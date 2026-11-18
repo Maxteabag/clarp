@@ -49,7 +49,8 @@ pub fn dumps_ascii(value: &Value) -> String {
 }
 
 /// A value in the one form two writers agree on: its fields in the order of their names,
-/// nothing between them. What a digest of a value is taken of.
+/// nothing between them, a fraction as Python writes one. What a digest of a value is
+/// taken of (`json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))`).
 pub fn canonical(value: &Value) -> String {
     match value {
         Value::Array(items) => {
@@ -65,6 +66,7 @@ pub fn canonical(value: &Value) -> String {
                 .collect();
             format!("{{{}}}", fields.join(","))
         }
+        Value::Number(written) => number(written),
         plain => plain.to_string(),
     }
 }

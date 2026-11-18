@@ -405,6 +405,8 @@ pub struct PushRegistration {
     /// The paired device that asks, with full scope. Empty: someone else.
     pub owner: String,
     pub provider: String,
+    /// The ways an Android phone says it can hold a ring's conversation.
+    pub modes: Vec<String>,
 }
 
 /// What became of a push to a token.
@@ -1539,8 +1541,7 @@ impl Fleet {
                 push_grant: &asked.push_grant,
                 owner: &asked.owner,
                 provider: &asked.provider,
-                // What a phone can run in a call is the calls' to know: not built yet.
-                modes: &[],
+                modes: &asked.modes,
             },
             &|owner| can_receive(devices, owner),
             self.works.clock.now_ms(),

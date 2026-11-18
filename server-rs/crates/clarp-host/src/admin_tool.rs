@@ -36,7 +36,7 @@ use crate::peers::{self, Failed};
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
 use crate::{janitors, request_tool, roster};
 use axum::http::{Method, StatusCode};
-use clarp_kernel::calls::Refused;
+use clarp_kernel::calls::{ADMINISTRATOR, Refused};
 
 /// What argparse says of a command line it cannot read, and exits 2 with.
 fn usage(why: &str) -> ToolAnswer {
@@ -341,6 +341,23 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
 
 fn home() -> std::path::PathBuf {
     std::env::var_os("HOME").map_or_else(|| std::path::PathBuf::from("/"), std::path::PathBuf::from)
+}
+
+/// What a ring held as a live voice call is about, as a file has it: no larger than such a
+/// context may be, in UTF-8, and JSON. `Err`: why it cannot be used, in words.
+fn event_context(file: &std::path::Path) -> Result<Value, String> {
+    use std::io::Read;
+    let most = clarp_kernel::live_call::CONTEXT_BYTES;
+    let opened = std::fs::File::open(file).map_err(|error| error.to_string())?;
+    let mut raw = Vec::new();
+    // One byte more than it may be, so that one too large is seen to be.
+    let read = opened.take(most as u64 + 1).read_to_end(&mut raw);
+    read.map_err(|error| error.to_string())?;
+    if raw.len() > most {
+        return Err(format!("over {most} bytes"));
+    }
+    let text = String::from_utf8(raw).map_err(|error| error.to_string())?;
+    serde_json::from_str(&text).map_err(|error| error.to_string())
 }
 
 /// A path as it was written where the tool was called: `~` is the home of whoever runs
@@ -736,8 +753,18 @@ async fn ring(app: &App, tool: &ToolCall, command: &str, rest: &[String]) -> Too
                         body["agent"] = json!(agent);
                     }
                     if live {
-                        // What a live voice call would be told stays where it is: this Host
-                        // holds none, and says so.
+                        // What the ring is about is read here, where the tool was called,
+                        // and sent whole: the Host checks it as it checks any.
+                        let named = parsed.option("--context-file").unwrap_or_default();
+                        match event_context(&written_from(tool, named)) {
+                            Ok(context) => body["event_context"] = context,
+                            Err(why) => {
+                                let said = format!(
+                                    "clarp-admin call ring: cannot use --context-file: {why}"
+                                );
+                                return ToolAnswer::said(2, &said);
+                            }
+                        }
                         body["conversation_mode"] = json!("agent_live_v1");
                     }
                     if parsed.flags.contains("--listen-first") {
@@ -756,7 +783,7 @@ async fn ring(app: &App, tool: &ToolCall, command: &str, rest: &[String]) -> Too
                 }
             };
             let looked = desk.rings(app, |rings, _, with, (out, _)| {
-                rings.look(&placed, with.at.now_ms, out)
+                rings.look_as((&placed, ADMINISTRATOR), &with.world, with.at.now_ms, out)
             });
             let looked = looked.await;
             let rings = matches!(&looked, Ok(Ok(seen)) if seen["ring"]["state"] == "ringing");
@@ -773,7 +800,7 @@ async fn ring(app: &App, tool: &ToolCall, command: &str, rest: &[String]) -> Too
             };
             let ring_id = parsed.positional.first().cloned().unwrap_or_default();
             let looked = desk.rings(app, |rings, _, with, (out, _)| {
-                rings.look(&ring_id, with.at.now_ms, out)
+                rings.look_as((&ring_id, ADMINISTRATOR), &with.world, with.at.now_ms, out)
             });
             ring_said(looked.await)
         }

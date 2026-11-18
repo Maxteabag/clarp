@@ -1215,6 +1215,33 @@ What this does not show: Claude Code and Antigravity in a terminal (their words 
 and by the Host's test with a stand-in), an agent that has a session of its tool taken up there, and a
 terminal of an agent through the relay.
 
+## The stream of speech, where the Host has no key for its engine; and the cost of a turn (18 Nov 2026, L32)
+
+Installed at 05:29 from the landed commit (`775b19ac`), the relay back after 42 ms, 23 agents.
+
+The engine of a stream of speech is Deepgram's, reached with the owner's key. The Host that is installed
+here has no such key, and it was given none for a check: a key of the owner's does not go from one Host to
+another without his word. So no stream was carried to the real engine. What the installed Host answers was
+asked at its door:
+
+| Asked | Answered |
+|---|---|
+| `GET /stt/stream?model=deepgram:nova-3` as no socket | 426 `upgrade required (websocket)` |
+| the same as a socket, naming no engine | 409 `engine does not detect turns on a stream: local` |
+| as a socket, for Deepgram | 503 `deepgram API key is not configured` |
+| as a socket, for ElevenLabs' Scribe | 409 `engine does not detect turns on a stream: elevenlabs:scribe_v2` |
+| as a socket, without the Host's token | 401 |
+
+`GET /transcription-capabilities` says that the phone finds the ends of turns (`turn_taking: native`) and
+that the Host's own engine hears (`engine: local`), which is how the owner's Python Host on this machine is
+set as well. Nothing was spent.
+
+With the same landing the Host counts what a turn of Claude cost as the reference does since its PR 412
+(what the session's total grew by; not known where it fell). The Claude row of `GET /backend-usage` on the
+installed Host carries `cost_activation_ms`, and no other tool's row does.
+
+What stands open of this: a stream carried to the real engine, once the owner gives this Host a key for it.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

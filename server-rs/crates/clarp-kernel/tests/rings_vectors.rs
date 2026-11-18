@@ -12,8 +12,8 @@ use std::collections::{BTreeMap, HashSet};
 use clarp_kernel::calls::{self, Asker, At, Calls, Contact};
 use clarp_kernel::push;
 use clarp_kernel::rings::{
-    AUDIT_KEPT, Answer, Asked, BETWEEN_MS, Caller, Effects, HOURLY_MOST, KEPT, OPENING_MOST,
-    People, REASON_MOST, RING_MS, Rings,
+    AUDIT_KEPT, Admission, Answer, Asked, BETWEEN_MS, Caller, Effects, Given, HOURLY_MOST, KEPT,
+    Minted, OPENING_MOST, People, Profiles, REASON_MOST, RING_MS, Rings, World,
 };
 use serde_json::{Value, json};
 
@@ -23,6 +23,23 @@ fn vectors() -> Value {
 
 fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or("").to_string()
+}
+
+/// A Host with no profile: none of its rings is held as a live voice call.
+struct Bare;
+
+impl Profiles for Bare {
+    fn profile(&self, _: &str) -> Option<String> {
+        None
+    }
+
+    fn file(&self, _: &str, _: &str) -> Option<Vec<u8>> {
+        None
+    }
+
+    fn takes_calls(&self, _: &str) -> Result<Option<String>, calls::Refused> {
+        Ok(None)
+    }
 }
 
 /// The agents of the Host as the vectors made them, without the ones a script let go.
@@ -125,6 +142,16 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
                 known: &known,
             };
             let ring_id = text(step, "ring_id");
+            let anyone = |_: &str| true;
+            let world = World {
+                profiles: &Bare,
+                android: &[],
+                can_push_android: false,
+                device_ok: &anyone,
+                host_id: "host-1",
+                has_key: false,
+                runs_tools: false,
+            };
             let before = made;
             let answered: Result<Value, calls::Refused> = match do_ {
                 "tick" => Ok(Value::Null),
@@ -166,7 +193,11 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
                         event_context: step.get("event_context").unwrap_or(&Value::Null),
                         opening_mode: step.get("opening_mode"),
                     };
-                    rings.admit(&asked, people, now, &mut out).map(|admitted| {
+                    let admitted = rings.admit(&asked, people, &world, now, &mut out);
+                    admitted.map(|admission| {
+                        let Admission::Place(admitted) = admission else {
+                            panic!("an ordinary ring is placed: {step}");
+                        };
                         let voiced = if step["voiced"] == true {
                             format!("/audio/{now}__{}.mp3", admitted.caller().session)
                         } else {
@@ -177,18 +208,35 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
                         Rings::rung(&ring, delivery(), now)
                     })
                 }
-                "look" => rings.look(&ring_id, now, &mut out),
+                "look" => {
+                    let principal = text(step, "principal");
+                    rings.look_as((&ring_id, &principal), &world, now, &mut out)
+                }
                 "answer" => {
                     let asked = Answer {
                         principal: step["principal"].as_str().unwrap(),
                         ring_id: &ring_id,
                         conversation_mode: step.get("conversation_mode").unwrap_or(&Value::Null),
                         opening_mode: step.get("opening_mode"),
+                        request_id: &Value::Null,
+                        client_nonce: &Value::Null,
+                    };
+                    // No ring of these scripts is held live: nothing is minted for one.
+                    let given = Given {
+                        roster: &roster,
+                        new_id: &new_id,
+                        minted: Minted {
+                            call: "",
+                            attempt: "",
+                            nonce: "",
+                            ticket: "",
+                        },
                     };
                     let answered = rings.answer(
                         &mut calls,
                         &asked,
-                        (&roster, &new_id),
+                        given,
+                        &world,
                         at,
                         (&mut out, &mut of_calls),
                     );

@@ -14,8 +14,12 @@
 //! phone shows an incoming call; answering starts a call with that agent, whose opening
 //! line, voiced when the ring was placed, is heard first. A ring and the call it becomes
 //! are one desk's, because an answer changes both.
+//!
+//! A ring may be held as a live voice call, and the owner may call an agent so: that is
+//! [`live`], on the same desk and under the same lock.
 
-use std::collections::{BTreeMap, HashMap};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use axum::body::Bytes;
@@ -34,6 +38,17 @@ use crate::fleet::Directory;
 use crate::ids;
 use crate::pairing::Scope;
 
+pub mod live;
+
+/// What became of a request to ring, under the desk's lock.
+enum Placing {
+    /// It is answered already: a live ring that was placed (and until when it rings), or
+    /// the ring its event rang before.
+    Told(Value, Option<i64>),
+    /// An ordinary ring: its line is voiced, and then it is placed.
+    ToVoice(rings::Admitted),
+}
+
 /// The kind of thing a phone's calls are, among what is left with the fleet.
 const KIND: &str = "call";
 
@@ -46,6 +61,10 @@ const RINGS_KEPT: &str = "rings";
 const AUDIT_KEPT: &str = "audit";
 const SETTINGS_KEPT: &str = "settings";
 const VOIP_KEPT: &str = "voip";
+/// The phones that switched rings off for themselves, and the agents known to take the
+/// user's calls live.
+const PREFS_KEPT: &str = "prefs";
+const TAKING_KEPT: &str = "taking";
 
 /// How long after a ring is overdue its timer looks: by then it is overdue for certain.
 const TIMER_SLACK: Duration = Duration::from_millis(500);
@@ -57,6 +76,12 @@ const PUSH_WAIT: Duration = Duration::from_secs(25);
 struct Books {
     calls: Calls,
     rings: Rings,
+    /// The agents known to take the user's calls live, as it is kept.
+    taking: Option<String>,
+    /// The sessions of the live calls that run now, by their call: how each is stopped.
+    sessions: HashMap<String, live::Running>,
+    /// The phones that hold a live call's socket now: one each.
+    voices: HashSet<String>,
 }
 
 /// The desk of calls and rings. Its books are `None` until they were read where they are
@@ -82,6 +107,11 @@ pub struct With<'a> {
     pub roster: &'a [Contact],
     pub known: &'a dyn Fn(&str) -> Option<rings::Caller>,
     pub new_id: &'a str,
+    /// What of the Host a ring held as a live voice call is admitted and held by.
+    pub world: rings::World<'a>,
+    /// The live calls a request ended on their rings: their sessions are stopped before the
+    /// books are let go of, so that a call is never retired and its session not told.
+    pub stops: &'a RefCell<Vec<(String, String)>>,
 }
 
 impl With<'_> {
@@ -165,12 +195,24 @@ impl Desk {
                 &read(SETTINGS_KEPT),
                 list(VOIP_KEPT),
             );
+            let mut rings = rings.with_prefs(list(PREFS_KEPT));
+            // A live call that was joined under a Host before this one has no session now.
+            let mut out = rings::Effects::default();
+            if !rings.orphaned(&mut out).is_empty() {
+                let kept = serde_json::to_vec(rings.rings()).unwrap_or_default();
+                app.fleet
+                    .keep(RINGS, RINGS_KEPT.to_string(), Some(kept))
+                    .await?;
+            }
             if let Some(ring) = rings.ringing() {
                 timer(app, ring.expires_at);
             }
             *held = Some(Books {
                 calls: Calls::kept(books),
                 rings,
+                taking: read(TAKING_KEPT).as_str().map(str::to_string),
+                sessions: HashMap::new(),
+                voices: HashSet::new(),
             });
         }
         held.as_mut()
@@ -214,9 +256,24 @@ impl Desk {
         let roster = roster(&directory);
         let now_ms = app.clock.now_ms();
         let (mut out, mut of_calls) = (rings::Effects::default(), Effects::default());
+        let shelf = live::Shelf::of(app, books.taking.clone());
+        let stops = RefCell::new(Vec::new());
         // What the request is given lives no longer than the request: nothing of it waits
         // with what is done afterwards.
         let answer = {
+            let androids = live::androids(&directory);
+            let paired = |principal: &str| directory.can_receive(principal);
+            let world = rings::World {
+                profiles: &shelf,
+                android: &androids,
+                // This Host pushes nothing to Android phones.
+                can_push_android: false,
+                device_ok: &paired,
+                host_id: &app.server_id,
+                has_key: app.ears.key("openai").is_some(),
+                // The tools of a live call are not built here yet.
+                runs_tools: false,
+            };
             let known = |agent_id: &str| -> Option<rings::Caller> {
                 let mut members = directory.members.iter();
                 let member = members.find(|member| member.record.agent_id == agent_id)?;
@@ -237,6 +294,8 @@ impl Desk {
                 roster: &roster,
                 known: &known,
                 new_id: &ids::hex(16),
+                world,
+                stops: &stops,
             };
             ask(
                 &mut books.rings,
@@ -245,6 +304,19 @@ impl Desk {
                 (&mut out, &mut of_calls),
             )
         };
+        // A call that was retired on its ring: its session is told now, under the same lock.
+        for (call_id, reason) in stops.into_inner() {
+            if let Some(running) = books.sessions.get(&call_id) {
+                running.stop(&reason);
+            }
+        }
+        if let Some(taking) = shelf.to_keep() {
+            let kept = serde_json::to_vec(&json!(taking)).unwrap_or_default();
+            app.fleet
+                .keep(RINGS, TAKING_KEPT.to_string(), Some(kept))
+                .await?;
+            books.taking = Some(taking);
+        }
         // What a call says of itself comes before what the ring says of its answer.
         Self::done(app, &directory, &books.calls, of_calls, now_ms).await?;
         let rings = &books.rings;
@@ -269,6 +341,11 @@ impl Desk {
                 VOIP_KEPT,
                 serde_json::to_vec(rings.voip()),
             ),
+            (
+                out.changed.prefs,
+                PREFS_KEPT,
+                serde_json::to_vec(rings.prefs()),
+            ),
         ];
         for (changed, name, kept) in keeps {
             if changed {
@@ -291,20 +368,30 @@ impl Desk {
         if pushes.is_empty() {
             return;
         }
-        let show_reason = self.shows_reason().await;
+        let (show_reason, without) = self.alerted().await;
         for pushed in pushes {
+            // A ring held as a live voice call has no alert, in any state of it: a phone that
+            // cannot hold one must never be shown one.
+            if !pushed.ring.conversation_mode.is_empty() {
+                continue;
+            }
             app.pusher.rung(crate::pusher::Rung {
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
+                without: without.clone(),
             });
         }
     }
 
-    async fn shows_reason(&self) -> bool {
+    /// How the alert of a ring is sent: whether a locked phone may show why the agent calls,
+    /// and the phones that are left out of it, having switched rings off for themselves.
+    async fn alerted(&self) -> (bool, Vec<String>) {
         let held = self.books.lock().await;
-        held.as_ref()
-            .is_some_and(|books| books.rings.shows_reason())
+        let rings = held.as_ref().map(|books| &books.rings);
+        rings.map_or((false, Vec::new()), |rings| {
+            (rings.shows_reason(), rings.switched_off())
+        })
     }
 
     /// A request on the rings that places none: asked, done, and the phones told on the side.
@@ -322,7 +409,8 @@ impl Desk {
     /// is the agent whose turn asks, which rings as itself only; empty for the owner's own
     /// tools, which name the agent. The ring is admitted, its opening line is voiced in the
     /// agent's own voice, and then it rings: the phones are pushed and the one who asked is
-    /// told what became of that.
+    /// told what became of that. A ring held as a live voice call is placed in the moment it
+    /// is admitted, with nothing voiced: its opening is the voice's own.
     pub async fn ring(
         &self,
         app: &App,
@@ -345,10 +433,25 @@ impl Desk {
             opening_mode: said.get("opening_mode"),
         };
         let admitted = self.rings(app, |rings, _, with, (out, _)| {
-            rings.admit(&asked, with.people(), with.at.now_ms, out)
+            let now = with.at.now_ms;
+            let admission = rings.admit(&asked, with.people(), &with.world, now, out)?;
+            Ok(match admission {
+                rings::Admission::Again(answer) => Placing::Told(answer, None),
+                rings::Admission::Place(admitted) if admitted.is_live() => {
+                    let (answer, expires_at) = live::placed(rings, admitted, with, out);
+                    Placing::Told(answer, Some(expires_at))
+                }
+                rings::Admission::Place(admitted) => Placing::ToVoice(admitted),
+            })
         });
         let admitted = match admitted.await? {
-            Ok(admitted) => admitted,
+            Ok(Placing::ToVoice(admitted)) => admitted,
+            Ok(Placing::Told(answer, expires_at)) => {
+                if let Some(expires_at) = expires_at {
+                    timer(app, expires_at);
+                }
+                return Ok(Ok(answer));
+            }
             Err(refused) => return Ok(Err(refused)),
         };
         // Said in the agent's own voice now, so that answering plays it at once. When
@@ -370,7 +473,7 @@ impl Desk {
         timer(app, ring.expires_at);
         // The phones are pushed, and the one who rang hears what became of it. No phone
         // takes a call through a key of this Host's own: the push is the incoming call.
-        let show_reason = self.shows_reason().await;
+        let (show_reason, without) = self.alerted().await;
         let mut counted = crate::pusher::Counted::default();
         let mut still_going = false;
         for pushed in pushes {
@@ -378,6 +481,7 @@ impl Desk {
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
+                without: without.clone(),
             };
             if pushed.kind == "ring" {
                 let told = app.pusher.rung_and_told(rung);
@@ -765,13 +869,16 @@ async fn ring_look(
     Extension(principal): Extension<Principal>,
     Query(asked): Query<HashMap<String, String>>,
 ) -> Response {
-    if let Err(refused) = caller(&principal) {
-        return refused.into_response();
-    }
+    let caller = match caller(&principal) {
+        Ok(caller) => caller,
+        Err(refused) => return refused.into_response(),
+    };
     let ring_id = asked.get("ring_id").cloned().unwrap_or_default();
     let desk = app.calls.clone();
+    // What a client is shown is what it may be told of: a live ring only a phone that can
+    // hold one, a call the user started only its own phone.
     let looked = desk.rings(&app, |rings, _, with, (out, _)| {
-        rings.look(&ring_id, with.at.now_ms, out)
+        rings.look_as((&ring_id, &caller), &with.world, with.at.now_ms, out)
     });
     answered(looked.await)
 }
@@ -788,15 +895,24 @@ async fn ring_answer(
         Err(refused) => return refused.into_response(),
     };
     let ring_id = text(&said, "ring_id");
+    let desk = app.calls.clone();
     let asked = rings::Answer {
         principal: &caller,
         ring_id: &ring_id,
         conversation_mode: &said["conversation_mode"],
         opening_mode: said.get("opening_mode"),
+        request_id: &said["request_id"],
+        client_nonce: &said["client_nonce"],
     };
-    let desk = app.calls.clone();
+    // A ring is answered as it was placed: with a call, or with the grant of a live one.
+    let names = live::Names::new();
     let taken = desk.rings(&app, |rings, calls, with, effects| {
-        rings.answer(calls, &asked, (with.roster, with.new_id), with.at, effects)
+        let given = rings::Given {
+            roster: with.roster,
+            new_id: with.new_id,
+            minted: names.minted(),
+        };
+        rings.answer(calls, &asked, given, &with.world, with.at, effects)
     });
     answered(taken.await)
 }
@@ -890,13 +1006,12 @@ async fn ring_voip_token(
     answered(left.await)
 }
 
-/// What of rings this Host does not have: a ring held as a live voice call, one that
-/// listens first, a phone's own switch. Said in words, and nothing is done.
+/// What of rings this Host does not have: a ring that listens first. Said in words, and
+/// nothing is done.
 async fn not_this_ring() -> ApiError {
     ApiError::new(
         StatusCode::NOT_IMPLEMENTED,
-        "This Host rings as an ordinary call only: no live voice call, no listening first, no \
-         switch for one phone",
+        "This Host has no ring that listens first",
     )
 }
 
@@ -916,12 +1031,11 @@ pub fn routes() -> Router<App> {
             "/calls/ring/settings",
             get(ring_settings).post(ring_settings_change),
         )
-        .route("/calls/ring/voip-token", post(ring_voip_token))
-        .route(
-            "/calls/ring/{*rest}",
-            get(not_this_ring).post(not_this_ring),
-        )
-        .route("/calls/live", post(not_this_ring));
+        .route("/calls/ring/voip-token", post(ring_voip_token));
+    let router = live::routes(router).route(
+        "/calls/ring/{*rest}",
+        get(not_this_ring).post(not_this_ring),
+    );
     changes.iter().fold(router, |router, action| {
         let (path, action) = (format!("/calls/{action}"), (*action).to_string());
         let change = move |app: State<App>, principal: Extension<Principal>, bytes: Bytes| {

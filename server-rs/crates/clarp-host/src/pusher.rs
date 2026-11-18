@@ -56,6 +56,8 @@ pub struct Rung {
     pub kind: &'static str,
     /// The owner lets a locked phone show why the agent calls.
     pub show_reason: bool,
+    /// The phones that switched rings off for themselves: none of their rows is told.
+    pub without: Vec<String>,
 }
 
 /// What became of a push, as the one who asked for it is told: whether this Host pushes at
@@ -268,10 +270,15 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) -> Counted {
     }
     // A revoked device's rows are stopped when it is revoked; this is for any that outlived
     // that. Phones that are reached through another push service are not reached yet.
+    let left_out = |row: &PushRow| match job {
+        Job::Ring(rung, _) => !row.principal.is_empty() && rung.without.contains(&row.principal),
+        _ => false,
+    };
     let rows: Vec<&PushRow> = directory
         .push
         .active()
         .filter(|row| row.provider != "fcm" && directory.can_receive(&row.principal))
+        .filter(|row| !left_out(row))
         .collect();
     if rows.is_empty() {
         return counted;

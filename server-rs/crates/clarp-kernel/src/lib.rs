@@ -32,6 +32,8 @@ pub mod journal;
 pub mod kept_portraits;
 pub mod languages;
 pub mod live;
+pub mod live_call;
+pub mod live_session;
 pub mod located;
 pub mod media;
 pub mod notify;
