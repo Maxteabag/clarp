@@ -183,7 +183,9 @@ impl Checks<'_> {
         )?;
         let props = fields.get("properties");
         let kind = fields.get("type");
-        let Some(props) = props.and_then(J::object).filter(|_| kind.and_then(J::str) == Some("object"))
+        let Some(props) = props
+            .and_then(J::object)
+            .filter(|_| kind.and_then(J::str) == Some("object"))
         else {
             return Err(Refusal::new("schema_shape", path));
         };
@@ -209,7 +211,9 @@ impl Checks<'_> {
         }
         for key in json::ordered(props)? {
             let at = self.step(&format!("{path}/properties"), key);
-            let name = key.as_str().filter(|name| self.ident().matches(name) && *name != "on");
+            let name = key
+                .as_str()
+                .filter(|name| self.ident().matches(name) && *name != "on");
             if name.is_none() {
                 return Err(Refusal::new("schema_shape", &at));
             }
@@ -283,7 +287,10 @@ impl Checks<'_> {
         submitted: bool,
     ) -> Result<(), Refusal> {
         let empty = Obj::new();
-        let props = schema.get("properties").and_then(J::object).unwrap_or(&empty);
+        let props = schema
+            .get("properties")
+            .and_then(J::object)
+            .unwrap_or(&empty);
         let required = if submitted {
             required_of(&J::Object(schema.clone()))
         } else {
@@ -328,7 +335,10 @@ impl Checks<'_> {
         {
             return Err(wrong());
         }
-        if rule.get("const").is_some_and(|constant| !same(value, constant)) {
+        if rule
+            .get("const")
+            .is_some_and(|constant| !same(value, constant))
+        {
             return Err(wrong());
         }
         if let Some(members) = rule.get("enum") {
@@ -393,7 +403,9 @@ impl Checks<'_> {
             Some(J::Array(required)) => required.first().and_then(J::str),
             _ => None,
         };
-        let pointer = operator.and_then(|operator| value.get(operator)).and_then(J::str);
+        let pointer = operator
+            .and_then(|operator| value.get(operator))
+            .and_then(J::str);
         let key = pointer
             .and_then(|pointer| pointer.strip_prefix('/'))
             .filter(|key| self.ident().matches(key) && fields.contains(key));
@@ -417,7 +429,10 @@ impl Checks<'_> {
             .filter(|root| self.ident().matches(root) && nodes.contains(root))
             .ok_or_else(|| Refusal::new("element_id", "/spec/root"))?;
         let empty = Obj::new();
-        let fields = schema.get("properties").and_then(J::object).unwrap_or(&empty);
+        let fields = schema
+            .get("properties")
+            .and_then(J::object)
+            .unwrap_or(&empty);
         let mut bound = BTreeSet::new();
         for name in json::ordered(nodes)? {
             let at = self.step(path, name);
@@ -483,7 +498,10 @@ impl Checks<'_> {
     ) -> Result<(), Refusal> {
         let empty = Obj::new();
         let rules = component.props.object().unwrap_or(&empty);
-        let declared = rules.get("properties").and_then(J::object).unwrap_or(&empty);
+        let declared = rules
+            .get("properties")
+            .and_then(J::object)
+            .unwrap_or(&empty);
         let closed = rules.get("additionalProperties") == Some(&J::Bool(false));
         let allows = |key: &Text| !closed || declared.at(key).is_some();
         let required = required_of(&component.props);
@@ -636,7 +654,8 @@ pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
     if *field("catalog") != catalog.name {
         return Err(Refusal::new("unknown_catalog", "/catalog"));
     }
-    if !matches!(field("catalog_version"), J::Int(_)) || *field("catalog_version") != catalog.version
+    if !matches!(field("catalog_version"), J::Int(_))
+        || *field("catalog_version") != catalog.version
     {
         return Err(Refusal::new("catalog_version", "/catalog_version"));
     }
@@ -668,7 +687,10 @@ pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
         &["intent", "label"],
         "unknown_key",
     )?;
-    if !submit.get("intent").is_some_and(|intent| checks.ident().is(intent)) {
+    if !submit
+        .get("intent")
+        .is_some_and(|intent| checks.ident().is(intent))
+    {
         return Err(Refusal::new("submit_intent", "/submit/intent"));
     }
     match submit.get("label") {

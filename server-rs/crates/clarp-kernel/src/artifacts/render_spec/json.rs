@@ -78,7 +78,12 @@ impl Text {
         if points.iter().any(|point| (0xd800..0xe000).contains(point)) {
             Self::Lone(points)
         } else {
-            Self::Valid(points.iter().filter_map(|point| char::from_u32(*point)).collect())
+            Self::Valid(
+                points
+                    .iter()
+                    .filter_map(|point| char::from_u32(*point))
+                    .collect(),
+            )
         }
     }
 
@@ -215,8 +220,8 @@ impl J {
             Self::Null => Value::Null,
             Self::Bool(truth) => Value::Bool(*truth),
             Self::Int(number) => {
-                let held = i64::try_from(*number)
-                    .unwrap_or(if *number < 0 { i64::MIN } else { i64::MAX });
+                let held =
+                    i64::try_from(*number).unwrap_or(if *number < 0 { i64::MIN } else { i64::MAX });
                 Value::Number(Number::from(held))
             }
             Self::Float(number) => Number::from_f64(*number).map_or(Value::Null, Value::Number),
@@ -531,11 +536,13 @@ impl Reader<'_> {
             return None;
         }
         // Held at the end of 128 bits beyond them: no rule tells such numbers apart.
-        let held = written.parse::<i128>().unwrap_or(if written.starts_with('-') {
-            i128::MIN
-        } else {
-            i128::MAX
-        });
+        let held = written
+            .parse::<i128>()
+            .unwrap_or(if written.starts_with('-') {
+                i128::MIN
+            } else {
+                i128::MAX
+            });
         Some(J::Int(held))
     }
 

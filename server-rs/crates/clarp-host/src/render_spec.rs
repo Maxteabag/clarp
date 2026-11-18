@@ -267,7 +267,13 @@ async fn published(
     let elsewhere = !artifact_id.is_empty()
         && app.fleet.directory().members.iter().any(|other| {
             other.record.agent_id != member.record.agent_id
-                && other.agent.view().books.artifacts.any(&artifact_id).is_some()
+                && other
+                    .agent
+                    .view()
+                    .books
+                    .artifacts
+                    .any(&artifact_id)
+                    .is_some()
         });
     let asked = Publish {
         artifact_id,
@@ -284,7 +290,10 @@ async fn published(
         checked(app, &member, &asked).map_err(|why| refused(why, Ok(catalog)))?;
         return Ok(None);
     }
-    let done = member.agent.artifact(Want::SpecPublish(Box::new(asked))).await?;
+    let done = member
+        .agent
+        .artifact(Want::SpecPublish(Box::new(asked)))
+        .await?;
     let done = done.map_err(|why| refused(why, Ok(catalog)))?;
     Ok(Some(library::shown(app, done.artifact, "", capable).await))
 }
