@@ -26389,7 +26389,10 @@ fn the_other_speech_engines_answer_the_apps() {
             .iter()
             .any(|e| e["type"] == "audio" && e["preview"] == true && e["url"] == playback["url"])
     });
-    choose("gemini", "elevenlabs");
+    // Neither engine can start. The Host still announces a clip, then its failure.
+    let unavailable_account = account.with_extension("unavailable");
+    std::fs::rename(&account, &unavailable_account).unwrap();
+    choose("google", "gemini");
     let before = heard.lock().unwrap().len();
     say("voice-missing", "No engine can say this.");
     wait_for("registered clip to report failure", || {
@@ -26409,6 +26412,7 @@ fn the_other_speech_engines_answer_the_apps() {
         .filter_map(|e| e["type"].as_str().map(str::to_string))
         .collect();
     assert_eq!(relevant, ["audio", "tts-error"]);
+    std::fs::rename(unavailable_account, &account).unwrap();
     choose("deepgram", "none");
     host.kill();
 
