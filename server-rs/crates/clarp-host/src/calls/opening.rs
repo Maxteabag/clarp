@@ -193,12 +193,32 @@ impl Desk {
 
     /// Only the accepted actor message can repair the fleet's copy. A retry
     /// with an existing client message ID cannot adopt an ordinary send.
-    pub(crate) async fn recover_clip(&self,app:&App,member:&crate::fleet::Member,ring_id:&str,kind:clarp_kernel::rings::binding::Kind,id:&str)->Result<(),Unavailable>{
-        let row=member.agent.opening_row(id).await?;
-        let proof=&row["reservation"];
-        if proof["ring_id"]==ring_id && proof["kind"]==json!(kind)
-            && let (Some(turn_id),Some(epoch))=(row["turn"].as_u64(),proof["epoch"].as_u64()) {
-            self.bind_clip(app,ring_id,&member.record.agent_id,clarp_kernel::rings::binding::Binding{turn_id,kind,epoch,admission_id:id.into()}).await?;
+    pub(crate) async fn recover_clip(
+        &self,
+        app: &App,
+        member: &crate::fleet::Member,
+        ring_id: &str,
+        kind: clarp_kernel::rings::binding::Kind,
+        id: &str,
+    ) -> Result<(), Unavailable> {
+        let row = member.agent.opening_row(id).await?;
+        let proof = &row["reservation"];
+        if proof["ring_id"] == ring_id
+            && proof["kind"] == json!(kind)
+            && let (Some(turn_id), Some(epoch)) = (row["turn"].as_u64(), proof["epoch"].as_u64())
+        {
+            self.bind_clip(
+                app,
+                ring_id,
+                &member.record.agent_id,
+                clarp_kernel::rings::binding::Binding {
+                    turn_id,
+                    kind,
+                    epoch,
+                    admission_id: id.into(),
+                },
+            )
+            .await?;
         }
         Ok(())
     }
@@ -468,8 +488,14 @@ impl Desk {
         let _serial = self.opening_turn.lock().await;
         // Previous releases kept a trace index. It cannot establish turn
         // ownership and must not retain private tokens after their openings go.
-        let old=app.fleet.kept_all("opening_audio").await?.into_iter().map(|(key,_)|("opening_audio",key)).collect();
-        app.fleet.change_together(Vec::new(),old).await?;
+        let old = app
+            .fleet
+            .kept_all("opening_audio")
+            .await?
+            .into_iter()
+            .map(|(key, _)| ("opening_audio", key))
+            .collect();
+        app.fleet.change_together(Vec::new(), old).await?;
         let mut records = Self::archived_openings(app).await?;
         {
             let mut held = self.books.lock().await;
@@ -500,7 +526,8 @@ impl Desk {
                 }) {
                     continue;
                 }
-                self.recover_clip(app,&member,&r.ring_id,kind,id).await?;
+                self.recover_clip(app, &member, &r.ring_id, kind, id)
+                    .await?;
             }
         }
         Ok(())
@@ -561,8 +588,10 @@ impl Desk {
             use clarp_kernel::rings::binding::CallEnd;
             let ended = match known {
                 Some(call) if call.state == "live" => CallEnd::Live,
-                Some(call) => call.ended_at.map_or(CallEnd::Unknown,CallEnd::Ended),
-                None => op["call_ended_at"].as_i64().map_or(CallEnd::Unknown,CallEnd::Ended),
+                Some(call) => call.ended_at.map_or(CallEnd::Unknown, CallEnd::Ended),
+                None => op["call_ended_at"]
+                    .as_i64()
+                    .map_or(CallEnd::Unknown, CallEnd::Ended),
             };
             if !clarp_kernel::rings::binding::expired(op["retired"]["at"].as_i64(), ended, now) {
                 continue;

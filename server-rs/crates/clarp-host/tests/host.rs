@@ -30321,38 +30321,71 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     // Model the crash after journal admission and before the fleet records
     // the binding. The journal remembers the admission's epoch and ring.
     drop(host);
-    let mut db=clarp_store_sqlite::SqliteKeyValue.open(&place.root.join("data/fleet.db")).unwrap();
-    let mut rings:Vec<Value>=serde_json::from_slice(&db.get("kept.ring","rings").unwrap().unwrap()).unwrap();
-    let saved=rings.iter_mut().find(|row|row["ring_id"]==r["ring_id"]).unwrap();
-    let binding=saved["_opening"]["clip_bindings"][0].clone();
-    let old_key=clarp_kernel::rings::binding::key(saved["agent_id"].as_str().unwrap(),binding["turn_id"].as_u64().unwrap()).unwrap();
-    db.delete("kept.opening_by_turn",&old_key).unwrap();
-    saved["_opening"].as_object_mut().unwrap().remove("clip_bindings");
+    let mut db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let mut rings: Vec<Value> =
+        serde_json::from_slice(&db.get("kept.ring", "rings").unwrap().unwrap()).unwrap();
+    let saved = rings
+        .iter_mut()
+        .find(|row| row["ring_id"] == r["ring_id"])
+        .unwrap();
+    let binding = saved["_opening"]["clip_bindings"][0].clone();
+    let old_key = clarp_kernel::rings::binding::key(
+        saved["agent_id"].as_str().unwrap(),
+        binding["turn_id"].as_u64().unwrap(),
+    )
+    .unwrap();
+    db.delete("kept.opening_by_turn", &old_key).unwrap();
+    saved["_opening"]
+        .as_object_mut()
+        .unwrap()
+        .remove("clip_bindings");
     // Age only the disposable agent's last ring past the repeat-call limit.
-    saved["created_at"]=json!(1);
-    db.put("kept.ring","rings",&serde_json::to_vec(&rings).unwrap()).unwrap();
+    saved["created_at"] = json!(1);
+    db.put("kept.ring", "rings", &serde_json::to_vec(&rings).unwrap())
+        .unwrap();
     drop(db);
-    let host=place.start_in("test-only",&args,&env);
-    let db=clarp_store_sqlite::SqliteKeyValue.open(&place.root.join("data/fleet.db")).unwrap();
-    let recovered:Value=serde_json::from_slice(&db.get("kept.opening_by_turn",&old_key).unwrap().unwrap()).unwrap();
-    assert_eq!(recovered["skip"],true);
-    assert_eq!(recovered["tag"]["opening"],clip["opening"]);
+    let host = place.start_in("test-only", &args, &env);
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let recovered: Value =
+        serde_json::from_slice(&db.get("kept.opening_by_turn", &old_key).unwrap().unwrap())
+            .unwrap();
+    assert_eq!(recovered["skip"], true);
+    assert_eq!(recovered["tag"]["opening"], clip["opening"]);
     drop(db);
 
     // A later opening for the same agent uses the identical trace. It gets
     // its own playable greeting while the original keeps its retirement fence.
-    let later=ring(&host,&alma);
-    let next=answer(&host,&later,true).1["opening"].clone();
-    let request=json!({"session":alma,"text":"<speak>Second greeting.</speak>","trace_id":"test-greeting","client_msg_id":"greet-2",
+    let later = ring(&host, &alma);
+    let next = answer(&host, &later, true).1["opening"].clone();
+    let request = json!({"session":alma,"text":"<speak>Second greeting.</speak>","trace_id":"test-greeting","client_msg_id":"greet-2",
         "call_id":next["call_id"],"call_opening":{"token":next["token"],"epoch":next["epoch"]}});
-    assert_eq!(host.ask_as(&phone,"POST","/send",Some(&request)).0,200);
-    wait_for("two openings retain distinct clips for the same trace",||{
-        let events=host.get(&format!("/clips/recoverable?session={alma}"));
-        let all=events["events"].as_array().unwrap();
-        all.iter().any(|e|e["opening"]["token"]==next["token"] && e["opening"]["admission_id"]=="greet-2")
-            && all.iter().any(|e|e["clip_id"]==clip["clip_id"] && e["opening"]==clip["opening"])
-    });
-    assert_eq!(host.ask_as(&phone,"POST","/calls/end",Some(&json!({"call_id":next["call_id"]}))).0,200);
+    assert_eq!(host.ask_as(&phone, "POST", "/send", Some(&request)).0, 200);
+    wait_for(
+        "two openings retain distinct clips for the same trace",
+        || {
+            let events = host.get(&format!("/clips/recoverable?session={alma}"));
+            let all = events["events"].as_array().unwrap();
+            all.iter().any(|e| {
+                e["opening"]["token"] == next["token"] && e["opening"]["admission_id"] == "greet-2"
+            }) && all
+                .iter()
+                .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"] == clip["opening"])
+        },
+    );
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/end",
+            Some(&json!({"call_id":next["call_id"]}))
+        )
+        .0,
+        200
+    );
 
     // The microphone's deadline requires both watermarks. Make the scripted
     // backend's working directory unavailable before its first spawn.

@@ -2188,8 +2188,18 @@ async fn send_as(
             )
             .await?;
     }
-    if sent.duplicate && let Some((ring,id,_))=binding {
-        app.calls.recover_clip(app,&member,ring,clarp_kernel::rings::binding::Kind::GreetingReply,id).await?;
+    if sent.duplicate
+        && let Some((ring, id, _)) = binding
+    {
+        app.calls
+            .recover_clip(
+                app,
+                &member,
+                ring,
+                clarp_kernel::rings::binding::Kind::GreetingReply,
+                id,
+            )
+            .await?;
     }
     drop(guard);
     if let Some(writer) = writer {

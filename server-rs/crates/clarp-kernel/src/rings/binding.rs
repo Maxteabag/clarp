@@ -69,7 +69,9 @@ pub enum CallEnd {
 /// after the later event so a late retirement cannot turn a fenced clip into
 /// ordinary speech. With no known end, the retirement starts that day.
 pub fn expired(retired_at: Option<i64>, call: CallEnd, now: i64) -> bool {
-    let Some(retired) = retired_at else { return false };
+    let Some(retired) = retired_at else {
+        return false;
+    };
     let since = match call {
         CallEnd::Live => return false,
         CallEnd::Ended(ended) => retired.max(ended),
