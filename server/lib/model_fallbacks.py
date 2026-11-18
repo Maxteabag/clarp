@@ -287,13 +287,15 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
     )
     if shutil.which(cmd[0]) is None:
         raise ProviderFailure(f"{cmd[0]} is not on PATH")
-    with tempfile.TemporaryDirectory(prefix="clarp-model-fallback-") as root:
+    from .routing_input import prepared
+    with tempfile.TemporaryDirectory(prefix="clarp-model-fallback-") as root, \
+            prepared(runner.id, cmd, prompt) as call:
         if not current():
             raise Cancelled("request is no longer current")
         process = subprocess.Popen(
-            cmd,
+            call.argv,
             cwd=root,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if call.input is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -301,6 +303,7 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
             env={**os.environ, **runner.routing_env()},
         )
         deadline = time.monotonic() + timeout
+        payload = call.input
         try:
             while True:
                 if not current():
@@ -309,11 +312,11 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
                     raise ProviderFailure("fallback model timed out", "timeout")
                 try:
                     stdout, stderr = process.communicate(
-                        timeout=min(0.25, max(0.01, deadline - time.monotonic()))
+                        payload, timeout=min(0.25, max(0.01, deadline - time.monotonic()))
                     )
                     break
                 except subprocess.TimeoutExpired:
-                    pass
+                    payload = None  # communicate keeps its first input across retries
             if process.returncode:
                 raise provider_error(
                     (stderr or stdout or "").strip()[:1000]

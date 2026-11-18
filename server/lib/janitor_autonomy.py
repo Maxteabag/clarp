@@ -131,7 +131,9 @@ def decision_model(packet,run):
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('Decision CLI unavailable')
         from .launch_paths import existing_workspace_path
-        p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
+        from .routing_input import prepared
+        with prepared(adapter.id,cmd,prompt) as call:
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
@@ -156,6 +158,10 @@ def model_json(run,prompt,request_suffix=''):
         if not adapter or not adapter.supports_routing:raise ValueError('Provider does not support bounded calls')
         if frozen.get('isolated') and adapter.isolated_oneshot is not None:
             if not shutil.which(adapter.required_binary):raise model_fallbacks.ProviderFailure('CLI unavailable')
+            # agy's isolated run takes the prompt only as --print=<prompt>: refused before exec when
+            # the kernel would refuse it, so the fallback chain takes over (lib.routing_input).
+            from .routing_input import check_argument
+            check_argument(provider,'--print='+prompt)
             try:answer=adapter.isolated_oneshot(prompt,model=model.get('model') or '',home_name=f"{provider}-janitor-{frozen['template_id']}-home")
             except TimeoutError as exc:raise model_fallbacks.ProviderFailure(str(exc)[:500],'timeout') from exc
             except RuntimeError as exc:raise model_fallbacks.provider_error(str(exc)[:500]) from exc
@@ -163,7 +169,9 @@ def model_json(run,prompt,request_suffix=''):
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('CLI unavailable')
         from .launch_paths import existing_workspace_path
-        p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
+        from .routing_input import prepared
+        with prepared(adapter.id,cmd,prompt) as call:
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     answer=model_fallbacks.execute(run['agent_id'],run['run_id']+':'+(request_suffix or 'call'),primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))

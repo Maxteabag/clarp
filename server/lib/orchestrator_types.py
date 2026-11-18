@@ -42,6 +42,9 @@ MESSAGE_CONTEXT_CHARS = 240
 STATE_DETAIL_CONTEXT_CHARS = 240
 PENDING_CONTEXT_CHARS = 240
 RECENT_AGENT_WINDOW_MS = 30 * 60 * 1000
+# Of how many agents, besides the requested and the focused one, the broad packet shows the
+# last words; every other agent is listed by name only (the Rust Host's WHOLE_MOST).
+BROAD_DETAIL_AGENTS = 20
 
 DECISION_AGENT_MESSAGE = "agent_message"
 DECISION_CONTROL = "control"

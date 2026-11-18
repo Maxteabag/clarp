@@ -12,7 +12,7 @@ from typing import Any
 from . import agents as agents_db
 from . import identity
 from .db import conn, now_ms
-from .orchestrator_types import CLARIFY_CONFIDENCE, HIGH_CONFIDENCE, MESSAGE_CONTEXT_CHARS, OrchestratorSettings, PENDING_CONTEXT_CHARS, RECENT_AGENT_WINDOW_MS, RECENT_MESSAGES_PER_ROLE, STATE_DETAIL_CONTEXT_CHARS, STICKY_CONFIDENCE
+from .orchestrator_types import BROAD_DETAIL_AGENTS, CLARIFY_CONFIDENCE, HIGH_CONFIDENCE, MESSAGE_CONTEXT_CHARS, OrchestratorSettings, PENDING_CONTEXT_CHARS, RECENT_AGENT_WINDOW_MS, RECENT_MESSAGES_PER_ROLE, STATE_DETAIL_CONTEXT_CHARS, STICKY_CONFIDENCE
 
 
 def build_context_packet(
@@ -47,9 +47,17 @@ def build_context_packet(
             if agent["session"] in detailed_sessions
             or _agent_context_activity(agent) >= cutoff
         ]
+    # The broad view shows the last words of the requested and focused agents and of the
+    # BROAD_DETAIL_AGENTS most recently active others; the rest are listed by name only, so an
+    # agent idle longer than those is routed to by name, not by what it was last told.
+    recent_detail = set()
+    if include_all_context:
+        ranked = sorted((agent for agent in all_agents if agent["session"] not in detailed_sessions),
+                        key=_agent_context_activity, reverse=True)
+        recent_detail = {agent["agent_id"] for agent in ranked[:BROAD_DETAIL_AGENTS]}
     for agent in all_agents:
         agent_id = agent["agent_id"]
-        include_detail = include_all_context or agent["session"] in detailed_sessions
+        include_detail = agent["session"] in detailed_sessions or agent_id in recent_detail
         user_messages = (
             _recent_messages(agent_id, role="user", limit=RECENT_MESSAGES_PER_ROLE)
             if include_detail else []
