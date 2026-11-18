@@ -6065,10 +6065,15 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         json!({ "error": { "code": code, "path": path,
                            "message": catalog.reason(code) } })
     };
+    // What the apps are told of an artifact, without the number the stream gives each event.
     let events_of = |id: &str| -> Vec<Value> {
         let all = heard.lock().unwrap().clone();
         all.into_iter()
             .filter(|event| event["type"] == "artifact-updated" && event["artifact_id"] == id)
+            .map(|mut event| {
+                event.as_object_mut().unwrap().remove("event_id");
+                event
+            })
             .collect()
     };
     let rows_of = |id: &str| -> usize {
