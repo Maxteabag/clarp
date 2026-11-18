@@ -225,36 +225,73 @@ def _rows_since(marks: str, *, until: bool = False) -> str:
 
 
 def activity(con, plan_row, agent_ids: list[str], helper_ids: set[str],
-             since_ms: int, since_event: int) -> Activity:
+             since_ms: int, since_event: int, *, memo=None, full=False) -> Activity:
     owner = plan_row["agent_id"]
-    found = Activity(newest_ms=since_ms, newest_event=since_event)
     marks = ",".join("?" * len(agent_ids))
-    for r in con.execute(
+
+    def read(ids):
+        return con.execute(
             f"SELECT agent_id, role, phase, sender_agent_id, updated_at FROM messages "
-            f"WHERE {_rows_since(marks)} ORDER BY updated_at",
-            (*agent_ids, since_ms)):
-        at = int(r["updated_at"])
-        found.any_messages = True
-        found.newest_ms = max(found.newest_ms, at)
-        if r["role"] == "assistant" and r["phase"] == "final":
-            found.triggers.append((at, "owner turn end" if r["agent_id"] == owner
-                                   else "helper turn end"))
-        elif r["agent_id"] == owner and r["role"] == "user" and r["sender_agent_id"] in helper_ids:
-            found.triggers.append((at, "helper message"))
+            f"WHERE {_rows_since(','.join('?' * len(ids)))} ORDER BY updated_at", (*ids, since_ms))
+
+    def empty():
+        return Activity(newest_ms=since_ms, newest_event=since_event)
+
+    def from_facts(facts):
+        found = empty()
+        for agent, fact in facts.items():
+            if fact.any_messages:
+                found.any_messages = True
+                found.newest_ms = max(found.newest_ms, fact.newest_ms)
+            label = "owner turn end" if agent == owner else "helper turn end"
+            found.triggers.extend((at, label) for at in fact.finals)
+            if agent == owner:
+                found.triggers.extend((at, "helper message") for at, sender in fact.sends if sender in helper_ids)
+        return found
+
+    def plain_messages(rows):
+        found = empty()
+        for r in rows:
+            at = int(r["updated_at"])
+            found.any_messages = True
+            found.newest_ms = max(found.newest_ms, at)
+            if r["role"] == "assistant" and r["phase"] == "final":
+                found.triggers.append((at, "owner turn end" if r["agent_id"] == owner else "helper turn end"))
+            elif r["agent_id"] == owner and r["role"] == "user" and r["sender_agent_id"] in helper_ids:
+                found.triggers.append((at, "helper message"))
+        return found
+
+    reference = None
+    if memo is None:
+        found = plain_messages(read(agent_ids))
+    else:
+        predicted, authoritative = memo.facts(con, plan_row["plan_id"], agent_ids, since_ms, full, read)
+        found = from_facts(predicted)
+        if authoritative is not None:
+            reference = plain_messages(authoritative)
+    # The live job and ledger reads are shared by the authoritative check.
+    variants = (found,) if reference is None else (found, reference)
     for r in con.execute(
             f"SELECT terminal_at FROM background_jobs WHERE agent_id IN ({marks}) "
             f"AND terminal_at > ?", (*agent_ids, since_ms)):
-        found.triggers.append((int(r["terminal_at"]), "job end"))
-        found.newest_ms = max(found.newest_ms, int(r["terminal_at"]))
+        for variant in variants:
+            variant.triggers.append((int(r["terminal_at"]), "job end"))
+            variant.newest_ms = max(variant.newest_ms, int(r["terminal_at"]))
     for r in con.execute(
             "SELECT event_id, at, kind FROM goal_events WHERE plan_id=? AND event_id > ? "
             "AND delegation_id != 'goal-keeper' ORDER BY event_id",
             (plan_row["plan_id"], since_event)):
-        found.newest_event = max(found.newest_event, int(r["event_id"]))
-        if r["kind"] in STATUS_EVENT_KINDS:
-            found.triggers.append((int(r["at"]), "goal " + r["kind"]))
-            found.status_change = True
-    found.triggers.sort()
+        for variant in variants:
+            variant.newest_event = max(variant.newest_event, int(r["event_id"]))
+            if r["kind"] in STATUS_EVENT_KINDS:
+                variant.triggers.append((int(r["at"]), "goal " + r["kind"]))
+                variant.status_change = True
+    for variant in variants:
+        variant.triggers.sort()
+    if reference is not None:
+        if found != reference:
+            memo.differences.setdefault(plan_row["plan_id"], set()).add("activity")
+        return reference
     return found
 
 
@@ -434,11 +471,11 @@ def open_goals(config: dict) -> list:
         "archived_at": r["archived_at"]})]
 
 
-def _seen(con, row, now: int, watch: Triggers, *, full: bool = False) -> "Activity":
+def _seen(con, row, now: int, watch: Triggers, *, full: bool = False, memo=None) -> "Activity":
     since_ms, since_event = cursor(row, now, full=full)
     helpers = _helpers(con, row["agent_id"], int(row["created_at"]))
     ids = [row["agent_id"], *(h["agent_id"] for h in helpers)]
-    seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event)
+    seen = activity(con, row, ids, {h["agent_id"] for h in helpers}, since_ms, since_event, memo=memo, full=full)
     kept = []
     for at, label in seen.triggers:
         if label == "owner turn end" and watch.owner_turns:
@@ -483,7 +520,7 @@ def _due(config: dict, progress: dict, now: int, memo: KeeperMemo | None) -> lis
         # The one-off catch-up: a goal never updated, not yet tried, is read in full
         # once and queued now; the queue paces it (max_goals_per_run per run).
         full = plan_id not in caught and _needs_catch_up(row, now)
-        seen = _seen(con, row, now, watch, full=full)
+        seen = _seen(con, row, now, watch, full=full, memo=memo)
         if full:
             caught[plan_id] = now
             if seen.any_messages or seen.triggers:
