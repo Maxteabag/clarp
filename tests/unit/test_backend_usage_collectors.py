@@ -139,7 +139,7 @@ def test_app_server_probe_reads_rate_limits_once_initialized(monkeypatch):
     assert backend_usage.fetch_codex_usage_app_server() == {"captured": True}
     assert [proc.argv for proc in calls] == [["codex", "-s", "read-only", "-a", "never", "app-server"]]
     assert json.loads(calls[0].stdin.getvalue()) == {"method": "initialized", "params": {}}
-    assert captured == [({"primary": {}}, {"source_detail": "account/rateLimits/read"})]
+    assert captured == [({"rateLimits": {"primary": {}}}, {"source_detail": "account/rateLimits/read"})]
     assert calls[0].events == ["terminate", "wait"]
 
 
@@ -174,3 +174,59 @@ def test_app_server_probe_reports_a_missing_cli(monkeypatch):
     monkeypatch.setattr(backend_usage.subprocess, "Popen", missing)
     with pytest.raises(RuntimeError, match="codex not found"):
         backend_usage.fetch_codex_usage_app_server()
+
+
+def _window(used):
+    return {"primary": {"usedPercent": used, "windowDurationMins": 300, "resetsAt": 1_900_000_000}}
+
+
+def _read_through_app_server(monkeypatch, result):
+    """The app-server fallback with the real reader: only the process and its JSON-RPC are stand-ins."""
+    monkeypatch.setattr(backend_usage.subprocess, "Popen",
+                        lambda argv, **_kwargs: _FakeAppServer([], argv))
+    replies = [{"id": 1, "result": {}}, {"id": 2, "result": result}]
+    patch_shared(monkeypatch, backend_usage, "_codex_rpc", lambda *a, **k: replies.pop(0))
+    patch_shared(monkeypatch, backend_usage, "_read_codex_auth", lambda *a, **k: ("token", "account"))
+    return backend_usage.fetch_codex_usage_app_server()
+
+
+@pytest.mark.parametrize("result, used", [
+    ({"rateLimits": _window(30), "rateLimitsByLimitId": {"codex": {**_window(40), "limitId": "codex"}}}, 40),
+    ({"rateLimitsByLimitId": {"codex": {**_window(40), "limitId": "codex"}}}, 40),
+    ({"rateLimits": _window(30)}, 30),
+])
+def test_the_app_server_fallback_reads_the_whole_rate_limits_answer(monkeypatch, result, used):
+    """R68: account/rateLimits/read answers rateLimits and rateLimitsByLimitId side by side."""
+    assert _read_through_app_server(monkeypatch, result)["used_percentage"] == used
+
+
+def test_an_app_server_answer_without_rate_limits_is_an_error(monkeypatch):
+    with pytest.raises(RuntimeError, match="returned no rate limits"):
+        _read_through_app_server(monkeypatch, {"other": 1})
+
+
+def test_both_codex_reads_hand_the_reader_the_whole_answer(tmp_path, monkeypatch):
+    """The HTTPS read (unchanged) and the app-server read give the reader the answer as it came."""
+    from lib import backend_usage_codex
+    given = []
+    real = backend_usage_codex._select_rate_limit_payload
+    patch_shared(monkeypatch, backend_usage_codex, "_select_rate_limit_payload",
+                 lambda payload: given.append(payload) or real(payload))
+    body = {"plan_type": "plus", "rate_limit": {"primary_window": {"used_percent": 42, "limit_window_seconds": 18000,
+                                                                    "reset_at": 1_900_000_000}}}
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self): return json.dumps(body).encode()
+
+    codex_home = tmp_path / "codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(json.dumps(
+        {"auth_mode": "chatgpt", "tokens": {"access_token": "token", "account_id": "account"}}))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(backend_usage.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    backend_usage.fetch_codex_usage()
+    result = {"rateLimits": _window(30), "rateLimitsByLimitId": {}}
+    _read_through_app_server(monkeypatch, result)
+    assert given == [body, result]

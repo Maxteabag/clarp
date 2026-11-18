@@ -103,6 +103,16 @@ def _seconds(value):
     return float(match.group(1)) if match else None
 
 
+def _object(value):
+    """A protocol field meant to be an object; any other value reads as empty (R69)."""
+    return value if isinstance(value, dict) else {}
+
+
+def _items(value):
+    """A protocol field meant to be a list; any other value reads as empty (R69)."""
+    return value if isinstance(value, list) else ()
+
+
 class GeminiUpstream:
     """A GPT-Live-shaped upstream socket backed by a Gemini Live session."""
 
@@ -324,7 +334,9 @@ class GeminiUpstream:
         if isinstance(update, dict) and update.get("resumable") and update.get("newHandle"):
             self.handle = update["newHandle"]
         if "goAway" in message:
-            left = _seconds((message.get("goAway") or {}).get("timeLeft"))
+            # A goAway present means the server is going away: its timeLeft when that can be
+            # read, the default otherwise, whatever the value is (R69).
+            left = _seconds(_object(message["goAway"]).get("timeLeft"))
             self.reconnect_at = self.clock() + max(0.0, (left if left is not None else 5.0) - GOAWAY_MARGIN_SECONDS)
         if isinstance(message.get("usageMetadata"), dict):
             self.count_usage(message["usageMetadata"])
@@ -334,13 +346,14 @@ class GeminiUpstream:
             self.server_content(content)
         tool_call = message.get("toolCall")
         if isinstance(tool_call, dict):
-            for call in tool_call.get("functionCalls") or ():
-                self.function_call(call)
+            for call in _items(tool_call.get("functionCalls")):
+                if isinstance(call, dict):
+                    self.function_call(call)
         cancelled = message.get("toolCallCancellation")
         if isinstance(cancelled, dict):
             with self.lock:
-                for ident in cancelled.get("ids") or ():
-                    call = self.calls.get(ident)
+                for ident in _items(cancelled.get("ids")):
+                    call = self.calls.get(ident) if isinstance(ident, str) else None
                     if call is not None:
                         call["cancelled"] = True
 
@@ -349,8 +362,8 @@ class GeminiUpstream:
             with self.lock:
                 self.speaking = self.muted = False
             self.events.append({"type": "session.output_audio.interrupted"})
-        for part in (content.get("modelTurn") or {}).get("parts") or ():
-            data = (part.get("inlineData") or {}).get("data") if isinstance(part, dict) else None
+        for part in _items(_object(content.get("modelTurn")).get("parts")):
+            data = _object(_object(part).get("inlineData")).get("data")
             if isinstance(data, str) and data:
                 with self.lock:
                     self.speaking = True
@@ -360,7 +373,7 @@ class GeminiUpstream:
         now_ms = int((self.clock() - self.opened_at) * 1000)
         for field, kind in (("inputTranscription", "session.input_transcript.delta"),
                             ("outputTranscription", "session.output_transcript.delta")):
-            text = (content.get(field) or {}).get("text")
+            text = _object(content.get(field)).get("text")
             if isinstance(text, str) and text:
                 self.events.append({"type": kind, "delta": text, "event_id": uuid.uuid4().hex,
                                     "start_ms": now_ms, "end_ms": now_ms})
@@ -379,14 +392,14 @@ class GeminiUpstream:
         with self.lock:
             self.calls[ident] = {"name": name, "parts": [], "speak": False}
         self.events.append({"type": "session.delegation.created",
-                            "delegation": {"id": ident, "request": str((call.get("args") or {}).get("request") or "")}})
+                            "delegation": {"id": ident, "request": str(_object(call.get("args")).get("request") or "")}})
 
     # ---- usage ---------------------------------------------------------------
 
     def count_usage(self, usage):
         cost = 0.0
         for side in ("prompt", "response"):
-            for row in usage.get(side + "TokensDetails") or ():
+            for row in _items(usage.get(side + "TokensDetails")):
                 if not isinstance(row, dict) or type(row.get("tokenCount")) is not int:
                     continue
                 modality = str(row.get("modality") or "TEXT")

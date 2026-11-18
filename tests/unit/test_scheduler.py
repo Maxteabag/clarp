@@ -298,6 +298,7 @@ def test_many_repeating_failures_are_not_traced_again_when_the_memory_is_full(mo
 
 
 @pytest.mark.parametrize("expression", ["０ 9 * * *", "0 ٩ * * *", "*/５ * * * *", "0 9 1-３ * *",
+                                        "１/15 * * * *", "0-５/2 * * * *",
                                         "+5 * * * *", "1_0 * * * *", "0 9 * * ¹"])
 def test_a_cron_number_is_ascii_digits_only(expression):
     """R66: int() reads other scripts' digits, a sign and underscores; a cron field means none of them."""

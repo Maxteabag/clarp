@@ -191,11 +191,13 @@ def fetch_codex_usage_app_server(*, timeout: float = 8.0) -> dict[str, Any]:
             assert proc.stdin is not None
             proc.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
             proc.stdin.flush()
-            limits = (_codex_rpc(proc, 2, "account/rateLimits/read", timeout=timeout)
-                      .get("result") or {}).get("rateLimits") or {}
-            if not limits:
+            # The whole result, as the HTTPS path and the account/rateLimits/updated
+            # notification hand it over: the reader looks in it for rateLimits and
+            # rateLimitsByLimitId, which stand side by side (R68).
+            result = _codex_rpc(proc, 2, "account/rateLimits/read", timeout=timeout).get("result") or {}
+            if not (result.get("rateLimits") or result.get("rateLimitsByLimitId")):
                 raise RuntimeError("Codex app-server returned no rate limits")
-            return capture_codex_rate_limits(limits, source_detail="account/rateLimits/read")
+            return capture_codex_rate_limits(result, source_detail="account/rateLimits/read")
         except Exception as exc:  # noqa: BLE001
             last_error = str(exc)
         finally:
