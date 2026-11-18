@@ -12,14 +12,15 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Extension, Path, Query, State};
+use axum::extract::{Extension, Path, Query, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use clarp_actor::{Actor, ActorError, Kept, Outputs};
 use clarp_kernel::artifacts::decisions::{self, Ask, Given, OnBehalf};
-use clarp_kernel::artifacts::forms::{self, Sent};
+use clarp_kernel::artifacts::forms::{self, Sent, Submission};
+use clarp_kernel::artifacts::render_spec::{self as spec, Catalog, J, Publish};
 use clarp_kernel::artifacts::reports::{self, Page, Revisions};
 use clarp_kernel::artifacts::updates;
 use clarp_kernel::artifacts::{
@@ -41,6 +42,7 @@ use crate::fleet::{AgentRecord, Member};
 use crate::ids;
 use crate::pairing::Scope;
 use crate::pusher::Requested;
+use crate::render_spec;
 
 /// An agent's books as anyone may read them without asking the agent.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -99,6 +101,16 @@ pub enum Want {
     Submit {
         artifact_id: String,
         sent: Box<Sent>,
+    },
+    /// A render spec published, or published again as its next revision.
+    SpecPublish(Box<Publish>),
+    /// A user's answers to a render spec, read as the Python Host reads them. `elsewhere`
+    /// is a submission under the same id in another agent's book, with its artifact's id.
+    SpecSubmit {
+        artifact_id: String,
+        data: Box<J>,
+        elsewhere: Option<Box<(String, Submission)>>,
+        catalog: Box<Catalog>,
     },
 }
 
@@ -321,6 +333,37 @@ pub fn carry_out(
                     (form, true, None)
                 }),
             },
+            Want::SpecPublish(asked) => {
+                let mut ctx = Ctx {
+                    now_ms: now,
+                    token_hex: &mut ids::hex,
+                    taken: &|id| book.any(id).is_some(),
+                    published,
+                    elsewhere: &|_| false,
+                    page: &page,
+                };
+                // What is only checked is checked where it is asked, and never comes here.
+                book.spec_published(maker, asked, &mut ctx)
+                    .and_then(|made| {
+                        made.ok_or_else(|| spec::Refusal::new("not_open", "").refused())
+                    })
+                    .map(|made| (made, true, None))
+            }
+            Want::SpecSubmit {
+                artifact_id,
+                data,
+                elsewhere,
+                catalog,
+            } => {
+                let elsewhere = elsewhere
+                    .as_deref()
+                    .map(|(id, before)| (id.as_str(), before));
+                book.spec_submitted(catalog, artifact_id, data, elsewhere, now)
+                    .map(|(form, said, changed)| {
+                        receipt = Some(said);
+                        (form, changed, None)
+                    })
+            }
         }
     };
     let (artifact, changed, page) = match decided {
@@ -423,6 +466,7 @@ fn conflict(why: Refused) -> ApiError {
     let status = match why.why {
         Why::Permission => StatusCode::FORBIDDEN,
         Why::Value | Why::Integrity => StatusCode::CONFLICT,
+        Why::Spec(_) => return render_spec::said(why),
     };
     ApiError::new(status, why.message)
 }
@@ -468,7 +512,15 @@ async fn page_of(app: &App, page: &Page) -> Option<String> {
 
 /// A row as it is answered: as a representation asks for it, with its report's page put
 /// back, or named where a list leaves it out.
-pub(crate) async fn shown(app: &App, mut row: Value, representation: &str) -> Value {
+pub(crate) async fn shown(app: &App, mut row: Value, representation: &str, capable: bool) -> Value {
+    // A render spec's row is the same in every representation: plain, or with what was
+    // left out for a client that can see the spec.
+    if row["type"] == spec::KIND
+        && capable
+        && let Some(artifact) = spec_of(app, row["artifact_id"].as_str().unwrap_or(""))
+    {
+        spec::marked(&mut row, &artifact);
+    }
     let page = reports::named_page(&mut row);
     let mut row = represented(row, representation);
     match page {
@@ -486,12 +538,23 @@ pub(crate) async fn shown(app: &App, mut row: Value, representation: &str) -> Va
 }
 
 /// Rows as they are answered, in their order.
-async fn all_shown(app: &App, rows: Vec<Value>, representation: &str) -> Vec<Value> {
+async fn all_shown(app: &App, rows: Vec<Value>, representation: &str, capable: bool) -> Vec<Value> {
     let mut answered = Vec::with_capacity(rows.len());
     for row in rows {
-        answered.push(shown(app, row, representation).await);
+        answered.push(shown(app, row, representation, capable).await);
     }
     answered
+}
+
+/// A render spec as its agent keeps it, also one that was thrown away.
+fn spec_of(app: &App, artifact_id: &str) -> Option<Artifact> {
+    let fleet = Fleet::of(app);
+    let member = fleet.holder(artifact_id, true)?;
+    let view = member.agent.view();
+    let found = view.books.artifacts.any(artifact_id);
+    found
+        .filter(|artifact| artifact.kind == spec::KIND)
+        .cloned()
 }
 
 /// The artifact as a representation asks for it: as it is, without the payload its fields
@@ -545,6 +608,7 @@ type Params = Query<std::collections::HashMap<String, String>>;
 async fn list_artifacts(
     State(app): State<App>,
     Query(query): Params,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let representation = representation(&query)?;
     let text = |key: &str| query.get(key).map_or("", |value| value.trim()).to_string();
@@ -571,20 +635,23 @@ async fn list_artifacts(
         let fleet = Fleet::of(&app);
         artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
     };
-    let rows = all_shown(&app, rows, representation).await;
+    let capable = render_spec::capable(&app, &headers);
+    let rows = all_shown(&app, rows, representation, capable).await;
     Ok(Json(json!({ "artifacts": rows })))
 }
 
 async fn pinned_artifacts(
     State(app): State<App>,
     Query(query): Params,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let representation = representation(&query)?;
     let rows = {
         let fleet = Fleet::of(&app);
         artifacts::list_pinned(&fleet.shelves(), 100, app.clock.now_ms())
     };
-    let rows = all_shown(&app, rows, representation).await;
+    let capable = render_spec::capable(&app, &headers);
+    let rows = all_shown(&app, rows, representation, capable).await;
     Ok(Json(json!({ "artifacts": rows })))
 }
 
@@ -607,11 +674,21 @@ async fn get_artifact(
     let Some(row) = find(&app, rest) else {
         return Err(refused(StatusCode::NOT_FOUND, "artifact not found"));
     };
+    // A render spec is read whole only by a client that can see it.
+    if row["type"] == spec::KIND {
+        let opened = match spec_of(&app, rest) {
+            Some(artifact) if render_spec::capable(&app, &headers) => {
+                render_spec::opened(row, &artifact)?
+            }
+            _ => row,
+        };
+        return Ok(Json(json!({ "artifact": opened })).into_response());
+    }
     // Only this one representation is known here; any other is the artifact as it is.
     let flat = query
         .get("representation")
         .is_some_and(|given| given == "flat-v1");
-    let row = shown(&app, row, if flat { "flat-v1" } else { "" }).await;
+    let row = shown(&app, row, if flat { "flat-v1" } else { "" }, false).await;
     Ok(Json(json!({ "artifact": row })).into_response())
 }
 
@@ -747,14 +824,53 @@ pub(crate) async fn report_history(
 
 async fn create_artifact(
     State(app): State<App>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
-    let artifact = create(&app, &object(&body)?).await?;
-    Ok((StatusCode::CREATED, Json(json!({ "artifact": artifact }))).into_response())
+    let validate_only = render_spec::validate_only(query.as_deref());
+    let capable = render_spec::capable(&app, &headers);
+    let (status, answer) = posted(&app, &body, validate_only, capable).await?;
+    Ok((status, Json(answer)).into_response())
+}
+
+/// What `POST /artifacts` answers for this body: the status and the body of the answer.
+pub(crate) async fn posted(
+    app: &App,
+    body: &[u8],
+    validate_only: bool,
+    capable: bool,
+) -> Result<(StatusCode, Value), ApiError> {
+    // A render spec is read as the Python Host reads it: the rules see what that reader
+    // sees (a key twice, a number's spelling).
+    if let Some(J::Object(data)) = render_spec::body(body)
+        && render_spec::is_spec(&data)
+    {
+        return render_spec::publish(app, &data, validate_only, capable).await;
+    }
+    let artifact = made(app, &object(body)?, validate_only, capable).await?;
+    Ok((StatusCode::CREATED, json!({ "artifact": artifact })))
 }
 
 /// Makes an artifact from what a request says. Answers the artifact as it is shown.
 pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
+    made(app, data, false, false).await
+}
+
+/// Makes an artifact, or only checks a render spec when `validate_only` says so; the row as
+/// this client is shown it.
+async fn made(
+    app: &App,
+    data: &Map<String, Value>,
+    validate_only: bool,
+    capable: bool,
+) -> Result<Value, ApiError> {
+    if let J::Object(fields) = J::of(&Value::Object(data.clone()))
+        && render_spec::is_spec(&fields)
+    {
+        let (_, answer) = render_spec::publish(app, &fields, validate_only, capable).await?;
+        return Ok(answer.get("artifact").cloned().unwrap_or(answer));
+    }
     let kind = said(data, "type", "");
     if matches!(
         kind.trim().to_lowercase().as_str(),
@@ -771,6 +887,7 @@ pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value
         payload: data.get("payload").cloned(),
         artifact_id: said(data, "artifact_id", ""),
         expected_version: data.get("expected_version").cloned(),
+        validate_only,
     };
     let fleet = Fleet::of(app);
     let session = said(data, "session", "");
@@ -794,7 +911,7 @@ pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value
         live_elsewhere,
     };
     let made = ask_agent(&member, want).await?.artifact;
-    Ok(shown(app, made, "").await)
+    Ok(shown(app, made, "", capable).await)
 }
 
 /// `POST /artifacts/<id>` and what a user does with an artifact: `/archive`, `/discard`,
@@ -802,19 +919,60 @@ pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value
 async fn post_artifact(
     State(app): State<App>,
     Path(rest): Path<String>,
+    headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    let capable = render_spec::capable(&app, &headers);
     if let Some(artifact_id) = rest.trim_matches('/').strip_suffix("/submit") {
         return Ok(Json(
-            submit(&app, artifact_id.trim_matches('/'), &body).await?,
+            submit(&app, artifact_id.trim_matches('/'), &body, capable).await?,
         ));
     }
-    Ok(Json(change(&app, &rest, object(&body)?).await?))
+    // A render spec is revised as a whole, from the body as the Python Host reads it.
+    let id = rest.trim_matches('/');
+    if let Some(current) = spec_of(&app, id).filter(|spec| spec.deleted_at.is_none()) {
+        let Some(J::Object(data)) = render_spec::body(&body) else {
+            return Err(refused(StatusCode::BAD_REQUEST, "json object required"));
+        };
+        return Ok(Json(
+            render_spec::update(&app, &current, &data, capable).await?,
+        ));
+    }
+    Ok(Json(
+        changed_as(&app, &rest, object(&body)?, capable).await?,
+    ))
 }
 
 /// `POST /artifacts/<id>/submit`: a user sends answers to a form. Answered with a receipt;
 /// the same answers under the same id are answered with the same.
-async fn submit(app: &App, artifact_id: &str, body: &[u8]) -> Result<Value, ApiError> {
+async fn submit(
+    app: &App,
+    artifact_id: &str,
+    body: &[u8],
+    capable: bool,
+) -> Result<Value, ApiError> {
+    // Answers to a render spec are read as the Python Host reads them.
+    let spec = {
+        let fleet = Fleet::of(app);
+        fleet.holder(artifact_id, true).cloned().and_then(|member| {
+            let found = member
+                .agent
+                .view()
+                .books
+                .artifacts
+                .any(artifact_id)
+                .cloned();
+            found
+                .filter(|form| form.kind == spec::KIND)
+                .map(|form| (member, form))
+        })
+    };
+    if let Some((member, form)) = spec {
+        let Some(data @ J::Object(_)) = render_spec::body(body) else {
+            return Err(refused(StatusCode::BAD_REQUEST, "JSON object required"));
+        };
+        return render_spec::submit(app, &member, &form, &data, capable).await;
+    }
     let Ok(Value::Object(data)) = serde_json::from_slice(body) else {
         return Err(refused(StatusCode::BAD_REQUEST, "JSON object required"));
     };
@@ -853,6 +1011,16 @@ pub(crate) async fn change(
     app: &App,
     rest: &str,
     data: Map<String, Value>,
+) -> Result<Value, ApiError> {
+    changed_as(app, rest, data, false).await
+}
+
+/// The same, with the row as this client is shown it.
+async fn changed_as(
+    app: &App,
+    rest: &str,
+    data: Map<String, Value>,
+    capable: bool,
 ) -> Result<Value, ApiError> {
     let rest = rest.trim_matches('/');
     let (artifact_id, action) = ["archive", "discard", "pin"]
@@ -914,7 +1082,7 @@ pub(crate) async fn change(
         });
     };
     let done = ask_agent(member, want).await?;
-    let artifact = shown(app, done.artifact, "").await;
+    let artifact = shown(app, done.artifact, "", capable).await;
     Ok(if action == "update" {
         json!({ "artifact": artifact })
     } else {
@@ -1125,6 +1293,7 @@ async fn attention(State(app): State<App>, Query(query): Params) -> Json<Value> 
 async fn updates_page(
     State(app): State<App>,
     Query(query): Params,
+    headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let wrong = || refused(StatusCode::BAD_REQUEST, "invalid attention query");
     let limit = query
@@ -1142,7 +1311,7 @@ async fn updates_page(
         _ => wrong(),
     })?;
     Ok(Json(json!({
-        "artifacts": all_shown(&app, page.artifacts, representation).await,
+        "artifacts": all_shown(&app, page.artifacts, representation, render_spec::capable(&app, &headers)).await,
         "next_cursor": page.next_cursor,
         "snapshot_revision": page.snapshot_revision,
         "total": page.total,
@@ -1209,7 +1378,7 @@ pub(crate) async fn of_session(app: &App, session: &str) -> Value {
         let fleet = Fleet::of(app);
         artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
     };
-    json!({ "artifacts": all_shown(app, rows, "").await })
+    json!({ "artifacts": all_shown(app, rows, "", false).await })
 }
 
 /// The routes of the library and the inbox.
@@ -1218,6 +1387,7 @@ pub fn routes() -> Router<App> {
         .route("/artifacts", get(list_artifacts).post(create_artifact))
         .route("/artifacts/{*rest}", get(get_artifact).post(post_artifact))
         .route("/pinned-artifacts", get(pinned_artifacts))
+        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))
         .route("/decisions", post(create_decision))
         .route("/decisions/{*rest}", post(post_decision))
         .route("/attention", get(attention))

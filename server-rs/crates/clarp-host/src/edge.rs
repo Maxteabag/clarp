@@ -56,7 +56,7 @@ use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire}
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 101;
+pub const HOST_CONTRACT: u64 = 102;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -84,6 +84,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `GET /attention/inbox`: what agents made, a page at a time.
     ("attention_index", 2),
     ("artifact_summary_v1", 73),
+    // Render specs: a small form drawn by the app from a closed catalog, answered once; a
+    // spec only for a client at or above the owner's threshold (`render_spec.rs`).
+    ("render_spec", 102),
     ("flat_artifact_responses", 1),
     ("artifacts", 1),
     // What an agent publishes: `POST /media`, an agent's gallery, a file fetched whole and
@@ -340,6 +343,8 @@ pub struct ApiError {
     status: StatusCode,
     error: String,
     plain: bool,
+    /// What is answered under `error` where it is more than words: a render spec's refusal.
+    detail: Option<Value>,
 }
 
 impl ApiError {
@@ -348,6 +353,15 @@ impl ApiError {
             status,
             error: error.into(),
             plain: false,
+            detail: None,
+        }
+    }
+
+    /// An error whose `error` is this value; `error` says it in words, for a tool.
+    pub(crate) fn detailed(status: StatusCode, error: impl Into<String>, detail: Value) -> Self {
+        Self {
+            detail: Some(detail),
+            ..Self::new(status, error)
         }
     }
 
@@ -366,7 +380,13 @@ impl ApiError {
             status,
             error: text.into(),
             plain: true,
+            detail: None,
         }
+    }
+
+    /// What is answered under `error`, where it is more than words.
+    pub(crate) fn detail(&self) -> Option<&Value> {
+        self.detail.as_ref()
     }
 }
 
@@ -381,6 +401,8 @@ impl IntoResponse for ApiError {
         if self.plain {
             let kind = [(header::CONTENT_TYPE, "text/plain")];
             (self.status, kind, self.error).into_response()
+        } else if let Some(detail) = self.detail {
+            (self.status, Json(json!({ "error": detail }))).into_response()
         } else {
             (self.status, Json(json!({ "error": self.error }))).into_response()
         }

@@ -34,6 +34,7 @@ pub mod answers;
 pub mod decisions;
 pub mod forms;
 pub mod moved;
+pub mod render_spec;
 pub mod reports;
 pub mod updates;
 
@@ -183,6 +184,9 @@ pub enum Why {
     Permission,
     /// A name that is taken: the database's own refusal, `IntegrityError`.
     Integrity,
+    /// A refusal of a render spec, by its code; the message is its pointer
+    /// ([`render_spec::Refusal`]).
+    Spec(&'static str),
 }
 
 /// A call that is refused, in the words the Python Host uses.
@@ -326,6 +330,8 @@ pub struct New {
     pub artifact_id: String,
     /// The version a report that is published again follows.
     pub expected_version: Option<Value>,
+    /// Only check it: what only a render spec can be (`?validate_only=1`).
+    pub validate_only: bool,
 }
 
 /// Which artifacts are listed.
@@ -860,6 +866,14 @@ impl Artifact {
             "pinned": self.pinned_at.is_some(),
             "payload": self.payload,
         });
+        // A render spec's row is its columns alone: whoever answers with it adds what the
+        // client may see ([`render_spec::marked`], [`render_spec::opened`]).
+        if self.kind == render_spec::KIND {
+            if let Some(fields) = item.as_object_mut() {
+                fields.remove("payload");
+            }
+            return item;
+        }
         for key in PUBLIC_FIELDS {
             if let Some(value) = self
                 .payload
@@ -981,6 +995,9 @@ impl ArtifactBook {
         }
         if title.is_empty() {
             return refuse("artifact title required");
+        }
+        if new.validate_only {
+            return refuse("validate-only requires a render spec");
         }
         let artifact_id = match new.artifact_id.trim() {
             "" => new_id("artifact", ctx),

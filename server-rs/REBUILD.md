@@ -1945,6 +1945,40 @@ the same login for a minute. The Host tests direct requests with a numeric loopb
 address in `CLARP_USAGE_LOOPBACK` and give both tools private executable stand-ins.
 The first run against the installed Host belongs to the release lead.
 
+**Render specs** (18 Nov 2026; Host contract 102, feature `render_spec`). An agent declares a small form, and
+the app draws it with its own views from a closed catalog (`contract/catalogs/clarp.form.v1.json`: eight
+components, every property closed) and lets its user answer it once. The kind came to the Python Host the
+same day (its PR 418, issue 415) under a contract its app's agent, its release owner and the lead agreed, and
+this Host carries it as that Host does. The rules are the kernel's (`artifacts/render_spec.rs` and
+`render_spec/`): whether a payload is a spec, refused at the first rule it fails in the reference's order of
+stages, as a code from the closed list, a pointer and the catalog's sentence for the code, never with a value
+and never naming a key the caller wrote unless it is an identifier; whether answers are taken (accepted, the
+same again, or refused); what the agent is told; and the canonical bytes (RFC 8785, whole numbers only)
+that a spec is counted, hashed and capped by. They are held to `server/lib/render_spec.py` run as it is by
+791 recorded cases (`tools/render-spec-vectors.py`): 90 bodies, 260 payloads (every stage, every cap at and
+one over), 71 submissions, the reference's own 35 scenarios played through as its store plays them, 278
+clients, 10 messages and 47 catalog files, each that loads asked about nine payloads (the reference as of
+its PR 431, which asks that a bound property's schema be the catalog's shape of a binding). The body of a request is read as the Python Host reads it,
+because that reader is not JSON as it is defined and the refusals depend on it: it finds UTF-16 and UTF-32
+by their first bytes, lets half of a pair of signs through (refused later as `invalid_json`), takes `NaN`
+and numbers of any length (refused as `number_form`), reads `-0` as the whole number 0, and keeps that a
+key came twice (refused as `invalid_object`). Both catalog files are in the program; a catalog that does
+not pass its checks refuses render specs alone (503, `catalog_unavailable`). The Host (`render_spec.rs`
+beside `library.rs`) publishes, revises (a whole new payload that names the version it follows) and only
+checks (`?validate_only=1`); a spec is never in a row of a list, a search, the pins, Updates or an event.
+Who sees it is said by each request: a client whose `X-Clarp-Client` says `<platform>/<build>
+contract=<n>` at or above the owner's threshold (`[artifacts] render_spec_min_client` in his file, read at
+every request; unset, as the reference ships, nobody) is shown what was left out (`content_omitted`, with
+`element_count`) and reads the spec, and once it was answered the answers, from the artifact itself; any
+other client sees a plain row and cannot answer (403, `client_contract`). The first answers that are taken
+close the spec (`already_answered`); they are told to its agent once, through the same delivery as a
+form's answers, and the same answers under the same id get the same receipt. `GET
+/artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
+its bytes (`clarp-agent-artifacts publish-render-spec REQUEST_FILE [--validate-only]`), so that the Host is
+the only validator. Held end to end at every door the reference's own integration test goes through
+(`tests/host.rs`, a render spec is published, shown to who may see it and answered once). Not there: moving
+a render spec with its agent to another Host, which is the mover's contract.
+
 **The connection relay** (16 Nov 2026; the owner's requirement, through the Python Host's release owner: "when
 we switch to rust it will use relay"). A Host without a public address is reached through a relay: the Host
 keeps one outbound WebSocket to it, and what a phone asks at `<relay>/h/<host id>` comes down that socket as
