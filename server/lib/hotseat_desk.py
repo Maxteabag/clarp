@@ -199,9 +199,15 @@ def _resume_command(backend: str, item_id: str) -> str | None:
     """The command that resumes a native session, as that session's backend
     gives it. None when the backend is unknown or has none: a Claude command
     is not offered for a session of something else."""
-    from . import backends
+    from . import backends, transcript_paths
     known = backends.get(backend)
-    return known.native_resume_command(item_id) if known is not None else None
+    if known is None:
+        return None
+    if not transcript_paths.session_id_ok(item_id):
+        # The command is copied into a shell: an id outside the shared rule (R70) gets none.
+        transcript_paths.refused(known.id)
+        return None
+    return known.native_resume_command(item_id)
 
 
 def _carry_last_good(accounts: list[dict], previous) -> None:

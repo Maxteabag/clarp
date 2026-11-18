@@ -6,6 +6,7 @@ import pathlib
 from datetime import datetime
 from typing import Any
 
+from . import transcript_paths
 from .log import log_exception
 
 
@@ -108,11 +109,12 @@ def list_claude_sessions(
             if not isinstance(entry, dict) or entry.get("isSidechain"):
                 continue
             sid = str(entry.get("sessionId") or "")
-            if not sid:
-                continue
+            if not sid or not transcript_paths.checked_id("claude", sid):
+                continue      # offered for resume and fork only by the shared rule (R70)
             declared_path = pathlib.Path(str(entry.get("fullPath") or ""))
             transcript_path = (
-                declared_path if str(declared_path) and declared_path.is_file()
+                declared_path if (str(declared_path) and declared_path.is_file()
+                                  and transcript_paths.inside("claude", root, declared_path))
                 else index.parent / f"{sid}.jsonl"
             )
             if not transcript_path.is_file():
@@ -151,6 +153,7 @@ def list_claude_sessions(
             if project.is_dir()
             for path in project.glob("*.jsonl")
             if path.is_file() and path.stem not in indexed_transcript_ids
+            and transcript_paths.session_id_ok(path.stem)
         ]
     else:
         encoded = "-" + str(pathlib.Path(cwd)).strip("/").replace("/", "-")
@@ -158,6 +161,7 @@ def list_claude_sessions(
         candidates = [
             path for path in project.glob("*.jsonl")
             if path.is_file() and path.stem not in indexed_transcript_ids
+            and transcript_paths.session_id_ok(path.stem)
         ] if project.is_dir() else []
     try:
         candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)

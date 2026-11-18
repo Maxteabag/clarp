@@ -16,6 +16,7 @@ import time
 from functools import lru_cache
 from typing import Any
 
+from . import transcript_paths
 from .claude_reply_evidence import is_synthetic_assistant_record
 from .activity import summarize_tool_activity
 from .log import log_exception
@@ -698,10 +699,10 @@ def scan_for_jsonl(
     For decisions that must not rest on a cached miss, such as unbinding an
     agent whose transcript looks missing.
     """
-    if not backend_session_id:
+    if not backend_session_id or not transcript_paths.checked_id("claude", backend_session_id):
         return None
     projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
-    return _glob_latest_jsonl(projects_root, backend_session_id)
+    return transcript_paths.inside("claude", projects_root, _glob_latest_jsonl(projects_root, backend_session_id))
 
 
 def find_latest_jsonl(
@@ -723,7 +724,7 @@ def find_latest_jsonl(
     _TranscriptIndex), so callers may ask on every snapshot and every
     streamer tick without paying for a directory walk.
     """
-    if not backend_session_id:
+    if not backend_session_id or not transcript_paths.checked_id("claude", backend_session_id):
         return None
     projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
-    return _index_for(projects_root).lookup(backend_session_id)
+    return transcript_paths.inside("claude", projects_root, _index_for(projects_root).lookup(backend_session_id))

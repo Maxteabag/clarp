@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .. import agents as agents_db
-from .. import agy_transcript
+from .. import agy_transcript, transcript_paths
 from .. import provider_capabilities
 from .. import server_identity
 from ..tts_queue_records import enqueue as enqueue_tts
@@ -199,7 +199,7 @@ def _forget_conversations(home: pathlib.Path, conversation_id: str) -> None:
     """Remove this conversation, and anything older than an hour a crash left."""
     store = home / ".gemini" / "antigravity-cli"
     doomed: list[pathlib.Path] = []
-    if conversation_id and "/" not in conversation_id:
+    if conversation_id and transcript_paths.checked_id(AGY.id, conversation_id):
         doomed += [*store.glob(f"conversations/{conversation_id}.db*"), store / "brain" / conversation_id]
     cutoff = time.time() - ISOLATED_KEEP_SECONDS
     for old in (*store.glob("conversations/*.db*"), *store.glob("brain/*"), *store.glob("log/cli-*.log")):

@@ -103,3 +103,99 @@ def test_runtime_recovery_ends_receipts_of_turns_the_restart_killed():
 
     assert turn_queue.status("q1") == "interrupted"
     assert turn_queue.status("q2") == "queued"
+
+
+BAD_IDS = {"bad-agy": ("agy", "../escape"), "bad-claude": ("claude", "/etc/passwd"),
+           "bad-codex": ("codex", "a*b")}
+GOOD_AGY = "11111111-aaaa-4bbb-8ccc-000000000001"
+GOOD_CLAUDE = "22222222-aaaa-4bbb-8ccc-000000000002"
+
+
+def _stored(agent_id, backend_session_id):
+    """A binding stored before the shared rule existed: written as it was, past today's check."""
+    from lib import agents, db
+    agents.start_runtime(agent_id, agents.get_by_agent_id(agent_id)["session"])
+    db.conn().execute("UPDATE runtimes SET backend_session_id = ? WHERE agent_id = ? AND ended_at IS NULL",
+                      (backend_session_id, agent_id))
+
+
+def _fleet_with_bad_ids(tmp_path):
+    import pathlib
+    from lib import agents
+    from lib.fork import encoded_project_dir
+    ids = {}
+    for session, (backend, bad) in BAD_IDS.items():
+        ids[session] = agents.create_agent(persona=session, voice_id="", cwd=str(tmp_path),
+                                           session=session, backend=backend)
+        _stored(ids[session], bad)
+    ids["good-agy"] = agents.create_agent(persona="Ada", voice_id="", cwd=str(tmp_path),
+                                          session="good-agy", backend="agy")
+    _stored(ids["good-agy"], GOOD_AGY)
+    ids["good-claude"] = agents.create_agent(persona="Cy", voice_id="", cwd=str(tmp_path),
+                                             session="good-claude", backend="claude")
+    _stored(ids["good-claude"], GOOD_CLAUDE)
+    project = encoded_project_dir(str(tmp_path), pathlib.Path.home() / ".claude" / "projects")
+    project.mkdir(parents=True, exist_ok=True)
+    (project / f"{GOOD_CLAUDE}.jsonl").write_text('{"type":"user","sessionId":"%s"}\n' % GOOD_CLAUDE)
+    return ids
+
+
+def _logged(monkeypatch):
+    from lib import resume, runtime_startup, transcript_paths
+    lines = []
+    for module in (resume, runtime_startup, transcript_paths):
+        monkeypatch.setattr(module, "log", lambda event, detail="", **_: lines.append((event, detail)))
+    monkeypatch.setattr(resume, "log_exception", lambda event, exc, detail="", **_: lines.append((event, detail)))
+    return lines
+
+
+def test_a_stored_id_that_fails_the_rule_starts_that_agent_fresh_and_restores_every_other(tmp_path, monkeypatch):
+    """R70 review: such an id once stopped the runtime from starting (ValueError out of the binding,
+    the agents after it unrestored, recovery never run). It is a missing transcript: that agent
+    starts fresh, one line names the backend, everyone else is restored and recovery runs on."""
+    from lib import agents, db
+    import pytest
+    ids = _fleet_with_bad_ids(tmp_path)
+    lines = _logged(monkeypatch)
+    ran = []
+    try:
+        result = recover_runtime(
+            SimpleNamespace(stream=None, agents_path=tmp_path / "unused.json"),
+            SimpleNamespace(recover_queued=lambda: ran.append("queued") or 0),
+            mark_interrupted=lambda stream=None: ran.append("interrupted") or [],
+            reconcile=lambda: ran.append("reconciled") or 0)
+    except ValueError as exc:
+        pytest.fail(f"a stored id stopped the runtime from starting: {exc!r}")
+    assert ran == ["interrupted", "reconciled", "queued"] and result["queued"] == 0
+    assert agents.live_backend_session(ids["good-agy"]) == GOOD_AGY
+    assert agents.live_backend_session(ids["good-claude"]) == GOOD_CLAUDE
+    for session, (backend, bad) in BAD_IDS.items():
+        assert agents.live_backend_session(ids[session]) == "", session
+        kept = [row[0] for row in db.conn().execute(
+            "SELECT backend_session_id FROM runtimes WHERE agent_id = ? AND ended_at IS NOT NULL",
+            (ids[session],))]
+        assert kept == [bad], session        # ended as a fresh start ends it, not rewritten
+    refused = [detail for event, detail in lines if event == "transcriptSessionIdRefused"]
+    assert sorted(refused) == ["backend=agy", "backend=claude", "backend=codex"]
+    assert not any(bad in detail for event, detail in lines for _, bad in BAD_IDS.values())
+
+
+def test_a_binding_the_rule_refuses_at_restore_leaves_that_agent_fresh_and_goes_on(tmp_path, monkeypatch):
+    """However a refused id reaches the binding at restore, the loop goes on and that agent is fresh."""
+    from lib import agents, runtime_startup
+    import pytest
+    bad = agents.create_agent(persona="Bo", voice_id="", cwd=str(tmp_path), session="bo", backend="agy")
+    _stored(bad, "../escape")
+    good = agents.create_agent(persona="Al", voice_id="", cwd=str(tmp_path), session="al", backend="agy")
+    lines = _logged(monkeypatch)
+    monkeypatch.setattr(runtime_startup, "resume_missing_sessions", lambda *a, **k: [
+        {"sid": "bo", "action": "resumed", "ok": True, "backend_session_id": "../escape"},
+        {"sid": "al", "action": "resumed", "ok": True, "backend_session_id": GOOD_AGY}])
+    try:
+        runtime_startup.restore_persisted_agents(SimpleNamespace(agents_path=tmp_path / "unused.json"))
+    except ValueError as exc:
+        pytest.fail(f"a refused binding stopped the restore: {exc!r}")
+    assert agents.live_backend_session(bad) == ""
+    assert agents.current_runtime_id(bad) is not None
+    assert agents.live_backend_session(good) == GOOD_AGY
+    assert ("startupSessionRefused", "bo leaving fresh") in lines

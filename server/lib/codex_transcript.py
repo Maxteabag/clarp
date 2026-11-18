@@ -28,6 +28,7 @@ from typing import Any
 
 from .activity import summarize_tool_activity
 from .log import log_exception
+from . import transcript_paths
 from .text_util import truncate
 from .voice_markup import strip_hidden_blocks
 from .codex_tool_cells import (  # noqa: F401 - compatibility exports
@@ -767,6 +768,10 @@ def list_sessions(
     return sorted(out.values(), key=lambda item: item["mtime"], reverse=True)[:limit]
 
 
+# Codex names a rollout rollout-<YYYY-MM-DDTHH-MM-SS>-<session id>.jsonl.
+_ROLLOUT_NAME = re.compile(r"rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl")
+
+
 def find_latest_jsonl(
     session_id: str,
     sessions_root: pathlib.Path | None = None,
@@ -777,7 +782,7 @@ def find_latest_jsonl(
     suffix. Returns the newest match (a session is normally one file, but
     guard against duplicates). Empty session_id → None (honest empty
     history for an agent that hasn't talked yet)."""
-    if not session_id:
+    if not session_id or not transcript_paths.checked_id("codex", session_id):
         return None
     root = sessions_root or (_codex_home() / "sessions")
     if not root.is_dir():
@@ -786,6 +791,10 @@ def find_latest_jsonl(
     best_mtime = -1.0
     try:
         for p in root.rglob(f"*{session_id}.jsonl"):
+            # This session's rollout only: rollout-<ts>-<id>.jsonl, inside the store.
+            named = _ROLLOUT_NAME.fullmatch(p.name)
+            if not named or named.group(1) != session_id or not transcript_paths.inside("codex", root, p):
+                continue
             try:
                 m = p.stat().st_mtime
             except OSError:
