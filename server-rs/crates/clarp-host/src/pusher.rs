@@ -130,6 +130,7 @@ enum Job {
 /// The way to the pusher's thread. Handing it something never waits.
 #[derive(Clone)]
 pub struct Pusher {
+    live: mpsc::Sender<Rung>,
     tx: mpsc::Sender<Job>,
 }
 
@@ -142,9 +143,16 @@ impl Pusher {
         let _ = self.tx.send(Job::Request(asked));
     }
 
+    fn android_ring(&self, ring: &Rung) {
+        if ring.ring.conversation_mode == "agent_live_v1" && ring.ring.of_the_user().is_none() {
+            let _ = self.live.send(ring.clone());
+        }
+    }
+
     /// A ring changed: the owner's phones are told, whether or not anybody sits at a desk.
     /// An agent calling is the one interruption its user asked for.
     pub fn rung(&self, rung: Rung) {
+        self.android_ring(&rung);
         let _ = self.tx.send(Job::Ring(Box::new(rung), None));
     }
 
@@ -152,6 +160,7 @@ impl Pusher {
     /// answer comes when every phone was tried; a pusher that is gone answers nothing.
     pub fn rung_and_told(&self, rung: Rung) -> tokio::sync::oneshot::Receiver<Rang> {
         let (told, answer) = tokio::sync::oneshot::channel();
+        self.android_ring(&rung);
         let _ = self.tx.send(Job::Ring(Box::new(rung), Some(told)));
         answer
     }
@@ -159,16 +168,19 @@ impl Pusher {
 
 /// What is handed to the pusher before its thread runs: kept, and sent once it does.
 pub struct Waiting {
+    live: mpsc::Receiver<Rung>,
     rx: mpsc::Receiver<Job>,
 }
 
 /// A pusher, and what waits for its thread.
 pub fn pusher() -> (Pusher, Waiting) {
     let (tx, rx) = mpsc::channel();
-    (Pusher { tx }, Waiting { rx })
+    let (live, waiting) = mpsc::channel();
+    (Pusher { tx, live }, Waiting { rx, live: waiting })
 }
 
 /// What the pusher's thread works with.
+#[derive(Clone)]
 pub struct Works {
     pub android: Arc<crate::fcm::Sender>,
     /// The way to the phones. `None`: this Host pushes nothing.
@@ -192,6 +204,11 @@ pub struct Works {
 impl Waiting {
     /// Starts the pusher's thread.
     pub fn run(self, works: Works) -> Result<(), String> {
+        let android = works.clone();
+        std::thread::Builder::new()
+            .name("android-live-rings".into())
+            .spawn(move || live_rings(self.live, &android))
+            .map_err(|e| e.to_string())?;
         std::thread::Builder::new()
             .name("pusher".to_string())
             .spawn(move || {
@@ -221,7 +238,7 @@ impl Waiting {
                         _ => true,
                     };
                     if alerted {
-                        rang.alert = Some(deliver(&works, &job));
+                        rang.alert = Some(deliver(&works, &job, None));
                     }
                     if let Some(told) = told {
                         let _ = told.send(rang);
@@ -347,7 +364,47 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
 }
 
 /// Sends one job to every row of the register that is to have it. Answers what became of it.
-fn deliver(works: &Works, job: &Job) -> Counted {
+fn live_rings(rx: mpsc::Receiver<Rung>, works: &Works) {
+    let mut queued = std::collections::VecDeque::<Rung>::new();
+    let mut rings = clarp_kernel::fcm::LiveRings::default();
+    while let Some(rung) = queued.pop_front().or_else(|| rx.recv().ok()) {
+        queued.extend(rx.try_iter());
+        if !works.android.configured() {
+            continue;
+        }
+        let directory = works.fleet.directory();
+        let rows = directory
+            .push
+            .active()
+            .filter(|row| {
+                row.provider == "fcm"
+                    && row.platform == "android"
+                    && row.principal.starts_with("device_")
+                    && directory.can_receive(&row.principal)
+                    && !rung.without.contains(&row.principal)
+                    && serde_json::from_str::<Vec<String>>(&row.supported_conversation_modes)
+                        .is_ok_and(|modes| modes.iter().any(|mode| mode == "agent_live_v1"))
+            })
+            .map(|row| row.token.clone())
+            .collect();
+        let later = queued
+            .iter()
+            .any(|next| next.ring.ring_id == rung.ring.ring_id);
+        let targets = rings.targets(
+            &rung.ring.ring_id,
+            rung.kind,
+            rung.ring.expires_at,
+            works.clock.now_ms(),
+            later,
+            rows,
+        );
+        if !targets.is_empty() {
+            deliver(works, &Job::Ring(Box::new(rung), None), Some(&targets));
+        }
+    }
+}
+
+fn deliver(works: &Works, job: &Job, live: Option<&[String]>) -> Counted {
     let (mode, key) = works.direct.alert_settings();
     let relay = works.relay.as_deref();
     let mut routes = Routes::new(
@@ -419,6 +476,9 @@ fn deliver(works: &Works, job: &Job) -> Counted {
                 routes.enabled()
             }
         })
+        .filter(|row| {
+            live.is_none_or(|tokens| row.provider == "fcm" && tokens.contains(&row.token))
+        })
         .filter(|row| !left_out(row))
         .collect();
     if rows.is_empty() {
@@ -432,7 +492,10 @@ fn deliver(works: &Works, job: &Job) -> Counted {
         let face = face
             .as_ref()
             .map_or(("", false), |(address, own)| (address.as_str(), *own));
-        let (payload, _) = payload(job, &works.server_id, face);
+        let (mut payload, _) = payload(job, &works.server_id, face);
+        if live.is_some() {
+            payload["conversation_mode"] = serde_json::json!("agent_live_v1");
+        }
         let collapse_id = push::collapse_id(&payload);
         let push = Push {
             payload: &payload,

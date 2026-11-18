@@ -196,3 +196,71 @@ impl Sending {
         Next::Finished(status, reason, String::new())
     }
 }
+
+/// A ring can have been shown even when the push service never answered. Keep
+/// the tokens tried until its end, or ten minutes after its expiry. After a
+/// restart an unknown ring's end goes to every currently eligible row.
+#[derive(Default)]
+pub struct LiveRings {
+    tried: std::collections::HashMap<String, (i64, std::collections::HashSet<String>)>,
+}
+
+impl LiveRings {
+    pub fn targets(
+        &mut self,
+        id: &str,
+        kind: &str,
+        expires: i64,
+        now: i64,
+        later: bool,
+        rows: Vec<String>,
+    ) -> Vec<String> {
+        self.tried
+            .retain(|_, (expiry, _)| *expiry >= now.saturating_sub(600_000));
+        if kind == "ring" {
+            let (_, tried) = self
+                .tried
+                .entry(id.into())
+                .or_insert_with(|| (expires, Default::default()));
+            if later || now >= expires {
+                return Vec::new();
+            }
+            tried.extend(rows.iter().cloned());
+            return rows;
+        }
+        if later {
+            return Vec::new();
+        }
+        match self.tried.remove(id) {
+            Some((_, tried)) => rows
+                .into_iter()
+                .filter(|token| tried.contains(token))
+                .collect(),
+            None => rows,
+        }
+    }
+}
+
+/// The update allowance for one Android phone. An end is always eligible and
+/// still counts towards the day's total, so a phone can clear stale work.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub struct ActivityBudget {
+    day: i64,
+    count: u64,
+    bucket: Option<(f64, i64)>,
+}
+
+impl ActivityBudget {
+    pub fn reserve(&mut self, now: i64, update: bool) -> Result<(),i64> {
+        let day = now.div_euclid(86_400_000);
+        if day != self.day { self.count = 0; self.day = day; }
+        if update {
+            let level = self.bucket.map_or(10.0, |(remaining, at)| (remaining + (now-at).max(0) as f64 / 288_000.0).clamp(0.0,10.0));
+            if level < 1.0 {return Err(now+((1.0-level)*288_000.0).ceil() as i64);}
+            if self.count>=300{return Err((day+1)*86_400_000);}
+            self.bucket=Some((level-1.0,now));
+        }
+        self.count=self.count.saturating_add(1);
+        Ok(())
+    }
+}

@@ -207,6 +207,8 @@ pub struct App {
     pub revisions: Arc<Revisions>,
     /// The way to the phones that are not listening.
     pub pusher: Pusher,
+    pub android: Arc<crate::fcm::Sender>,
+    pub android_chip: Arc<crate::android_chip::Desk>,
     /// The desks that have said their user sits at them: no phone is paged meanwhile.
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
@@ -2640,7 +2642,8 @@ async fn revoke_device(
     }
     if app.fleet.revoke(device_id.clone()).await? {
         // What the device still listens to ends now, not when it next asks.
-        let _ = app.door.revoked.send(device_id);
+        let _ = app.door.revoked.send(device_id.clone());
+        app.android_chip.forget(&app,&device_id).await?;
         Ok(Json(json!({ "ok": true })))
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))

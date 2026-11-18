@@ -93,4 +93,30 @@ fn reference_android_data_and_activity_messages() {
         deliveries += 1;
     }
     assert_eq!(deliveries, 56);
+    let mut rings = fcm::LiveRings::default();
+    let mut changes = 0;
+    for row in fixture["rings"].as_array().unwrap() {
+        let tokens = serde_json::from_value(row["tokens"].clone()).unwrap();
+        let targets = rings.targets(
+            row["id"].as_str().unwrap(),
+            row["kind"].as_str().unwrap(),
+            row["expires"].as_i64().unwrap(),
+            row["now"].as_i64().unwrap(),
+            row["later"] == true,
+            tokens,
+        );
+        assert_eq!(json!(targets), row["tried"], "{row}");
+        changes += 1;
+    }
+    assert_eq!(changes, 20);
+    let mut devices = std::collections::HashMap::<String,fcm::ActivityBudget>::new();
+    for row in fixture["budgets"].as_array().unwrap() {
+        let now=row["at"].as_i64().unwrap()*1000;
+        let budget=devices.entry(row["owner"].as_str().unwrap().into()).or_default();
+        let allowed=budget.reserve(now,row["update"]==true);
+        assert_eq!(row["allowed"],allowed.is_ok(),"{row}");
+        if let Err(until)=allowed {
+            assert!(((until-now) as f64-1000.0*row["wait"].as_f64().unwrap()).abs()<=1.0,"{row}");
+        }
+    }
 }

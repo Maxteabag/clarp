@@ -269,8 +269,7 @@ impl Desk {
             let world = rings::World {
                 profiles: &shelf,
                 android: &androids,
-                // This Host pushes nothing to Android phones.
-                can_push_android: false,
+                can_push_android: app.android.configured(),
                 device_ok: &paired,
                 host_id: &app.server_id,
                 has_key: app.ears.key("openai").is_some(),

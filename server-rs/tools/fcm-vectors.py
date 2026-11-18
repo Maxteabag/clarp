@@ -19,7 +19,7 @@ def record(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(ROOT / 'server'))
-    return {**android_cases(), "deliveries": deliveries()}
+    return {**android_cases(), "deliveries": deliveries(), "rings": rings(), "budgets": budgets()}
 
 
 def android_cases():
@@ -68,6 +68,69 @@ def android_cases():
                 chips.append(dict(state=state, server=server, payload=payload))
                 take(payload, priority='5', collapse='agents-working')
     return dict(cases=cases, chips=chips)
+
+
+def budgets():
+    import contextlib
+    from lib import db, live_activity_fcm as chip, settings_store
+    saved = {}
+    settings_store.get = saved.get
+    settings_store.transaction = contextlib.nullcontext
+    db.busy_timeout_at_most = lambda _: contextlib.nullcontext()
+    settings_store.set_text = lambda key, text, **_: saved.update({key: text})
+    rows = []
+    def reserve(owner, at, update):
+        allowed, wait = chip.reserve(owner, at, update=update, day_limit=300, burst=10, refill=288)
+        rows.append(dict(owner=owner, at=at, update=update, allowed=allowed, wait=wait))
+    # Exhaust a burst, retry on either side of a refill, and end despite exhaustion.
+    for _ in range(11):
+        reserve('a', 1000, True)
+    for t in (999,1287,1288,1289):
+        reserve('a', t, True)
+    reserve('a',1290,False)
+    reserve('b',1290,True)
+    # Ends count towards the day but can still clear the notification when the day is spent.
+    for _ in range(298):
+        reserve('b',2000,False)
+    reserve('b',2000,True)
+    reserve('b',2001,True)
+    reserve('b',2001,False)
+    reserve('b',86399,True)
+    reserve('b',86400,True)
+    return rows
+
+
+def rings():
+    from lib import agent_rings, apns
+    sender = agent_rings._LiveRingSender('reference')
+    tried = []
+    apns.send_agent_ring = lambda ring, kind, tokens: tried.append(tokens[0]['token'])
+    agent_rings.log = lambda *_: None
+    steps = []
+    def step(ident, kind, now, expires, later, tokens):
+        tried.clear()
+        agent_rings.now_ms = lambda: now
+        sender._send({'ring_id': ident, 'expires_at': expires}, kind,
+                     [{'token': token} for token in tokens], later=later)
+        steps.append(dict(id=ident, kind=kind, now=now, expires=expires, later=later,
+                          tokens=list(tokens), tried=tried.copy()))
+    for offset in (-1, 0, 1):
+        ident = 'expiry' + str(offset)
+        step(ident, 'ring', 100 + offset, 100, False, 'ab')
+        step(ident, 'cancelled', 102, 100, False, 'abc')
+    for offset in (-1, 0, 1):
+        ident = 'forget' + str(offset)
+        step(ident, 'ring', 100, 200, False, 'abc')
+        step(ident, 'answered', 600200 + offset, 200, False, 'ad')
+    step('later', 'ring', 100, 200, True, 'ab')
+    step('later', 'answered', 101, 200, False, 'abc')
+    step('x', 'ring', 100, 200, False, 'ab')
+    step('y', 'ring', 101, 201, False, 'de')
+    step('x', 'declined', 102, 200, True, 'ab')
+    step('x', 'cancelled', 103, 200, False, 'bc')
+    step('y', 'missed', 201, 201, False, 'ef')
+    step('unknown', 'missed', 201, 201, False, 'abc')
+    return steps
 
 
 def deliveries():
