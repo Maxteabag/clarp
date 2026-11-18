@@ -22,6 +22,7 @@ pub mod difflib;
 pub mod direct_push;
 pub mod explain;
 pub mod failures;
+pub mod fcm;
 pub mod fork;
 pub mod goals;
 pub mod heard;

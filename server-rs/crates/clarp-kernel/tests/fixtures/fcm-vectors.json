@@ -1,0 +1,4198 @@
+{
+ "cases": [
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": null,
+      "subtitle": null,
+      "body": null
+     },
+     "interruption-level": null,
+     "sound": null,
+     "category": null,
+     "thread-id": null
+    },
+    "unknown": null,
+    "sent_at": null
+   },
+   "context": {
+    "unknown": "context",
+    "unread": null
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "unknown": "context",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "unknown": "context",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": false,
+      "subtitle": false,
+      "body": false
+     },
+     "interruption-level": false,
+     "sound": false,
+     "category": false,
+     "thread-id": false
+    },
+    "unknown": false,
+    "sent_at": false
+   },
+   "context": {
+    "unknown": "context",
+    "unread": false
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "False",
+    "body": "False",
+    "subtitle": "False",
+    "interruption_level": "false",
+    "sound": "false",
+    "category": "false",
+    "thread_id": "false",
+    "unknown": "false",
+    "sent_at": "1795010000000",
+    "unread": "false"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "False",
+      "body": "False",
+      "subtitle": "False",
+      "interruption_level": "false",
+      "sound": "false",
+      "category": "false",
+      "thread_id": "false",
+      "unknown": "false",
+      "sent_at": "1795010000000",
+      "unread": "false"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": true,
+      "subtitle": true,
+      "body": true
+     },
+     "interruption-level": true,
+     "sound": true,
+     "category": true,
+     "thread-id": true
+    },
+    "unknown": true,
+    "sent_at": true
+   },
+   "context": {
+    "unknown": "context",
+    "unread": true
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "True",
+    "body": "True",
+    "subtitle": "True",
+    "interruption_level": "true",
+    "sound": "true",
+    "category": "true",
+    "thread_id": "true",
+    "unknown": "true",
+    "sent_at": "1795010000000",
+    "unread": "true"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "True",
+      "body": "True",
+      "subtitle": "True",
+      "interruption_level": "true",
+      "sound": "true",
+      "category": "true",
+      "thread_id": "true",
+      "unknown": "true",
+      "sent_at": "1795010000000",
+      "unread": "true"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": 0,
+      "subtitle": 0,
+      "body": 0
+     },
+     "interruption-level": 0,
+     "sound": 0,
+     "category": 0,
+     "thread-id": 0
+    },
+    "unknown": 0,
+    "sent_at": 0
+   },
+   "context": {
+    "unknown": "context",
+    "unread": 0
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "0",
+    "body": "0",
+    "subtitle": "0",
+    "interruption_level": "0",
+    "sound": "0",
+    "category": "0",
+    "thread_id": "0",
+    "unknown": "0",
+    "sent_at": "1795010000000",
+    "unread": "0"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "0",
+      "body": "0",
+      "subtitle": "0",
+      "interruption_level": "0",
+      "sound": "0",
+      "category": "0",
+      "thread_id": "0",
+      "unknown": "0",
+      "sent_at": "1795010000000",
+      "unread": "0"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": -1,
+      "subtitle": -1,
+      "body": -1
+     },
+     "interruption-level": -1,
+     "sound": -1,
+     "category": -1,
+     "thread-id": -1
+    },
+    "unknown": -1,
+    "sent_at": -1
+   },
+   "context": {
+    "unknown": "context",
+    "unread": -1
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "-1",
+    "body": "-1",
+    "subtitle": "-1",
+    "interruption_level": "-1",
+    "sound": "-1",
+    "category": "-1",
+    "thread_id": "-1",
+    "unknown": "-1",
+    "sent_at": "1795010000000",
+    "unread": "-1"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "-1",
+      "body": "-1",
+      "subtitle": "-1",
+      "interruption_level": "-1",
+      "sound": "-1",
+      "category": "-1",
+      "thread_id": "-1",
+      "unknown": "-1",
+      "sent_at": "1795010000000",
+      "unread": "-1"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": 1.0,
+      "subtitle": 1.0,
+      "body": 1.0
+     },
+     "interruption-level": 1.0,
+     "sound": 1.0,
+     "category": 1.0,
+     "thread-id": 1.0
+    },
+    "unknown": 1.0,
+    "sent_at": 1.0
+   },
+   "context": {
+    "unknown": "context",
+    "unread": 1.0
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "1.0",
+    "body": "1.0",
+    "subtitle": "1.0",
+    "interruption_level": "1",
+    "sound": "1",
+    "category": "1",
+    "thread_id": "1",
+    "unknown": "1",
+    "sent_at": "1795010000000",
+    "unread": "1"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "1.0",
+      "body": "1.0",
+      "subtitle": "1.0",
+      "interruption_level": "1",
+      "sound": "1",
+      "category": "1",
+      "thread_id": "1",
+      "unknown": "1",
+      "sent_at": "1795010000000",
+      "unread": "1"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": 3.125,
+      "subtitle": 3.125,
+      "body": 3.125
+     },
+     "interruption-level": 3.125,
+     "sound": 3.125,
+     "category": 3.125,
+     "thread-id": 3.125
+    },
+    "unknown": 3.125,
+    "sent_at": 3.125
+   },
+   "context": {
+    "unknown": "context",
+    "unread": 3.125
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "3.125",
+    "body": "3.125",
+    "subtitle": "3.125",
+    "interruption_level": "3.125",
+    "sound": "3.125",
+    "category": "3.125",
+    "thread_id": "3.125",
+    "unknown": "3.125",
+    "sent_at": "1795010000000",
+    "unread": "3.125"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "3.125",
+      "body": "3.125",
+      "subtitle": "3.125",
+      "interruption_level": "3.125",
+      "sound": "3.125",
+      "category": "3.125",
+      "thread_id": "3.125",
+      "unknown": "3.125",
+      "sent_at": "1795010000000",
+      "unread": "3.125"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": "",
+      "subtitle": "",
+      "body": ""
+     },
+     "interruption-level": "",
+     "sound": "",
+     "category": "",
+     "thread-id": ""
+    },
+    "unknown": "",
+    "sent_at": ""
+   },
+   "context": {
+    "unknown": "context",
+    "unread": ""
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "unknown": "",
+    "sent_at": "1795010000000",
+    "unread": ""
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "unknown": "",
+      "sent_at": "1795010000000",
+      "unread": ""
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": "plain",
+      "subtitle": "plain",
+      "body": "plain"
+     },
+     "interruption-level": "plain",
+     "sound": "plain",
+     "category": "plain",
+     "thread-id": "plain"
+    },
+    "unknown": "plain",
+    "sent_at": "plain"
+   },
+   "context": {
+    "unknown": "context",
+    "unread": "plain"
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "plain",
+    "body": "plain",
+    "subtitle": "plain",
+    "interruption_level": "plain",
+    "sound": "plain",
+    "category": "plain",
+    "thread_id": "plain",
+    "unknown": "plain",
+    "sent_at": "1795010000000",
+    "unread": "plain"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "plain",
+      "body": "plain",
+      "subtitle": "plain",
+      "interruption_level": "plain",
+      "sound": "plain",
+      "category": "plain",
+      "thread_id": "plain",
+      "unknown": "plain",
+      "sent_at": "1795010000000",
+      "unread": "plain"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": [],
+      "subtitle": [],
+      "body": []
+     },
+     "interruption-level": [],
+     "sound": [],
+     "category": [],
+     "thread-id": []
+    },
+    "unknown": [],
+    "sent_at": []
+   },
+   "context": {
+    "unknown": "context",
+    "unread": []
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "[]",
+    "body": "[]",
+    "subtitle": "[]",
+    "interruption_level": "[]",
+    "sound": "[]",
+    "category": "[]",
+    "thread_id": "[]",
+    "unknown": "[]",
+    "sent_at": "1795010000000",
+    "unread": "[]"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "[]",
+      "body": "[]",
+      "subtitle": "[]",
+      "interruption_level": "[]",
+      "sound": "[]",
+      "category": "[]",
+      "thread_id": "[]",
+      "unknown": "[]",
+      "sent_at": "1795010000000",
+      "unread": "[]"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": [
+       1,
+       false
+      ],
+      "subtitle": [
+       1,
+       false
+      ],
+      "body": [
+       1,
+       false
+      ]
+     },
+     "interruption-level": [
+      1,
+      false
+     ],
+     "sound": [
+      1,
+      false
+     ],
+     "category": [
+      1,
+      false
+     ],
+     "thread-id": [
+      1,
+      false
+     ]
+    },
+    "unknown": [
+     1,
+     false
+    ],
+    "sent_at": [
+     1,
+     false
+    ]
+   },
+   "context": {
+    "unknown": "context",
+    "unread": [
+     1,
+     false
+    ]
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "[1, False]",
+    "body": "[1, False]",
+    "subtitle": "[1, False]",
+    "interruption_level": "[1,false]",
+    "sound": "[1,false]",
+    "category": "[1,false]",
+    "thread_id": "[1,false]",
+    "unknown": "[1,false]",
+    "sent_at": "1795010000000",
+    "unread": "[1,false]"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "[1, False]",
+      "body": "[1, False]",
+      "subtitle": "[1, False]",
+      "interruption_level": "[1,false]",
+      "sound": "[1,false]",
+      "category": "[1,false]",
+      "thread_id": "[1,false]",
+      "unknown": "[1,false]",
+      "sent_at": "1795010000000",
+      "unread": "[1,false]"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": {
+       "b": 2,
+       "a": "\"\\"
+      },
+      "subtitle": {
+       "b": 2,
+       "a": "\"\\"
+      },
+      "body": {
+       "b": 2,
+       "a": "\"\\"
+      }
+     },
+     "interruption-level": {
+      "b": 2,
+      "a": "\"\\"
+     },
+     "sound": {
+      "b": 2,
+      "a": "\"\\"
+     },
+     "category": {
+      "b": 2,
+      "a": "\"\\"
+     },
+     "thread-id": {
+      "b": 2,
+      "a": "\"\\"
+     }
+    },
+    "unknown": {
+     "b": 2,
+     "a": "\"\\"
+    },
+    "sent_at": {
+     "b": 2,
+     "a": "\"\\"
+    }
+   },
+   "context": {
+    "unknown": "context",
+    "unread": {
+     "b": 2,
+     "a": "\"\\"
+    }
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "{'b': 2, 'a': '\"\\\\'}",
+    "body": "{'b': 2, 'a': '\"\\\\'}",
+    "subtitle": "{'b': 2, 'a': '\"\\\\'}",
+    "interruption_level": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+    "sound": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+    "category": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+    "thread_id": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+    "unknown": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+    "sent_at": "1795010000000",
+    "unread": "{\"a\":\"\\\"\\\\\",\"b\":2}"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "{'b': 2, 'a': '\"\\\\'}",
+      "body": "{'b': 2, 'a': '\"\\\\'}",
+      "subtitle": "{'b': 2, 'a': '\"\\\\'}",
+      "interruption_level": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+      "sound": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+      "category": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+      "thread_id": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+      "unknown": "{\"a\":\"\\\"\\\\\",\"b\":2}",
+      "sent_at": "1795010000000",
+      "unread": "{\"a\":\"\\\"\\\\\",\"b\":2}"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": {
+      "title": "\ud83d\udcf1",
+      "subtitle": "\ud83d\udcf1",
+      "body": "\ud83d\udcf1"
+     },
+     "interruption-level": "\ud83d\udcf1",
+     "sound": "\ud83d\udcf1",
+     "category": "\ud83d\udcf1",
+     "thread-id": "\ud83d\udcf1"
+    },
+    "unknown": "\ud83d\udcf1",
+    "sent_at": "\ud83d\udcf1"
+   },
+   "context": {
+    "unknown": "context",
+    "unread": "\ud83d\udcf1"
+   },
+   "collapse": "",
+   "priority": "10",
+   "data": {
+    "payload_version": "1",
+    "title": "\ud83d\udcf1",
+    "body": "\ud83d\udcf1",
+    "subtitle": "\ud83d\udcf1",
+    "interruption_level": "\ud83d\udcf1",
+    "sound": "\ud83d\udcf1",
+    "category": "\ud83d\udcf1",
+    "thread_id": "\ud83d\udcf1",
+    "unknown": "\ud83d\udcf1",
+    "sent_at": "1795010000000",
+    "unread": "\ud83d\udcf1"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "title": "\ud83d\udcf1",
+      "body": "\ud83d\udcf1",
+      "subtitle": "\ud83d\udcf1",
+      "interruption_level": "\ud83d\udcf1",
+      "sound": "\ud83d\udcf1",
+      "category": "\ud83d\udcf1",
+      "thread_id": "\ud83d\udcf1",
+      "unknown": "\ud83d\udcf1",
+      "sent_at": "1795010000000",
+      "unread": "\ud83d\udcf1"
+     },
+     "android": {
+      "priority": "HIGH"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": null,
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": true,
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": 1,
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": [
+     "wrong"
+    ],
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {
+     "alert": "wrong"
+    },
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "aps": {},
+    "google": "x",
+    "gcm.x": "x",
+    "from": "x",
+    "notification": "x",
+    "message_type": "x",
+    "collapse_key": "x",
+    "Google": "kept"
+   },
+   "context": {
+    "payload_version": "old",
+    "sent_at": "old",
+    "collapse_id": "from-context"
+   },
+   "collapse": "id",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "Google": "kept",
+    "sent_at": "1795010000000",
+    "collapse_id": "from-context"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "Google": "kept",
+      "sent_at": "1795010000000",
+      "collapse_id": "from-context"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "id"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {
+    "body": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "5d177cb35f7a52efdb4028191fa85825c2f218b3da4966897e557d37fb54f18c",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "a53640463dade1f22bcda205edb6dd1fbf409c7e332984c2eac546a1003a5302",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "ec656062e9695653355e1e33e4a6c0b97f3b5326a1951f45d722296c053617e2",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "c1862ff3fdf4bf887a72f4a16f0310033c56b249f1f77dc7c5e0fcbe750e4fb2",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "b96b4e28cbce30160b77c1d13a9ff41bbee615b72857ed143ed9a9b8988169a8",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "64f0b123c824909e988a4ddcb8c58e772615c38fcce2c6fff01525711683f9c6",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "094c2292a001a47b200956b89a132d29ee3c44f3aef6652018baecbe767d4de8",
+   "message": null
+  },
+  {
+   "repeats": {
+    "body": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "336839a0a69a80cad870d78722eaae9e2d4a101f32770c26f4b541495e07bbdd",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "58529ed1499545a23a7a1ac4b3ea5f485183efe2ee3a3aed90b823b9430618ef",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "374391a63873aa668c7537ed8cfb645f64e863adecf708a14b51b5045fa1bf2c",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d61e642f1a9a4d45b7209dc3d298aa09afd27d3df08ec7ee240b62f853744274",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "a299e0cc6af152e7db6c5942f06c40dd00f3e0db28f3c885c2fe47dd63b4de8d",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "8e0e38db561b4febd86ac200a8c5e7292b8b42d6eff1d897bd4e45491e0760fe",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d58611a971799bc08e2127eeaa879690bba1675673da241c40f2c7ddf38ea8f2",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "853684b1d7b1b9e3a23c51e3d300296927a1c1773eadfa92746120bd3d9a862b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "opening_line": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "25793cb7e9f3429349cac5769df6ee26abce5c0527b19d94faa67e1ccdc41e61",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "89ede21a309f22781a7a17058ded1d7eaa4a3fa9e8d1b4bbabda0afc270d8c74",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d5a08c5fbbecef116af37619fd1ed485615b3b64db0f6a2db3778d7888003112",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "7b226dda41650814f4ead2178ba3572be00e8caab2d33926002626e8720f86aa",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "2adbeee0d3b5452f96c528e89fb3b4ae7717395da1221ae2b8ab3c56d64196f5",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "0ea491976f4c6ab6b38a86ffdffa28607a530b188abce3ecbdd2a7c4ccc7305b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "aa8ee754b76fd60b18bdae7f7363c27b7cd9cc2ef3a9cc55995d8a088947ae8d",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d51f4f2424d6fde2759106f6b4e26aa486728d46e6694297c041cc9febe4f556",
+   "message": null
+  },
+  {
+   "repeats": {
+    "subtitle": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "8ae2d4e6b3ca39c0569ea3f29151e24301f23d9f1927e9b63c1d68d4253660ca",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "62eb8f9c8fc02b0aebed259916f56b24b12d1af415930f1efa57fbf68c2a1202",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "616a3b3c1352cfb08085644c84968bb399e42e678972da2980794ef811cf2896",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "a4e83f9ee4158ee006225f77d8e4de11c05b2a05e89def5f6c7105e6bc5c238b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "8c7a63f16e07a630d1d15a591c414e6b0d7fdf9673523e9c98d244ae4c846910",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "69ded34c89be556468f3d984a9cc49c0c656ba2e94bb40d3e18ba5d567826f01",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d5efdc3165028fb0edd3a470c8cd253372081cd2479d32dc3c2468ea4256477f",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "9582d02c546c825d01a3f9f1c33c314bd4ec6dec263ad311a180ec5aef2893e0",
+   "message": null
+  },
+  {
+   "repeats": {
+    "title": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "c41cccf531d2b97215f26f920478b4c5a95006a46734a55b0f91ff90cc4cd9a0",
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "d988f918ccd4ff92607a3ab94905c2ae9573e14c3a88d6ab88ab6c06f2f3f612",
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "4b4ff746ae9d9ac31768a7518919e6c683e53e767d1280dd928a3a13c17cd8cd",
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "ec117af77df04dd7b9329904ed7a04df362cbd9e89e3b7fe5ce88951b7592dd1",
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "c6063ed58c104e3b061ccadc43ee41bc0be1f00358f04501e8af71419b498718",
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "reason": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "agent-ring"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "a",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\ud83d\udcf1",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\"",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "\\",
+     4097
+    ]
+   },
+   "payload": {
+    "kind": "user-notification"
+   },
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4006
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "340b912c57e03d7ccc56b763da5a01dd851eccc455e28cfdc984cd25820ac2de",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4007
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "656e15dfdaf805e1337ed0b63496825ea472bcbd3c4fa4818052b83179950d30",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4008
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "7df4f493f2a3cf2299ff07c260ecbd0c20f7081be2c72b8f99bd8d476f589a2b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4009
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "216c8c6ad5b37e95ac2d21f31113f100148de180e60984db6e49a56d9fc7d271",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4010
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "28e0c3f71ab0c3c6b2bed13b4af47c4225f7daacbd138614c443e92371eb63fc",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4011
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "589af3be0dc4af901409330d8682e0f1350f46e50a8c1a7b4fae9ee73d6db276",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4012
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "440df3839ae1ba9d6ea030f46ba271e75462ac5448bd1ceb99541b4f3bc832ce",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4013
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "bfea69b125ac13a6dbeab5103b20f6003b47ba5c5b13a34176d5fc86b1ac8599",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4014
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "5b6211f1f8870c0df639d63e9af2d49a8048c387172c0a6ab4b851ed0cce5884",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4015
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "a01985aa27745674095933d6589feac95f37f0029d7bbaf28e54d17cd856b77b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4016
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "01c63bb49e8aec44d3e2c8e913a2dae9e3e3b33711688f4637f5341afaf372be",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4017
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "18501fcb08f066637588e45c75f361ac71f70de5cfa4e97d9a6102c0c86abccd",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4018
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "dd48afb7babfaa7103dbf3d84f4bc3be2edc3067533ff178326606f156b5444d",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4019
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "44a9e3d8dce7878edfac3bb490136be2fe39ca20000f17aa977b71458f62afee",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4020
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "655ec24e3bf887e4075db081144caa0e2e08689aa34cf4260addd599e9d13b61",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4021
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "f0559e6ec1eaa156c7293cafaf3f1c7f161805fc9378940ac7d961294b67f08d",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4022
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "3bd79a6437b8a108daa076dcdb50664989666b039bed0a4459dcdb690fcf4a9b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4023
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "2875586e98085cbe86ac55ef1f82ba1c5042c23abc037944ec9e5924b7a23132",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4024
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "ffea5476fda1c1315fdfe4a383e7ac9a1885117305713be642e4b13dd7011828",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4025
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "59d5b388d9e60bdc457c2687af86630c98c7b4cc7c11f080bba16d290064aff9",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4026
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": "f24a9de89f8ca89fa81f32afb0d6baf043a754e01c617576156a68441c31910b",
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4027
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4028
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4029
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4030
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4031
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4032
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4033
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4034
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4035
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4036
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4037
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4038
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4039
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4040
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4041
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4042
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4043
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4044
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4045
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4046
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4047
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4048
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4049
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4050
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4051
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4052
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4053
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4054
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4055
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4056
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4057
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4058
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4059
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4060
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4061
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4062
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4063
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4064
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4065
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4066
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4067
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4068
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4069
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4070
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4071
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4072
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4073
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4074
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4075
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4076
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4077
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4078
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4079
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4080
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4081
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4082
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4083
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4084
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4085
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4086
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4087
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4088
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4089
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4090
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4091
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4092
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4093
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4094
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4095
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {
+    "notification_id": [
+     "x",
+     4096
+    ]
+   },
+   "payload": {},
+   "context": null,
+   "collapse": "",
+   "priority": "10",
+   "data": null,
+   "message": null
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":0}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":0}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":0}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":0}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 0,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":0}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":0}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 0,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":0}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":0}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":0}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":0}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":0}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":0}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":1}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":1}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":1}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":1}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":1}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":1}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":1}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":1}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":1}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":1}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":1}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":1}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":null}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":null}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":null}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":0,\"working\":null}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": null,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":null}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":null}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": null,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "update",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":null}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "update",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":1,\"working\":null}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":null}",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":null}",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  },
+  {
+   "repeats": {},
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   },
+   "context": null,
+   "collapse": "agents-working",
+   "priority": "5",
+   "data": {
+    "payload_version": "1",
+    "kind": "agents-working",
+    "event": "end",
+    "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":null}",
+    "server_instance_id": "test-server",
+    "collapse_id": "agents-working",
+    "sent_at": "1795010000000"
+   },
+   "message": {
+    "message": {
+     "token": "android-device-of-test",
+     "data": {
+      "payload_version": "1",
+      "kind": "agents-working",
+      "event": "end",
+      "state": "{\"agents\":[],\"lead\":null,\"needs_you\":null,\"working\":null}",
+      "server_instance_id": "test-server",
+      "collapse_id": "agents-working",
+      "sent_at": "1795010000000"
+     },
+     "android": {
+      "priority": "NORMAL",
+      "collapse_key": "agents-working"
+     }
+    }
+   }
+  }
+ ],
+ "chips": [
+  {
+   "state": {
+    "working": 0,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 0,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": 0,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 0,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 0,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 0,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": 0,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 0,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": 0,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": 1,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": 1,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": 0,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": 0,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": null,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": 1,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "update",
+    "state": {
+     "working": null,
+     "needs_you": 1,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    }
+   }
+  },
+  {
+   "state": {
+    "working": null,
+    "needs_you": null,
+    "lead": null,
+    "agents": []
+   },
+   "server": "test-server",
+   "payload": {
+    "kind": "agents-working",
+    "event": "end",
+    "state": {
+     "working": null,
+     "needs_you": null,
+     "lead": null,
+     "agents": []
+    },
+    "server_instance_id": "test-server"
+   }
+  }
+ ]
+}
