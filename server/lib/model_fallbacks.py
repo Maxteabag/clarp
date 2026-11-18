@@ -212,6 +212,32 @@ def attempts(agent_id, request_id):
     ]
 
 
+def content_free(error, backend):
+    """A failure whose words could hold a command line (TimeoutExpired, CalledProcessError: for
+    a CLI that takes its prompt as an argument, the prompt) as words that do not (issue 360,
+    R82). Any other error is returned as it is. The original's type name stays on the failure
+    for the attempt rows."""
+    import subprocess
+    if isinstance(error, subprocess.TimeoutExpired):
+        failure = ProviderFailure(f"{backend} timed out after {float(error.timeout):g} s", "timeout")
+    elif isinstance(error, subprocess.CalledProcessError):
+        failure = ProviderFailure(f"{backend} exited with status {error.returncode}")
+    else:
+        return error
+    failure.origin_type = type(error).__name__
+    return failure
+
+
+def _without_command_line(invoke, model):
+    """``invoke(model)``, a command line never in what it raises: not in its words, nor in a
+    traceback's chained exception (raised from None)."""
+    import subprocess
+    try:
+        return invoke(model)
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+        raise content_free(error, str(model.get("backend") or "the model")) from None
+
+
 def execute(agent_id, request_id, primary, invoke, *, current=lambda: True):
     """Run one model call, retrying it once per configured fallback provider.
 
@@ -224,7 +250,7 @@ def execute(agent_id, request_id, primary, invoke, *, current=lambda: True):
     if not current():
         raise Cancelled("request is no longer current")
     try:
-        return invoke(primary)
+        return _without_command_line(invoke, primary)
     except Exception as error:
         if _as_provider_failure(error) is None:
             raise
@@ -234,12 +260,13 @@ def execute(agent_id, request_id, primary, invoke, *, current=lambda: True):
             continue
         if not current() or get(agent_id)["revision"] != snapshot["revision"]:
             raise Cancelled("fallback configuration changed")
-        if not claim(agent_id, request_id, index, model, type(failure).__name__):
+        if not claim(agent_id, request_id, index, model,
+                     getattr(failure, "origin_type", type(failure).__name__)):
             raise AlreadyAttempted(
                 "fallback invocation already claimed; inspect its receipt"
             )
         try:
-            result = invoke(model)
+            result = _without_command_line(invoke, model)
             if not current() or get(agent_id)["revision"] != snapshot["revision"]:
                 raise Cancelled("request is no longer current")
             finish(agent_id, request_id, index, status="completed")

@@ -353,8 +353,24 @@ def recent_ignored_decisions(limit: int = 30) -> list[dict[str, Any]]:
     return [_decision_row_to_dict(r) for r in rows]
 
 
+# A stored error from before R82: a routing CLI's TimeoutExpired, whose words carry its command
+# line (for agy and opencode the prompt). Answered in the content-free form, not rewritten.
+_OLD_TIMEOUT = re.compile(r"\ACommand '\[(?:'([^']*)')?.*\]' timed out after ([0-9.]+) seconds\Z", re.S)
+
+
+def public_error(text: object) -> str:
+    """A decision's stored error as the routes answer it: never a command line (R82)."""
+    text = str(text or "")
+    match = _OLD_TIMEOUT.match(text)
+    if not match:
+        return text
+    name = os.path.basename(match.group(1) or "") or "the routing CLI"
+    return f"{name} timed out after {float(match.group(2)):g} s"
+
+
 def _decision_row_to_dict(row) -> dict[str, Any]:
     out = dict(row)
+    out["error"] = public_error(out.get("error"))
     for key in (
         "mentioned_sessions_json",
         "name_corrections_json",
