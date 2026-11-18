@@ -5307,6 +5307,286 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
 }
 
 #[test]
+fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto() {
+    // The grant names the phone; the account binds and sends to its token instead.
+    for (
+        mode,
+        granted,
+        credential,
+        relay_status,
+        direct_status,
+        reason,
+        handed,
+        relayed,
+        sent,
+        failed,
+        disabled,
+    ) in [
+        ("direct", true, "", 200, 200, "", 1, 0, 1, 0, 0),
+        ("DIRECT", true, "cav1.a.b.c", 200, 410, "", 1, 0, 0, 0, 1),
+        (
+            "direct",
+            true,
+            "",
+            200,
+            400,
+            "BadDeviceToken",
+            1,
+            0,
+            0,
+            0,
+            1,
+        ),
+        (
+            "direct",
+            true,
+            "",
+            200,
+            429,
+            "TooManyRequests",
+            1,
+            0,
+            0,
+            1,
+            0,
+        ),
+        ("auto", true, "", 503, 200, "", 1, 1, 1, 0, 0),
+        ("auto", true, "", 401, 200, "", 1, 1, 1, 0, 0),
+        ("auto", true, "", 403, 200, "", 0, 1, 0, 1, 0),
+        ("relay", true, "", 503, 200, "", 0, 1, 0, 1, 0),
+        ("relay", true, "", 401, 200, "", 0, 1, 0, 0, 1),
+        ("off", true, "", 200, 200, "", 0, 0, 0, 0, 0),
+        ("auto", false, "", 200, 200, "", 1, 0, 1, 0, 0),
+        ("relay", false, "", 200, 200, "", 0, 0, 0, 1, 0),
+        ("auto", false, "cav1.a.b.c", 200, 200, "", 0, 2, 1, 0, 0),
+        ("auto", false, "cav1.a.b.c", 503, 200, "", 1, 1, 1, 0, 0),
+    ] {
+        let place = Place::new("direct-alert");
+        let service = stand_in_push_service();
+        service.answers(&[(direct_status, &json!({"reason": reason}).to_string())]);
+        let relay = StandInRelay::start();
+        relay.answers(relay_status, json!({"results": [{"status": 200}]}));
+        let (key, public) = push_key(&place);
+        let settings = place.root.join("push.toml");
+        std::fs::write(
+            &settings,
+            format!(
+                "[apns]\nmode = '{mode}'\nkey_path = '{}'\nkey_id = 'KEY'\nteam_id = 'TEAM'\n",
+                key.display()
+            ),
+        )
+        .unwrap();
+        let host = place.start_in(
+            "admin-of-test",
+            &[
+                "--push-relay",
+                &format!("http://{}", relay.address),
+                "--push-keys",
+                settings.to_str().unwrap(),
+            ],
+            &[
+                ("CLARP_APNS_ENDPOINT", &service.address),
+                ("CLARP_PUSH_CREDENTIAL", credential),
+            ],
+        );
+        let agent = host.new_agent("Echo");
+        let (phone, _) = pair(&host, "Phone", "full");
+        let token = "ab".repeat(32);
+        let grant = format!(
+            "pg1.{}.{}.{}",
+            "a".repeat(64),
+            "b".repeat(16),
+            "c".repeat(64)
+        );
+        assert_eq!(
+            host.ask_as(
+                &phone,
+                "POST",
+                "/devices",
+                Some(&json!({"token": token, "push_grant": if granted { &grant } else { "" }}))
+            )
+            .0,
+            200
+        );
+        let (status, rung) = host.ask(
+            "POST",
+            "/calls/ring",
+            Some(&json!({"agent": agent, "reason": "Water", "opening_line": "Hello"})),
+        );
+        assert_eq!(status, 200, "{rung}");
+        let delivery = &rung["delivery"];
+        assert_eq!(
+            (
+                &delivery["sent"],
+                &delivery["failed"],
+                &delivery["disabled"]
+            ),
+            (&json!(sent), &json!(failed), &json!(disabled)),
+            "{mode} {rung}"
+        );
+        assert_eq!(delivery["enabled"], mode != "off");
+        let attempts = relay.taken();
+        assert_eq!(attempts.len(), relayed);
+        if let Some((path, auth, body)) = attempts.first() {
+            if granted {
+                assert_eq!(path, "/v1/push/send");
+                assert_eq!(auth, &format!("Bearer {grant}"));
+                assert!(body["notifications"][0].get("deviceToken").is_none());
+            } else {
+                assert_eq!(path, "/v1/push/devices");
+                assert_eq!(auth, &format!("Bearer {credential}"));
+                assert_eq!(body["devices"][0]["deviceToken"], token);
+                if let Some((path, _, body)) = attempts.get(1) {
+                    assert_eq!(path, "/v1/push/send");
+                    assert_eq!(body["notifications"][0]["deviceToken"], token);
+                }
+            }
+        }
+        let requests = service.handed();
+        assert_eq!(requests.len(), handed);
+        if let Some((path, headers, payload)) = requests.first() {
+            assert_eq!(path, &format!("/3/device/{token}"));
+            assert_eq!(headers["apns-push-type"], "alert");
+            assert_eq!(headers["apns-topic"], "com.maxteabag.clarp");
+            assert_eq!(
+                read_push_token(&headers["authorization"], &public).1["iss"],
+                "TEAM"
+            );
+            assert_eq!(payload["ring_id"], rung["ring"]["ring_id"]);
+            assert_eq!(payload["kind"], "agent-ring");
+            assert_eq!(headers["apns-priority"], "10");
+            assert_eq!(
+                headers["apns-collapse-id"],
+                payload["notification_id"].as_str().unwrap()
+            );
+            assert!(!headers.contains_key("apns-expiration"));
+            if granted && relayed == 1 {
+                assert_eq!(payload, &attempts[0].2["notifications"][0]["payload"]);
+            }
+        }
+        if sent > 0 {
+            wait_for("the successful push is recorded", || {
+                host.get("/devices/push-tokens")["tokens"][0]["last_push_at"].is_number()
+            });
+        }
+        if granted && mode == "auto" && relay_status == 401 {
+            relay.answers(200, json!({"results": [{"status": 200}]}));
+            host.post(
+                "/calls/ring/cancel",
+                json!({"ring_id": rung["ring"]["ring_id"]}),
+            );
+            wait_for("the revoked grant is forgotten on the next alert", || {
+                service.handed().len() == 2
+            });
+            assert_eq!(relay.taken().len(), 1);
+            assert_eq!(service.handed()[1].2["ring_state"], "cancelled");
+        }
+        if disabled > 0 {
+            wait_for("direct rejection disables the token", || {
+                host.get("/devices/push-tokens")["tokens"][0]["disabled_at"].is_number()
+            });
+        }
+    }
+    let place = Place::new("direct-reply");
+    let (key, _) = push_key(&place);
+    let settings = place.root.join("push.toml");
+    std::fs::write(
+        &settings,
+        format!(
+            "[apns]\nkey_path = '{}'\nkey_id = 'KEY'\nteam_id = 'TEAM'\n",
+            key.display()
+        ),
+    )
+    .unwrap();
+    let service = stand_in_push_service();
+    let host = place.start_in(
+        "admin-of-test",
+        &["--push-keys", settings.to_str().unwrap()],
+        &[("CLARP_APNS_ENDPOINT", &service.address)],
+    );
+    let session = host.post(
+        "/agents",
+        json!({
+            "name": "Pictured", "backend": "scripted", "avatar_base64": "YSBtYWRlLXVwIHBpY3R1cmU="
+        }),
+    )["session"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (phone, _) = pair(&host, "Portrait phone", "full");
+    let at = "https://host.example:7690";
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/devices",
+            Some(&json!({
+                "token": "bc".repeat(32), "base_url": at
+            }))
+        )
+        .0,
+        200
+    );
+    host.post("/send", json!({"session": session, "text": "Desktop answer", "client": "desktop", "client_msg_id": "desktop-1"}));
+    wait_for("desktop reply completed", || {
+        host.conversation(&session)
+            .contains(&said("assistant", "Desktop answer"))
+            && host.state(&session) == "done"
+    });
+    host.send(&session, "Phone answer", "phone-1");
+    wait_for("ordinary reply sent directly", || {
+        !service.handed().is_empty()
+    });
+    let reply = service.handed()[0].2.clone();
+    assert_eq!(reply["aps"]["alert"]["body"], "Phone answer");
+    assert!(reply["aps"].get("sound").is_none());
+    assert_eq!(reply["kind"], "user-notification");
+    assert_eq!(reply["avatar_custom"], true);
+    let face = reply["avatar_url"]
+        .as_str()
+        .unwrap()
+        .strip_prefix(at)
+        .unwrap();
+    assert_eq!(fetch(&host, "", "GET", face, &[], b"").status, 200);
+    let (status, asked) = host.ask("POST", "/decisions", Some(&json!({
+        "session": session, "title": "The code", "question": "Which code?", "response_type": "text_input"
+    })));
+    assert_eq!(status, 201, "{asked}");
+    wait_for("the request arrives after the reply", || {
+        service.handed().len() == 2
+    });
+    let (_, headers, decision) = &service.handed()[1];
+    assert_eq!(decision["aps"]["category"], "input-request");
+    assert_eq!(decision["aps"]["sound"], "default");
+    assert_eq!(decision["aps"]["alert"]["body"], "Which code?");
+    assert_eq!(
+        decision["decision_id"],
+        asked["artifact"]["decision"]["decision_id"]
+    );
+    assert_eq!(
+        headers["apns-collapse-id"],
+        decision["notification_id"].as_str().unwrap()
+    );
+    assert_eq!(decision["avatar_custom"], true);
+    assert!(decision["avatar_url"].as_str().unwrap().starts_with(at));
+
+    // A readable but unusable signing key refuses the send before any request leaves the Host.
+    std::fs::write(&key, "no signing key").unwrap();
+    let other = host.new_agent("Dag");
+    let (status, rung) = host.ask(
+        "POST",
+        "/calls/ring",
+        Some(&json!({
+            "agent": other, "reason": "Rain", "opening_line": "Hello"
+        })),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(rung["delivery"]["failed"], 1);
+    assert_eq!(rung["delivery"]["disabled"], 0);
+    assert_eq!(service.handed().len(), 2);
+}
+
+#[test]
 fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away() {
     let place = Place::new("pair");
     let host = place.start_with_token("the-administrators-token");

@@ -19,38 +19,13 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use clarp_kernel::devices::PushRow;
+pub use clarp_kernel::alert_routes::Outcome;
 use clarp_kernel::push::collapse_id_on_the_wire;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedSender;
 
 /// What the push service calls a token that is gone for good.
 const DEAD: [&str; 3] = ["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"];
-
-/// What became of one push.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    /// The push service took it.
-    Sent,
-    /// The push service says the token is gone: nothing is sent to it again.
-    Dead(String),
-    /// The phone took its grant back, and this Host has no other way to it.
-    GrantRevoked,
-    /// This one push was refused. Nothing is known against the token.
-    Refused { status: u16, reason: String },
-    /// The relay could not be reached, or could not reach the push service.
-    Down(String),
-    /// This Host has no way to the phone: it gave no grant, and the Host has no credential.
-    NoPath,
-}
-
-/// One push, as it was delivered or not.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Delivery {
-    pub outcome: Outcome,
-    /// The phone's grant was refused on the way: it is forgotten, whatever came after.
-    pub grant_revoked: bool,
-}
 
 /// A push as it is handed to the relay.
 #[derive(Debug, Clone, Copy)]
@@ -306,32 +281,8 @@ impl Relay {
         self.by_credential((token, environment), &notification(push))
     }
 
-    /// Sends one push to one row of the register.
-    pub fn send(&self, row: &PushRow, push: &Push<'_>) -> Delivery {
-        let notification = notification(push);
-        let mut grant_revoked = false;
-        if !row.push_grant.is_empty() {
-            match self.by_grant(&row.push_grant, &notification) {
-                // There is another way to the phone: go on with it.
-                Outcome::GrantRevoked if !self.credential.is_empty() => grant_revoked = true,
-                outcome => {
-                    return Delivery {
-                        grant_revoked: outcome == Outcome::GrantRevoked,
-                        outcome,
-                    };
-                }
-            }
-        }
-        if self.credential.is_empty() {
-            return Delivery {
-                outcome: Outcome::NoPath,
-                grant_revoked,
-            };
-        }
-        Delivery {
-            outcome: self.by_credential((&row.token, &row.environment), &notification),
-            grant_revoked,
-        }
+    pub fn to_grant(&self, grant: &str, push: &Push<'_>) -> Outcome {
+        self.by_grant(grant, &notification(push))
     }
 }
 
