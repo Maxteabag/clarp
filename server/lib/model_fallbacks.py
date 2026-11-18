@@ -298,7 +298,6 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
             stdin=subprocess.PIPE if call.input is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             start_new_session=True,
             env={**os.environ, **runner.routing_env()},
         )
@@ -311,9 +310,11 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
                 if time.monotonic() >= deadline:
                     raise ProviderFailure("fallback model timed out", "timeout")
                 try:
-                    stdout, stderr = process.communicate(
+                    out, err = process.communicate(
                         payload, timeout=min(0.25, max(0.01, deadline - time.monotonic()))
                     )
+                    # Bytes in (routing_input encodes the prompt as argv would), text out as before.
+                    stdout, stderr = (out or b"").decode(), (err or b"").decode()
                     break
                 except subprocess.TimeoutExpired:
                     payload = None  # communicate keeps its first input across retries

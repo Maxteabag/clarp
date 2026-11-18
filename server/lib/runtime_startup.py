@@ -71,6 +71,11 @@ def recover_runtime(
     if reconcile is None:
         from .reconcile import reconcile_all
         reconcile = reconcile_all
+    from .routing_input import sweep_stale
+    try:
+        sweep_stale()      # prompt-file directories a Host death left behind (issue 360, R35)
+    except OSError as exc:
+        log_exception("routingDirSweepFail", exc)
     with db.busy_timeout(SQLITE_RECOVERY_BUSY_TIMEOUT_MS):
         restore_agents(ctx)
         interrupted = ([] if clean_handoff else
