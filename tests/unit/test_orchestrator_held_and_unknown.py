@@ -294,3 +294,129 @@ def test_a_status_query_about_an_agent_it_can_answer_for_is_unchanged(effects):
         "kind": "status_query", "target_session": "antoni", "confidence": 0.95, "reason": "status"}, effects)
     assert say("what is Antoni doing?").action == "status"
     assert effects["spoken"] and effects["spoken"][0].startswith("Antoni")
+
+
+# ---- PR 436 review: a command is never held; a name given anywhere is the target; voice names ----
+
+COMMANDS = ("restart", "relaunch", "resume", "stop", "interrupt", "switch", "fork", "create")
+REASONS = ("unsure", "unknown name", "archived", "janitor", "outside the call")
+
+
+def _expected(action, reason):
+    if reason == "unsure":
+        return orchestrator.UNSURE_COMMAND
+    if action == "fork":
+        return orchestrator.FORK_IN_APP
+    if action == "create":
+        return None                      # create names a new agent; it acts on none
+    return {"unknown name": orchestrator.NO_SUCH_AGENT, "archived": orchestrator.CANNOT_COMMAND,
+            "janitor": orchestrator.NO_VOICE_COMMANDS,
+            "outside the call": orchestrator.CANNOT_COMMAND}[reason]
+
+
+@pytest.mark.parametrize("reason", REASONS)
+@pytest.mark.parametrize("action", COMMANDS)
+def test_a_command_turned_into_a_question_or_refused_is_never_held(effects, monkeypatch, action, reason):
+    """Whatever the reason, the command is answered with its sentence, nothing is held, nothing
+    acts, and a later "yes" sends nothing: with nothing held there is nothing to confirm, so the
+    confirmation is answered HELD_MESSAGE_GONE (never the command's words as chat)."""
+    interrupted = []
+    monkeypatch.setattr(backends, "interrupt_any", lambda agent_id: interrupted.append(agent_id))
+    target = {"unknown name": "zed", "janitor": "clarp-message-delegator"}.get(reason, "antoni")
+    command = {"kind": "agent_control", "control_action": action, "target_session": target,
+               "confidence": 0.4 if reason == "unsure" else 0.95, "reason": "command",
+               "control_payload": {"name": "Nova"} if action == "create" else {}}
+
+    def model(packet):
+        if packet["utterance"] == "yes":
+            ident = packet["pending"][0]["pending_id"] if packet["pending"] else "the-command"
+            return {"kind": "agent_message", "target_session": "mike", "pending_id": ident,
+                    "confidence": 0.95, "reason": "confirmed"}
+        return command
+    say, dispatched = router(model, effects)
+    if reason == "archived":
+        db.conn().execute("UPDATE agents SET archived_at = 1 WHERE session = 'antoni'")
+    outcome = say(f"{action} {target}", only_sessions=("mike",) if reason == "outside the call" else None)
+    expected = _expected(action, reason)
+    assert held() == []
+    if expected is None:
+        assert outcome.action == "control" and effects["created"] == [{"name": "Nova", "synthesize_audio": True}]
+        return
+    assert outcome.action == "clarify"
+    assert effects["spoken"] == [expected]
+    assert effects["created"] == [] and interrupted == []
+    say("yes")
+    assert dispatched == []
+    assert effects["spoken"][-1] == orchestrator.HELD_MESSAGE_GONE
+
+
+def test_stop_interrupt_and_switch_on_a_name_nobody_has_say_so(effects, monkeypatch):
+    """They did nothing and said nothing (a silent no-op the user took for done)."""
+    current = ["stop"]
+    say, _ = router(lambda packet: {"kind": "agent_control", "control_action": current[0],
+                                    "target_session": "zed", "confidence": 0.95}, effects)
+    for action in ("stop", "interrupt", "switch", "stop_agent", "switch_focus"):
+        current[0] = action
+        effects["spoken"].clear()
+        assert say(f"{action} zed").action == "clarify"
+        assert effects["spoken"] == [orchestrator.NO_SUCH_AGENT], action
+    assert held() == []
+
+
+def _restart(target="", name=None):
+    decision = {"kind": "agent_control", "control_action": "restart", "target_session": target,
+                "confidence": 0.95, "reason": "restart"}
+    if name is not None:
+        decision["control_payload"] = {"name": name}
+    return lambda packet: decision
+
+
+def test_a_name_given_only_in_the_payload_is_the_target_not_the_agent_spoken_to(effects):
+    say, _ = router(_restart(name="Antoni"), effects)
+    assert say("restart Antoni").action == "control"
+    assert [c["replace_sid"] for c in effects["created"]] == ["antoni"]
+
+
+def test_a_payload_name_nobody_has_is_refused_not_turned_into_the_agent_spoken_to(effects):
+    say, _ = router(_restart(name="Zed"), effects)
+    assert say("restart Zed").action == "clarify"
+    assert effects["created"] == [] and effects["spoken"] == [orchestrator.NO_SUCH_AGENT]
+
+
+def test_two_names_that_disagree_are_refused(effects):
+    say, _ = router(_restart(target="antoni", name="Mike"), effects)
+    assert say("restart Antoni").action == "clarify"
+    assert effects["created"] == [] and effects["spoken"] == [orchestrator.WHICH_AGENT]
+    assert held() == []
+
+
+def test_with_no_name_at_all_the_command_is_for_the_agent_spoken_to(effects):
+    say, _ = router(_restart(), effects)
+    assert say("restart").action == "control"
+    assert [c["replace_sid"] for c in effects["created"]] == ["mike"]
+
+
+@pytest.mark.parametrize("spoken", ["Antoni", "ANTONI", "antoni", "Antoni Gaudí", "antoni gaudi", "ANTONI GAUDI"])
+def test_a_command_name_resolves_as_a_voice_name(effects, spoken):
+    say, _ = router(_restart(target=spoken), effects)
+    db.conn().execute("UPDATE agents SET persona = 'Antoni Gaudí' WHERE session = 'antoni'")
+    assert say(f"restart {spoken}").action == "control", effects["spoken"]
+    assert [c["replace_sid"] for c in effects["created"]] == ["antoni"]
+
+
+def test_two_agents_of_one_voice_name_are_asked_about_and_nothing_is_held(effects):
+    say, _ = router(_restart(target="Sam"), effects)
+    for session in ("sam-a", "sam-b"):
+        agents.create_agent(persona="Sam", voice_id="", cwd="/tmp", session=session)
+    assert say("restart Sam").action == "clarify"
+    assert effects["spoken"] == [orchestrator.WHICH_AGENT]
+    assert effects["created"] == [] and held() == []
+
+
+@pytest.mark.parametrize("spoken", ["Antoni", "ANTONI", "Antoni Gaudí", "antoni gaudi"])
+def test_a_status_question_name_resolves_as_a_voice_name(effects, spoken):
+    say, _ = router(lambda packet: {"kind": "status_query", "target_session": spoken,
+                                    "confidence": 0.95, "reason": "status"}, effects)
+    db.conn().execute("UPDATE agents SET persona = 'Antoni Gaudí' WHERE session = 'antoni'")
+    assert say(f"what is {spoken} doing?").action == "status", effects["spoken"]
+    assert effects["spoken"] and effects["spoken"][0].startswith("Antoni")
