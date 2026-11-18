@@ -45,10 +45,21 @@ impl KeyValue for Counted {
         }
         self.inner.put(table, key, value)
     }
-    fn put_together(&mut self, writes: &[(String,String,Vec<u8>)]) -> std::result::Result<(),StoreError> {
+    fn put_together(
+        &mut self,
+        writes: &[(String, String, Vec<u8>)],
+    ) -> std::result::Result<(), StoreError> {
         let mut counts = self.counts.lock().unwrap();
-        counts.ops.push(Op::Batch(writes.iter().map(|(table,key,_)| Op::Write(table.clone(),key.clone())).collect()));
-        if writes.iter().any(|(table,_,_)| counts.fail_write.as_ref()==Some(table)) {
+        counts.ops.push(Op::Batch(
+            writes
+                .iter()
+                .map(|(table, key, _)| Op::Write(table.clone(), key.clone()))
+                .collect(),
+        ));
+        if writes
+            .iter()
+            .any(|(table, _, _)| counts.fail_write.as_ref() == Some(table))
+        {
             return Err(StoreError("cut before commit".into()));
         }
         self.inner.put_together(writes)
@@ -94,6 +105,7 @@ impl Place {
         )
         .unwrap();
         let works = fleet::Works {
+            opening_gate: crate::calls::opening_launch::channel().0,
             config: Arc::new(config),
             engine: Arc::new(MemEngine::new()),
             codecs: clarp_codec::standard_set("zstd").unwrap(),
@@ -167,10 +179,16 @@ async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
             read(COUNTER, "last"),
             read(SESSIONS, "A"),
             read(GLOBAL, "all"),
-            Op::Batch(vec![write(COUNTER,"last"), write(SESSIONS,"A"),write(GLOBAL,"all"),write(RUNS,"1"),write(TRACES,"voice")]),
+            Op::Batch(vec![
+                write(COUNTER, "last"),
+                write(SESSIONS, "A"),
+                write(GLOBAL, "all"),
+                write(RUNS, "1"),
+                write(TRACES, "voice")
+            ]),
             read(RUNS, "1"),
             read(SESSIONS, "A"),
-            Op::Batch(vec![write(SESSIONS,"A"),write(RUNS,"1")]),
+            Op::Batch(vec![write(SESSIONS, "A"), write(RUNS, "1")]),
         ]
     );
     let late = desk.record(&fleet, clip("A", "voice", "")).await.unwrap();
@@ -295,13 +313,19 @@ async fn an_interrupted_batch_preserves_every_key_and_the_next_number() {
             );
         }
         assert_eq!(desk.inputs(&fleet, "A").await.unwrap().1, ["first"]);
-        assert_eq!(load::<i64>(&fleet,COUNTER,"last").await.unwrap(),Some(1));
-        assert_eq!(load::<Vec<i64>>(&fleet,GLOBAL,"all").await.unwrap().unwrap(),vec![1]);
-        let index:Session=load(&fleet,SESSIONS,"A").await.unwrap().unwrap();
-        assert_eq!(index.newest,[1]);
-        assert_eq!(index.spoken,[1]);
-        assert!(load::<i64>(&fleet,TRACES,"cut").await.unwrap().is_none());
-        assert!(load::<Run>(&fleet,RUNS,"2").await.unwrap().is_none());
+        assert_eq!(load::<i64>(&fleet, COUNTER, "last").await.unwrap(), Some(1));
+        assert_eq!(
+            load::<Vec<i64>>(&fleet, GLOBAL, "all")
+                .await
+                .unwrap()
+                .unwrap(),
+            vec![1]
+        );
+        let index: Session = load(&fleet, SESSIONS, "A").await.unwrap().unwrap();
+        assert_eq!(index.newest, [1]);
+        assert_eq!(index.spoken, [1]);
+        assert!(load::<i64>(&fleet, TRACES, "cut").await.unwrap().is_none());
+        assert!(load::<Run>(&fleet, RUNS, "2").await.unwrap().is_none());
         let next = desk
             .record(&fleet, clip("A", "next", "next"))
             .await
@@ -332,8 +356,8 @@ async fn interrupted_finish_keeps_the_unanswered_clip_out_of_recent_speech() {
         .unwrap();
     assert_eq!(row["run_id"], id);
     assert_eq!(row["transcript"], "");
-    let index:Session=load(&fleet,SESSIONS,"A").await.unwrap().unwrap();
-    assert_eq!(index.spoken,[1]);
+    let index: Session = load(&fleet, SESSIONS, "A").await.unwrap().unwrap();
+    assert_eq!(index.spoken, [1]);
     place.cut(None);
     desk.finish(&fleet, id, "completed".into(), 8)
         .await
