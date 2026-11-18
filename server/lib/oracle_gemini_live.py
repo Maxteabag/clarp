@@ -324,8 +324,10 @@ class GeminiUpstream:
         if isinstance(update, dict) and update.get("resumable") and update.get("newHandle"):
             self.handle = update["newHandle"]
         if "goAway" in message:
-            left = _seconds((message.get("goAway") or {}).get("timeLeft"))
-            self.reconnect_at = self.clock() + max(0.0, (left if left is not None else 5.0) - GOAWAY_MARGIN_SECONDS)
+            away = message["goAway"] or {}
+            if isinstance(away, dict):  # any other goAway is passed over: the deadline held stays (R69)
+                left = _seconds(away.get("timeLeft"))
+                self.reconnect_at = self.clock() + max(0.0, (left if left is not None else 5.0) - GOAWAY_MARGIN_SECONDS)
         if isinstance(message.get("usageMetadata"), dict):
             self.count_usage(message["usageMetadata"])
             self.events.append({"type": "session.usage.updated", "usage": self.usage()})
