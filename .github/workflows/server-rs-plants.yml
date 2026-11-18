@@ -1,0 +1,109 @@
+name: Planted rules (Rust)
+
+# Whether the tests of the Host in Rust can fail (server-rs/REBUILD.md, server-rs/tools/plants/runner.py):
+# a list of wrong rules is planted, one rule at a time, and the tests are to catch every one. It runs only
+# when someone starts it, on the commit whose tests are asked about:
+#   gh workflow run server-rs-plants.yml -R Maxteabag/clarp --ref <branch> -f list=<list>
+# Several machines share a list, each taking every Nth rule; the last job tells what all of them found,
+# and fails where a wrong rule was not caught. Peter does not want tests that run by themselves
+# (10 Nov 2026), so there is no other trigger here.
+
+on:
+  workflow_dispatch:
+    inputs:
+      list:
+        description: The list of wrong rules, a file of server-rs/tools/plants without its ending
+        required: true
+      shards:
+        description: How many machines share the list
+        default: "8"
+      numbers:
+        description: Only these rules, by their numbers with blanks between (all where this is empty)
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-rs-plants-${{ github.ref }}-${{ inputs.list }}
+  cancel-in-progress: true
+
+jobs:
+  shards:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      each: ${{ steps.each.outputs.each }}
+    steps:
+      - id: each
+        env:
+          LIST: ${{ inputs.list }}
+          SHARDS: ${{ inputs.shards }}
+          NUMBERS: ${{ inputs.numbers }}
+        run: |
+          [[ "$LIST" =~ ^[a-z0-9-]+$ ]] || { echo "no such list: $LIST"; exit 2; }
+          [[ "$SHARDS" =~ ^[1-9][0-9]?$ ]] || { echo "shards: a number from 1 to 99"; exit 2; }
+          [[ "$NUMBERS" =~ ^[0-9\ ]*$ ]] || { echo "numbers: numbers with blanks between"; exit 2; }
+          echo "each=$(seq -s, 0 $((SHARDS - 1)) | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  plant:
+    needs: shards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.shards.outputs.each) }}
+    env:
+      LIST: ${{ inputs.list }}
+      SHARDS: ${{ inputs.shards }}
+      NUMBERS: ${{ inputs.numbers }}
+      PLANTS_CARGO: "1"
+      PLANTS_OUT: ${{ runner.temp }}/plants
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server-rs
+          shared-key: plants
+          save-if: ${{ matrix.shard == 0 }}
+      # The tests of the Host as a process run the programs a build of the workspace puts beside it.
+      - name: Build
+        working-directory: server-rs
+        run: cargo build --workspace --locked
+      - name: Plant
+        run: |
+          # shellcheck disable=SC2086
+          python3 "server-rs/tools/plants/$LIST.py" --shard "${{ matrix.shard }}/$SHARDS" $NUMBERS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plants-${{ inputs.list }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/plants
+          retention-days: 14
+
+  told:
+    needs: plant
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: found
+          pattern: plants-${{ inputs.list }}-*
+      - name: What was found
+        env:
+          LIST: ${{ inputs.list }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          cat found/*/"$LIST".shard-*.result > told.txt
+          grep -E '^(CAUGHT|MISSED|DID NOT COMPILE|HUNG) ' told.txt > rules.txt || true
+          grep -vE '^CAUGHT ' rules.txt || true
+          grep -E ': NOT RUN|^as it is ' told.txt | sort | uniq -c || true
+          echo "$LIST: $(wc -l < rules.txt) wrong rules, $(grep -c '^CAUGHT ' rules.txt) CAUGHT"
+          # Every machine told what it found; the tests passed as they are; and every wrong rule was caught.
+          [ "$(ls found/*/"$LIST".shard-*.result | wc -l)" = "$SHARDS" ]
+          if grep -q ': NOT RUN' told.txt; then exit 1; fi
+          if grep -qvE '^CAUGHT ' rules.txt; then exit 1; fi
