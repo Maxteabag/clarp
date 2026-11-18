@@ -45,7 +45,7 @@ PLANTS = [
     (H, 'host', 'direct request addresses another device', '(&row.token, &row.environment),', '("wrong-device", &row.environment),'),
     (H, 'host', 'a successful direct send is a refusal', 'Ok((200, _, _)) => Outcome::Sent', 'Ok((201, _, _)) => Outcome::Sent'),
     (H, 'host', 'only the HTTP status can retire a dead device', '|| clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason)', '|| reason == "imaginary-token-error"'),
-    (H, 'host', 'a refusal disables a live phone', 'Outcome::Refused {\n                                status,\n                                reason: reason.to_string(),\n                            }', 'Outcome::Dead(reason.to_string())'),
+    (H, 'host', 'a refusal disables a live phone', 'Outcome::Refused {\n                                    status,\n                                    reason: reason.to_string(),\n                                }', 'Outcome::Dead(reason.to_string())'),
     (H, 'host', 'a revoked grant is left on the registration', 'if delivery.grant_revoked {', 'if false && delivery.grant_revoked {'),
     (H, 'host', 'relay account sends the wrong token', 'relay.to_token(&row.token, &row.environment, &push)', 'relay.to_token("wrong-device", &row.environment, &push)'),
     (H, 'host', 'relay grant sends the wrong bearer', 'relay.to_grant(&row.push_grant, &push)', 'relay.to_grant("wrong-grant", &push)'),
