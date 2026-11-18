@@ -530,7 +530,21 @@ def test_the_budget_samples_skips_under_pressure_and_caps_cpu(monkeypatch):
 
 # ---- crashes, races, rollback --------------------------------------------------
 
+def _one_batch(monkeypatch):
+    """The import as one batch, whatever the machine's speed (as the golden tests pin it): its
+    batches otherwise end at 25 ms of wall-clock time, and a busy run then commits an early one."""
+    monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 0)
+    monkeypatch.setattr(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9)
+
+
+def _row_per_batch(monkeypatch):
+    """Every row its own batch: the earlier batches are committed when a later step fails."""
+    monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 1)
+    monkeypatch.setattr(message_store, "IMPORT_WRITE_BUDGET_SECONDS", 1e9)
+
+
 def test_a_crash_at_each_step_leaves_no_checkpoint_ahead_of_the_rows(tmp_path, clock, shadow_on, monkeypatch):
+    _one_batch(monkeypatch)
     lines = claude_lines(3)
     _prepare(tmp_path / "a.sqlite", "claude")
     transcript = tmp_path / "t.jsonl"
@@ -574,6 +588,99 @@ def test_a_crash_at_each_step_leaves_no_checkpoint_ahead_of_the_rows(tmp_path, c
                           backend_session_id=SESSION)
     cp = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
     assert cp.turn_count == len(inc.parse_range("claude", transcript, 0, transcript.stat().st_size))
+
+
+def _stored(transcript):
+    """This transcript's rows, its checkpoints, and whether the conversation's head covers every row."""
+    c = db.conn()
+    rows = c.execute("SELECT message_id, seq, revision FROM messages WHERE source_file=? ORDER BY seq",
+                     (str(transcript),)).fetchall()
+    checkpoints = c.execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0]
+    head = c.execute("SELECT revision FROM conversation_heads WHERE agent_id=? AND backend_session_id=?",
+                     (AGENT, SESSION)).fetchone()
+    return ([tuple(r) for r in rows], checkpoints,
+            head is not None and all(r["revision"] <= head["revision"] for r in rows))
+
+
+def _crash_at_the_checkpoint(monkeypatch):
+    class Crash(BaseException):
+        pass
+    real = inc.write_checkpoint
+    monkeypatch.setattr(inc, "write_checkpoint", lambda *a: (_ for _ in ()).throw(Crash()))
+    return Crash, real
+
+
+def test_a_crash_after_earlier_batches_leaves_rows_and_no_checkpoint(tmp_path, clock, shadow_on, monkeypatch):
+    """The rows' last batch and the checkpoint go together; the earlier batches are rows only. A crash
+    at the checkpoint leaves those rows and no checkpoint, and the next import completes over them."""
+    _row_per_batch(monkeypatch)
+    lines = claude_lines(3)
+    _prepare(tmp_path / "a.sqlite", "claude")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_bytes(b"".join(lines))
+    parsed = len(inc.parse_range("claude", transcript, 0, transcript.stat().st_size))
+    Crash, real = _crash_at_the_checkpoint(monkeypatch)
+    with pytest.raises(Crash):
+        inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    db.conn().rollback()          # the process died: SQLite drops the open batch
+    rows, checkpoints, _ = _stored(transcript)
+    assert checkpoints == 0 and 0 < len(rows) < parsed
+    monkeypatch.setattr(inc, "write_checkpoint", real)
+    inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    rows, checkpoints, head_covers = _stored(transcript)
+    cp = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    assert checkpoints == 1 and cp.turn_count == parsed == len(rows)
+    assert len({message_id for message_id, _, _ in rows}) == len({seq for _, seq, _ in rows}) == len(rows)
+    assert head_covers
+
+
+def test_a_crash_in_a_yielding_tail_after_its_first_write_keeps_the_checkpoint_it_had(
+        tmp_path, clock, monkeypatch):
+    """The same crash under the tail path as both Hosts run it (the nine switches, a yield after the
+    first write): the tail's earlier batches are committed, the checkpoint stays the one it had, never
+    ahead of the rows. The next process sees that the rows moved past that checkpoint, imports in full,
+    and its checkpoint covers exactly the rows."""
+    from tests.readmodel.rm_n14_harness import HOSTS_SWITCHES
+    conf = dict(inc._DEFAULTS, **HOSTS_SWITCHES)       # as the Hosts run: tails applied, no shadow
+    monkeypatch.setattr(inc, "settings", lambda: dict(conf))
+    lines = claude_lines(5)
+    _prepare(tmp_path / "a.sqlite", "claude")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_bytes(b"".join(lines[:9]))
+    _one_batch(monkeypatch)
+    inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    before = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    rows_before, _, _ = _stored(transcript)
+    assert before.turn_count == len(rows_before) and inc.load_frontier(db.conn(), before) is not None
+    _append(transcript, lines[9:])
+    parsed = len(inc.parse_range("claude", transcript, 0, transcript.stat().st_size))
+    assert not _decide(before, "claude", transcript)                # a tail, by the checkpoint
+    tails = []
+    real_tail = message_writes.store_transcript_tail
+    monkeypatch.setattr(message_writes, "store_transcript_tail", lambda *a, **k: (tails.append(k.get(
+        "yield_after_first_write")), real_tail(*a, **k))[1])
+    _row_per_batch(monkeypatch)
+    Crash, real = _crash_at_the_checkpoint(monkeypatch)
+    with pytest.raises(Crash):
+        inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    assert tails == [True]                                          # it was the tail, yielding after its first write
+    db.conn().rollback()                                            # the process died: SQLite drops the open batch
+    inc._TAIL_STATES.reset()                                        # and its in-memory tail state goes with it
+    inc._READ_PREFIXES.reset()
+    rows, checkpoints, _ = _stored(transcript)
+    assert checkpoints == 1 and inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript)) == before
+    assert len(rows_before) < len(rows) < parsed                    # the tail's earlier batches are committed
+    monkeypatch.setattr(inc, "write_checkpoint", real)
+    reasons = []
+    log = inc._tail_log
+    monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (reasons.append(code), log(code, **kw))[1])
+    result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    assert result["apply_mode"] == "full" and "full_carry_inputs_changed" in reasons
+    rows, checkpoints, head_covers = _stored(transcript)
+    cp = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    assert checkpoints == 1 and cp.turn_count == parsed == len(rows)
+    assert len({message_id for message_id, _, _ in rows}) == len({seq for _, seq, _ in rows}) == len(rows)
+    assert head_covers
 
 
 def test_two_importers_racing_keep_the_checkpoint_that_covers_more(tmp_path, clock, shadow_on):
