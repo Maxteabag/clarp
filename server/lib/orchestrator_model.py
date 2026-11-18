@@ -67,14 +67,15 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
             stdin=None if call.input is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
             timeout=max(0.25, settings.timeout_ms / 1000.0),
             env={**os.environ, **runner.routing_env()},
             check=False,
         )
+    # Bytes in (routing_input encodes the prompt as argv would), text out as before.
+    stdout, stderr = (proc.stdout or b"").decode(), (proc.stderr or b"").decode()
     if proc.returncode != 0:
-        raise RuntimeError((proc.stderr or proc.stdout or f"{binary} rc={proc.returncode}")[:1000])
-    return _extract_json(runner.routing_text(proc.stdout or ""))
+        raise RuntimeError((stderr or stdout or f"{binary} rc={proc.returncode}")[:1000])
+    return _extract_json(runner.routing_text(stdout))
 
 
 _OPENAI_EFFORTS = set(OPENAI_EFFORTS)
