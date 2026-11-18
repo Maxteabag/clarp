@@ -143,6 +143,12 @@ impl Desk {
                 provider: name,
                 instance: &instance,
             };
+            let stamp = || {
+                clarp_backend::by_id(name)?
+                    .login_file(home)
+                    .and_then(|file| crate::logins::digest(&file))
+            };
+            let before = stamp();
             let account = if name == CLAUDE {
                 known.claude_account(with, true).await
             } else {
@@ -188,12 +194,6 @@ impl Desk {
             if !force && !due {
                 continue;
             }
-            let stamp = || {
-                clarp_backend::by_id(name)?
-                    .login_file(home)
-                    .and_then(|file| crate::logins::digest(&file))
-            };
-            let before = stamp();
             if name == "agy" {
                 *self
                     .agy_attempt

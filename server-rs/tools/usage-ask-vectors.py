@@ -124,8 +124,61 @@ def cases(place):
         except RuntimeError:
             projected = None
         agy_cases.append({"body": body, "projected": projected, "now": now[0]})
+    # A second Host identity isolates the structured rows and episodes in this store.
+    import uuid
+    sequence = iter(range(1, 10000))
+    uuid.uuid4 = lambda: uuid.UUID(int=next(sequence))
+    store._computer_id = lambda: "another-host"
+    active[0] = "account-one"
+    identity = ("generation-one", active[0])
+    usage._active_codex_identity = lambda **kw: identity
+    codex._read_codex_auth = lambda *args: ("synthetic", "account-one")
+    codex._codex_identity = lambda *args: identity
+    now[0] += 1000000
+    turns = []
+    def window(n, mins):
+        return {"used_percent": n, "window_minutes": mins, "resets_at": began // 1000 + 9000}
+    room = {"primary": window(20, 300), "secondary": window(42, 10080)}
+    blocked = {"rate_limit": {"allowed": False}, "rate_limit_reached_type": {"type": "credits_empty"}}
+    for action, body in [
+            ("read", {"rate_limit": room}),
+            ("read", {"rate_limit": {**room, "primary": window(82, 300)}}),
+            ("read", {"rate_limit": {"secondary": window(17, 10080)}}),
+            ("refused", None),
+            ("read", {"rate_limit": {"primary": window(100, 300)}}),
+            ("read", {"rate_limit": room}),
+            ("failure", None),
+            ("read", blocked),
+            ("ask", None),
+            ("ask", None),
+            ("failure", None),
+            ("read", {"rate_limit": {**room, "limit_reached": True},
+                      "rate_limit_reached_type": {"type": "member_credit"}}),
+            ("read", {"rate_limit": room})]:
+        now[0] += 900000 if action == "ask" and turns[-1]["action"] != "ask" else 1
+        entry = {"action": action, "now": now[0]}
+        events = []
+        if action == "read":
+            kept = codex.capture_codex_rate_limits(body, source_detail="/wham/usage", identity=identity)
+            entry["snapshot"] = {"windows": kept["windows"]}
+            block = codex._codex_block_from_payload(body)
+            if block:
+                del block["provider_reason"]
+                entry["snapshot"]["blocked"] = block
+            events = kept.get("limit_events", [])
+        elif action == "failure":
+            store._record_unknown("codex", "codex-usage-endpoint", "Codex usage unavailable")
+        elif action == "refused":
+            event = codex.record_classified_usage_limit("codex")
+            events = [event] if event and event.get("_new") else []
+        entry["events"] = [{k: v for k, v in ev.items() if not k.startswith("_")} for ev in events]
+        entry["row"] = store._response_row("codex", now[0])
+        entry["provider"] = usage._structured_provider("codex", now[0])
+        entry["used_up"] = usage.exhausted_backends(now[0]).get("codex")
+        entry["due"] = codex._codex_needs_refresh()
+        turns.append(entry)
     return {"at": began, "payload": {"command": {"data": {"groups": groups}}}, "cases": rows, "direct": direct,
-            "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
+            "authoritative": turns, "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
 
 
 if __name__ == "__main__":

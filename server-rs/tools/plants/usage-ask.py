@@ -93,6 +93,34 @@ for before,after,reason in [
 ]:
     PLANTS.append((P,"host",reason,before,after))
 
+Q = "clarp-kernel/src/quota.rs"
+S = "clarp-kernel/src/standing.rs"
+PLANTS.extend([
+    (S, "vectors", "a changed Claude account never makes a reading due", "other || crate::usage_ask::due", "false && other || crate::usage_ask::due"),
+    (Q, "vectors", "treat equal account identifiers as rotated", "on.account != Some(account.as_str())", "on.account == Some(account.as_str())"),
+    (Q, "vectors", "ignore the last authoritative refresh", "crate::usage_ask::due(self.authoritative_ms, now)", "self.authoritative_ms.is_none()"),
+    (Q, "vectors", "a completed turn before the observation invalidates it", "done > self.authoritative_ms.unwrap_or(0)", "done <= self.authoritative_ms.unwrap_or(0)"),
+    (Q, "vectors", "ignore a completed turn exactly at the current instant", "unwrap_or(0) && done <= now", "unwrap_or(0) && done < now"),
+    (Q, "vectors", "do not refresh a whole 100 percent reading", "n >= 100.0", "n > 100.0"),
+    (Q, "vectors", "a failed refresh erases prior percentage", "self.row.as_ref().is_none_or(|r| r.used.is_null())", "self.row.as_ref().is_none_or(|r| !r.used.is_null())"),
+    (Q, "vectors", "date refresh failure before it happens", "self.authoritative_ms = Some(now);", "self.authoritative_ms = Some(now-1000);"),
+    (Q, "vectors", "erase error on failed collection", 'self.error = "Codex usage unavailable".into();', 'self.error = String::new();'),
+    (Q, "vectors", "treat a complete reading as sparse", 'matches!(detail, "/wham/usage" | "account/rateLimits/read")','detail == "account/rateLimits/read"'),
+    (Q, "vectors", "retain omitted windows in legacy row", ".filter(same).filter(|_| !whole)", ".filter(same)"),
+    (Q, "vectors", "never take a direct block", 'self.block = snapshot.get("blocked").cloned();','self.block = None;'),
+    (Q, "vectors", "leave an omitted session window active", '"five_hour" => five_hours.is_none()', '"five_hour" => false'),
+    (Q, "vectors", "leave an omitted weekly window active", '"seven_day" => week.is_none()', '"seven_day" => false'),
+    (Q, "vectors", "mark an omitted window as stale", 'freshness: "unknown",\n                        source_kind: "authoritative_window_omitted"', 'freshness: "stale",\n                        source_kind: "authoritative_window_omitted"'),
+    (Q, "vectors", "wrong reason for an omitted limit event", 'source_kind: "authoritative_window_omitted"', 'source_kind: "provider_reported"'),
+    (Q, "vectors", "retain retired windows", 'self.windows.retain(|w| !omitted(w));','self.windows.iter().for_each(|_| ());'),
+    (Q, "vectors", "clear an unknown terminal even at 100 percent", 'unwrap_or(0.0) < 100.0','unwrap_or(0.0) <= 100.0'),
+    (Q, "vectors", "retain unknown hard limits after usable reading", 'events.extend(self.clear_unknown(tool, Some(login), now_ms, new_id));','events.extend(Vec::<Value>::new());'),
+    (Q, "vectors", "expire the workspace block on its last fresh millisecond", "now_ms - at <= WINDOW_FRESH_MS", "now_ms - at < WINDOW_FRESH_MS"),
+    (Q, "vectors", "forget the error on a missing measurement", '"freshness":"unknown","error":self.error', '"freshness":"unknown","error":""'),
+    (Q, "vectors", "make a failed positive reading appear error free", '"error": self.error,','"error": "",'),
+    (Q, "vectors", "mislabel the source in the legacy response", 'self.authoritative_ms.is_some() {"codex-usage-endpoint"}', 'self.authoritative_ms.is_some() {"codex-app-server"}'),
+])
+
 
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

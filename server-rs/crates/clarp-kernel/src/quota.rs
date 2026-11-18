@@ -246,6 +246,9 @@ impl Kept {
         let same = |row: &&Row| {
             row.generation == login.generation && row.account.as_deref() == login.account
         };
+        if self.row.as_ref().is_some_and(|row| !same(&row)) {
+            self.block = None;
+        }
         let whole = matches!(detail, "/wham/usage" | "account/rateLimits/read");
         let mut merged: Map<String, Value> = match self.row.as_ref().filter(same).filter(|_| !whole)
         {

@@ -22023,7 +22023,10 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         75.0
     );
     assert_eq!(first["limit_events"][0]["kind"], "warning");
-    assert_eq!(first["providers"]["claude"]["source"]["detail"], "anthropic-oauth-usage");
+    assert_eq!(
+        first["providers"]["claude"]["source"]["detail"],
+        "anthropic-oauth-usage"
+    );
     let ident = first["limit_events"][0]["provider_limit_event_id"].clone();
     wait_for("Codex warning on the event stream", || {
         heard.lock().unwrap().iter().any(|event| {

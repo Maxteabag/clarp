@@ -296,6 +296,1041 @@
   }
  ],
  "at": 1900000000000,
+ "authoritative": [
+  {
+   "action": "read",
+   "due": false,
+   "events": [],
+   "now": 1900001300002,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [
+    {
+     "dedupe_key": "pld-2f635f6a4e32292c303abd3c4664459db18e6f8750770c39",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000001",
+     "freshness": "fresh",
+     "kind": "warning",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000002",
+     "resets_at": "2030-03-17T20:16:40Z",
+     "schema_version": 1,
+     "source": {
+      "kind": "provider_reported"
+     },
+     "threshold_id": "five_hour_80_percent",
+     "type": "provider-limit",
+     "used_percentage": 82.0,
+     "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+    }
+   ],
+   "now": 1900001300003,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000001",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000002",
+       "state": "warning"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 82.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 82.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 82.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 82.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [
+    {
+     "dedupe_key": "pld-7c7fdc61005e9831f2320eab5ea04aa5394b91a61ce35a6b",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000001",
+     "freshness": "unknown",
+     "kind": "unknown",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000003",
+     "resets_at": null,
+     "schema_version": 1,
+     "source": {
+      "kind": "authoritative_window_omitted"
+     },
+     "threshold_id": null,
+     "type": "provider-limit",
+     "used_percentage": null,
+     "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+    }
+   ],
+   "now": 1900001300004,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 17.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 17.0,
+    "windows": {
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 17.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 17.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "refused",
+   "due": false,
+   "events": [
+    {
+     "dedupe_key": "pld-80cf3df8fd71f7978da308b989472d77941a77ef0665b071",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000004",
+     "freshness": "fresh",
+     "kind": "hard_limit",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000005",
+     "resets_at": null,
+     "schema_version": 1,
+     "source": {
+      "kind": "classified_terminal"
+     },
+     "threshold_id": null,
+     "type": "provider-limit",
+     "used_percentage": null,
+     "window_id": "puw-31626a53ac204ecddcb9e2f7a34dfb3c"
+    }
+   ],
+   "now": 1900001300005,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "classified quota terminal",
+     "kind": "classified_terminal"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 17.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000004",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000005",
+       "state": "hard_limit"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": null,
+      "scope": "account",
+      "source": {
+       "detail": "classified quota terminal",
+       "kind": "classified_terminal"
+      },
+      "unit": "percent",
+      "used_percentage": null,
+      "window_id": "puw-31626a53ac204ecddcb9e2f7a34dfb3c"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 17.0,
+    "windows": {
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 17.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": {
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "reason": "usage_limit",
+    "resets_at": null,
+    "state": "exhausted",
+    "window": "unknown"
+   }
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [
+    {
+     "dedupe_key": "pld-dde90a37e1a904bed0364bb1a8a486ea76264be55d054175",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+     "freshness": "fresh",
+     "kind": "hard_limit",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000007",
+     "resets_at": "2030-03-17T20:16:40Z",
+     "schema_version": 1,
+     "source": {
+      "kind": "provider_reported"
+     },
+     "threshold_id": null,
+     "type": "provider-limit",
+     "used_percentage": 100.0,
+     "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+    }
+   ],
+   "now": 1900001300006,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000007",
+       "state": "hard_limit"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000004",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000005",
+       "state": "hard_limit"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": null,
+      "scope": "account",
+      "source": {
+       "detail": "classified quota terminal",
+       "kind": "classified_terminal"
+      },
+      "unit": "percent",
+      "used_percentage": null,
+      "window_id": "puw-31626a53ac204ecddcb9e2f7a34dfb3c"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 100.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 100.0,
+      "window_minutes": 300
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 100.0,
+      "window_minutes": 300
+     }
+    }
+   },
+   "used_up": {
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "reason": "usage_limit",
+    "resets_at": null,
+    "state": "exhausted",
+    "window": "unknown"
+   }
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [
+    {
+     "dedupe_key": "pld-20d39e2dea805b93290a363817c7b7a82bc03938348853ca",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000004",
+     "freshness": "fresh",
+     "kind": "recovered",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000008",
+     "resets_at": null,
+     "schema_version": 1,
+     "source": {
+      "kind": "provider_reported"
+     },
+     "threshold_id": null,
+     "type": "provider-limit",
+     "used_percentage": null,
+     "window_id": "puw-31626a53ac204ecddcb9e2f7a34dfb3c"
+    },
+    {
+     "dedupe_key": "pld-59ce19bdf5d9357d215dab7c279eb17066377e8525ff078d",
+     "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+     "freshness": "fresh",
+     "kind": "recovered",
+     "observed_at": "2030-03-17T18:08:20Z",
+     "provider_id": "codex",
+     "provider_instance_id": "another-host:codex",
+     "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+     "resets_at": "2030-03-17T20:16:40Z",
+     "schema_version": 1,
+     "source": {
+      "kind": "provider_reported"
+     },
+     "threshold_id": null,
+     "type": "provider-limit",
+     "used_percentage": 20.0,
+     "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+    }
+   ],
+   "now": 1900001300007,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "failure",
+   "due": false,
+   "events": [],
+   "now": 1900001300008,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:08:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:08:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "Codex usage unavailable",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  },
+  {
+   "action": "read",
+   "due": true,
+   "events": [],
+   "now": 1900001300009,
+   "provider": {
+    "freshness": "unknown",
+    "observed_at": null,
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "No structured usage evidence for this provider",
+     "kind": "unavailable"
+    },
+    "windows": []
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "unknown",
+    "resets_at": null,
+    "source": "codex-usage-endpoint",
+    "used_percentage": null,
+    "windows": {}
+   },
+   "snapshot": {
+    "blocked": {
+     "reason": "credits_depleted",
+     "resets_at": null
+    },
+    "windows": {}
+   },
+   "used_up": {
+    "observed_at": null,
+    "provider_id": "codex",
+    "reason": "credits_depleted",
+    "resets_at": null,
+    "state": "exhausted",
+    "window": "unknown"
+   }
+  },
+  {
+   "action": "ask",
+   "due": true,
+   "events": [],
+   "now": 1900002200009,
+   "provider": {
+    "freshness": "unknown",
+    "observed_at": null,
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "No structured usage evidence for this provider",
+     "kind": "unavailable"
+    },
+    "windows": []
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "unknown",
+    "resets_at": null,
+    "source": "codex-usage-endpoint",
+    "used_percentage": null,
+    "windows": {}
+   },
+   "used_up": {
+    "observed_at": null,
+    "provider_id": "codex",
+    "reason": "credits_depleted",
+    "resets_at": null,
+    "state": "exhausted",
+    "window": "unknown"
+   }
+  },
+  {
+   "action": "ask",
+   "due": true,
+   "events": [],
+   "now": 1900002200010,
+   "provider": {
+    "freshness": "unknown",
+    "observed_at": null,
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "No structured usage evidence for this provider",
+     "kind": "unavailable"
+    },
+    "windows": []
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:08:20Z",
+    "freshness": "unknown",
+    "resets_at": null,
+    "source": "codex-usage-endpoint",
+    "used_percentage": null,
+    "windows": {}
+   },
+   "used_up": null
+  },
+  {
+   "action": "failure",
+   "due": true,
+   "events": [],
+   "now": 1900002200011,
+   "provider": {
+    "freshness": "unknown",
+    "observed_at": null,
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "No structured usage evidence for this provider",
+     "kind": "unavailable"
+    },
+    "windows": []
+   },
+   "row": {
+    "backend": "codex",
+    "error": "Codex usage unavailable",
+    "fetched_at": "2030-03-17T18:23:20Z",
+    "freshness": "unknown",
+    "resets_at": null,
+    "source": "codex-usage-endpoint",
+    "used_percentage": null,
+    "windows": {}
+   },
+   "used_up": null
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [],
+   "now": 1900002200012,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:23:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:23:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:23:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:23:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "blocked": {
+     "reason": "credits_depleted",
+     "resets_at": null
+    },
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": {
+    "observed_at": null,
+    "provider_id": "codex",
+    "reason": "credits_depleted",
+    "resets_at": null,
+    "state": "exhausted",
+    "window": "unknown"
+   }
+  },
+  {
+   "action": "read",
+   "due": false,
+   "events": [],
+   "now": 1900002200013,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T18:23:20Z",
+    "provider_id": "codex",
+    "provider_instance_id": "another-host:codex",
+    "source": {
+     "detail": "/wham/usage",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "limit": {
+       "episode_id": "plp-00000000-0000-0000-0000-000000000006",
+       "provider_limit_event_id": "ple-00000000-0000-0000-0000-000000000009",
+       "state": "recovered"
+      },
+      "observed_at": "2030-03-17T18:23:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 20.0,
+      "window_id": "puw-2f352656321a66b54ac38db1fc98a336"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T18:23:20Z",
+      "resets_at": "2030-03-17T20:16:40Z",
+      "scope": "account",
+      "source": {
+       "detail": "/wham/usage",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 42.0,
+      "window_id": "puw-ff90fbf72c73bbabe628c379593d4453"
+     }
+    ]
+   },
+   "row": {
+    "backend": "codex",
+    "error": "",
+    "fetched_at": "2030-03-17T18:23:20Z",
+    "freshness": "fresh",
+    "resets_at": "2030-03-17T20:16:40Z",
+    "source": "codex-usage-endpoint",
+    "used_percentage": 20.0,
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "snapshot": {
+    "windows": {
+     "primary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 20.0,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": "2030-03-17T20:16:40Z",
+      "used_percentage": 42.0,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "used_up": null
+  }
+ ],
  "blocks": [
   {
    "blocked": {
