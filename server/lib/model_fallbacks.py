@@ -130,6 +130,67 @@ def is_provider_failure(cause, message=""):
     return bool(cause in PROVIDER_FAILURES and not _DENIED_RE.search(message))
 
 
+# A CLI's own words on failure are what an operator debugs with ("rate limit reached", "unknown
+# model ..."), but a CLI that repeats its input puts the request into them (issue 360, R85). They
+# are kept only when they hold none of it: no run of ECHO_RUN characters in common with the prompt.
+ECHO_RUN = 24
+KEPT_MOST = 300
+_SPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|[\"\\/bfnrt'])")
+_ESCAPED = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _plain(text):
+    """One line: control characters and runs of white space become one space."""
+    return _SPACE.sub(" ", text).strip()
+
+
+def _unescaped(text):
+    """``text`` with JSON (and Python repr) string escapes undone, as a tool that prints its
+    input as a JSON or repr string writes it."""
+    def one(match):
+        code = match.group(1)
+        if code[0] == "u":
+            return chr(int(code[1:], 16))
+        return _ESCAPED.get(code, code)
+    return _ESCAPE.sub(one, text)
+
+
+def echoes(text, prompt):
+    """Whether ``text`` shares a run of ECHO_RUN characters (the whole prompt when it is shorter)
+    with ``prompt``, read as written or with its string escapes undone; white space compared as
+    one space. Covered: JSON and Python string escapes, newlines and tabs written as spaces. Not
+    covered: base64, percent or HTML encoding, a run broken by an inserted ellipsis."""
+    request = _plain(prompt or "")
+    if not request:
+        return False
+    run = min(ECHO_RUN, len(request))
+    for form in {_plain(text), _plain(_unescaped(text))}:
+        if any(form[at:at + run] in request for at in range(0, len(form) - run + 1)):
+            return True
+    return False
+
+
+def cli_failure(backend, output, *, prompt, returncode=None):
+    """What a routing CLI's failure says, wherever it is caught: its own words as one line of at
+    most KEPT_MOST characters when they hold none of the request, else "<backend> exited with
+    status N (<category>)". The category is always kept: the fallback chain and the attempt rows
+    read it, never the words."""
+    from . import error_classify
+
+    words = (output or "").strip()
+    category = error_classify.classify_error(words)
+    if category != error_classify.INTERRUPTED and category not in PROVIDER_FAILURES:
+        category = error_classify.RUNNER_EXIT
+    status = f"exited with status {returncode}" if returncode is not None else "failed"
+    line = _plain(words)[:KEPT_MOST]
+    if not line or echoes(line, prompt):
+        line = f"{backend} {status} ({category})"
+    if category == error_classify.INTERRUPTED:
+        return Cancelled(line)
+    return ProviderFailure(line, category)
+
+
 def provider_error(message):
     """Categorise a runner-level failure into the exception it deserves.
 
@@ -346,10 +407,8 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
                 except subprocess.TimeoutExpired:
                     payload = None  # communicate keeps its first input across retries
             if process.returncode:
-                raise provider_error(
-                    (stderr or stdout or "").strip()[:1000]
-                    or f"{cmd[0]} exited rc={process.returncode}"
-                )
+                raise cli_failure(runner.id, stderr or stdout, prompt=prompt,
+                                  returncode=process.returncode)
             return schema_object(runner.routing_text(stdout or ""), schema)
         finally:
             try:
