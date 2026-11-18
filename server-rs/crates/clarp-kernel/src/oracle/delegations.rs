@@ -228,8 +228,12 @@ pub enum Fate {
     NotAdmitted,
     /// Its turn runs.
     Live,
-    /// Its turn is gone and left an answer.
-    Said { message_id: String, text: String },
+    /// Its turn is over and left an answer, at this moment.
+    Said {
+        message_id: String,
+        text: String,
+        at_ms: i64,
+    },
     /// Its turn is gone and left none.
     Lost,
 }
@@ -440,8 +444,9 @@ impl Book {
     }
 
     /// The Host looks again at the delegations that are not over, each asked what became
-    /// of its turn: one whose turn is gone is ended with the answer it left, or as failed.
-    /// Answers how many were ended.
+    /// of its turn: one whose turn is over is ended with the answer it left, at the moment
+    /// that was left; one whose turn is gone without one failed, now. Answers how many
+    /// were ended.
     pub fn orphans(&mut self, mut fate: impl FnMut(&Delegation) -> Fate, now_ms: i64) -> usize {
         let open: Vec<usize> = (0..self.rows.len())
             .filter(|at| self.rows[*at].status.active())
@@ -451,9 +456,11 @@ impl Book {
             let row = self.rows[at].clone();
             let said = match fate(&row) {
                 Fate::NotAdmitted | Fate::Live => continue,
-                Fate::Said { message_id, text } => {
-                    self.completed(&row.trace_id, &message_id, &text, now_ms)
-                }
+                Fate::Said {
+                    message_id,
+                    text,
+                    at_ms,
+                } => self.completed(&row.trace_id, &message_id, &text, at_ms),
                 Fate::Lost => false,
             };
             // An answer that says nothing is none: the delegation failed.
