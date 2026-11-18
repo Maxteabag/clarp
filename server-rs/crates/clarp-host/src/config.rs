@@ -463,7 +463,7 @@ impl Config {
             return Err(not_here);
         }
         let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
-        let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
+        let cartesia_endpoint = voice_endpoint("CLARP_CARTESIA_ENDPOINT")?;
         let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
         let fcm_endpoint = std::env::var("CLARP_FCM_ENDPOINT")
             .ok()
@@ -479,7 +479,7 @@ impl Config {
                     })
             })
             .transpose()?;
-        let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
+        let gemini_endpoint = voice_endpoint("CLARP_GEMINI_ENDPOINT")?;
         let google_token_endpoint = voice_endpoint("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
         let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
         // A token of the owner's real account is never handed to a stand-in, and a token a
