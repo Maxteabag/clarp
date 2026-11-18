@@ -200,10 +200,18 @@ impl Desk {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner) = Some(with.now_ms);
             }
-            let answer = provider.ask(name, home, with.now_ms,before).await;
+            let answer = provider.ask(name, home, with.now_ms, before).await;
             let with = With::of(app, home);
             let mut known = self.known.lock().await;
-            if before != stamp() || (name==CODEX && known.login(with,CODEX,false).await.as_ref().map(Named::login)!=login.as_ref().map(Named::login)) {
+            if before != stamp()
+                || (name == CODEX
+                    && known
+                        .login(with, CODEX, false)
+                        .await
+                        .as_ref()
+                        .map(Named::login)
+                        != login.as_ref().map(Named::login))
+            {
                 continue;
             }
             if name == "agy" {
