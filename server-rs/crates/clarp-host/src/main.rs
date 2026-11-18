@@ -63,6 +63,13 @@ async fn serve(config: Config) -> Result<(), String> {
         .and_then(|()| std::fs::create_dir_all(&config.run_dir))
         .map_err(|error| format!("the Host's directories cannot be made: {error}"))?;
 
+    if let Err(reason) = clarp_host::calls::generation::bootstrap(&config.data_dir) {
+        eprintln!(
+            "clarp-host: listen-first generation unavailable ({})",
+            reason.kind()
+        );
+    }
+
     let mut store = tables
         .open(&config.data_dir.join("fleet.db"))
         .map_err(|error| error.to_string())?;

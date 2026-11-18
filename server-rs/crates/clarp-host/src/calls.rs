@@ -38,6 +38,7 @@ use crate::fleet::Directory;
 use crate::ids;
 use crate::pairing::Scope;
 
+pub mod generation;
 pub mod live;
 mod tools;
 mod transcript;
