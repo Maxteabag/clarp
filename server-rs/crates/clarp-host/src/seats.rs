@@ -198,14 +198,17 @@ impl Desk {
     /// A live read of the tool, for whoever asked: the one under way is waited for, none is
     /// begun before one is allowed, and otherwise the tool is asked now.
     async fn read(&self, app: &App, force: bool) -> Outcome {
-        let began_ms = app.clock.now_ms();
-        let done = {
+        let (began_ms, done) = loop {
+            let began_ms = app.clock.now_ms();
             let mut state = self.state.lock().await;
             if let Some(mut under_way) = state.under_way.clone() {
                 drop(state);
                 let ended = under_way.wait_for(|ended| ended.is_some());
                 let ended = tokio::time::timeout(WAITED_FOR, ended).await;
-                let made = matches!(ended, Ok(Ok(ended)) if *ended == Some(true));
+                let made = matches!(&ended, Ok(Ok(ended)) if **ended == Some(true));
+                if force && ended.is_ok() {
+                    continue;
+                }
                 return if made { Outcome::Read } else { Outcome::Failed };
             }
             let last_attempt_ms = state.last_attempt_ms;
@@ -218,7 +221,7 @@ impl Desk {
             state.last_attempt_ms = began_ms;
             let (done, under_way) = watch::channel(None);
             state.under_way = Some(under_way);
-            done
+            break (began_ms, done);
         };
         let (of_desk, list, work) = tokio::join!(
             self.asking(desk::DESK_ASKED),

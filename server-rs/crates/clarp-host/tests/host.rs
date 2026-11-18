@@ -17547,7 +17547,10 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let (status, said) = host.ask("POST", "/hotseat/renew", Some(&json!({})));
     assert_eq!(
         (status, said["error"].as_str()),
-        (409, Some("switch_failed"))
+        (
+            501,
+            Some("Changing the account seats is not built on this Host yet")
+        )
     );
     // Work that stopped is continued from the desk on a Host that lists some: this one
     // lists none.
@@ -23310,22 +23313,46 @@ else:sys.exit(2)
     wait_for("the waiting turn to answer", || h.state(&agent) == "done");
     assert!(h.conversation(&agent).contains(&said("assistant", "on it")));
 
-    // Hold a shared lock just as a live provider process does. A different provider can
-    // move meanwhile and this provider reports its switch as running until the lock goes.
-    let lock = std::fs::File::open(place.root.join("data/account-claude.lock")).unwrap();
-    lock.lock_shared().unwrap();
+    // The stand-in tool stays in a live shim through a Host restart. Its provider cannot
+    // move until that actual tool exits, while another provider remains switchable.
+    let release = place.root.join("release-live-tool");
+    let ran = place.root.join("live-tool-started");
+    let script = format!(
+        "#!/bin/sh\nread msg\ndate > '{}'\nfor i in $(seq 1 600); do [ -f '{}' ] && break; sleep 0.1; done\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}}'\n",
+        ran.display(),
+        release.display()
+    );
+    program(&claude, &script);
+    h.send(&agent, "hold this turn", "live-lock");
+    wait_for("the live tool to start", || ran.exists());
+    drop(h);
+    let h = start("select");
     std::thread::scope(|scope| {
-        let pending = scope.spawn(|| switch(&h, "claude", "backup"));
-        wait_for("the desk to show a waiting switch", || {
+        let pending=scope.spawn(||{
+            let body=json!({"provider":"claude","alias":"backup"}).to_string();
+            let mut stream=TcpStream::connect(&h.address).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(45))).unwrap();
+            write!(stream,"POST /hotseat/switch HTTP/1.1\r\nHost: test\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+            let mut answer=String::new();
+            stream.read_to_string(&mut answer).unwrap();
+            assert!(answer.starts_with("HTTP/1.1 202"),"{answer}");
+            let (_,body)=answer.split_once("\r\n\r\n").unwrap();
+            let pending:Value=serde_json::from_str(body).unwrap();
+            assert_eq!(pending,json!({"ok":true,"switched":false,"pending":true,"reason":"switch_in_progress","provider":"claude","alias":"backup","message":"The switch is still running. The desk shows how it ended."}));
+        });
+        wait_for("the pending Claude switch", || {
             h.get("/hotseat/desk")["switches"][0]["state"] == "running"
         });
+        assert_eq!(switch(&h, "codex", "current").1["switched"], true);
+        pending.join().unwrap();
         assert_eq!(
             std::fs::read_to_string(place.root.join("claude.active")).unwrap(),
             "current"
         );
-        assert_eq!(switch(&h, "codex", "current").1["switched"], true);
-        lock.unlock().unwrap();
-        assert_eq!(pending.join().unwrap().1["switched"], true);
+        std::fs::write(release, "").unwrap();
+        wait_for("the pending switch to complete", || {
+            h.get("/hotseat/desk")["switches"][0]["state"] == "switched"
+        });
     });
     drop(h);
     let h = start("select");

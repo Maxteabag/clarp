@@ -103,6 +103,14 @@ rules(A,"desk",[
     ('switched = answer.1["switched"] == true;', 'switched = answer.1["changed"] == true;', "misread successful automatic result"),
     ('if read.is_ok()', 'if read.is_err()', "discard every successful scheduled report"),
 ])
+rules("clarp-host/src/agent.rs","desk",[
+    ('pool.guard_turn(&mut order);','let _ = (&pool, &mut order);',"launch a provider without holding its login lock"),
+])
+rules(M,"desk",[
+    ('"reason":"switch_in_progress"','"reason":"no_accounts"',"mislabel a still-running switch"),
+    ('"pending":true','"pending":false',"claim an unfinished switch is over"),
+    ('202,','200,',"return completed status to a request whose work is still running"),
+])
 # All mutation runs use synthetic programs and an isolated Host directory.
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
