@@ -159,7 +159,7 @@ def record(root):
         add('queued but claimed',{'do':'greet','intent_state':'admitted','row':row,'claimed_at':1000})
     # Only generation is read from the Host setting here; reads and effects below
     # are isolated substitutes for the queue's evidence.
-    
+
     add('replay or conflicting reuse',{'body':{'request_id':'s'}},{'body':{'request_id':'s'}},
         {'body':{'request_id':'s','reason':'different'}})
     return {"stories":scripts,**extras(root,op)}
