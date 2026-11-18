@@ -105,6 +105,16 @@ impl Launcher {
         if let Some(session) = &order.named_session {
             command.arg("--named-session").arg(session);
         }
+        if let Some((signal, wait_ms)) = order.before_stop {
+            command.args(["--before-stop", signal, &wait_ms.to_string()]);
+        }
+        let program = if order.program == "clarp-shim" {
+            match self {
+                Self::Direct { shim } | Self::SystemdScope { shim } => shim.as_path(),
+            }
+        } else {
+            Path::new(&order.program)
+        };
         command
             .arg("--spool")
             .arg(&order.spool)
@@ -115,7 +125,7 @@ impl Launcher {
             .arg("--stdin-file")
             .arg(&order.stdin_file)
             .arg("--")
-            .arg(&order.program)
+            .arg(program)
             .args(&order.args);
         // The Host's own secrets stay with the Host. A turn is given what its tools need.
         for name in crate::OWN_SECRETS {
@@ -223,6 +233,7 @@ mod tests {
         ShimOrder {
             named_session: None,
             prompt_as_file: false,
+            before_stop: None,
             turn: TurnId(7),
             attempt: 1,
             spool: PathBuf::from("/data/agents/a1/spool/7.jsonl"),

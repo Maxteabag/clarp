@@ -3,7 +3,7 @@
 # (server-rs/tools/build release): the Host and its shim, a token of its own, and a systemd user
 # unit. Nothing here compiles.
 #
-#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH]
+#   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
 #                                [--push-keys FILE|off]
@@ -14,7 +14,7 @@
 #                  whatever the phone reaches in front of it: the Host's own token is only taken
 #                  from the loopback
 #   --name         what the apps call this Host (default: "<hostname> Rust")
-#   --claude, --codex, --agy   the programs to run for a turn. Default: the ones the Python Host on this
+#   --claude, --codex, --agy, --opencode   the programs to run for a turn. Default: the ones the Python Host on this
 #                  machine runs (read from its unit, clarp-runtime.service), so that an agent
 #                  that moves is run by the same tool it was run by; without a Python Host, the
 #                  ones on the path. Run this again after the Python Host changed its tools
@@ -102,10 +102,10 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--agy|--opencode|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
-        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--start] [--files-only]" >&2; exit 2 ;;
+        *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--opencode PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--start] [--files-only]" >&2; exit 2 ;;
     esac
 done
 
@@ -120,7 +120,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|agy|opencode|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -129,6 +129,7 @@ for key in "${!said[@]}"; do
 done
 listen="${chosen[listen]:-127.0.0.1:7690}"; name="${chosen[name]:-$(hostname) Rust}"
 claude="${chosen[claude]:-}"; codex="${chosen[codex]:-}"; agy="${chosen[agy]:-}"
+opencode="${chosen[opencode]:-}"
 push_relay="${chosen[push-relay]:-https://clarp-audio-central.peter-w-adams96.workers.dev}"
 [ "$push_relay" = off ] && push_relay=""
 port="${listen##*:}"; address="${listen%:*}"
@@ -145,6 +146,7 @@ python_share="${python_share:-$HOME/.local/share/clarp}"
 claude="${claude:-$(PATH="$tools_path" command -v claude || true)}"
 codex="${codex:-$(PATH="$tools_path" command -v codex || true)}"
 agy="${agy:-$(PATH="$tools_path" command -v agy || true)}"
+opencode="${opencode:-$(PATH="$tools_path" command -v opencode || true)}"
 # The owner's tool that knows the seats of the machine's accounts, where there is one: on the
 # path the agents' tools are found on, or on the path of whoever installs.
 seats_tool="${chosen[seats-tool]:-$(PATH="$tools_path:$PATH" command -v hotseat || true)}"
@@ -501,6 +503,7 @@ Environment="BASH_ENV=$share/libexec/tools-first.sh"
 ${claude:+Environment="CLARP_CLAUDE_PROGRAM=$claude"}
 ${codex:+Environment="CLARP_CODEX_PROGRAM=$codex"}
 ${agy:+Environment="CLARP_AGY_PROGRAM=$agy"}
+${opencode:+Environment="CLARP_OPENCODE_PROGRAM=$opencode"}
 # The fence: what a Clarp tool reads to find its Host names this Host, never a Python Host's files.
 # (The Python Host's own tools do not read it. They are off the path above.)
 Environment="CLARP_CONFIG_DIR=$config"
@@ -550,7 +553,7 @@ else
     echo "the connection relay: none (this Host is told of no file that could turn it on)"
 fi
 [ -s "$kept" ] && echo "kept with the installation: $(tr '\n' ' ' < "$kept")"
-echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}, agy = ${agy:-not found}"
+echo "turns run: claude = ${claude:-not found}, codex = ${codex:-not found}, agy = ${agy:-not found}, opencode/deepseek = ${opencode:-not found}"
 echo "the agents' own tools: $tools names in $share/tools"
 [ "$files_only" = 1 ] && { echo "files only: systemd was not asked"; exit 0; }
 systemctl --user daemon-reload

@@ -66,11 +66,13 @@ const WHOLE_MOST: usize = 20;
 const ADDRESSING: &str = "orchestrator.addressing_mode";
 const MODES: [&str; 4] = ["off", "first_name", "most_names", "ai"];
 /// The tools of the Host a router can be set to, as an app names them.
-const TOOLS: [(&str, &str); 5] = [
+const TOOLS: [(&str, &str); 7] = [
     ("claude", "Claude"),
     ("codex", "Codex"),
     ("agy", "Antigravity"),
     ("grok", "Grok"),
+    ("opencode", "OpenCode"),
+    ("deepseek", "DeepSeek"),
     ("muse", "Muse Code"),
 ];
 

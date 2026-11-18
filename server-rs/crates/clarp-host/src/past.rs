@@ -79,6 +79,7 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
         OF_A_DIRECTORY
     };
     let (root, codex, of) = (projects(&home), codex_home(&home), cwd.clone());
+    let opencode = history::opencode::database(&home);
     let agy = agy_own(&home);
     let read = move || match tool.as_str() {
         CODEX => {
@@ -91,6 +92,7 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
             if all { "" } else { &of },
             limit,
         ),
+        "opencode" | "deepseek" => history::opencode::sessions(&opencode, &of, all, limit),
         "muse" => past::native_sessions(
             clarp_kernel::grok_muse::Tool::Muse,
             &home,
@@ -194,6 +196,11 @@ fn read_of_codex(named: &str) -> Option<Held> {
     Some((history::codex(&rollout), history::model(&rollout)))
 }
 
+fn read_of_opencode(named: &str) -> Option<Held> {
+    let path = history::opencode::database(&crate::config::home());
+    Some((history::opencode::read(&path, named)?, String::new()))
+}
+
 /// What was said and done in a conversation Antigravity kept: read from its transcript
 /// ([`history::agy`]). A conversation this Host itself carried over into a new one opens
 /// with the Host's record of the one before, which is no part of what the user said. The
@@ -289,6 +296,15 @@ pub(crate) async fn begins(
             Some((clarp_kernel::grok_muse_history::grok(&log), String::new()))
         })
         .await;
+    }
+    if matches!(tool.to_ascii_lowercase().as_str(), "opencode" | "deepseek") {
+        let label = if tool.eq_ignore_ascii_case("deepseek") {
+            "DeepSeek"
+        } else {
+            "OpenCode"
+        };
+        return begins_where_it_ran(app, asked, resume, fork.is_some(), label, read_of_opencode)
+            .await;
     }
     if tool.eq_ignore_ascii_case("muse") {
         return begins_where_it_ran(app, asked, resume, fork.is_some(), "Muse Code", |id| {

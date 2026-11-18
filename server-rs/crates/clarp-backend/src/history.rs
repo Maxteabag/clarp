@@ -22,6 +22,7 @@ use clarp_kernel::tools;
 use serde_json::{Value, json};
 
 mod agy;
+pub mod opencode;
 mod rollout;
 
 pub use agy::agy;

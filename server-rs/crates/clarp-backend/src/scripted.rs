@@ -62,6 +62,7 @@ impl Backend for Scripted {
         stdin.push(b'\n');
         Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: self.program.clone(),
             args: self.args.clone(),
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],

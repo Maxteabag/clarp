@@ -191,6 +191,7 @@ impl Backend for Agy {
         args.push(format!("--print={prompt}"));
         Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: self.program.clone(),
             args,
             env: vec![
@@ -247,6 +248,7 @@ impl Backend for Agy {
         args.push(format!("--print={}", question.prompt));
         Some(Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: self.program.clone(),
             args,
             env: Vec::new(),
@@ -286,6 +288,7 @@ impl Backend for Agy {
         Some(Apart {
             launch: Launch {
                 prompt_as_file: false,
+                before_stop: None,
                 program: self.program.clone(),
                 args,
                 env: Vec::new(),
