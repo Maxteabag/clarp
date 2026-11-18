@@ -260,7 +260,9 @@ impl Worker {
     }
 
     pub async fn execute(&mut self, tool: &str, args: &Value, explicit: bool) -> Value {
-        if !self.current().await {
+        // A proposed team delegation gets a durable attempt even if a router
+        // returns after hang-up. Only the later fence may authorize the send.
+        if tool != "delegate_to_agent" && !self.current().await {
             return team::ended(tool);
         }
         if tool == "ask_my_agent" {
@@ -329,6 +331,10 @@ impl Worker {
                     return failed(tool);
                 }
                 if !self.current().await {
+                    row["status"] = json!("not_done");
+                    row["status_text"] = json!("not_sent");
+                    row["error"] = json!("call ended before the request");
+                    let _ = self.save(&id, &row).await;
                     return team::ended(tool);
                 }
                 let receipt = if cfg["delegate"]["kind"] == "prompt" {

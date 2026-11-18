@@ -29944,6 +29944,19 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
             .unwrap()
             .contains("Please give Theo work")
     );
+    assert!(
+        saved["pacing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["event"] == "agentLiveAskAnswered"
+                && p["detail"].as_str().unwrap().contains("status=completed"))
+    );
+    use std::os::unix::fs::PermissionsExt as _;
+    assert_eq!(
+        std::fs::metadata(&document).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     let receipts = saved["receipts"].as_array().unwrap();
     for (tool, status) in [
         ("delegate_to_agent", "forwarded"),
@@ -30009,6 +30022,109 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         1
     );
     closed(&grant, 2);
+    // Hold the director's first answer while the phone hangs up. Receipt
+    // of the second proposal in the ledger proves the old worker resumed
+    // after retirement: it may finish the admitted send but cannot start another.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/delegate", listener.local_addr().unwrap());
+    let (entered, request) = std::sync::mpsc::channel();
+    let (release, proceed) = std::sync::mpsc::channel();
+    let director_thread = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let wire = whole_request(&mut stream);
+        entered.send(wire).unwrap();
+        proceed.recv_timeout(Duration::from_secs(20)).unwrap();
+        let body = json!({"result":"forwarded","sent":true,"intent":"before-close","sesjon":4})
+            .to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    });
+    live_profile(
+        &place,
+        "guard",
+        &guard,
+        json!({"user_call_default":"live","user_call_opening":"Hi.",
+        "live_tools":{"enabled":true,"agents":[{"session":member,"name":"Theo"}],
+        "delegate":{"kind":"http","url":endpoint}}}),
+    );
+    // The next route drops expired attempts and keeps newer claims.
+    use clarp_ports::kv::KeyValueEngine as _;
+    let mut store = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    store
+        .put("kept.live_tools", "old-claim", br#"{"at":1}"#)
+        .unwrap();
+    let recent = json!({"at":now_ms() as f64/1000.0});
+    store
+        .put(
+            "kept.live_tools",
+            "recent-claim",
+            recent.to_string().as_bytes(),
+        )
+        .unwrap();
+    let (status,third)=host.ask_as(&phone,"POST","/calls/live",Some(&json!({"agent":session(&guard),"request_id":"call-three","client_nonce":"nonce-three"})));
+    assert_eq!(status, 200, "{third}");
+    let grant = third["live"].clone();
+    let (_door, upstream) = join(&grant, 2);
+    ask(
+        &upstream,
+        "Two tasks",
+        json!([
+            action(
+                "delegate_to_agent",
+                json!({"agent":member,"request":"first"})
+            ),
+            action(
+                "delegate_to_agent",
+                json!({"agent":member,"request":"second"})
+            )
+        ]),
+    );
+    let wire = request.recv_timeout(Duration::from_secs(15)).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(wire.split_once("\r\n\r\n").unwrap().1).unwrap()["request"],
+        "first"
+    );
+    closed(&grant, 3);
+    release.send(()).unwrap();
+    director_thread.join().unwrap();
+    let ledger = || {
+        store
+            .list("kept.live_tools")
+            .unwrap()
+            .into_iter()
+            .filter_map(|(_, bytes)| {
+                let row: Value = serde_json::from_slice(&bytes).unwrap();
+                (row["call_id"] == grant["call_id"] && row["kind"] == "delegate_request")
+                    .then_some(row)
+            })
+            .collect::<Vec<_>>()
+    };
+    wait_for(
+        "the retired call records the refused second delegation",
+        || ledger().iter().any(|r| r["status_text"] == "not_sent"),
+    );
+    assert!(store.get("kept.live_tools", "old-claim").unwrap().is_none());
+    assert!(
+        store
+            .get("kept.live_tools", "recent-claim")
+            .unwrap()
+            .is_some()
+    );
+    let attempts = ledger();
+    assert_eq!(attempts.len(), 2);
+    assert!(attempts.iter().any(|r| r["status_text"] == "forwarded"));
+    assert!(
+        attempts
+            .iter()
+            .any(|r| r["status"] == "not_done" && r["error"] == "call ended before the request")
+    );
+    assert!(upstream.of_kind("session.commentary.append").is_empty());
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its
