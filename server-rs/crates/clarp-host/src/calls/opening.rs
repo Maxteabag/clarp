@@ -561,10 +561,11 @@ impl Desk {
                 .of(op["principal"].as_str().unwrap_or(""))
                 .iter()
                 .find(|c| c.call_id == ring.call_id);
+            use clarp_kernel::rings::binding::CallEnd;
             let ended = match known {
-                Some(call) if call.state == "live" => None,
-                Some(call) => call.ended_at,
-                None => op["call_ended_at"].as_i64(),
+                Some(call) if call.state == "live" => CallEnd::Live,
+                Some(call) => call.ended_at.map_or(CallEnd::Unknown,CallEnd::Ended),
+                None => op["call_ended_at"].as_i64().map_or(CallEnd::Unknown,CallEnd::Ended),
             };
             if !clarp_kernel::rings::binding::expired(op["retired"]["at"].as_i64(), ended, now) {
                 continue;

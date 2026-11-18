@@ -58,8 +58,22 @@ pub fn key(agent_id: &str, turn_id: u64) -> Option<String> {
     (!agent_id.is_empty() && turn_id != 0).then(|| format!("{agent_id}:{turn_id}"))
 }
 
-/// Keep the retired record until the call has been over for a full day.
-pub fn expired(retired_at: Option<i64>, call_ended_at: Option<i64>, now: i64) -> bool {
-    retired_at.is_some_and(|retired| retired <= now)
-        && call_ended_at.is_some_and(|ended| now.saturating_sub(ended) >= 86_400_000)
+#[derive(Clone, Copy)]
+pub enum CallEnd {
+    Live,
+    Ended(i64),
+    Unknown,
+}
+
+/// A retired binding fences clips already in flight. Keep it for a full day
+/// after the later event so a late retirement cannot turn a fenced clip into
+/// ordinary speech. With no known end, the retirement starts that day.
+pub fn expired(retired_at: Option<i64>, call: CallEnd, now: i64) -> bool {
+    let Some(retired) = retired_at else { return false };
+    let since = match call {
+        CallEnd::Live => return false,
+        CallEnd::Ended(ended) => retired.max(ended),
+        CallEnd::Unknown => retired,
+    };
+    now.saturating_sub(since) >= 86_400_000
 }
