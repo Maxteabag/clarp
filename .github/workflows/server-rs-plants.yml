@@ -59,7 +59,6 @@ jobs:
       SHARDS: ${{ inputs.shards }}
       NUMBERS: ${{ inputs.numbers }}
       PLANTS_CARGO: "1"
-      PLANTS_OUT: ${{ runner.temp }}/plants
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -73,6 +72,8 @@ jobs:
         working-directory: server-rs
         run: cargo build --workspace --locked
       - name: Plant
+        env:
+          PLANTS_OUT: ${{ runner.temp }}/plants
         run: |
           # shellcheck disable=SC2086
           python3 "server-rs/tools/plants/$LIST.py" --shard "${{ matrix.shard }}/$SHARDS" $NUMBERS
