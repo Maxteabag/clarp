@@ -1149,23 +1149,20 @@ class OrchestratorService:
         return f"{persona} is active, but I do not have recent work details yet."
 
     @staticmethod
-    def _clip_key(text: str, phrase_key: str) -> tuple[str, str | None]:
-        """The cache key to try, and the text its clip must carry. A model-chosen key plays as it
-        did; one of the router's own sentences (lib.orchestrator_phrases) uses its own key and
-        plays a clip only of that very sentence (R76)."""
-        if phrase_key:
-            return phrase_key, None
-        key = _FIXED_KEY.get(text, "")
-        return key, (text if key else None)
+    def _clip_key(text: str, phrase_key: str) -> str:
+        """The cache key to try: the one given (the model's, _as_clarify's default), else the
+        router's own key for one of its fixed sentences (lib.orchestrator_phrases, R76). Whoever
+        chose it, its clip plays only when it is this very text (R80)."""
+        return phrase_key or _FIXED_KEY.get(text, "")
 
     def _speak_orchestrator(self, text: str, settings: OrchestratorSettings,
                             *, phrase_key: str = "") -> None:
-        key, expected = self._clip_key(text, phrase_key)
+        key = self._clip_key(text, phrase_key)
         if key and self._play_cached_phrase(
             phrase_key=key,
             session="",
             voice_id=settings.voice_id,
-            expected_text=expected,
+            expected_text=text,
         ):
             return
         self.ctx.speak_announcement(text, settings.voice_id, session=None)
@@ -1174,18 +1171,21 @@ class OrchestratorService:
                           *, phrase_key: str = "") -> None:
         agent = identity.lookup(session)
         if agent:
-            key, expected = self._clip_key(text, phrase_key)
+            key = self._clip_key(text, phrase_key)
             if key and self._play_cached_phrase(
                 phrase_key=key,
                 session=session,
                 voice_id=agent.get("voice_id") or "",
-                expected_text=expected,
+                expected_text=text,
             ):
                 return
             self.ctx.speak_announcement(text, agent.get("voice_id"), session=session)
 
     def _play_cached_phrase(self, *, phrase_key: str, session: str,
-                            voice_id: str, expected_text: str | None = None) -> bool:
+                            voice_id: str, expected_text: str) -> bool:
+        """Play the cached clip of ``expected_text`` under ``phrase_key``, if there is one: only a
+        row whose text is that very sentence plays (R80: a clip never says other words than the
+        ones meant, whoever chose the key)."""
         row = conn().execute(
             """SELECT audio_path, text
                  FROM orchestrator_phrase_cache
@@ -1203,8 +1203,8 @@ class OrchestratorService:
         ).fetchone()
         if not row or not row["audio_path"]:
             return False
-        if expected_text is not None and row["text"] != expected_text:
-            # A clip of another text never stands in for the sentence (R76): spoken instead.
+        if row["text"] != expected_text:
+            # A clip of another text never stands in for the sentence (R76, R80): spoken instead.
             log("orchestratorPhraseMismatch", f"key={phrase_key}")
             return False
         path = str(row["audio_path"])
