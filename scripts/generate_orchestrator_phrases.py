@@ -23,13 +23,9 @@ from lib.paths import RuntimePaths  # noqa: E402
 from lib.tts_engine import make_clip_filename  # noqa: E402
 
 
-PHRASES = {
-    "clarify_target": "Was that for me?",
-    "ambiguous_target": "I am not sure who that was for.",
-    "repeat_missing": "I do not have anything recent to replay.",
-    "control_unknown": "I am not sure what control action you meant.",
-    "agent_control_unknown": "I am not sure how to do that yet.",
-}
+# The texts live with the router that speaks them (lib.orchestrator_phrases, issue 360 R76):
+# a clip is recorded for exactly the sentence the router says under that key.
+from lib.orchestrator_phrases import PHRASES  # noqa: E402
 
 
 def upsert_phrase(*, phrase_key: str, voice_id: str, text: str,
