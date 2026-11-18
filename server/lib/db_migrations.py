@@ -293,6 +293,9 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
         if version < 127:
             _migrate_to_v127(con)
 
+        if version < 128:
+            _migrate_to_v128(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -1092,6 +1095,19 @@ def _migrate_to_v125(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "supported_conversation_modes" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
+
+def _migrate_to_v128(con: sqlite3.Connection) -> None:
+    """Start Claude delta accounting at installation. Preserve historical charges."""
+    con.execute(_HOST_INDEX_SQL)
+    start = db_schema._SCHEMA_SQL.index("CREATE TABLE usage_cursors")
+    end = db_schema._SCHEMA_SQL.index(";", start)
+    con.execute(db_schema._SCHEMA_SQL[start:end].replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1))
+    if "cost_kind" not in {row[1] for row in con.execute("PRAGMA table_info(turn_usage)")}:
+        con.execute("ALTER TABLE turn_usage ADD COLUMN cost_kind TEXT NOT NULL DEFAULT 'legacy'")
+    stamp = int(time.time() * 1000)
+    con.execute("INSERT OR IGNORE INTO settings(key, value, updated_at) VALUES (?, ?, ?)",
+                ("usage.claude_cost_activation_ms", str(stamp), stamp))
+
 
 def _migrate_to_v127(con: sqlite3.Connection) -> None:
     """``goal_keeper_receipts``: one receipt per goal per Goal keeper run. A new table and its
