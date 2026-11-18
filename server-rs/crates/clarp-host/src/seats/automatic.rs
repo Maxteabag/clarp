@@ -6,9 +6,6 @@ use clarp_kernel::seat_switch::{self, Demand};
 const ROLE: &str = "account-hotseat";
 
 async fn owner(app: &App) -> Option<(String, u64, Value)> {
-    if app.config.accounts != Accounts::Select || !app.seats.told() {
-        return None;
-    }
     app.janitors
         .read(app, |book, world, _| {
             let id = book.resolve(ROLE, None, world).ok()??;
@@ -26,6 +23,9 @@ async fn owner(app: &App) -> Option<(String, u64, Value)> {
 }
 
 pub(super) async fn enabled(app: &App) -> bool {
+    if app.config.accounts != Accounts::Select || !app.seats.told() {
+        return false;
+    }
     owner(app).await.is_some()
 }
 
@@ -33,6 +33,8 @@ pub fn start(app: &App) {
     if app.config.accounts != Accounts::Select || !app.seats.told() {
         return;
     }
+    // The account mode and configured tool are fixed for this Host process.
+    // Only an admitted worker looks up Janitor owners on subsequent ticks.
     let app = app.clone();
     tokio::spawn(async move {
         let every = Duration::from_millis(app.config.janitors_checked_every_ms.max(50));
