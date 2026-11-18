@@ -241,7 +241,49 @@ def extras(root, op):
                     elif action=='parked':result=op.authorize_parked_launch(row_id,trace)
                     else:result=op.resolve_launch_failure(row_id,trace)
                     gates.append(dict(action=action,before=before,status=status,breach=breach,result=result,effects=effects,after=opening))
-    return dict(headers=headers,clips=clips,uuids=uuids,gates=gates)
+    return dict(headers=headers,clips=clips,uuids=uuids,gates=gates,admissions=admissions(op))
+
+
+def admissions(op):
+    import sqlite3
+    from lib import prompt_admissions, turn_queue
+    con=sqlite3.connect(':memory:')
+    con.row_factory=sqlite3.Row
+    con.execute('CREATE TABLE prompt_admissions (agent_id, client_admission_id, admission_id, channel, trace_id)')
+    op.db.conn=lambda:con
+    cases=[]
+    for state in ('intended','admitted','cancelled','started',None):
+        for admission in (None,'call','foreign','other-trace'):
+            for queued in (None,'same','other'):
+                for guard in ('ok','stopped_after_answer','retired','restart'):
+                    gen={'boot':'boot','instance':'instance'}
+                    opening={'ring_id':'ring','call_id':'call','server_id':'test','session':'service','agent_id':'agent',
+                             'reason':'Pump','silence_ms':1250,'state':'initiative_queued','retired':None,
+                             'fence':{'host_gen':gen},'intent':{'state':state,'trace_id':'trace','admission_id':'call-open:ring:1','cause':'no_mic'}}
+                    if state is None: opening['intent']=None
+                    if guard=='retired':opening['retired']={'reason':'call_ended','at':100}
+                    box={'op':opening,'gen':gen if guard!='restart' else dict(gen,boot='new-boot')}
+                    before=copy.deepcopy(opening)
+                    row=None if queued is None else {'status':'queued','claimed_at':None,'trace_id':'trace' if queued=='same' else 'other'}
+                    op._row=lambda _:row
+                    op._fence_breach=lambda _: 'stopped_after_answer' if guard=='stopped_after_answer' else ''
+                    op._withdraw_row=lambda _: row is not None
+                    effects=[]
+                    turn_queue.mark_unknown=lambda _:None
+                    @contextlib.contextmanager
+                    def transaction(_): yield box
+                    op._opening_txn=transaction
+                    con.execute('DELETE FROM prompt_admissions')
+                    existing=None if admission is None else {'channel':'message' if admission=='foreign' else 'call','trace_id':'other' if admission=='other-trace' else 'trace'}
+                    if existing:con.execute('INSERT INTO prompt_admissions VALUES(?,?,?,?,?)',('agent','call-open:ring:1','owned',existing['channel'],existing['trace_id']))
+                    prompt_admissions.create=lambda **kw:effects.append('create') or kw
+                    prompt_admissions.record=lambda *_a,**_kw:effects.append('record') or 'admission'
+                    turn_queue.enqueue=lambda **_kw:effects.append('enqueue')
+                    turn_queue.allow_paused_for=lambda _:effects.append('allow_paused')
+                    result=op.admit_initiative('ring')
+                    cases.append(dict(before=before,generation=box['gen'],guard=guard,existing=existing,row=row,result=result,after=opening,effects=effects))
+    con.close()
+    return cases
 
 if __name__=='__main__':
     if '--record' in sys.argv:

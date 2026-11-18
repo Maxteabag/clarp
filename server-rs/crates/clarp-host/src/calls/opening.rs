@@ -44,9 +44,10 @@ impl Desk {
         app: &App,
         owner: &str,
         change: Change<'_>,
+        id: &str,
         queue: &Value,
     ) -> Result<Applied, Unavailable> {
-        self.rings(app, |rings, calls, with, (out, call_effects)| {
+        self.with_opening(app, id, |rings, calls, with, (out, call_effects)| {
             let now = with.at.now_ms;
             let body = match &change {
                 Change::Claim(b) | Change::Greeting { body: b, .. } => *b,
@@ -56,7 +57,14 @@ impl Desk {
             let ring = found.map(|ring| ring.ring_id.clone()).unwrap_or_default();
             let fence = found.and_then(|ring| {
                 with.world.opening.and_then(|proof| {
-                    rules::fence(ring, calls, with.at.host_id, proof).map(str::to_owned)
+                    rules::fence(
+                        ring,
+                        rings.rings().iter().any(|r| r.ring_id == ring.ring_id),
+                        calls,
+                        with.at.host_id,
+                        proof,
+                    )
+                    .map(str::to_owned)
                 })
             });
             let generation = proven(with);
@@ -143,7 +151,7 @@ impl Desk {
                 status,
                 answer,
                 admit: fx.admit,
-                withdraw: fx.withdraw,
+                withdraw: fx.takes_waiter(queue, &state["intent"]["trace_id"]),
                 state,
             }
         })
@@ -173,7 +181,7 @@ impl Desk {
         message: &str,
         ok: bool,
     ) -> Result<(), Unavailable> {
-        self.rings(app, |rings, _, with, (out, _)| {
+        self.with_opening(app, id, |rings, _, with, (out, _)| {
             let g = proven(with);
             let world = rules::World {
                 generation: &g,
@@ -231,10 +239,22 @@ impl Desk {
     async fn saved_opening(&self, app: &App, token: &Value) -> Result<Option<Value>, Unavailable> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
-        Ok(books
-            .rings
-            .by_opening_token(token)
-            .map(|r| r.opening.clone()))
+        if let Some(r) = books.rings.by_opening_token(token) {
+            return Ok(Some(r.opening.clone()));
+        }
+        let Some(token) = token.as_str().filter(|t| t.starts_with("opn_")) else {
+            return Ok(None);
+        };
+        let Some(id) = app.fleet.kept("opening_by_token", token.into()).await? else {
+            return Ok(None);
+        };
+        let id = String::from_utf8(id).map_err(|e| Unavailable(e.to_string()))?;
+        let Some(raw) = app.fleet.kept("opening_history", id).await? else {
+            return Ok(None);
+        };
+        let ring: clarp_kernel::rings::Ring =
+            serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string()))?;
+        Ok(Some(ring.opening))
     }
 
     pub(super) async fn queue_row(&self, app: &App, op: &Value) -> Result<Value, Unavailable> {
@@ -262,56 +282,9 @@ impl Desk {
             .await?
             .unwrap_or(Value::Null);
         let row = self.queue_row(app, &original).await?;
-        let mut applied = self.apply_opening(app, owner, change, &row).await?;
-        if applied.status == 404
-            && let Change::Claim(claim) = change
-            && let Some(token) = body["token"].as_str().filter(|t| t.starts_with("opn_"))
-            && let Some(kept) = app.fleet.kept("opening_history", token.into()).await?
-        {
-            let mut op: Value =
-                serde_json::from_slice(&kept).map_err(|err| Unavailable(err.to_string()))?;
-            let queue = self.queue_row(app, &op).await?;
-            let g = super::generation::read(&app.config.data_dir);
-            let generation = if g == super::generation::read(&app.config.data_dir) {
-                g
-            } else {
-                Value::Null
-            };
-            let now = app.clock.now_ms();
-            let nonce = format!("own_{}", crate::ids::hex(16));
-            let trace = format!("callopen-{}", crate::ids::hex(6));
-            let world = rules::World {
-                generation: &generation,
-                now,
-                host: &app.server_id,
-                fence: Some("ring_changed"),
-                queue: &queue,
-                nonce: &nonce,
-                trace: &trace,
-            };
-            let mut effects = rules::Effects::default();
-            let (status, answer) = rules::claim(&mut op, owner, claim, &world, &mut effects);
-            if effects.dirty {
-                op["updated_at"] = json!(now);
-                app.fleet
-                    .keep(
-                        "opening_history",
-                        token.into(),
-                        Some(op.to_string().into_bytes()),
-                    )
-                    .await?;
-            }
-            return Ok(Applied {
-                status,
-                answer,
-                admit: false,
-                withdraw: false,
-                state: op,
-            });
-        }
+        let id = original["ring_id"].as_str().unwrap_or("");
+        let mut applied = self.apply_opening(app, owner, change, id, &row).await?;
         if applied.withdraw
-            && row["foreign"] != true
-            && row["trace_id"] == original["intent"]["trace_id"]
             && let Some(turn) = row["turn"].as_u64()
             && let Some(member) = original["session"].as_str().and_then(|s| app.member(s))
         {
@@ -344,22 +317,18 @@ impl Desk {
             .member(op["session"].as_str().unwrap_or(""))
             .ok_or_else(|| Unavailable("opening agent gone".into()))?;
         let row = member.agent.opening_row(id).await?;
-        let authorized = self
-            .rings(app, |rings, calls, with, (out, _)| {
+        let (authorized,withdraw) = self
+            .with_opening(app,ring_id, |rings, calls, with, (out, _)| {
+                let present = rings.rings().iter().any(|r| r.ring_id == ring_id);
                 let generation = proven(with);
                 rings
                     .change_opening(ring_id, with.at.now_ms, out, |ring, fx| {
                         let fence = with.world.opening.and_then(|p| {
-                            rules::fence(ring, calls, with.at.host_id, p).map(str::to_owned)
+                            rules::fence(ring, present, calls, with.at.host_id, p).map(str::to_owned)
                         });
                         let op = &mut ring.opening;
                         if op["intent"]["admission_id"] != id
                             || op["intent"]["trace_id"] != trace
-                            || !op["retired"].is_null()
-                            || !matches!(
-                                op["intent"]["state"].as_str(),
-                                Some("intended" | "admitted")
-                            )
                         {
                             return false;
                         }
@@ -372,27 +341,22 @@ impl Desk {
                             trace: "",
                             fence: fence.as_deref(),
                         };
-                        if let Some(reason) = rules::breach(&op["fence"]["host_gen"], &generation)
-                            .or(fence.as_deref())
-                        {
-                            rules::retire_current(op, reason, &world, fx);
-                            fx.announce = fx.dirty;
-                            return false;
-                        }
-                        if !row.is_null() && (row["foreign"] == true || row["trace_id"] != trace) {
-                            op["state"] = json!("unknown");
-                            op["intent"]["state"] = json!("unknown");
-                            fx.dirty = true;
-                            fx.announce = true;
-                            return false;
-                        }
-                        op["intent"]["state"] = json!("admitted");
-                        fx.dirty = true;
-                        row.is_null()
+                        let admission = if row.is_null() { Value::Null } else {
+                            json!({"channel": if row["foreign"] == true {"message"} else {"call"}, "trace_id":row["trace_id"]})
+                        };
+                        let decision = rules::admit(op,&admission,true,&world,fx);
+                        fx.announce = fx.dirty && decision == "fenced";
+                        decision == "admitted"
                     })
-                    .is_some_and(|(send, _)| send)
+                    .map(|(send, fx)| (send,fx.takes_waiter(&row,&op["intent"]["trace_id"]))).unwrap_or_default()
             })
             .await?;
+        if withdraw && let Some(turn) = row["turn"].as_u64() {
+            member
+                .agent
+                .withdraw(clarp_kernel::turn::TurnId(turn), "opening retired".into())
+                .await?;
+        }
         if !authorized {
             return Ok(());
         }
@@ -417,7 +381,7 @@ impl Desk {
             // the actor can establish the provenance of the winning message.
             let winner = member.agent.opening_row(id).await?;
             if winner["foreign"] == true || winner["trace_id"] != trace {
-                self.rings(app, |rings, _, with, (out, _)| {
+                self.with_opening(app, ring_id, |rings, _, with, (out, _)| {
                     rings.change_opening(ring_id, with.at.now_ms, out, |r, fx| {
                         if r.opening["intent"]["admission_id"] == id
                             && r.opening["intent"]["trace_id"] == trace
@@ -440,6 +404,15 @@ impl Desk {
 }
 
 impl Desk {
+    async fn archived_openings(app: &App) -> Result<Vec<clarp_kernel::rings::Ring>, Unavailable> {
+        app.fleet
+            .kept_all("opening_history")
+            .await?
+            .into_iter()
+            .map(|(_, raw)| serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string())))
+            .collect()
+    }
+
     /// A process may stop between the intent commit and the agent's idempotent
     /// admission. Recover only the reservation that is still current.
     pub async fn recover_openings(&self, app: &App) -> Result<(), Unavailable> {
@@ -447,10 +420,12 @@ impl Desk {
         let pending = {
             let mut held = self.books.lock().await;
             let books = Self::read(&mut held, app).await?;
+            let archived = Self::archived_openings(app).await?;
             books
                 .rings
                 .rings()
                 .iter()
+                .chain(archived.iter())
                 .filter(|r| {
                     r.opening["retired"].is_null()
                         && matches!(
@@ -476,10 +451,12 @@ impl Desk {
         let retired = {
             let mut held = self.books.lock().await;
             let books = Self::read(&mut held, app).await?;
+            let archived = Self::archived_openings(app).await?;
             books
                 .rings
                 .rings()
                 .iter()
+                .chain(archived.iter())
                 .filter(|r| !r.opening.is_null() && r.opening["retired"].is_null())
                 .filter_map(|r| {
                     let reason = if let Some(owner) = principal {
@@ -497,7 +474,7 @@ impl Desk {
             let row = self.queue_row(app, &op).await?;
             let id = op["ring_id"].as_str().unwrap_or("");
             let withdraw = self
-                .rings(app, |rings, _, with, (out, _)| {
+                .with_opening(app, id, |rings, _, with, (out, _)| {
                     let generation = proven(with);
                     let world = rules::World {
                         now: with.at.now_ms,
@@ -511,7 +488,7 @@ impl Desk {
                     let changed = rings.change_opening(id, with.at.now_ms, out, |r, fx| {
                         fx.announce = rules::retire_current(&mut r.opening, &reason, &world, fx);
                     });
-                    changed.is_some_and(|(_, fx)| fx.withdraw && row["foreign"] != true)
+                    changed.is_some_and(|(_, fx)| fx.takes_waiter(&row, &op["intent"]["trace_id"]))
                 })
                 .await?;
             if withdraw
