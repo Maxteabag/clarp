@@ -20,6 +20,7 @@ pub mod agy;
 pub mod catalogue;
 pub mod claude;
 pub mod codex;
+mod grok_muse;
 pub mod history;
 pub mod limits;
 pub mod past;
@@ -282,6 +283,8 @@ pub fn program(id: &str) -> Option<String> {
     match id {
         "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
         "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
+        "grok" => Some(named("CLARP_GROK_PROGRAM").unwrap_or_else(|| "grok".into())),
+        "muse" => Some(named("CLARP_MUSE_PROGRAM").unwrap_or_else(|| "muse".into())),
         "agy" => Some(named(AGY_PROGRAM_ENV).unwrap_or_else(|| "agy".to_string())),
         _ => None,
     }
@@ -301,6 +304,10 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "agy" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
             Some(program) => agy::Agy::with_program(program),
             None => agy::Agy::new(),
+        })),
+        "grok" | "muse" => Some(Arc::new(grok_muse::Adapter {
+            tool: if id == "grok" { clarp_kernel::grok_muse::Tool::Grok } else { clarp_kernel::grok_muse::Tool::Muse },
+            program: program(id)?,
         })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
