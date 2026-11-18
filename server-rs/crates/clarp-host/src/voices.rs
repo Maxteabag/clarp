@@ -303,7 +303,11 @@ async fn preview(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    match app.mouth.preview(&provider, voice, &said, Some(&kept_as)).await {
+    match app
+        .mouth
+        .preview(&provider, voice, &said, Some(&kept_as))
+        .await
+    {
         Ok(preview) => preview.send(&header_text(&headers, "range")),
         Err(why) => {
             eprintln!("clarp-host: a preview of a voice could not be made: {why}");

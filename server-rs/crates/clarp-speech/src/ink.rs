@@ -94,7 +94,7 @@ impl Ink {
             decoder,
         }
     }
-    fn url(&self,language:&str,listen_for:&str)->String{
+    fn url(&self, language: &str, listen_for: &str) -> String {
         let words = terms(listen_for);
         let mut fields = vec![
             ("model", self.model),
@@ -133,7 +133,7 @@ impl Ink {
         key: &str,
     ) -> Result<Heard, Deaf> {
         let pcm = chirp::pcm(&self.decoder, clip.audio).map_err(Deaf::Failed)?;
-        let url=self.url(language,listen_for);
+        let url = self.url(language, listen_for);
         let mut req = url
             .into_client_request()
             .map_err(|_| Deaf::Failed("invalid Cartesia speech endpoint".into()))?;
@@ -193,15 +193,24 @@ impl Ink {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod tests{
+mod tests {
     use super::*;
     #[test]
-    fn ink_urls_preserve_vocabulary_order_and_limits(){
-        let v:Value=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/speech-engines-vectors.json")).unwrap();
-        let ink=Ink::new("ink-2",Box::new(||None),String::new(),"cat");
-        for case in v["ink_queries"].as_array().unwrap(){
-            let terms=case["words"].as_array().unwrap().iter().map(|s|s.as_str().unwrap()).collect::<Vec<_>>().join(",");
-            assert_eq!(ink.url("nb",&terms),case["url"]);
+    fn ink_urls_preserve_vocabulary_order_and_limits() {
+        let v: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/speech-engines-vectors.json"
+        ))
+        .unwrap();
+        let ink = Ink::new("ink-2", Box::new(|| None), String::new(), "cat");
+        for case in v["ink_queries"].as_array().unwrap() {
+            let terms = case["words"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|s| s.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join(",");
+            assert_eq!(ink.url("nb", &terms), case["url"]);
         }
     }
 }

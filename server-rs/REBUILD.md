@@ -1989,6 +1989,21 @@ itself, under a name of the battle test's own, is in `docs/battle-test.md` (16 N
 reported: the Python connector dropped the apps' own headers (reference defect R25; fixed there within the
 hour, PR 383).
 
+**The other engines of speech** (18 Nov 2026). Deepgram returns MP3 over HTTP, with Flux and Aura
+using different API versions. ElevenLabs sends its audio in WebSocket frames for streaming speech.
+Google Chirp 3 HD returns a complete MP3 in JSON. It uses the configured ADC account and project,
+refuses inputs longer than 5,000 UTF-8 bytes, and preserves supported pauses as escaped SSML.
+A live line can switch engines only before the listener receives audio. For an audition the Host
+buffers the answer. Only the requested voice enters the cache, and a fallback is returned for that
+play. The Cartesia picker reads the voice catalogue and offers previews. A preview by text creates
+an audio event for the requested session.
+
+The app can change the speaking provider and its fallback. The Rust Host keeps this selection
+with the fleet and uses it on subsequent clips. The owner’s file supplies defaults and credentials.
+Cartesia Ink-Whisper receives the uploaded clip as a multipart file. Ink-2 receives decoded PCM
+over a socket, with vocabulary in its URL. Partial transcripts are replaced as the provider speaks,
+and only the final parts are joined for the answer.
+
 **The heartbeat** (16 Nov 2026). An agent that asked for it is given a turn when it has been idle for the
 owner's interval, so that it looks at what it has standing: the prompt, the plan it has (its title and at
 most twelve things that are open, each followed by its parts), and before them a word about a turn that was
