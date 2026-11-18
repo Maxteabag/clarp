@@ -39,6 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 from . import db
+from .goal_keeper_memo import KeeperMemo
 from .log import log_exception
 
 ROLE = "goal-keeper"
@@ -449,7 +450,13 @@ def _seen(con, row, now: int, watch: Triggers, *, full: bool = False) -> "Activi
     return seen
 
 
-def due(config: dict, progress: dict, now: int) -> list[str]:
+def due(config: dict, progress: dict, now: int, *, memo: KeeperMemo | None = None) -> list[str]:
+    if memo is not None:
+        return memo.evaluate(config, progress, now, _due)
+    return _due(config, progress, now, None)
+
+
+def _due(config: dict, progress: dict, now: int, memo: KeeperMemo | None) -> list[str]:
     """Goals whose folded triggers are ripe, or that a due sweep finds active.
     ``progress`` (the Janitor's persisted state) is updated in place."""
     from .janitor_schedule import compute_next_run
@@ -466,7 +473,8 @@ def due(config: dict, progress: dict, now: int) -> list[str]:
     con = db.conn()
     caught = progress.setdefault("caught_up", {})
     ready, live = [], set()
-    for row in open_goals(config):
+    rows = open_goals(config) if memo is None else memo.rows(config, sweeping, open_goals)
+    for row in rows:
         plan_id = row["plan_id"]
         live.add(plan_id)
         state = goals.setdefault(plan_id, {})

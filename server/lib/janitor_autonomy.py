@@ -278,6 +278,7 @@ SEAT_RETELL_MS=15*60*1000
 
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None,notice_stream=None,seat_serves=None):
+        self._keeper_memos = {}
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         # goal_ask(run, prompt, plan_id) -> (answer, usage, model): the Goal keeper's model call.
         self.goal_ask=goal_ask or (lambda run,prompt,plan_id:model_json(run,prompt,plan_id));self.goal_batch=None
@@ -677,14 +678,20 @@ class AutonomyJanitors:
         parallel on a thread of its own, so model calls never hold up this loop."""
         from . import goal_keeper
         if self.goal_batch is not None and self.goal_batch.is_alive():return
-        for config in janitor_builtins.eligible(goal_keeper.ROLE):
+        configs = janitor_builtins.eligible(goal_keeper.ROLE)
+        active = {(config["agent_id"], config["generation"]) for config in configs}
+        self._keeper_memos = {key: reader for key, reader in self._keeper_memos.items() if key in active}
+        for config in configs:
             if self.stop_event.is_set():return
             watch=goal_keeper.triggers(config)
             if not watch.progress_attachment:continue
             now=db.now_ms()
             progress=janitors.get_progress(watch.progress_attachment) or {}
             if progress.get('generation')!=config['generation']:progress={'generation':config['generation']}
-            ready=goal_keeper.due(config,progress,now)
+            key = (config["agent_id"], config["generation"])
+            if key not in self._keeper_memos:
+                self._keeper_memos[key] = goal_keeper.KeeperMemo()
+            ready=goal_keeper.due(config,progress,now,memo=self._keeper_memos[key])
             janitors.save_progress(watch.progress_attachment,config['generation'],progress)
             if not ready:continue
             width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
