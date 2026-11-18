@@ -29,15 +29,23 @@ async fn perform(
     let directory = app.fleet.directory();
     let agent = data["agent_id"].as_str().unwrap_or("").trim();
     let known = directory.members.iter().any(|m| m.record.agent_id == agent);
-    let book=&app.ears.vocab;
-    let mut value=if !write && matches!(action.as_str(),"runs"|"run"){
-        book.report(&app.fleet,&action,&data).await
-    }else{book.administration(&app.fleet,&action,&data,now,known,write).await}
-    .map_err(|(status,why)|ApiError::new(status,why))?;
-    if action=="run"{
-        let trace=clarp_kernel::vocabulary::book::text(&data["trace_id"]);
-        let url=format!("/transcription-audio?trace_id={trace}");
-        if tokio::task::spawn_blocking(move||audio::exists(&root,&trace)).await.unwrap_or(false){value["audio_url"]=json!(url);}
+    let book = &app.ears.vocab;
+    let mut value = if !write && matches!(action.as_str(), "runs" | "run") {
+        book.report(&app.fleet, &action, &data).await
+    } else {
+        book.administration(&app.fleet, &action, &data, now, known, write)
+            .await
+    }
+    .map_err(|(status, why)| ApiError::new(status, why))?;
+    if action == "run" {
+        let trace = clarp_kernel::vocabulary::book::text(&data["trace_id"]);
+        let url = format!("/transcription-audio?trace_id={trace}");
+        if tokio::task::spawn_blocking(move || audio::exists(&root, &trace))
+            .await
+            .unwrap_or(false)
+        {
+            value["audio_url"] = json!(url);
+        }
     }
     Ok(Json(value))
 }
