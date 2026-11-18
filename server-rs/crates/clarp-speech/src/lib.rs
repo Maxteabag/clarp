@@ -24,3 +24,6 @@ pub mod nova;
 pub mod scribe;
 pub mod speak;
 pub mod whisper;
+
+mod speech_socket;
+pub mod ink;

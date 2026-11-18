@@ -64,6 +64,8 @@ pub struct Ears {
     scribe: Arc<dyn Listener>,
     /// Deepgram Nova, which is there when its key is.
     nova: Arc<dyn Listener>,
+    ink:Arc<dyn Listener>,
+    ink_whisper:Arc<dyn Listener>,
     /// Google's Chirp, which is there when the owner's file names a project and his
     /// account's file can be read.
     chirp: Arc<dyn Listener>,
@@ -148,10 +150,16 @@ impl Ears {
         if !config.chirp_decoder.is_empty() {
             chirp = chirp.decoded_by(vec![config.chirp_decoder.clone()]);
         }
+        let ink=|model|->Arc<dyn Listener>{
+            let owner=keys.clone();
+            Arc::new(clarp_speech::ink::Ink::new(model,Box::new(move ||owner.key("cartesia")),config.ink_endpoint.clone(),&config.chirp_decoder))
+        };
         Self {
             own,
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
+            ink:ink("ink-2"),
+            ink_whisper:ink("ink-whisper"),
             chirp: Arc::new(chirp),
             keys,
             engine: config.transcription_engine.clone(),
@@ -177,7 +185,7 @@ impl Ears {
     /// what it needs: its key, or for Google the owner's project and account.
     fn has(&self, provider: &str) -> bool {
         match provider {
-            "elevenlabs" | "deepgram" => self.keys.key(provider).is_some(),
+            "elevenlabs" | "deepgram" | "cartesia" => self.keys.key(provider).is_some(),
             "google" => {
                 let file = self.keys.read();
                 file.is_some_and(|file| owner::google_speech(&file).is_some())
@@ -244,6 +252,8 @@ impl Ears {
         let engine = match model {
             SCRIBE => &self.scribe,
             NOVA => &self.nova,
+            "cartesia:ink-2"=>&self.ink,
+            "cartesia:ink-whisper"=>&self.ink_whisper,
             CHIRP => &self.chirp,
             // An engine the contract lists and this Host does not have.
             _ => return Err((StatusCode::BAD_REQUEST, heard::not_installed(model))),

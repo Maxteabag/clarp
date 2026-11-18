@@ -217,12 +217,6 @@ async fn no_hotseat() -> ApiError {
     not_built("Changing the account seats is")
 }
 
-/// `GET /cartesia-voices`: the old picker of Cartesia's voices. The catalogue of voices
-/// (`GET /voice-catalog`) has them; this list is not kept.
-async fn cartesia_voices() -> Json<Value> {
-    Json(json!({ "available": false, "voices": [] }))
-}
-
 async fn podcasts() -> Json<Value> {
     Json(json!({ "conversations": [], "next_cursor": null }))
 }
@@ -425,7 +419,6 @@ pub fn routes() -> Router<App> {
         .route("/hotseat/resume", post(hotseat_resume))
         .route("/hotseat/switch", post(hotseat_switch))
         .route("/hotseat/{action}", post(no_hotseat))
-        .route("/cartesia-voices", get(cartesia_voices))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))
         .route("/vocab/packs", get(vocab_packs).post(no_vocabulary))

@@ -112,6 +112,7 @@ pub struct Config {
     pub deepgram_voice_endpoint: String,
     pub eleven_voice_endpoint: String,
     pub google_voice_endpoint: String,
+    pub ink_endpoint:String,
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
     /// Empty: the push service itself.
     pub apns_endpoint: String,
@@ -443,6 +444,7 @@ impl Config {
             Ok(endpoint)
         };
         let deepgram_voice_endpoint = voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        let ink_endpoint=voice_endpoint("CLARP_INK_ENDPOINT")?;
         let google_voice_endpoint = voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
         let eleven_voice_endpoint = voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
         let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
@@ -564,6 +566,7 @@ impl Config {
             deepgram_voice_endpoint,
             eleven_voice_endpoint,
             google_voice_endpoint,
+            ink_endpoint,
             apns_endpoint,
             fcm_endpoint,
             gemini_endpoint,
