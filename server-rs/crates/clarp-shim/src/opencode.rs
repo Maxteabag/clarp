@@ -5,8 +5,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
-use clarp_tool_args::opencode;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use clarp_tool_args::opencode;
 use nix::sys::signal::{SigSet, Signal, kill};
 use nix::unistd::Pid;
 use serde_json::{Value, json};
@@ -150,7 +150,19 @@ impl Client {
     fn json(req: minreq::Request) -> Result<Value> {
         const LIMIT: u64 = 10 * 1024 * 1024;
         let mut bytes = Vec::new();
-        Read::take(Self::response(req)?, LIMIT + 1).read_to_end(&mut bytes)?;
+        let reply = Self::response(req)?;
+        let length = reply
+            .headers
+            .get("content-length")
+            .map(|value| value.parse::<u64>())
+            .transpose()?;
+        if length.is_some_and(|n| n > LIMIT) {
+            return Err("OpenCode response exceeds ten MiB".into());
+        }
+        Read::take(reply, LIMIT + 1).read_to_end(&mut bytes)?;
+        if length.is_some_and(|n| n != bytes.len() as u64) {
+            return Err("incomplete OpenCode response".into());
+        }
         if bytes.len() as u64 > LIMIT {
             return Err("OpenCode response exceeds ten MiB".into());
         }
@@ -426,6 +438,7 @@ pub fn run(binary: &str) -> Result<u8> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -445,6 +458,77 @@ mod tests {
             (String::new(), None),
         ] {
             assert_eq!(port(io::Cursor::new(data.into_bytes())), want);
+        }
+    }
+
+    // A loopback server that captures the request and answers once. Redirects,
+    // bad statuses and truncated bodies are tested without any provider.
+    fn answering(reply: Vec<u8>) -> (Client, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            use std::io::BufRead;
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut reader = BufReader::new(&socket);
+            let mut request = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+                request.push_str(&line);
+            }
+            let _ = socket.write_all(&reply);
+            request
+        });
+        (
+            Client {
+                base: format!("http://127.0.0.1:{port}"),
+                auth: "Basic synthetic".into(),
+                directory: "/a b".into(),
+            },
+            server,
+        )
+    }
+
+    #[test]
+    fn loopback_http_reads_chunked_responses_and_refuses_redirects_and_errors() {
+        for (response, wanted) in [
+            (
+                "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{\"\r\n5\r\na\":1}\r\n0\r\n\r\n",
+                Ok(json!({"a":1})),
+            ),
+            ("HTTP/1.1 204 No Content\r\n\r\n", Ok(Value::Null)),
+            (
+                "HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\nContent-Length: 0\r\n\r\n",
+                Err("302"),
+            ),
+            (
+                "HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\n{}",
+                Err("incomplete"),
+            ),
+            (
+                "HTTP/1.1 200 OK\r\nContent-Length: 10485761\r\n\r\n",
+                Err("ten MiB"),
+            ),
+            (
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n",
+                Err("401"),
+            ),
+        ] {
+            let (client, server) = answering(response.as_bytes().to_vec());
+            let result = client.post("/session", None, 3);
+            match wanted {
+                Ok(body) => assert_eq!(result.unwrap(), body),
+                Err(code) => assert!(result.unwrap_err().to_string().contains(code)),
+            }
+            let headers = server.join().unwrap().to_ascii_lowercase();
+            assert!(headers.starts_with("post /session?directory=%2fa%20b http/1.1\r\n"));
+            assert!(headers.contains("authorization: basic synthetic\r\n"));
+            assert!(!headers.contains("accept-encoding:"));
         }
     }
 }

@@ -550,10 +550,8 @@ while True: signal.pause()
 /// reports TERM without exiting, and only finishes voluntarily on USR2.
 #[test]
 fn plain_stop_owns_the_group_until_the_end_is_written() {
-    for mode in ["running","already-exited","unstopped","fast"] {
-        let code=r#"import os,signal,sys
-from pathlib import Path
-base=Path(os.environ["CLARP_SHIM_SOCKET"]).parent
+    for mode in ["running", "already-exited", "unstopped", "fast"] {
+        let code = r#"import os,signal,sys
 mode=sys.argv[1]
 signal.alarm(10)
 if mode!="fast" and os.fork()==0:
@@ -570,48 +568,84 @@ if mode in ("unstopped","already-exited"):
     sys.exit(23)
 while True: signal.pause()
 "#;
-        let mut run=start(&format!("plain-stop-{mode}"), &format!("exec python3 -c '{code}' {mode}"));
-        let pid = |who:&str| records(&run.spool).iter().find_map(|r| match &r.entry {
-            Entry::Out(line)=>line.strip_prefix(who)?.parse::<i32>().ok(), _=>None
+        let mut run = start(
+            &format!("plain-stop-{mode}"),
+            &format!("exec python3 -c '{code}' {mode}"),
+        );
+        let pid = |who: &str| {
+            records(&run.spool).iter().find_map(|r| match &r.entry {
+                Entry::Out(line) => line.strip_prefix(who)?.parse::<i32>().ok(),
+                _ => None,
+            })
+        };
+        wait_for("owned processes", || {
+            pid("leader ").is_some() && (mode == "fast" || pid("child ").is_some())
         });
-        wait_for("owned processes",||pid("leader ").is_some() && (mode=="fast"||pid("child ").is_some()));
-        let leader=pid("leader ").unwrap();
-        if matches!(mode,"unstopped"|"already-exited") {
-            wait_for("leader exit without reaping",|| std::fs::read_to_string(format!("/proc/{leader}/stat")).is_ok_and(|s|s.contains(") Z ")));
+        let leader = pid("leader ").unwrap();
+        if matches!(mode, "unstopped" | "already-exited") {
+            wait_for("leader exit without reaping", || {
+                std::fs::read_to_string(format!("/proc/{leader}/stat"))
+                    .is_ok_and(|s| s.contains(") Z "))
+            });
             assert!(!records(&run.spool).iter().any(Record::is_final));
         }
-        let began=Instant::now();
-        if mode=="unstopped" {
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid("child ").unwrap()),nix::sys::signal::Signal::SIGUSR2).unwrap();
+        let began = Instant::now();
+        if mode == "unstopped" {
+            nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid("child ").unwrap()),
+                nix::sys::signal::Signal::SIGUSR2,
+            )
+            .unwrap();
         } else {
-            assert!(ask(&run.socket,&Request::Stop{grace_ms:1_000}).ok);
-            if mode!="fast"{
-                wait_for("descendant TERM",||outs(&records(&run.spool)).contains(&"descendant TERM"));
+            assert!(ask(&run.socket, &Request::Stop { grace_ms: 1_000 }).ok);
+            if mode != "fast" {
+                wait_for("descendant TERM", || {
+                    outs(&records(&run.spool)).contains(&"descendant TERM")
+                });
                 assert!(!records(&run.spool).iter().any(Record::is_final));
-                assert!(ask(&run.socket,&Request::Stop{grace_ms:0}).ok);
+                assert!(ask(&run.socket, &Request::Stop { grace_ms: 0 }).ok);
             }
         }
-        wait_for("Exited after both pipes close",|| records(&run.spool).iter().any(Record::is_final));
-        if mode=="fast"{
-            assert!(began.elapsed()<Duration::from_millis(500));
+        wait_for("Exited after both pipes close", || {
+            records(&run.spool).iter().any(Record::is_final)
+        });
+        if mode == "fast" {
+            assert!(began.elapsed() < Duration::from_millis(500));
             assert!(run.shim.try_wait().unwrap().is_none());
-        } else if mode!="unstopped" {
-            assert!((Duration::from_millis(970)..Duration::from_secs(4)).contains(&began.elapsed()));
+        } else if mode != "unstopped" {
+            assert!(
+                (Duration::from_millis(970)..Duration::from_secs(4)).contains(&began.elapsed())
+            );
         }
-        let status=run.shim.wait().unwrap();
-        let natural=matches!(mode,"unstopped"|"already-exited");
-        assert_eq!(status.code(), Some(if natural {23}else{1}));
-        let all=records(&run.spool);
-        let signals:Vec<_>=all.iter().filter_map(|r|match &r.entry {
-            Entry::Shim(ShimEvent::Stopping{signal})=>Some(signal.as_str()),_=>None
-        }).collect();
-        let expected:&[&str]=match mode {"unstopped"=>&[],"fast"=>&["SIGTERM"],_=>&["SIGTERM","SIGKILL"]};
-        assert_eq!(signals,expected);
-        assert_eq!(outs(&all).contains(&"background output"), mode=="unstopped");
-        assert_eq!(all.last().unwrap().entry, Entry::Shim(ShimEvent::Exited{
-            code:natural.then_some(23), signal:(!natural).then_some(15),
-        }));
-        assert_eq!(all.iter().filter(|r|r.is_final()).count(),1);
+        let status = run.shim.wait().unwrap();
+        let natural = matches!(mode, "unstopped" | "already-exited");
+        assert_eq!(status.code(), Some(if natural { 23 } else { 1 }));
+        let all = records(&run.spool);
+        let signals: Vec<_> = all
+            .iter()
+            .filter_map(|r| match &r.entry {
+                Entry::Shim(ShimEvent::Stopping { signal }) => Some(signal.as_str()),
+                _ => None,
+            })
+            .collect();
+        let expected: &[&str] = match mode {
+            "unstopped" => &[],
+            "fast" => &["SIGTERM"],
+            _ => &["SIGTERM", "SIGKILL"],
+        };
+        assert_eq!(signals, expected);
+        assert_eq!(
+            outs(&all).contains(&"background output"),
+            mode == "unstopped"
+        );
+        assert_eq!(
+            all.last().unwrap().entry,
+            Entry::Shim(ShimEvent::Exited {
+                code: natural.then_some(23),
+                signal: (!natural).then_some(15),
+            })
+        );
+        assert_eq!(all.iter().filter(|r| r.is_final()).count(), 1);
         std::fs::remove_dir_all(run.dir).unwrap();
     }
 }
