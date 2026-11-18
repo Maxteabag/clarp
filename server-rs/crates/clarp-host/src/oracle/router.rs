@@ -19,7 +19,7 @@ const ROUTER_URL: &str = "https://api.openai.com/v1/responses";
 const ANSWERS_WITHIN: Duration = Duration::from_secs(35);
 
 /// Asks the router with the owner's key. `None`: it did not answer.
-pub(super) async fn asked(app: &App, key: &str, question: Value) -> Option<Value> {
+pub(crate) async fn asked(app: &App, key: &str, question: Value) -> Option<Value> {
     let address = match app.config.router_endpoint.as_str() {
         "" => ROUTER_URL.to_string(),
         stand_in => stand_in.to_string(),

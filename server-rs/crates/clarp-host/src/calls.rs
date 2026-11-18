@@ -40,6 +40,7 @@ use crate::pairing::Scope;
 
 pub mod live;
 mod transcript;
+mod tools;
 
 pub(crate) use live::{Voice, dial};
 
