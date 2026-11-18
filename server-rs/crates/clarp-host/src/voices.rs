@@ -112,9 +112,11 @@ async fn engines_told(State(app): State<App>) -> Json<Value> {
     let owners = app.mouth.owners();
     let has_key = |provider: &str| app.mouth.has_key(provider, &owners);
     let mut told = engines(&owners, &has_key);
+    let refusal=app.mouth.google_refusal().await;
     for row in told["providers"].as_array_mut().into_iter().flatten() {
         let id = row["id"].as_str().unwrap_or("");
-        if id != "none" && !BUILT.contains(&id) {
+        if id=="google" && let Some(code)=refusal {row["error"]=json!(code);row["available"]=json!(false);}
+        else if id != "none" && !BUILT.contains(&id) {
             row["available"] = json!(false);
         }
     }
@@ -135,6 +137,7 @@ async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiE
     };
     let provider = word("provider", "").to_lowercase();
     let fallback = word("fallback", "none").to_lowercase();
+    if (provider=="google" || fallback=="google") && let Some(code)=app.mouth.google_refusal().await {return Err(ApiError::new(StatusCode::CONFLICT,code));}
     if [&provider, &fallback]
         .iter()
         .any(|p| p.as_str() != "none" && !BUILT.contains(&p.as_str()))
@@ -182,7 +185,11 @@ async fn catalogue_for(app: &App, current: &str) -> Value {
     let directory = app.fleet.directory();
     let agents = agents_of(&directory);
     let has_key = |provider: &str| app.mouth.has_key(provider, &owners);
-    here(told(&owners, &agents, current, &has_key, &cartesia))
+    let mut found=told(&owners,&agents,current,&has_key,&cartesia);
+    if let Some(code)=app.mouth.google_refusal().await && let Some(row)=found["providers"].as_array_mut().and_then(|rows|rows.iter_mut().find(|r|r["id"]=="google")){
+        row["error"]=json!(code);row["available"]=json!(false);
+    }
+    here(found)
 }
 
 /// `GET /voice-catalog?for=<session>`.
@@ -286,6 +293,7 @@ async fn preview(
         .map_or("", |text| text.trim())
         .to_lowercase();
     let voice = asked.get("id").map_or("", |text| text.trim());
+    if provider=="google" && let Some(code)=app.mouth.google_refusal().await {return ApiError::new(StatusCode::CONFLICT,code).into_response();}
     let catalogue = catalogue_for(&app, "").await;
     let rows = catalogue["providers"].as_array().into_iter().flatten();
     let row = rows.clone().find(|row| row["id"] == provider.as_str());
@@ -412,7 +420,7 @@ async fn legacy_preview(State(app): State<App>, body: Bytes) -> Result<Json<Valu
         .mouth
         .legacy_preview(session, voice, clarp_kernel::python::first(text, 200))
         .await
-        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+        .map_err(|e| ApiError::new(if matches!(e.as_str(),"google_id_collision"|"google_id_unverifiable"){StatusCode::CONFLICT}else{StatusCode::INTERNAL_SERVER_ERROR}, &e))?;
     Ok(Json(json!({"ok":true,"url":format!("/audio/{name}")})))
 }
 
