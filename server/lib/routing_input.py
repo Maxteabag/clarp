@@ -25,10 +25,9 @@ from typing import Iterator
 # The kernel's limit for one argument, its terminating NUL included (PAGE_SIZE * 32).
 ARGUMENT_LIMIT = 128 * 1024
 
-# Backend id -> how the prompt goes: "stdin" (the argv's last element is the prompt), or a flag
-# that names a prompt file (the argv's last two elements are a flag and the prompt).
-_STDIN = {"claude": (), "codex": ("-",)}
-_PROMPT_FILE = {"grok": ("-p", "--prompt-file"), "muse": ("--", "--prompt-file")}
+# How the prompt goes is each backend's own declaration (backend_catalogue: oneshot_stdin_args,
+# oneshot_prompt_file_flags): on stdin (the argv's last element is the prompt), or in a file named
+# by a flag (the argv's last two elements are a flag and the prompt).
 
 
 class PromptNotEncodable(RuntimeError):
@@ -67,10 +66,13 @@ def prepared(backend: str, argv: list[str], prompt: str) -> Iterator[Prepared]:
         raw = prompt.encode("utf-8", "surrogateescape")
     except UnicodeEncodeError:
         raise PromptNotEncodable(f"prompt cannot be encoded for {backend}") from None
-    if backend in _STDIN and argv and argv[-1] == prompt:
-        yield Prepared(argv[:-1] + list(_STDIN[backend]), raw)
+    from . import backend_catalogue
+    definition = backend_catalogue.get(backend)
+    stdin_args = definition.oneshot_stdin_args if definition else None
+    if stdin_args is not None and argv and argv[-1] == prompt:
+        yield Prepared(argv[:-1] + list(stdin_args), raw)
         return
-    flag, file_flag = _PROMPT_FILE.get(backend, ("", ""))
+    flag, file_flag = (definition and definition.oneshot_prompt_file_flags) or ("", "")
     if flag and argv[-2:] == [flag, prompt]:
         root = pathlib.Path(tempfile.mkdtemp(prefix="clarp-routing-"))
         try:
