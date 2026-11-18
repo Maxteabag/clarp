@@ -186,7 +186,7 @@ fn a_payload_is_a_render_spec_or_is_refused_as_the_python_host_does() {
             }
         }
     }
-    assert_eq!((valid, refused), (42, 217));
+    assert_eq!((valid, refused), (41, 219));
     let by_code: Vec<(&str, usize)> = codes.iter().map(|(code, n)| (code.as_str(), *n)).collect();
     assert_eq!(
         by_code,
@@ -203,7 +203,7 @@ fn a_payload_is_a_render_spec_or_is_refused_as_the_python_host_does() {
             ("invalid_version", 5),
             ("missing_key", 20),
             ("number_form", 14),
-            ("prop", 20),
+            ("prop", 22),
             ("schema_keyword", 3),
             ("schema_shape", 35),
             ("state_value", 8),
@@ -353,7 +353,10 @@ fn the_reference_vectors_play_through_as_the_python_host_plays_them() {
             assert_eq!(status, expected, "{name}");
         }
     }
-    assert_eq!((vectors["flows"].as_array().unwrap().len(), steps_played), (35, 56));
+    assert_eq!(
+        (vectors["flows"].as_array().unwrap().len(), steps_played),
+        (35, 56)
+    );
 }
 
 #[test]
