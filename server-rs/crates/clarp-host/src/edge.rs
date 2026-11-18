@@ -127,14 +127,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // which everything goes to the contact; a call that goes on in the thread of its owner
     // and contact, or begins anew; and the cues of sound a call plays. Its calls of the
     // first kind are not built, and the status says so. A call is put through to an agent
-    // and back (`oracle_handoff`; `docs/oracle-handoff.md`). Not listed, because not built:
-    // the second voice (`oracle_gemini_voice`).
+    // and back (`oracle_handoff`; `docs/oracle-handoff.md`). Its second voice is Gemini Live.
     ("oracle", 1),
     ("oracle_contact", 7),
     ("oracle_direct_contact", 8),
     ("oracle_context_memory", 9),
     ("oracle_earcons", 15),
     ("oracle_handoff", 22),
+    ("oracle_gemini_voice", 36),
     // The chip a phone shows of the fleet on its lock screen is kept current by pushes
     // (`POST /devices/live-activity`; `docs/live-items.md` §8). Listed only by a Host that
     // can reach an activity: one with a relay and an account of its own there.

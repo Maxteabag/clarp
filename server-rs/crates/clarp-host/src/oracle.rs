@@ -32,6 +32,7 @@ mod handoffs;
 mod memory;
 mod router;
 mod tools;
+mod upstream;
 
 type Answered = Result<Json<Value>, ApiError>;
 
@@ -174,13 +175,16 @@ const FIRST_KIND: (&str, &str) = ("gpt-realtime-2.1", "cedar");
 ///
 /// The calls of the second kind (`GET /oracle/v2`) are built: they go on in the thread of
 /// their owner and contact, begin anew where that is asked, and go to the contact alone
-/// where that is asked; and one can be held where the owner's key for their voice is there.
-/// Their voice is the one model: the other, and detours into a podcast, are not built. The
-/// first kind of call, WebRTC and the other engine of the second kind are not built either,
+/// where that is asked. Routing requires the owner's OpenAI key.
+/// The owner can select Gemini Live when its key is present. Podcast detours, the
+/// first kind of call, WebRTC and the other engine of the second kind are not built,
 /// and nothing of them is claimed.
 async fn status(State(app): State<App>) -> Json<Value> {
     let key = app.ears.key("openai").is_some();
     let (model, voice) = (oracle::voice::model(), oracle::voice::voice());
+    let choice = voice_told(&app, &app.fleet.directory());
+    let selected = &choice["gemini"];
+    let second = choice["provider"] == "gemini";
     Json(json!({
         "available": false,
         "model": FIRST_KIND.0,
@@ -193,12 +197,12 @@ async fn status(State(app): State<App>) -> Json<Value> {
             "direct_contact": true,
             "direct_contact_available": key,
             "available": key,
-            "model": model,
-            "voice": voice,
+            "model": if second { selected["model"].as_str() } else { Some(model) },
+            "voice": if second { selected["voice"].as_str() } else { Some(voice) },
             "podcast": false,
             "podcast_history": false,
-            "voice_provider": "openai",
-            "voice_providers": ["openai"],
+            "voice_provider": choice["provider"],
+            "voice_providers": choice["available"],
         },
         "v2_tinkered": {
             "context_memory": false,

@@ -105,6 +105,7 @@ pub struct Config {
     pub flux_endpoint: String,
     /// The same for the voice of a ring held as a live voice call, which is a socket too.
     pub live_endpoint: String,
+    pub gemini_live_endpoint: String,
     /// Where the router of the Oracle's calls is asked, in a test: an address on this machine.
     pub router_endpoint: String,
     /// The same for the engines that speak.
@@ -462,6 +463,21 @@ impl Config {
             let not_here = format!("CLARP_LIVE_ENDPOINT {live_endpoint}: a socket on this machine");
             return Err(not_here);
         }
+        let gemini_live_endpoint = std::env::var("CLARP_GEMINI_LIVE_ENDPOINT").unwrap_or_default();
+        if !gemini_live_endpoint.is_empty() {
+            let uri = gemini_live_endpoint.parse::<http::Uri>().ok();
+            let local = uri.as_ref().is_some_and(|uri| {
+                uri.scheme_str() == Some("ws")
+                    && uri
+                        .authority()
+                        .is_some_and(|a| !a.as_str().contains('@') && a.port_u16().is_some())
+                    && matches!(uri.host(), Some("127.0.0.1" | "[::1]" | "localhost"))
+                    && uri.query().is_none()
+            });
+            if !local {
+                return Err("CLARP_GEMINI_LIVE_ENDPOINT requires a loopback socket".into());
+            }
+        }
         let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
         let cartesia_endpoint = voice_endpoint("CLARP_CARTESIA_ENDPOINT")?;
         let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
@@ -561,6 +577,7 @@ impl Config {
             nova_endpoint,
             flux_endpoint,
             live_endpoint,
+            gemini_live_endpoint,
             router_endpoint,
             cartesia_endpoint,
             deepgram_voice_endpoint,
