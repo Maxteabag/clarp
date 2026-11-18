@@ -31806,7 +31806,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
         ]),
         json!([1, 7, 8, 9, 15])
     );
-    assert!(has["oracle_handoff"] == 22 && has["oracle_gemini_voice"].is_null());
+    assert!(has["oracle_handoff"] == 22 && has["oracle_gemini_voice"] == 36);
 
     // What is no call is refused in plain words, as the Python Host refuses it, and neither
     // the voice nor the router is reached for it.
@@ -33531,6 +33531,364 @@ fn a_call_of_the_oracle_is_told_the_words_its_owner_prepared_for_its_contact() {
         (400, NO_FILE.to_string())
     );
     assert_eq!(voice.keys.lock().unwrap().len(), 5);
+}
+
+#[test]
+fn a_call_of_the_oracle_uses_its_second_voice() {
+    let place = Place::new("oracle-second-voice");
+    let gpt = stand_in_oracle_voice();
+    let router = stand_in_oracle_router();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("ws://{}/live", listener.local_addr().unwrap());
+    let connections = Arc::new(AtomicU64::new(0));
+    let refuse = Arc::new(AtomicBool::new(false));
+    let rejecting = refuse.clone();
+    let acknowledge = Arc::new(AtomicBool::new(true));
+    let auto = acknowledge.clone();
+    let attempts = connections.clone();
+    let (ends, opened) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            if rejecting.load(Ordering::SeqCst) {
+                drop(stream);
+                continue;
+            }
+            #[allow(clippy::result_large_err)]
+            let check = |req: &tungstenite::handshake::server::Request,
+                         answer: tungstenite::handshake::server::Response| {
+                assert!(
+                    req.uri()
+                        .query()
+                        .is_some_and(|q| q == "key=%67%2D%74%65%73%74")
+                );
+                Ok(answer)
+            };
+            let socket = tungstenite::accept_hdr(stream, check).unwrap();
+            let ack = auto.load(Ordering::SeqCst);
+            let answers: Answers = Arc::new(move |v| {
+                (ack && v.get("setup").is_some()).then(|| json!({"setupComplete":{}}))
+            });
+            ends.send(End::of(socket, answers)).unwrap();
+        }
+    });
+    let world = [
+        ("CLARP_GEMINI_LIVE_ENDPOINT", address.as_str()),
+        ("CLARP_LIVE_ENDPOINT", gpt.address.as_str()),
+        ("CLARP_ROUTER_ENDPOINT", router.address.as_str()),
+        ("GEMINI_API_KEY", "g-test"),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let check_status = |host: &Host, gemini: bool, openai: bool| {
+        let effective = if gemini { "gemini" } else { "openai" };
+        let available = if gemini {
+            json!(["openai", "gemini"])
+        } else {
+            json!(["openai"])
+        };
+        let selected = host.get("/oracle/voice-provider");
+        assert_eq!(selected["provider"], effective);
+        assert_eq!(selected["selected"], "gemini");
+        assert_eq!(selected["available"], available);
+        let status = &host.get("/oracle/status")["v2"];
+        assert_eq!(status["voice_provider"], effective);
+        assert_eq!(status["voice_providers"], available);
+        assert_eq!(status["available"], openai);
+    };
+    {
+        let single = Place::new("oracle-single-voice");
+        let host = single.start_without(
+            "admin",
+            &[],
+            &[world[0], world[1], world[2], world[4]],
+            &["GEMINI_API_KEY"],
+        );
+        assert_eq!(
+            host.ask(
+                "POST",
+                "/oracle/voice-provider",
+                Some(&json!({"provider":"gemini"}))
+            )
+            .0,
+            200
+        );
+        check_status(&host, false, true);
+        let (phone, _) = pair(&host, "Phone", "full");
+        let call = End::of_a_phone(socket_at(&host, &phone, "/oracle/v2").unwrap());
+        call.told_of("session.started", 1);
+        call.says(&json!({"type":"session.close"}));
+        call.ends();
+    }
+    {
+        let empty = Place::new("oracle-second-without-router-key");
+        let absent = empty.start_without("admin", &[], &world[..4], &["OPENAI_API_KEY"]);
+        let (phone, _) = pair(&absent, "Phone", "full");
+        assert_eq!(
+            absent
+                .ask(
+                    "POST",
+                    "/oracle/voice-provider",
+                    Some(&json!({"provider":"gemini"}))
+                )
+                .0,
+            200
+        );
+        check_status(&absent, true, false);
+        assert_eq!(refused_a_socket(&absent, &phone, "/oracle/v2").0, 503);
+        assert_eq!(connections.load(Ordering::SeqCst), 0);
+    }
+    let mut child = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .arg("--data")
+        .arg(place.root.join("data"))
+        .arg("--run")
+        .arg(place.root.join("run"))
+        .arg("--cwd")
+        .arg(place.root.join("work"))
+        .args(["--listen", "127.0.0.1:0"])
+        .envs(world.iter().copied())
+        .env("CLARP_HOST_TOKEN", "admin")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut err = BufReader::new(child.stderr.take().unwrap());
+    let mut listening = String::new();
+    err.read_line(&mut listening).unwrap();
+    let local = listening
+        .trim()
+        .strip_prefix("clarp-host listens on ")
+        .unwrap()
+        .to_owned();
+    let errors = std::thread::spawn(move || {
+        err.read_to_string(&mut listening).unwrap();
+        listening
+    });
+    let mut out = child.stdout.take().unwrap();
+    let output = std::thread::spawn(move || {
+        let mut text = String::new();
+        out.read_to_string(&mut text).unwrap();
+        text
+    });
+    let host = Host {
+        process: child,
+        address: local,
+        token: "admin".into(),
+    };
+    let (phone, _) = pair(&host, "Phone", "full");
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/oracle/voice-provider",
+            Some(&json!({"provider":"gemini"}))
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["oracle_gemini_voice"],
+        36
+    );
+    let status = || host.get("/oracle/status")["v2"].clone();
+    assert_eq!(status()["voice_provider"], "gemini");
+    assert_eq!(status()["voice_providers"], json!(["openai", "gemini"]));
+    let open = || End::of_a_phone(socket_at(&host, &phone, "/oracle/v2").unwrap());
+    let end = || opened.recv_timeout(Duration::from_secs(30)).unwrap();
+    let normal = open();
+    let normal_voice = end();
+    normal.told_of("session.started", 1);
+    normal_voice.says(&json!({"usageMetadata":{"thoughtsTokenCount":100}}));
+    assert_eq!(
+        normal.told_of("oracle_v2.usage", 1)[0]["voice_estimate_usd"],
+        0.00045
+    );
+    normal.says(&json!({"type":"session.close"}));
+    let final_frame = normal.told_of("oracle_v2.usage", 2);
+    assert_eq!(final_frame[1]["finalized"], true);
+    assert_eq!(final_frame[1]["usage_final"], true);
+    assert_eq!(final_frame[1]["voice_estimate_usd"], 0.00045);
+    assert_eq!(final_frame[1]["billing"], "gemini_api");
+    assert_eq!(final_frame[1]["reason"], "client_closed");
+    normal.told_of("session.closed", 1);
+    normal.ends();
+    let call = open();
+    let first = end();
+    let started = &call.told_of("session.started", 1)[0]["session"];
+    assert_eq!(started["provider"], "gemini");
+    assert_eq!(started["model"], status()["model"]);
+    let setup = first.told()[0]["setup"].clone();
+    assert_eq!(
+        setup["model"],
+        format!("models/{}", started["model"].as_str().unwrap())
+    );
+    call.says(&json!({"type":"session.input_audio.append","audio":loud()}));
+    wait_for("microphone audio at Gemini", || {
+        first
+            .told()
+            .iter()
+            .any(|v| v["realtimeInput"]["audio"]["data"] == loud())
+    });
+    let sound =
+        || json!({"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":loud()}}]}}});
+    first.says(&sound());
+    assert_eq!(
+        call.told_of("session.output_audio.delta", 1)[0]["delta"],
+        loud()
+    );
+    call.says(&json!({"type":"oracle_v2.interrupt"}));
+    wait_for("interrupt instructions at Gemini", || {
+        first.told().iter().any(|v| v["clientContent"].is_object())
+    });
+    first.says(&sound());
+    first.says(&json!({"serverContent":{"interrupted":true}}));
+    call.told_of("oracle_v2.playback_flush", 1);
+    call.told_of("oracle_v2.quiet", 1);
+    assert_eq!(call.of_kind("session.output_audio.delta").len(), 1);
+    first.says(&json!({"usageMetadata":{"thoughtsTokenCount":1000}}));
+    assert_eq!(
+        call.told_of("oracle_v2.usage", 1)[0]["voice_estimate_usd"],
+        0.0045
+    );
+    router.wants(
+        json!([{"type":"message","content":[{"type":"output_text","text":"The pump is ready."}]}]),
+    );
+    first.says(&json!({"serverContent":{"inputTranscription":{"text":"What about the pump?"}},
+        "toolCall":{"functionCalls":[{"name":"delegate_to_agent","id":"pump","args":{"request":"What about the pump?"}}]}}));
+    wait_for("Gemini receives the routed answer", || {
+        first.told().iter().any(|v| {
+            let r = &v["toolResponse"]["functionResponses"][0];
+            r["id"] == "pump"
+                && r["response"]["result"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("The pump is ready."))
+        })
+    });
+    router.wants(
+        json!([{"type":"message","content":[{"type":"output_text","text":"The recalled reply."}]}]),
+    );
+    first.says(
+        &json!({"serverContent":{"inputTranscription":{"text":"Look again."}},
+        "toolCall":{"functionCalls":[{"id":"recalled","name":"delegate_to_agent"}]},
+        "toolCallCancellation":{"ids":["recalled"]}}),
+    );
+    wait_for("recalled route returned as ordinary commentary", || {
+        first.told().iter().any(|v| {
+            v["clientContent"]["turns"][0]["parts"][0]["text"]
+                .as_str()
+                .is_some_and(|s| s.contains("[Host, speak] The recalled reply."))
+        })
+    });
+    assert!(
+        !first
+            .told()
+            .iter()
+            .any(|v| v["toolResponse"]["functionResponses"][0]["id"] == "recalled")
+    );
+    first.says(
+        &json!({"sessionResumptionUpdate":{"resumable":true,"newHandle":"resume-1"},"goAway":{}}),
+    );
+    let second = end();
+    let verify = |line: &End, id: &str| {
+        wait_for("resumed setup", || !line.told().is_empty());
+        let mut expected = setup.clone();
+        expected["sessionResumption"] = json!({"handle":id});
+        assert_eq!(line.told()[0]["setup"], expected);
+    };
+    verify(&second, "resume-1");
+    second.says(&json!({"sessionResumptionUpdate":{"resumable":true,"newHandle":"resume-2"}}));
+    second.says(&sound());
+    call.told_of("session.output_audio.delta", 2);
+    let departing = Instant::now();
+    second.says(&json!({"goAway":{"timeLeft":"5s"}}));
+    let third = end();
+    verify(&third, "resume-2");
+    assert!(departing.elapsed() >= Duration::from_secs(3));
+    assert!(departing.elapsed() < Duration::from_secs(5));
+    third.says(&json!({"sessionResumptionUpdate":{"resumable":true,"newHandle":"resume-3"}}));
+    third.leaves();
+    let fourth = end();
+    verify(&fourth, "resume-3");
+    fourth.says(&sound());
+    call.told_of("session.output_audio.delta", 3);
+    call.says(&json!({"type":"session.close"}));
+    assert_eq!(
+        call.told_of("session.closed", 1)[0]["usage"]["reconnects"],
+        3
+    );
+    call.ends();
+    let disconnected = |call: &End| {
+        assert_eq!(
+            call.told_of("error", 1)[0],
+            json!({"type":"error","error":{"message":"Oracle v2 disconnected"}})
+        );
+        call.ends();
+    };
+    let unnamed = open();
+    let socket = end();
+    unnamed.told_of("session.started", 1);
+    let before = connections.load(Ordering::SeqCst);
+    socket.leaves();
+    disconnected(&unnamed);
+    assert_eq!(connections.load(Ordering::SeqCst), before);
+    for times_out in [false, true] {
+        let phone = open();
+        let socket = end();
+        phone.told_of("session.started", 1);
+        acknowledge.store(false, Ordering::SeqCst);
+        let started = Instant::now();
+        socket.says(&json!({"sessionResumptionUpdate":{"resumable":true,"newHandle":"replacement"},"goAway":{}}));
+        let replacement = end();
+        wait_for("replacement setup arrived", || {
+            !replacement.told().is_empty()
+        });
+        assert_eq!(
+            replacement.told()[0]["setup"]["sessionResumption"]["handle"],
+            "replacement"
+        );
+        replacement.says(&json!({"usageMetadata":{}}));
+        if !times_out {
+            replacement.closes();
+        }
+        disconnected(&phone);
+        if times_out {
+            assert!(started.elapsed() >= Duration::from_secs(10));
+        }
+        assert!(phone.of_kind("oracle_v2.usage").is_empty());
+        acknowledge.store(true, Ordering::SeqCst);
+    }
+    let before = connections.load(Ordering::SeqCst);
+    refuse.store(true, Ordering::SeqCst);
+    let fallback = open();
+    fallback.told_of("session.started", 1);
+    let failed_by = Instant::now();
+    assert_eq!(connections.load(Ordering::SeqCst), before + 1);
+    fallback.says(&json!({"type":"session.close"}));
+    fallback.ends();
+    refuse.store(false, Ordering::SeqCst);
+    let held = open();
+    held.told_of("session.started", 1);
+    assert_eq!(connections.load(Ordering::SeqCst), before + 1);
+    check_status(&host, true, true);
+    held.says(&json!({"type":"session.close"}));
+    held.ends();
+    std::thread::sleep(Duration::from_secs(600).saturating_sub(failed_by.elapsed()));
+    let recovered = open();
+    let _socket = end();
+    assert_eq!(
+        recovered.told_of("session.started", 1)[0]["session"]["provider"],
+        "gemini"
+    );
+    assert_eq!(connections.load(Ordering::SeqCst), before + 2);
+    recovered.says(&json!({"type":"session.close"}));
+    recovered.ends();
+    host.kill();
+    let log = errors.join().unwrap() + &output.join().unwrap();
+    assert!(log.contains("oracleV2Close provider=gemini"));
+    for private in [&address[..], "g-test", "?key=", "%67%2D%74"] {
+        assert!(
+            !log.contains(private),
+            "Gemini connection information in Host output"
+        );
+    }
 }
 
 #[test]
