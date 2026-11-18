@@ -191,6 +191,18 @@ impl Desk {
         .await
     }
 
+    /// Only the accepted actor message can repair the fleet's copy. A retry
+    /// with an existing client message ID cannot adopt an ordinary send.
+    pub(crate) async fn recover_clip(&self,app:&App,member:&crate::fleet::Member,ring_id:&str,kind:clarp_kernel::rings::binding::Kind,id:&str)->Result<(),Unavailable>{
+        let row=member.agent.opening_row(id).await?;
+        let proof=&row["reservation"];
+        if proof["ring_id"]==ring_id && proof["kind"]==json!(kind)
+            && let (Some(turn_id),Some(epoch))=(row["turn"].as_u64(),proof["epoch"].as_u64()) {
+            self.bind_clip(app,ring_id,&member.record.agent_id,clarp_kernel::rings::binding::Binding{turn_id,kind,epoch,admission_id:id.into()}).await?;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn greeting_admitted(
         &self,
         app: &App,
@@ -454,6 +466,10 @@ impl Desk {
     /// Older messages without this receipt keep their ordinary audio.
     pub async fn recover_bindings(&self, app: &App) -> Result<(), Unavailable> {
         let _serial = self.opening_turn.lock().await;
+        // Previous releases kept a trace index. It cannot establish turn
+        // ownership and must not retain private tokens after their openings go.
+        let old=app.fleet.kept_all("opening_audio").await?.into_iter().map(|(key,_)|("opening_audio",key)).collect();
+        app.fleet.change_together(Vec::new(),old).await?;
         let mut records = Self::archived_openings(app).await?;
         {
             let mut held = self.books.lock().await;
@@ -484,26 +500,7 @@ impl Desk {
                 }) {
                     continue;
                 }
-                let row = member.agent.opening_row(id).await?;
-                let proof = &row["reservation"];
-                if proof["ring_id"] == r.ring_id
-                    && proof["kind"] == json!(kind)
-                    && let (Some(turn_id), Some(epoch)) =
-                        (row["turn"].as_u64(), proof["epoch"].as_u64())
-                {
-                    self.bind_clip(
-                        app,
-                        &r.ring_id,
-                        &r.agent_id,
-                        clarp_kernel::rings::binding::Binding {
-                            turn_id,
-                            kind,
-                            epoch,
-                            admission_id: id.into(),
-                        },
-                    )
-                    .await?;
-                }
+                self.recover_clip(app,&member,&r.ring_id,kind,id).await?;
             }
         }
         Ok(())

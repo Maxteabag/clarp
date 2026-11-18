@@ -23,12 +23,18 @@ fn a_clip_belongs_to_the_admitted_agent_and_turn_even_when_traces_repeat() {
         admission_id: "intent-two".into(),
         epoch: 7,
     };
+    for invalid in [Binding{turn_id:0,..greeting.clone()}, Binding{admission_id:String::new(),..greeting.clone()}] {
+        assert!(!invalid.record(&mut first));
+        assert!(first.get("clip_bindings").is_none());
+    }
     assert!(greeting.clone().record(&mut first));
     assert!(initiative.clone().record(&mut second));
     assert_eq!(
         first["clip_bindings"],
         json!([{"turn_id":1,"kind":"greeting_reply","admission_id":"hello","epoch":4}])
     );
+    assert!(!Binding{admission_id:"impostor".into(),..greeting.clone()}.record(&mut first));
+    assert!(!Binding{turn_id:8,..greeting.clone()}.record(&mut first));
     first["epoch"] = json!(5);
     assert!(
         !Binding {
