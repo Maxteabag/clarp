@@ -47,8 +47,9 @@ def submit(body, *, error=None, http=200):
     return result
 
 
-def case(name, *steps):
+def case(name, *steps, title=None):
     ident = "vector-" + name
+    title = ident if title is None else title
     state, submissions = None, 0
     for step in steps:
         if step["action"] == "submit":
@@ -62,14 +63,15 @@ def case(name, *steps):
                 state, submissions = "completed", 1
                 body = step["body"]
                 step["payload_hash"] = hashlib.sha256(encoded([ident, body["version"], body["answers"]])).hexdigest()
-                step["prompt"] = (f"The user answered {ident!r}.\nArtifact ID: {ident}\nVersion: {body['version']}\n"
+                # The title is written as a canonical JSON string.
+                step["prompt"] = (f"The user answered {encoded(title).decode()}.\nArtifact ID: {ident}\nVersion: {body['version']}\n"
                                   f"Submission ID: {body['submission_id']}\nThese are user preferences for review, "
                                   "not approval to perform protected actions.\nAnswers:\n" + encoded(body["answers"]).decode())
                 step["receipt"] = {"artifact_id": ident, "submission_id": step["body"]["submission_id"],
                                    "version": "build-1", "accepted": True, "delivery_status": "pending"}
         step["stored_status"] = state
         step["submission_count"] = submissions
-    return {"name": name, "artifact_id": ident, "steps": steps}
+    return {"name": name, "artifact_id": ident, "steps": steps, **({"title": title} if title != ident else {})}
 
 
 def boundary(name, extra):
@@ -177,6 +179,23 @@ def scenarios():
                "answers": {"intent": "other", "state": {}}}, http=409, error=refused("version_mismatch", "/version")))
     yield case("intent-before-state", publish(), submit({**good, "answers": {"intent": "other", "state": {}}},
                http=400, error=refused("intent_mismatch", "/answers/intent")))
+    invalid = form()
+    invalid["spec"]["elements"]["topic"]["type"] = "other"
+    invalid["spec"]["state"]["notify"] = "yes"
+    yield case("elements-before-state", publish(invalid, error=refused("component", "/spec/elements/topic/type")))
+
+    # The title in the agent's message is a canonical JSON string: quotes and a backslash
+    # escaped, non-ASCII as it is.
+    yield case("message-title", publish(), submit(good), title='Say "go" \\ ø, 東京: vector-message-title')
+
+    # "-0" in the JSON text is the integer 0: accepted, and its canonical bytes are "0".
+    payload = form()
+    payload["answer_schema"]["properties"]["count"] = {"type": "integer"}
+    payload["spec"]["state"]["count"] = 0
+    step = publish(payload)
+    step["payload_text"] = encoded(payload).decode().replace('"count":0', '"count":-0')
+    assert step["payload_text"].count('"count":-0') == 1
+    yield case("minus-zero", step)
 
 
 if __name__ == "__main__":
