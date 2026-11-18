@@ -116,6 +116,9 @@ def record(root):
         {'claim':'speech_started'}, {'claim':'renew','body':{'request_id':'renew'}},
         {'claim':'renew','body':{'request_id':'renew','epoch':1,'expected_epoch':1,'owner_nonce':'own_'+format(2,'032x')}},
         {'do':'greet'}, {'do':'admitted','ok':False},{'do':'admitted','ok':True},{'do':'greet','body':{'epoch':1}})
+    add('abandoned greeting creates a second initiative generation',
+        {'claim':'no_mic'},{'claim':'speech_started'},
+        {'claim':'speech_abandoned','body':{'reason':'empty_capture'}})
     for claim in ('silence','no_mic','not_ready','speech_abandoned','listening','renew','speech_started'):
         for state in ('pending','listening','speech_latched','greeting','fallback','unknown','initiative_started'):
             add('claim in '+state,{'state':state,'claim':claim,'body':{'at_ms':1250,'watermark_ms':1250,'reason':'empty_capture'}})
@@ -185,7 +188,54 @@ def extras(root, op):
         except ValueError: canonical=None
         except identity._Invalid: canonical=None
         uuids.append(dict(raw=raw,canonical=canonical))
-    return dict(headers=headers,clips=clips,uuids=uuids)
+    gates=[]
+    from lib import turn_queue
+    import contextlib,copy
+    row_id='call-open:ring:1'
+    trace='trace'
+    for action in ('claim','release','parked','failed'):
+        for state in ('intended','admitted','started','cancelled','unknown'):
+            for status in ('queued','parked','claimed','started','done',None):
+                for breach in ('','stopped_after_answer','reboot'):
+                    now=3000
+                    generation={'boot':'boot','instance':'instance'}
+                    opening={'ring_id':'ring','state':'initiative_started' if state=='started' else 'initiative_queued',
+                             'server_id':'test','retired':None,'fence':{'host_gen':generation},
+                             'intent':{'admission_id':row_id,'trace_id':trace,'state':state,'kind':'initiative'}}
+                    before=copy.deepcopy(opening)
+                    row={'status':status,'trace_id':trace,'claimed_at':100 if status=='claimed' else None} if status else None
+                    effects=[]
+                    box={'op':opening,'gen':dict(generation,boot='other') if breach=='reboot' else generation}
+                    @contextlib.contextmanager
+                    def transaction(_):
+                        yield box
+                    op._opening_txn=transaction
+                    op.now_ms=lambda:now
+                    op._row=lambda _:row
+                    op._fence_breach=lambda _:breach if breach=='stopped_after_answer' else ''
+                    op._announce_opening=lambda _:None
+                    op.is_initiative=lambda *args:True
+                    op.is_foreign_message=lambda _:False
+                    op._row_admission=lambda _:row_id
+                    def withdraw(_):
+                        if status in ('queued','parked'):
+                            effects.append('withdraw');return True
+                        return False
+                    op._withdraw_row=withdraw
+                    turn_queue.mark_unknown=lambda _:effects.append('unknown')
+                    turn_queue.withdraw_claimed=lambda _:effects.append('withdraw_claimed')
+                    turn_queue.release_claim=lambda _:effects.append('release')
+                    turn_queue.mark_launched_call_open_unknown=lambda _:effects.append('launched_unknown')
+                    def take(_):
+                        if status=='queued':effects.append('claim');return True
+                        return False
+                    turn_queue.claim_for_dispatch=take
+                    if action=='claim':result=op.claim_initiative(row_id)
+                    elif action=='release':result=op.release_unsent(row_id,trace)
+                    elif action=='parked':result=op.authorize_parked_launch(row_id,trace)
+                    else:result=op.resolve_launch_failure(row_id,trace)
+                    gates.append(dict(action=action,before=before,status=status,breach=breach,result=result,effects=effects,after=opening))
+    return dict(headers=headers,clips=clips,uuids=uuids,gates=gates)
 
 if __name__=='__main__':
     if '--record' in sys.argv:

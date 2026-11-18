@@ -1569,6 +1569,15 @@ delegation is checked by one read of the director's intent. The contact's answer
 in bounded parts and is acknowledged after the voice transport accepts its first part.
 An opted-in transcript keeps text, receipts and pacing entries in the call's private directory.
 The receiver and sender flows are compared with `live-call-tools-vectors.json`.
+*A ring that listens first* (18 Nov 2026). The answering phone claims its opening with
+a token and renews its epoch using a rotating nonce. The public ring carries neither.
+The greeting is admitted to the calling agent. A silence or microphone claim can instead
+admit one initiative, tied to its ring, generation and trace. The Host checks the boot,
+instance, call, pairing and Stop generation again before starting the shim. A crashed Host
+can reconstruct an intended admission by its reserved id. The group call and its opening
+are committed together before the answer or event. Older phones receive the original
+spoken line. A clip for the opening carries its token, epoch and admission id, and the
+voice worker skips synthesis once its authority has been withdrawn.
 The push by which such a ring reaches a
 locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
 until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user

@@ -663,3 +663,147 @@ pub fn clip(op: &Value, trace: &str) -> Option<(Value, bool)> {
         skip,
     ))
 }
+
+#[derive(Default)]
+pub struct Dispatch {
+    pub opening: Effects,
+    pub release: bool,
+    pub withdraw_claimed: bool,
+    pub claim: bool,
+    pub launched_unknown: bool,
+}
+
+/// The dispatcher knows whether a backend was invoked. No operation may infer
+/// that a launch was unsent merely from a timeout or a process disappearing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    Claim,
+    ReleaseUnsent,
+    Parked,
+    FailedAfterLaunch,
+}
+
+pub fn dispatch(
+    action: Gate,
+    op: &mut Value,
+    id: &str,
+    trace: &str,
+    w: &World<'_>,
+    fx: &mut Dispatch,
+) -> Value {
+    let intent = &op["intent"];
+    let status = &w.queue["status"];
+    let exact = intent["admission_id"] == id && intent["trace_id"] == trace;
+    match action {
+        Gate::Claim => {
+            if w.queue["foreign"] == true {
+                return json!(true);
+            }
+            if w.queue.is_null() || !exact || w.queue["trace_id"] != trace {
+                fx.opening.withdraw = matches!(status.as_str(), Some("queued" | "parked"));
+                return json!(false);
+            }
+            if identity(op, w, &mut fx.opening).is_some() {
+                return json!(false);
+            }
+            if op["intent"]["state"] == "started" {
+                if !matches!(
+                    status.as_str(),
+                    Some("started" | "done" | "failed" | "interrupted" | "ended" | "unknown")
+                ) {
+                    if let Some(reason) = w.fence {
+                        retire(op, reason, w, &mut fx.opening);
+                    }
+                    mark_unknown(op, &mut fx.opening);
+                }
+                return json!(false);
+            }
+            if op["intent"]["state"] != "admitted" || !op["retired"].is_null() {
+                fx.opening.withdraw = matches!(status.as_str(), Some("queued" | "parked"));
+                return json!(false);
+            }
+            if let Some(reason) = w.fence {
+                retire(op, reason, w, &mut fx.opening);
+                fx.opening.withdraw = matches!(status.as_str(), Some("queued" | "parked"));
+                return json!(false);
+            }
+            if status != "queued" {
+                return json!(false);
+            }
+            fx.claim = true;
+            op["intent"]["state"] = json!("started");
+            if op["state"] == "initiative_queued" {
+                op["state"] = json!("initiative_started");
+            }
+            fx.opening.dirty = true;
+            fx.opening.announce = true;
+            json!(true)
+        }
+        Gate::ReleaseUnsent | Gate::Parked => {
+            let refused = if action == Gate::Parked {
+                json!("unknown")
+            } else {
+                json!(false)
+            };
+            if !exact || intent["state"] != "started" || status != "claimed" {
+                return refused;
+            }
+            if identity(op, w, &mut fx.opening).is_some() {
+                return refused;
+            }
+            if action == Gate::Parked {
+                if let Some(reason) = w.fence {
+                    retire(op, reason, w, &mut fx.opening);
+                    fx.withdraw_claimed = true;
+                    op["intent"]["state"] = json!("cancelled");
+                    fx.opening.dirty = true;
+                    fx.opening.announce = true;
+                    return json!("cancelled");
+                }
+                return json!("launch");
+            }
+            if !op["retired"].is_null() {
+                fx.withdraw_claimed = true;
+                op["intent"]["state"] = json!("cancelled");
+            } else {
+                fx.release = true;
+                op["intent"]["state"] = json!("admitted");
+                if op["state"] == "initiative_started" {
+                    op["state"] = json!("initiative_queued");
+                }
+            }
+            fx.opening.dirty = true;
+            fx.opening.announce = true;
+            json!(true)
+        }
+        Gate::FailedAfterLaunch => {
+            if !exact || intent["state"] != "started" {
+                return json!(false);
+            }
+            if identity(op, w, &mut fx.opening).is_some() {
+                return json!(fx.opening.dirty);
+            }
+            if let Some(reason) = w.fence {
+                retire(op, reason, w, &mut fx.opening);
+            }
+            op["intent"]["state"] = json!("unknown");
+            fx.launched_unknown = true;
+            if op["retired"].is_null() {
+                op["state"] = json!("unknown");
+            }
+            fx.opening.dirty = true;
+            fx.opening.announce = true;
+            json!(true)
+        }
+    }
+}
+
+fn mark_unknown(op: &mut Value, fx: &mut Effects) {
+    op["intent"]["state"] = json!("unknown");
+    fx.unknown = true;
+    fx.dirty = true;
+    fx.announce = true;
+    if op["retired"].is_null() {
+        op["state"] = json!("unknown");
+    }
+}
