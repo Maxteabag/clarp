@@ -755,12 +755,17 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         && joined.snapshot["live_tools"]["from"] == joined.snapshot["agent"]["session"]
         && joined.principal != joined.snapshot["agent"]["session"]
         && !joined.principal.is_empty();
+    let (reconciled, mut confirmations)=mpsc::unbounded_channel();
     let mut worker = configured.then(|| super::tools::Worker {
         app: app.clone(),
         call: joined.clone(),
         active: active.clone(),
         team: Default::default(),
         taken: Vec::new(),
+        asked: Default::default(),
+        answers: Default::default(),
+        auto_decided: false,
+        reconciled,
     });
     let mut routing = clarp_kernel::live_call::routing::Routing::default();
     let (completed, mut results) = mpsc::unbounded_channel::<(
@@ -801,6 +806,11 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let idle = Duration::from_secs_f64(rules::PHONE_IDLE_S);
     let mut phone_spoke = Instant::now();
     let mut signs_seen = line.signs_of_life();
+    let (found, mut discoveries) = mpsc::channel(1);
+    let mut polling = false;
+    let mut last_poll = 0.0;
+    let mut last_user = f64::NEG_INFINITY;
+    let mut last_output = f64::NEG_INFINITY;
     loop {
         // What the step before this told is said now, in its order, the books let go of.
         for said in std::mem::take(&mut told.said) {
@@ -851,6 +861,44 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                 });
             }
         }
+        if let Some(owned) = worker.as_mut() {
+            if !polling && !owned.asked.is_empty() && now - last_poll >= 2.0 {
+                polling = true;
+                last_poll = now;
+                let (app, ids, found) = (app.clone(), owned.asked.clone(), found.clone());
+                tokio::spawn(async move {
+                    let rows = crate::oracle::live_rows(&app, &ids)
+                        .await
+                        .unwrap_or_default();
+                    let _ = found.send(rows).await;
+                });
+            }
+            if let Some(append) = owned.answers.due(now, last_user, last_output) {
+                let sent = if machine.accepts_tool_note()
+                    && owned.current().await
+                    && let Some(voice) = voice.as_mut()
+                {
+                    let msg = json!({"type":format!("session.{}.append",append.channel),"content":append.text,"delegation_id":Value::Null});
+                    voice
+                        .send(Message::Text(
+                            clarp_kernel::python::dumps_ascii(&msg).into(),
+                        ))
+                        .await
+                        .ok()
+                        .map(|_| true)
+                } else {
+                    Some(false)
+                };
+                if owned.answers.delivered(&append, sent, seconds(began))
+                    && owned.current().await
+                    && crate::oracle::acknowledge_live(app, &append.id, &principal)
+                        .await
+                        .unwrap_or(false)
+                {
+                    owned.answers.acknowledged(&append.id);
+                }
+            }
+        }
         let from_voice = async {
             match voice.as_mut() {
                 Some(voice) => voice.next().await,
@@ -861,6 +909,15 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             biased;
             // A request ended the call on its ring: that is why the session is over.
             Some(reason) = stopped.recv() => machine.stopped(&mut told, &reason),
+            Some(note)=confirmations.recv()=> {
+                if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) {
+                    told.said.push(Said::Voice(json!({"type":"session.thinking.append","content":note,"delegation_id":Value::Null})));
+                }
+            }
+            Some(rows)=discoveries.recv(), if worker.is_some()=>{
+                polling=false;
+                if let Some(owned)=worker.as_mut() && owned.current().await{owned.adopt(rows);}
+            }
             Some((owned,route,results))=results.recv()=>{
                 routing.taken=owned.taken.clone();
                 let failed=results.is_none();let receipts=results.unwrap_or_default();
@@ -886,7 +943,11 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
-                    if configured {routing.observe(&event,seconds(began));}
+                    if configured {
+                        routing.observe(&event,seconds(began));
+                        if event["type"]=="session.input_transcript.delta" && event["delta"].as_str().is_some_and(|s|!python::strip(s).is_empty()){last_user=seconds(began);}
+                        if event["type"]=="session.output_audio.delta" && event["delta"].as_str().and_then(python::b64decode).is_some_and(|s|clarp_kernel::oracle::conversation::audible(&s)){last_output=seconds(began);}
+                    }
                     if let Some(transcript)=&transcript && let Some(delta)=event["delta"].as_str().filter(|text| !python::strip(text).is_empty()) {
                         let role=match event["type"].as_str(){
                             Some("session.input_transcript.delta")=>Some("user"),

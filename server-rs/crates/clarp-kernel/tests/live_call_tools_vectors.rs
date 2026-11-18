@@ -241,3 +241,52 @@ fn the_live_router_sees_only_new_user_requests_with_the_recent_conversation() {
     }
     assert_eq!(count, 85);
 }
+
+#[test]
+fn returned_answers_advance_only_on_delivery_and_replay_from_the_requested_part() {
+    use clarp_kernel::live_call::answers::Answers;
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let mut count = 0;
+    for case in fixture["answers"].as_array().unwrap() {
+        let mut answers = Answers::default();
+        answers
+            .queue(
+                "answer-one",
+                "A sender",
+                "a source",
+                case["text"].as_str().unwrap(),
+                "  a   question?  ",
+            )
+            .unwrap();
+        for step in case["steps"].as_array().unwrap() {
+            let read = &step["read"];
+            let receipt = if read.is_null() {
+                Value::Null
+            } else {
+                answers.read(read)
+            };
+            assert_eq!(receipt, step["receipt"]);
+            let now = step["at"].as_f64().unwrap();
+            let mut sent = Vec::new();
+            let mut ack = Vec::new();
+            if (read.is_null() || receipt["status"] != "nothing_to_read")
+                && let Some(a) = answers.due(
+                    now,
+                    step["user"].as_f64().unwrap(),
+                    step["voice"].as_f64().unwrap(),
+                )
+            {
+                sent.push(json!([a.channel, a.text]));
+                if answers.delivered(&a, step["delivery"].as_bool(), now) {
+                    ack.push(a.id.clone());
+                    answers.acknowledged(&a.id);
+                }
+            }
+            assert_eq!(json!(sent), step["spoken"], "step {count}");
+            assert_eq!(json!(ack), step["ack"], "step {count}");
+            count += 1;
+        }
+    }
+    assert_eq!(count, 100);
+}
