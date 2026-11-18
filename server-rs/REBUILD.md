@@ -1338,6 +1338,21 @@ The picker takes Grok's models from its CLI and Muse's visible models and effort
 from its local catalogue. The orchestrator can ask either CLI one question. Muse
 suppresses its session log for that question.
 
+**Switching accounts** (18 Nov 2026). A Host started with `--accounts select` and
+`--seats-tool PROGRAM` can switch the machine's Claude and Codex defaults. The
+desk reads the active alias under the pool's exclusive login lock. A turn holds
+the same file locked for shared use as long as its tool runs, including while
+its Host is down. A switch that needs longer than thirty seconds returns 202.
+The desk reports the outcome when the tool finishes. Claude confirms the switch
+in JSON. Codex confirms it by its exit status.
+
+An enabled Hotseat Janitor uses its configured floors, required and running
+models, adaptive intervals and last switch to choose a seat. Notify mode records
+the advice. Automatic mode checks the owner and the current login again before
+changing it. The status records each provider's most recent action. Exhaustion
+leaves waiting work in the pool. Banked resets belong to a separate decision
+of the owner. The other account modes leave the login where it is.
+
 **Antigravity** (17 Nov 2026). The third tool of the owner's agents (35 of his 191 ran on it when this was
 counted), and the one the Goal keeper's job recommends. `clarp-backend` `agy.rs`, by the Python Host's
 `backend/agy.py`:

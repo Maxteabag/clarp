@@ -612,6 +612,27 @@ impl Pool {
         (Some(back.len()), out)
     }
 
+    /// The account desk confirmed a new login after draining its tool. A recovery that
+    /// already sent a selector finishes its own pass. Between passes the new information
+    /// takes up the waiting models it covers.
+    pub fn login_available(&mut self, serves: impl Fn(&str) -> bool, now: i64) -> Vec<Effect> {
+        if !self.recovering {
+            return self.served(serves, now).1;
+        }
+        if self.pass.is_some() || self.attempts.iter().any(|a| a.owned && !a.stopped) {
+            return Vec::new();
+        }
+        let models = self
+            .parked_now()
+            .into_iter()
+            .filter(|a| serves(&a.model))
+            .map(|a| a.model)
+            .collect();
+        let mut effects = Vec::new();
+        self.after(Verdict::Only(models), now, &mut effects);
+        effects
+    }
+
     /// The turns that are still their agents', the others forgotten; without those let go
     /// at their half hour, which run and are not parked again.
     fn pending(&mut self) -> Vec<Attempt> {

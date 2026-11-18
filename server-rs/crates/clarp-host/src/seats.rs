@@ -31,7 +31,12 @@
 //! a person types. A turn that waits for an account is not sent a prompt: it is tried at
 //! once on the account that is there, which is all a person who asks for it can mean.
 
+use serde_json::json;
+use std::collections::BTreeMap;
 use std::process::Stdio;
+pub(crate) mod automatic;
+mod switching;
+pub use automatic::start as start_switcher;
 use std::time::Duration;
 
 use clarp_kernel::conversation::Message;
@@ -57,9 +62,6 @@ const MOST_PRINTED: u64 = 8 * 1024 * 1024;
 const WAITED_FOR: Duration = Duration::from_secs(desk::DESK_ASKED.1 + 5);
 /// What the tool is told so that it renews no login as it reads.
 const RENEW_NOTHING: (&str, &str) = ("HOTSEAT_NO_REFRESH", "1");
-/// This Host has no switcher of seats of its own: none is on.
-const SWITCHER_ON: bool = false;
-
 /// What is kept with the fleet: the seats as the strict answer tells them, and the desk.
 #[derive(Default, Serialize, Deserialize)]
 struct Kept {
@@ -67,12 +69,19 @@ struct Kept {
     seats: Seats,
     #[serde(default)]
     desk: desk::Desk,
+    #[serde(default)]
+    switches: BTreeMap<String, Value>,
+    #[serde(default)]
+    last_switch: BTreeMap<String, Value>,
+    #[serde(default)]
+    notifications: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
 struct State {
     /// What is kept: read from the fleet once, and written back with every read.
     kept: Option<Kept>,
+    running: BTreeMap<String, Value>,
     /// When this Host, since it started, last began a read.
     last_attempt_ms: i64,
     /// The read that is under way, for whoever else asks for one: it says how it ended.
@@ -105,6 +114,7 @@ pub struct Desk {
     /// Whether the tool may renew a login as it reads: on a Host that keeps the logins.
     renews: bool,
     state: tokio::sync::Mutex<State>,
+    switches: [tokio::sync::Mutex<()>; 2],
 }
 
 impl Desk {
@@ -113,6 +123,7 @@ impl Desk {
             tool: tool.to_string(),
             renews,
             state: tokio::sync::Mutex::default(),
+            switches: Default::default(),
         }
     }
 
@@ -125,6 +136,16 @@ impl Desk {
     /// and read for at most its time; then it is ended, with what it started. The Host's
     /// own secrets stay with the Host.
     async fn asking(&self, (args, most): (&[&str], u64)) -> Answer {
+        self.command(args, most, None, false).await
+    }
+
+    async fn command(
+        &self,
+        args: &[&str],
+        most: u64,
+        lock: Option<&std::fs::File>,
+        exit_only: bool,
+    ) -> Answer {
         // A Host that was told no tool has no program to start: that fails as one that is
         // not there does.
         let mut tool = tokio::process::Command::new(&self.tool);
@@ -136,6 +157,10 @@ impl Desk {
             .kill_on_drop(true);
         for name in crate::OWN_SECRETS {
             tool.env_remove(name);
+        }
+        if let Some(lock) = lock {
+            // The child retains the machine-wide lock even if its Host exits during the switch.
+            tool.stdin(lock.try_clone().map_err(|_| Failed::DidNotRun)?);
         }
         if !self.renews {
             tool.env(RENEW_NOTHING.0, RENEW_NOTHING.1);
@@ -155,6 +180,7 @@ impl Desk {
         };
         let ended = tokio::time::timeout(Duration::from_secs(most), to_its_end).await;
         match ended {
+            Ok((Ok(ended), _)) if exit_only && ended.success() => Ok(Value::Bool(true)),
             Ok((Ok(ended), bytes)) => desk::answer(ended.code(), &String::from_utf8_lossy(&bytes)),
             Ok((Err(_), _)) => Err(Failed::DidNotRun),
             Err(_) => {
@@ -171,28 +197,31 @@ impl Desk {
 
     /// A live read of the tool, for whoever asked: the one under way is waited for, none is
     /// begun before one is allowed, and otherwise the tool is asked now.
-    async fn read(&self, app: &App) -> Outcome {
-        let began_ms = app.clock.now_ms();
-        let done = {
+    async fn read(&self, app: &App, force: bool) -> Outcome {
+        let (began_ms, done) = loop {
+            let began_ms = app.clock.now_ms();
             let mut state = self.state.lock().await;
             if let Some(mut under_way) = state.under_way.clone() {
                 drop(state);
                 let ended = under_way.wait_for(|ended| ended.is_some());
                 let ended = tokio::time::timeout(WAITED_FOR, ended).await;
-                let made = matches!(ended, Ok(Ok(ended)) if *ended == Some(true));
+                let made = matches!(&ended, Ok(Ok(ended)) if **ended == Some(true));
+                if force && ended.is_ok() {
+                    continue;
+                }
                 return if made { Outcome::Read } else { Outcome::Failed };
             }
             let last_attempt_ms = state.last_attempt_ms;
             let Some(kept) = state.kept(app).await else {
                 return Outcome::Failed;
             };
-            if began_ms < kept.desk.next_read_at(last_attempt_ms) {
+            if !force && began_ms < kept.desk.next_read_at(last_attempt_ms) {
                 return Outcome::Held;
             }
             state.last_attempt_ms = began_ms;
             let (done, under_way) = watch::channel(None);
             state.under_way = Some(under_way);
-            done
+            break (began_ms, done);
         };
         let (of_desk, list, work) = tokio::join!(
             self.asking(desk::DESK_ASKED),
@@ -214,6 +243,13 @@ impl Desk {
         let mut made = false;
         if let Some(kept) = state.kept(app).await {
             made = kept.desk.read(&mut kept.seats, answers, began_ms);
+            for (provider, record) in &kept.last_switch {
+                if record["at"].as_i64().is_some_and(|stamp| stamp >= began_ms)
+                    && let Some(alias) = record["to"].as_str()
+                {
+                    kept.desk.mark_active(provider, alias);
+                }
+            }
             if let Ok(written) = serde_json::to_vec(kept) {
                 let _ = app.fleet.keep(KIND, KEPT.to_string(), Some(written)).await;
             }
@@ -305,21 +341,21 @@ fn said(asked: &Value, key: &str) -> String {
 /// would have to do it, and that is not built. A Host that does not put the logins of its
 /// machine in place does not do it at all: it says so, in the shape of the Python Host's
 /// refusals, once the asking is one it could read.
-pub fn switch(app: &App, asked: &Value) -> Option<resume::Answer> {
+pub async fn switch(app: &App, asked: &Value) -> resume::Answer {
     let read = resume::switch_wanted(&said(asked, "provider"), &said(asked, "alias"));
     let (tool, alias) = match read {
         Ok(wanted) => wanted,
-        Err(refusal) => return Some(refusal),
+        Err(refusal) => return refusal,
     };
     if app.config.accounts == Accounts::Select {
-        return None;
+        return switching::manual(app, tool, alias).await;
     }
     let body = serde_json::json!({
         "ok": false, "error": "logins_kept_elsewhere", "provider": tool, "alias": alias,
         "message": "This Host reads the account seats and moves none. The account in use is \
                     changed where the logins of this machine are kept.",
     });
-    Some((409, body))
+    (409, body)
 }
 
 /// `POST /hotseat/resume`: work that stopped goes on, a held queue is let go, or the command
@@ -460,20 +496,22 @@ pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
 /// `GET /hotseat/status`: how the account seats stand, as the tool's list last said them.
 /// Nothing is read for it.
 pub async fn status(app: &App) -> Value {
+    let enabled = automatic::enabled(app).await;
     let now = app.clock.now_ms();
     let mut state = app.seats.state.lock().await;
     match state.kept(app).await {
-        Some(kept) => kept.seats.served(SWITCHER_ON, now),
-        None => Seats::default().served(SWITCHER_ON, now),
+        Some(kept) => kept.seats.served(enabled, now),
+        None => Seats::default().served(enabled, now),
     }
 }
 
 /// `GET /hotseat/desk`: the desk as it is kept; with `refresh`, after a live read where one
 /// is allowed. The read runs to its end whether or not whoever asked for it is still there.
 pub async fn asked(app: &App, refresh: bool) -> Value {
+    let enabled = automatic::enabled(app).await;
     let outcome = if refresh {
         let reader = app.clone();
-        let read = tokio::spawn(async move { reader.seats.read(&reader).await });
+        let read = tokio::spawn(async move { reader.seats.read(&reader, false).await });
         Some(read.await.unwrap_or(Outcome::Failed))
     } else {
         None
@@ -493,12 +531,20 @@ pub async fn asked(app: &App, refresh: bool) -> Value {
         outcome,
         last_attempt_ms: state.last_attempt_ms,
     };
+    let running = state.running.clone();
     match state.kept(app).await {
-        Some(kept) => kept
-            .desk
-            .served(&kept.seats.served(SWITCHER_ON, now), &asked),
+        Some(kept) => {
+            let mut payload = kept.desk.served(&kept.seats.served(enabled, now), &asked);
+            payload["switches"] = json!(
+                ["claude", "codex"]
+                    .iter()
+                    .filter_map(|tool| running.get(*tool).or_else(|| kept.switches.get(*tool)))
+                    .collect::<Vec<_>>()
+            );
+            payload
+        }
         None => {
-            let nothing = Seats::default().served(SWITCHER_ON, now);
+            let nothing = Seats::default().served(enabled, now);
             desk::Desk::default().served(&nothing, &asked)
         }
     }

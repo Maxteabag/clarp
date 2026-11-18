@@ -33,6 +33,7 @@ pub struct Service {
     tool: &'static str,
     /// The owner's selector for the tool: a program and its arguments.
     command: Vec<String>,
+    login_lock: Option<std::path::PathBuf>,
     pool: Mutex<Pool>,
     clock: Arc<dyn Clock + Send + Sync>,
     /// The way to the agents, once there are agents.
@@ -47,7 +48,17 @@ impl Service {
         command: Vec<String>,
         clock: Arc<dyn Clock + Send + Sync>,
     ) -> Arc<Self> {
+        Self::with_lock(tool, command, clock, None)
+    }
+
+    pub fn with_lock(
+        tool: &'static str,
+        command: Vec<String>,
+        clock: Arc<dyn Clock + Send + Sync>,
+        login_lock: Option<std::path::PathBuf>,
+    ) -> Arc<Self> {
         Arc::new(Self {
+            login_lock,
             tool,
             command,
             pool: Mutex::new(Pool::new()),
@@ -60,6 +71,69 @@ impl Service {
     /// The tool whose accounts these are.
     pub fn tool(&self) -> &'static str {
         self.tool
+    }
+
+    /// Hold an OS lock in the tool process. It survives a Host restart with the shim.
+    pub fn guard_turn(&self, order: &mut clarp_actor::ShimOrder) {
+        let Some(path) = &self.login_lock else { return };
+        let program = std::mem::replace(&mut order.program, "flock".into());
+        let args = std::mem::take(&mut order.args);
+        order.args = vec![
+            "--shared".into(),
+            "--no-fork".into(),
+            path.to_string_lossy().into_owned(),
+            program,
+        ];
+        order.args.extend(args);
+    }
+
+    /// Provider one-shots hold the same shared lock as a turn for their full call.
+    pub async fn use_login(
+        app: &crate::edge::App,
+        tool: &str,
+    ) -> std::io::Result<Option<std::fs::File>> {
+        let Some(path) = app
+            .pools
+            .iter()
+            .find(|p| p.tool() == tool)
+            .and_then(|p| p.login_lock.clone())
+        else {
+            return Ok(None);
+        };
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(path)?;
+            file.lock_shared()?;
+            Ok(Some(file))
+        })
+        .await
+        .map_err(std::io::Error::other)?
+    }
+
+    pub async fn switch_lock(&self) -> Option<std::fs::File> {
+        let path = self.login_lock.clone()?;
+        tokio::task::spawn_blocking(move || {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(path)
+                .ok()?;
+            file.lock().ok()?;
+            Some(file)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    pub fn available(self: &Arc<Self>, serves: impl Fn(&str) -> bool) {
+        self.told(|pool, now| ((), pool.login_available(serves, now)));
     }
 
     /// Gives the pool the way to the agents.
@@ -204,7 +278,21 @@ impl Service {
         let spawned = std::thread::Builder::new()
             .name(format!("{}-accounts-selector", self.tool))
             .spawn(move || {
-                let verdict = selected(&service.command, &models, service.selector_most);
+                let command = if let Some(lock) = &service.login_lock
+                    && !service.command.is_empty()
+                {
+                    let mut args = vec![
+                        "flock".into(),
+                        "--exclusive".into(),
+                        "--no-fork".into(),
+                        lock.to_string_lossy().into_owned(),
+                    ];
+                    args.extend(service.command.iter().cloned());
+                    args
+                } else {
+                    service.command.clone()
+                };
+                let verdict = selected(&command, &models, service.selector_most);
                 let said = match &verdict {
                     Verdict::All => "an account serves",
                     Verdict::Only(_) => "the account now active serves some of the models",

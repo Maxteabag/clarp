@@ -58,6 +58,7 @@ pub mod roster;
 pub mod router;
 pub mod said;
 pub mod schedules;
+pub mod seat_switch;
 pub mod seats;
 pub mod socket;
 pub mod speech_stream;
