@@ -483,3 +483,48 @@ def test_resume_unbound_preserves_recorded_model(tmp_path, monkeypatch):
     agent = agents_db.get_by_session(result.session)
     assert agent['model'] == 'session-model'
     assert agents_db.live_backend_session(agent['agent_id']) == 'native'
+
+
+def test_a_forked_conversation_id_the_binding_refuses_is_a_400_not_a_500(tmp_path, monkeypatch):
+    """Every caller of bind_backend_session answers its ValueError (R70 review): here a fork that
+    came back with an id the shared rule refuses ends the new runtime and is refused cleanly."""
+    from lib import backends
+    ctx = _ctx(tmp_path)
+    forked = []
+    monkeypatch.setattr(type(backends.get("claude")), "fork_conversation",
+                        lambda self, session_id, *, source_cwd, cwd: forked.append(session_id)
+                        or "../not-one-component")
+    try:
+        with pytest.raises(AgentLifecycleError) as error:
+            AgentLifecycleService(ctx).create({
+                "name": "Rachel", "session": "rachel", "cwd": str(tmp_path), "voice_id": "V_RACHEL",
+                "fork_session_id": "0b1c2d3e-0000-4000-8000-000000000001"})
+    except ValueError as exc:
+        pytest.fail(f"a refused forked id escaped as a 500: {exc!r}")
+    assert forked, "the request itself was refused, not the forked id"
+    assert (error.value.status, error.value.code) == (400, "invalid session id")
+    rachel = agents_db.get_by_session("rachel")
+    assert rachel is None or agents_db.current_runtime_id(rachel["agent_id"]) is None
+
+
+def test_a_fork_source_that_leads_out_of_the_store_is_cannot_fork_that_session(tmp_path):
+    """The fork copy's own refusal (R70 review) answers in the route's error form, nothing made."""
+    import pathlib
+    from lib.fork import encoded_project_dir
+    ctx = _ctx(tmp_path)
+    source = "0b1c2d3e-0000-4000-8000-000000000001"
+    project = encoded_project_dir(str(tmp_path), pathlib.Path.home() / ".claude" / "projects")
+    project.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{"sessionId": "x"}\n')
+    (project / f"{source}.jsonl").symlink_to(outside)
+    try:
+        with pytest.raises(AgentLifecycleError) as error:
+            AgentLifecycleService(ctx).create({
+                "name": "Rachel", "session": "rachel", "cwd": str(tmp_path), "voice_id": "V_RACHEL",
+                "fork_session_id": source})
+    except ValueError as exc:
+        pytest.fail(f"the refusal escaped as a 500: {exc!r}")
+    assert (error.value.status, error.value.code) == (400, "cannot fork that session")
+    assert agents_db.get_by_session("rachel") is None
+    assert sorted(p.name for p in project.iterdir()) == [f"{source}.jsonl"]

@@ -83,6 +83,11 @@ def resume_missing_sessions(
         claude_id = ""
         backend = backends.normalize(info.get("backend"))
         mapped = (backend_sessions_by_session or {}).get(sid, "")
+        if mapped and not transcript_paths.session_id_ok(mapped):
+            # A stored id that fails the shared rule (R70) is a missing
+            # transcript: this agent starts fresh. One line, the backend only.
+            transcript_paths.refused(backend)
+            mapped = ""
         if mapped:
             runner = backends.by_id(backend)
             try:

@@ -44,6 +44,11 @@ def restore_persisted_agents(ctx) -> None:
                         f"{result['sid']} wants {exc.backend_session_id} "
                         f"owned by {exc.owner_agent_id}; leaving fresh",
                     )
+                except ValueError:
+                    # An id the binding refuses (R70) leaves this agent fresh;
+                    # every other agent is still restored and recovery runs on.
+                    agents_db.start_runtime(agent["agent_id"], result["sid"])
+                    log("startupSessionRefused", f"{result['sid']} leaving fresh")
         log("runtimeAgentRestore",
             f"{result['sid']} {result['action']} ok={result['ok']}")
 

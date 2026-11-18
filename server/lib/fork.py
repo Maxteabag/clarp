@@ -11,7 +11,16 @@ import pathlib
 import re
 import uuid
 
+from . import transcript_paths
 from .log import log_exception
+
+
+class ForkRefused(ValueError):
+    """The source id, the file it names or the place of the copy is not one the shared rule
+    (lib.transcript_paths) allows: nothing is copied."""
+
+    def __init__(self) -> None:
+        super().__init__("cannot fork that session")
 
 
 def encoded_project_dir(cwd: str, projects_root: pathlib.Path) -> pathlib.Path:
@@ -34,18 +43,28 @@ def fork_session(source_id: str, cwd: str,
     (saved cwd first, then global scan).
     """
     projects_root = projects_root or (pathlib.Path.home() / ".claude" / "projects")
+    # The id must be one path component (so no glob character either), and the file it names,
+    # like the place of the copy, inside the store with symlinks resolved (R70).
+    if not transcript_paths.checked_id("claude", source_id):
+        raise ForkRefused()
     src = encoded_project_dir(cwd, projects_root) / f"{source_id}.jsonl"
     if not src.is_file():
         # Try global scan — the saved cwd may not match the actual project dir.
-        candidates = list(projects_root.glob(f"*/{source_id}.jsonl"))
+        candidates = sorted(projects_root.glob(f"*/{source_id}.jsonl"))
         if not candidates:
-            raise FileNotFoundError(f"no jsonl found for session {source_id}")
+            raise FileNotFoundError("no jsonl found for that session")
         src = candidates[0]
+    if transcript_paths.inside("claude", projects_root, src) is None:
+        raise ForkRefused()
 
     new_id = new_id or str(uuid.uuid4())
+    if not transcript_paths.checked_id("claude", new_id):
+        raise ForkRefused()
     target = encoded_project_dir(dest_cwd, projects_root) if dest_cwd else src.parent
-    target.mkdir(parents=True, exist_ok=True)
     dst = target / f"{new_id}.jsonl"
+    if transcript_paths.inside("claude", projects_root, dst) is None:
+        raise ForkRefused()
+    target.mkdir(parents=True, exist_ok=True)
 
     with src.open(encoding="utf-8") as f_in, dst.open("w", encoding="utf-8") as f_out:
         for line in f_in:

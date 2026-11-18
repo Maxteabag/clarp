@@ -200,3 +200,14 @@ def test_binding_refuses_an_id_that_is_not_one_component(tmp_path):
     with pytest.raises(ValueError, match="one path component"):
         agents.bind_backend_session(agent, "../outside")
     agents.bind_backend_session(agent, "11111111-2222-3333-4444-555555555555")
+
+
+def test_muse_refusing_an_id_by_its_own_pattern_logs_the_one_line_too(tmp_path, monkeypatch):
+    """Muse's own, narrower pattern refused silently while only its containment refusal logged."""
+    from lib import backends, transcript_paths
+    lines = []
+    monkeypatch.setattr(transcript_paths, "log", lambda event, detail="": lines.append((event, detail)))
+    assert muse_transcript.find_latest_jsonl("not-a-muse-id", home=tmp_path / "muse") is None
+    assert muse_transcript.find_latest_jsonl("-abcdef12", home=tmp_path / "muse") is None
+    assert backends.get("muse")._reclaim_session("not-a-muse-id", agent_id="a", session="s") == "unverifiable"
+    assert lines == [("transcriptSessionIdRefused", "backend=muse")] * 3
