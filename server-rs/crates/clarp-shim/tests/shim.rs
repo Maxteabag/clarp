@@ -433,3 +433,115 @@ print(json.dumps([sys.argv[1:], fd == "/dev/null", data]))
     }
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_direct_child_can_abort_before_its_group_is_terminated() {
+    for exits in [false, true] {
+        let dir = std::env::temp_dir().join(format!("clarp-abort-{}-{exits}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("shim.sock");
+        let script = r#"import os,signal,sys,time
+def note(s):
+    with open("events","a") as f: f.write(s+"\n")
+def direct(sig,frame):
+    note("direct")
+    if sys.argv[1]=="true": sys.exit(0)
+def terminate(sig,frame):
+    note("group")
+    sys.exit(0)
+signal.signal(signal.SIGUSR1,direct)
+if os.fork()==0:
+    # In one case stderr stays open until KILL; in the other the pumps end early.
+    signal.signal(signal.SIGTERM,signal.SIG_IGN)
+    signal.signal(signal.SIGUSR1,lambda *_: note("wrong child"))
+    for fd in ((0,1,2) if sys.argv[1]=="true" else (0,1)): os.close(fd)
+    with open("stubborn","w") as f: f.write(str(os.getpid()))
+    signal.alarm(12)
+    while True: signal.pause()
+if os.fork()==0:
+    signal.signal(signal.SIGUSR1,lambda *_: note("wrong child"))
+    signal.signal(signal.SIGTERM,terminate)
+    note("ready")
+    while True: signal.pause()
+while True: signal.pause()
+"#;
+        let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
+            .current_dir(&dir)
+            .args([
+                "--spool",
+                "spool/turn.jsonl",
+                "--socket",
+                "shim.sock",
+                "--before-stop",
+                "SIGUSR1",
+                "1500",
+                "--",
+                "python3",
+                "-c",
+                script,
+                if exits { "true" } else { "false" },
+            ])
+            .spawn()
+            .unwrap();
+        let read = || std::fs::read_to_string(dir.join("events")).unwrap_or_default();
+        wait_for("both signal handlers", || {
+            read().contains("ready") && dir.join("stubborn").is_file()
+        });
+        let start = Instant::now();
+        let stop = Request::Stop { grace_ms: 2000 };
+        assert!(ask(&socket, &stop).ok);
+        if !exits {
+            wait_for("direct abort", || read().contains("direct"));
+            assert!(ask(&socket, &stop).ok);
+        }
+        wait_for("group termination", || read().contains("group"));
+        assert_eq!(read(), "ready\ndirect\ngroup\n");
+        if exits {
+            wait_for("exited in the spool", || {
+                records(&dir.join("spool/turn.jsonl")).iter().any(|r| {
+                    matches!(
+                        r.entry,
+                        Entry::Shim(ShimEvent::Exited {
+                            code: Some(0),
+                            signal: None
+                        })
+                    )
+                })
+            });
+            assert!(
+                start.elapsed() < Duration::from_millis(500),
+                "Exited was held behind group escalation"
+            );
+            assert!(shim.try_wait().unwrap().is_none());
+        } else {
+            assert!(
+                (Duration::from_millis(1450)..Duration::from_secs(3)).contains(&start.elapsed())
+            );
+        }
+        shim.wait().unwrap();
+        let pid = std::fs::read_to_string(dir.join("stubborn")).unwrap();
+        wait_for("the remaining descendant to be killed", || {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            stat.is_empty() || stat.contains(") Z ")
+        });
+        let all = records(&dir.join("spool/turn.jsonl"));
+        assert_eq!(all.iter().any(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping{signal}) if signal=="SIGKILL")), !exits);
+
+        assert!(
+            matches!(
+                all.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited { .. })
+            ),
+            "late record: {all:?}"
+        );
+        assert_eq!(
+            all.iter()
+                .filter(|r| matches!(r.entry, Entry::Shim(ShimEvent::Exited { .. })))
+                .count(),
+            1
+        );
+        assert!(start.elapsed() >= Duration::from_secs(2));
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}

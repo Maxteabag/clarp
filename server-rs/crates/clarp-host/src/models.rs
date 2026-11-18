@@ -30,7 +30,9 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
+const TOOLS: [&str; 7] = [
+    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+];
 /// How long a tool has to answer one question about itself, where nothing else is declared
 /// of the question (Antigravity fetches its list of models, and is given longer).
 const WITHIN: Duration = Duration::from_millis(2_500);
@@ -147,7 +149,12 @@ async fn asked(program: &Path, args: &[String], within: Duration) -> Option<(i32
 }
 
 /// A tool's row, from what the tool says of itself now.
-async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
+async fn row_of(
+    tool: &str,
+    home: &Path,
+    observed_at: &str,
+    listing: &tokio::sync::OnceCell<Option<String>>,
+) -> Value {
     let program = clarp_backend::program(tool).and_then(|name| located(&name));
     let how = catalogue::declared(tool)["asked"].clone();
     let for_its_version = ["--version".to_string()];
@@ -161,6 +168,16 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
             let models = async {
                 match how["how"].as_str() {
                     // Asked by a command: its answer counts where it ended well.
+                    Some("listing") => listing
+                        .get_or_init(|| async {
+                            let args = ["models".to_string(), "--verbose".to_string()];
+                            asked(program, &args, WITHIN)
+                                .await
+                                .filter(|(code, _)| *code == 0)
+                                .map(|(_, text)| text)
+                        })
+                        .await
+                        .clone(),
                     Some("command") => {
                         let with: Vec<String> = how["with"]
                             .as_array()
@@ -223,6 +240,14 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
     for flag in not_yet.map_or(&[][..], |(_, flags)| *flags) {
         row[*flag] = json!(false);
     }
+    if matches!(tool, "opencode" | "deepseek") {
+        let home = home.to_owned();
+        let deepseek = tool == "deepseek";
+        let joined = tokio::task::spawn_blocking(move || {
+            crate::logins::opencode::group_models(&home, row, deepseek)
+        });
+        return joined.await.unwrap_or_default();
+    }
     row
 }
 
@@ -243,7 +268,8 @@ impl Shelf {
             return kept.told.clone();
         }
         let observed_at = crate::wire::to_the_second(now_ms);
-        let asked = TOOLS.map(|tool| row_of(tool, &home, &observed_at));
+        let listing = tokio::sync::OnceCell::new();
+        let asked = TOOLS.map(|tool| row_of(tool, &home, &observed_at, &listing));
         let found = futures_util::future::join_all(asked).await;
         let named = TOOLS.iter().map(|tool| (*tool).to_string());
         let rows: Vec<(String, Value)> = named.zip(found).collect();

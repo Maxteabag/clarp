@@ -42,6 +42,7 @@ pub mod live_session;
 pub mod located;
 pub mod media;
 pub mod notify;
+pub mod opencode;
 pub mod oracle;
 pub mod personas;
 pub mod portraits;
@@ -69,3 +70,8 @@ pub mod turn;
 pub mod usage;
 pub mod usage_ask;
 pub mod voices;
+
+/// A native session identifier that can be used as a single path component.
+pub fn native_session_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != ".."
+}

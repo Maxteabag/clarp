@@ -61,6 +61,7 @@ impl Backend for Adapter {
             args.extend([self.tool.prompt_flag().into(), prompt]);
         }
         Launch {
+            before_stop: None,
             prompt_as_file,
             program: self.program.clone(),
             args,
@@ -76,6 +77,7 @@ impl Backend for Adapter {
             &q.prompt,
         );
         Some(Launch {
+            before_stop: None,
             prompt_as_file: false,
             program: self.program.clone(),
             args,

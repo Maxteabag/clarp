@@ -23,6 +23,7 @@ pub mod codex;
 mod grok_muse;
 pub mod history;
 pub mod limits;
+pub mod opencode;
 pub mod past;
 pub mod scripted;
 
@@ -107,6 +108,8 @@ pub struct OwnHome {
 /// How to start the tool for one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
+    /// A signal to the direct child and a bounded wait in milliseconds before group termination.
+    pub before_stop: Option<(&'static str, u64)>,
     pub program: String,
     pub args: Vec<String>,
     /// Set on top of the environment the tool inherits.
@@ -173,6 +176,10 @@ pub enum Signal {
     /// running total of its session, not the turn's share (Claude Code's `total_cost_usd`,
     /// which it carries over when it continues a session). The actor tells the turn's share.
     Cost {
+        micros: u64,
+    },
+    /// The charge for this turn alone.
+    TurnCost {
         micros: u64,
     },
     /// The tool process is gone, and this is how the turn went.
@@ -290,9 +297,12 @@ pub fn program(id: &str) -> Option<String> {
     match id {
         "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
         "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
-        "grok" => Some(named("CLARP_GROK_PROGRAM").unwrap_or_else(|| "grok".into())),
-        "muse" => Some(named("CLARP_MUSE_PROGRAM").unwrap_or_else(|| "muse".into())),
         "agy" => Some(named(AGY_PROGRAM_ENV).unwrap_or_else(|| "agy".to_string())),
+        "grok" => Some(named("CLARP_GROK_PROGRAM").unwrap_or_else(|| "grok".into())),
+        "opencode" | "deepseek" => {
+            Some(named("CLARP_OPENCODE_PROGRAM").unwrap_or_else(|| "opencode".to_string()))
+        }
+        "muse" => Some(named("CLARP_MUSE_PROGRAM").unwrap_or_else(|| "muse".into())),
         _ => None,
     }
 }
@@ -320,6 +330,14 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
             },
             program: program(id)?,
         })),
+        "opencode" | "deepseek" => Some(Arc::new(opencode::OpenCode(
+            if id == "opencode" {
+                "opencode"
+            } else {
+                "deepseek"
+            },
+            program(id)?,
+        ))),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,
     }

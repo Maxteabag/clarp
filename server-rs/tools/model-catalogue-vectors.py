@@ -28,7 +28,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-backend' / 'tests' / 'fixtures' / 'model-catalogue-vectors.json'
 TABLE = HERE.parent / 'crates' / 'clarp-backend' / 'src' / 'catalogue.json'
-TOOLS = ('claude', 'codex', 'agy', 'grok', 'muse')
+TOOLS = ('claude', 'codex', 'agy', 'grok', 'opencode', 'deepseek', 'muse')
 AT = '2027-01-15T08:00:00Z'
 
 
