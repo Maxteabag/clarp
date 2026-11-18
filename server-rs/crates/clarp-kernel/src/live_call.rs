@@ -16,6 +16,8 @@
 //! folder, a clock or a key: a profile and its files are given as they were read. Held to
 //! those modules by `tests/fixtures/live-call-vectors.json`.
 
+pub mod receipts;
+
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
