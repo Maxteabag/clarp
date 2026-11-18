@@ -157,7 +157,7 @@ fn a_body_is_read_and_written_canonically_as_the_python_host_does() {
             example["sha256"]
         );
     }
-    eprintln!("bodies: {read} read ({written} written, {refused} refused), {not_json} no JSON");
+    assert_eq!((read, written, refused, not_json), (51, 16, 35, 35));
 }
 
 #[test]
@@ -186,7 +186,33 @@ fn a_payload_is_a_render_spec_or_is_refused_as_the_python_host_does() {
             }
         }
     }
-    eprintln!("payloads: {valid} taken, {refused} refused, by code {codes:?}");
+    assert_eq!((valid, refused), (42, 217));
+    let by_code: Vec<(&str, usize)> = codes.iter().map(|(code, n)| (code.as_str(), *n)).collect();
+    assert_eq!(
+        by_code,
+        [
+            ("catalog_version", 8),
+            ("component", 2),
+            ("depth", 2),
+            ("element_count", 2),
+            ("element_id", 12),
+            ("element_tree", 9),
+            ("expression", 24),
+            ("invalid_json", 6),
+            ("invalid_object", 16),
+            ("invalid_version", 5),
+            ("missing_key", 20),
+            ("number_form", 14),
+            ("prop", 20),
+            ("schema_keyword", 3),
+            ("schema_shape", 35),
+            ("state_value", 8),
+            ("submit_intent", 3),
+            ("submit_label", 3),
+            ("unknown_catalog", 3),
+            ("unknown_key", 22),
+        ]
+    );
 }
 
 fn previous_of(case: &Value) -> Option<(String, bool)> {
@@ -238,7 +264,7 @@ fn answers_are_taken_or_refused_as_the_python_host_does() {
             }
         }
     }
-    eprintln!("answers: {taken} taken, {again} again, {refused} refused");
+    assert_eq!((taken, again, refused), (9, 5, 57));
 }
 
 #[test]
@@ -327,10 +353,7 @@ fn the_reference_vectors_play_through_as_the_python_host_plays_them() {
             assert_eq!(status, expected, "{name}");
         }
     }
-    eprintln!(
-        "flows: {} with {steps_played} steps",
-        vectors["flows"].as_array().unwrap().len()
-    );
+    assert_eq!((vectors["flows"].as_array().unwrap().len(), steps_played), (35, 56));
 }
 
 #[test]
@@ -350,7 +373,7 @@ fn the_agent_is_told_the_answers_as_the_python_host_tells_them() {
         assert_eq!(text, case["text"]);
         told += 1;
     }
-    eprintln!("messages: {told}");
+    assert_eq!(told, 10);
 }
 
 #[test]
@@ -371,7 +394,7 @@ fn a_client_may_see_a_spec_as_the_python_host_says() {
             may_not += 1;
         }
     }
-    eprintln!("clients: {may} may, {may_not} may not");
+    assert_eq!((may, may_not), (22, 256));
 }
 
 #[test]
@@ -424,5 +447,5 @@ fn a_catalog_is_loaded_or_not_as_the_python_host_loads_it() {
     // While the catalog cannot be loaded, every refusal is that one.
     let unavailable = Refusal::new("not_open", "").triple(Err(Unavailable));
     assert_eq!(unavailable, vectors["without_a_catalog"]);
-    eprintln!("catalogs: {loaded} loaded, {not} not");
+    assert_eq!((loaded, not), (14, 27));
 }
