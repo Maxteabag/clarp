@@ -2002,9 +2002,9 @@ stages, as a code from the closed list, a pointer and the catalog's sentence for
 and never naming a key the caller wrote unless it is an identifier; whether answers are taken (accepted, the
 same again, or refused); what the agent is told; and the canonical bytes (RFC 8785, whole numbers only)
 that a spec is counted, hashed and capped by. They are held to `server/lib/render_spec.py` run as it is by
-841 recorded cases (`tools/render-spec-vectors.py`): 95 bodies, 260 payloads (every stage, every cap at and
+851 recorded cases (`tools/render-spec-vectors.py`): 95 bodies, 260 payloads (every stage, every cap at and
 one over), 71 submissions, the reference's own 47 scenarios played through as its store plays them, 278
-clients, 10 messages, 33 sets of the texts besides a payload (the reference's PR 438) and 47 catalog files, each that loads asked about nine payloads (the reference as of
+clients, 10 messages, 33 sets of the texts besides a payload (the reference's PR 438), 10 bodies that do or do not hold a text no store can hold (its PR 441) and 47 catalog files, each that loads asked about nine payloads (the reference as of
 its PR 431, which asks that a bound property's schema be the catalog's shape of a binding). The body of a request is read as the Python Host reads it,
 because that reader is not JSON as it is defined and the refusals depend on it: it finds UTF-16 and UTF-32
 by their first bytes, lets half of a pair of signs through (refused later as `invalid_json`), takes `NaN`
@@ -2023,7 +2023,7 @@ form's answers, and the same answers under the same id get the same receipt. `GE
 /artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
 its bytes (`clarp-agent-artifacts publish-render-spec REQUEST_FILE [--validate-only]`), so that the Host is
 the only validator. Held end to end at every door the reference's own integration test goes through
-(`tests/host.rs`, a render spec is published, shown to who may see it and answered once). Not there: moving
+(`tests/host.rs`, a render spec is published, shown to who may see it and answered once). A request to `/artifacts` or `/decisions` that is not a read and whose body holds half of a UTF-16 pair, in a text or a key, is refused before any route looks at it with the Python Host's one sentence (its PR 441, R79), a render spec's own requests excepted: their contract names the field. Not there: moving
 a render spec with its agent to another Host, which is the mover's contract.
 
 **The connection relay** (16 Nov 2026; the owner's requirement, through the Python Host's release owner: "when

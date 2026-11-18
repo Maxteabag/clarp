@@ -6947,6 +6947,103 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let (_, kept) = ask("GET", "/artifacts/ref-a", capable, None);
     assert_eq!(kept["artifact"]["title"], "Decide");
 
+    // A text no store can hold, anywhere in a body to `/artifacts` or `/decisions` that is
+    // not a read, is refused with one sentence before the route looks at it: before its 404,
+    // its 409, its 403, and nothing is kept (R79). A render spec's own requests keep the
+    // contract's refusals.
+    let unstorable = (400, json!({ "error": spec::UNSTORABLE }));
+    let lone = |text: &str| text.replace("HALF", "x\\ud800");
+    for (path, written, without, turn) in [
+        ("/decisions/none/what", r#"{"x": "HALF"}"#, 404, false),
+        (
+            "/artifacts",
+            r#"{"session": "theo", "type": "decision", "title": "HALF"}"#,
+            409,
+            false,
+        ),
+        (
+            "/decisions/none/resolve",
+            r#"{"answer": "HALF", "expected_revision": 1}"#,
+            403,
+            true,
+        ),
+    ] {
+        let mut headers = vec![("Content-Type", "application/json")];
+        if turn {
+            headers.push(("X-Clarp-Turn", "synthetic"));
+        }
+        let send = |body: &str| {
+            let got = fetch(&host, "", "POST", path, &headers, body.as_bytes());
+            (
+                got.status,
+                serde_json::from_slice::<Value>(&got.body).unwrap_or(Value::Null),
+            )
+        };
+        assert_eq!(send(&lone(written)), unstorable, "{path}");
+        assert_eq!(send(&written.replace("HALF", "x")).0, without, "{path}");
+    }
+    let listed = rows_of("unstorable");
+    for written in [
+        r#"{"session": "theo", "type": "document", "artifact_id": "unstorable", "title": "Notes", "payload": {"content": "HALF"}}"#,
+        r#"{"session": "theo", "type": "document", "artifact_id": "unstorable", "title": "Notes", "payload": {"HALF": "a key"}}"#,
+        r#"{"session": "HALF", "type": "document", "artifact_id": "unstorable", "title": "Notes", "payload": {"content": "hi"}}"#,
+    ] {
+        assert_eq!(
+            raw("POST", "/artifacts", None, lone(written).as_bytes()),
+            unstorable
+        );
+    }
+    assert_eq!((listed, rows_of("unstorable")), (0, 0));
+    assert_eq!(
+        raw(
+            "POST",
+            "/artifacts/a-document",
+            None,
+            lone(r#"{"title": "HALF"}"#).as_bytes()
+        ),
+        unstorable
+    );
+    assert_eq!(
+        ask("GET", "/artifacts/a-document", None, None).1["artifact"]["title"],
+        "Renamed"
+    );
+    let (status, said) = raw("POST", "/artifacts", None, lone(r#"["HALF"]"#).as_bytes());
+    assert_eq!(
+        (status, &said["error"]),
+        (400, &json!("json object required"))
+    );
+    let read = fetch(
+        &host,
+        "",
+        "GET",
+        "/artifacts",
+        &[],
+        lone(r#"{"a": "HALF"}"#).as_bytes(),
+    );
+    assert_eq!(read.status, 200);
+    // A render spec's own: made, revised, answered.
+    let (status, said) = raw(
+        "POST",
+        "/artifacts/open",
+        capable,
+        lone(r#"{"title": "HALF", "payload": {}}"#).as_bytes(),
+    );
+    assert_eq!((status, said), (400, refusal("invalid_json", "/title")));
+    let submitted = lone(&format!(
+        r#"{{"version": "build-3", "submission_id": "{}HALF", "answers": {{"intent": "submit_decision", "state": {{"choice": "send"}}}}}}"#,
+        "a".repeat(31)
+    ));
+    let (status, said) = raw(
+        "POST",
+        "/artifacts/open/submit",
+        capable,
+        submitted.as_bytes(),
+    );
+    assert_eq!(
+        (status, said),
+        (400, refusal("invalid_submission_id", "/submission_id"))
+    );
+
     // The row is the same at every door: a mutation's answer, a search, the pins, Updates.
     for (client, can) in [(below, false), (capable, true)] {
         let id = if can {

@@ -461,7 +461,7 @@ pub fn router(app: App) -> Router {
         .route("/tools/run", post(run_tool))
         .merge(apps::routes())
         .merge(crate::heard::routes())
-        .merge(library::routes())
+        .merge(library::routes().layer(middleware::from_fn_with_state(app.clone(), library::texts)))
         .merge(media::routes())
         .merge(plans::routes())
         .merge(push::routes())

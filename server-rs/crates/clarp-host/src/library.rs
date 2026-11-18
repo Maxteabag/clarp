@@ -1381,6 +1381,75 @@ pub(crate) async fn of_session(app: &App, session: &str) -> Value {
     json!({ "artifacts": all_shown(app, rows, "", false).await })
 }
 
+/// A request to `/artifacts` or `/decisions` that is not a read, whose body holds half of a
+/// UTF-16 pair in any text or key, is refused here with one sentence, before any route
+/// looks at it, and nothing is kept (the Python Host's `request_texts`, R79). A render spec's
+/// own requests are left to the contract's refusals, which name the field (R71).
+pub(crate) async fn texts(
+    State(app): State<App>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if request.method() == axum::http::Method::GET {
+        return next.run(request).await;
+    }
+    let path = request.uri().path().to_string();
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, 2 * 1024 * 1024).await else {
+        return refused(StatusCode::PAYLOAD_TOO_LARGE, "length limit exceeded").into_response();
+    };
+    let data = render_spec::body(&bytes);
+    let lone =
+        matches!(&data, Some(J::Object(_))) && data.as_ref().is_some_and(spec::json::holds_lone);
+    if lone && !spec_request(&app, &path, data.as_ref()) {
+        eprintln!(
+            "clarp-host: requestTextRefused {}",
+            path.split('/').nth(1).unwrap_or_default()
+        );
+        return refused(StatusCode::BAD_REQUEST, spec::UNSTORABLE).into_response();
+    }
+    let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+    next.run(request).await
+}
+
+/// Whether a request is a render spec's own: one made (`type` render_spec), or one to a
+/// render spec that is there.
+fn spec_request(app: &App, path: &str, data: Option<&J>) -> bool {
+    if path == "/artifacts" {
+        return data.and_then(J::object).is_some_and(render_spec::is_spec);
+    }
+    let Some(rest) = path.strip_prefix("/artifacts/") else {
+        return false;
+    };
+    let rest = percent_decoded(rest);
+    let id = rest.trim_matches('/').split('/').next().unwrap_or_default();
+    spec_of(app, id).is_some_and(|spec| spec.deleted_at.is_none())
+}
+
+/// A part of a path with its `%XX` read, as Python's `unquote` reads it.
+fn percent_decoded(part: &str) -> String {
+    let bytes = part.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|two| std::str::from_utf8(two).ok())
+            .and_then(|two| u8::from_str_radix(two, 16).ok());
+        match (bytes[at], hex) {
+            (b'%', Some(byte)) => {
+                out.push(byte);
+                at += 3;
+            }
+            (byte, _) => {
+                out.push(byte);
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// The routes of the library and the inbox.
 pub fn routes() -> Router<App> {
     Router::new()

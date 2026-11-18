@@ -376,6 +376,15 @@ PLANTS = [
     (H, 'host', "a revision's title, summary and status are not checked", '    if let Err(refusal) = spec::envelope(&given) {', '    if let Err(refusal) = spec::envelope(&given[..0]) {'),
     (H, 'host', "a revision's title, summary or status not given is null", '        .filter_map(|key| Some((*key, data.get(key)?)))\n        .collect();\n    if let Err(refusal) = spec::envelope(&given) {', '        .map(|key| (*key, data.get(key).unwrap_or(&J::Null)))\n        .collect();\n    if let Err(refusal) = spec::envelope(&given) {'),
     (J, 'vectors', 'a body may nest a level deeper', '                if self.depth > DEEPEST_READ {', '                if self.depth > DEEPEST_READ + 1 {'),
+    # A text no store can hold, refused where a request comes in (the reference's PR 441: R79).
+    (R, 'vectors', 'the sentence of a text no store can hold says otherwise', '"A text in this request holds a character that cannot be stored."', '"A text in this request cannot be stored."'),
+    (J, 'vectors', 'a half in a key is passed over', '                    if matches!(key, Text::Lone(_)) {\n                        return true;\n                    }\n', ''),
+    (J, 'vectors', 'what is in a list is passed over', '            J::Array(items) => pending.extend(items),', '            J::Array(_) => {}'),
+    (E, 'host', 'the routes answer first: nothing is checked before them', '        .merge(library::routes().layer(middleware::from_fn_with_state(app.clone(), library::texts)))', '        .merge(library::routes())'),
+    (L, 'host', 'a read is checked too', '    if request.method() == axum::http::Method::GET {', '    if request.method() == axum::http::Method::PUT {'),
+    (L, 'host', "a render spec's own requests are refused with the sentence", '    if lone && !spec_request(&app, &path, data.as_ref()) {', '    if lone {'),
+    (L, 'host', 'a request to a render spec that is there is no render spec\'s', '    spec_of(app, id).is_some_and(|spec| spec.deleted_at.is_none())', '    spec_of(app, id).is_some_and(|_| false)'),
+    (L, 'host', 'a body that is no object is refused with the sentence', '    let lone = matches!(&data, Some(J::Object(_))) && data.as_ref().is_some_and(spec::json::holds_lone);', '    let lone = data.as_ref().is_some_and(spec::json::holds_lone);'),
     # The agent's tool.
     (T, 'host', 'a conflict is printed as a failure', '            let told = matches!(error.status().as_u16(), 400 | 403 | 409);', '            let told = matches!(error.status().as_u16(), 400 | 403);'),
     (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
