@@ -14,7 +14,7 @@ from __future__ import annotations
 import pathlib
 
 from .log import log, log_exception
-from . import backends
+from . import backends, transcript_paths
 
 
 def _encoded_project_dir(cwd: str, projects_root: pathlib.Path) -> pathlib.Path:
@@ -31,13 +31,13 @@ def find_session_jsonl(backend_session_id: str, cwd: str,
     directories, and the JSONL lives in whichever dir was current when the
     first turn ran.
     """
-    if not backend_session_id:
+    if not backend_session_id or not transcript_paths.checked_id("claude", backend_session_id):
         return None
     target = _encoded_project_dir(cwd, projects_root) / f"{backend_session_id}.jsonl"
     if target.is_file():
-        return target
+        return transcript_paths.inside("claude", projects_root, target)
     for hit in projects_root.glob(f"*/{backend_session_id}.jsonl"):
-        return hit
+        return transcript_paths.inside("claude", projects_root, hit)
     return None
 
 

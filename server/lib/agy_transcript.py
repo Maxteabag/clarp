@@ -29,6 +29,7 @@ import urllib.parse
 from typing import Any
 
 from .log import log_exception
+from . import transcript_paths
 from .text_util import truncate
 
 # Map agy's event types onto the tool names the UI already styles.
@@ -342,12 +343,12 @@ def find_latest_jsonl(
     brain_root: pathlib.Path | None = None,
 ) -> pathlib.Path | None:
     """Locate the transcript.jsonl for an agy conversation id."""
-    if not conversation_id:
+    if not conversation_id or not transcript_paths.checked_id("agy", conversation_id):
         return None
     root = _agy_home(brain_root)
     p = (root / conversation_id / ".system_generated" / "logs"
          / "transcript.jsonl")
-    return p if p.is_file() else None
+    return transcript_paths.inside("agy", root, p) if p.is_file() else None
 
 
 def _summaries_file() -> pathlib.Path:

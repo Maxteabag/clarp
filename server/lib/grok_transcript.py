@@ -10,6 +10,7 @@ from typing import Any
 
 from .voice_preamble import strip_voice_preamble
 from .claude_transcript import summarise_tool, truncate
+from . import transcript_paths
 
 
 def grok_home() -> pathlib.Path:
@@ -196,21 +197,21 @@ def parse_turns(path) -> list[dict]:
 
 
 def find_latest_jsonl(session_id: str, *, home: pathlib.Path | None = None):
-    if not session_id:
+    if not session_id or not transcript_paths.checked_id("grok", session_id):
         return None
     root = sessions_root(home)
     if not root.is_dir():
         return None
     direct = root / session_id / "chat_history.jsonl"
     if direct.is_file():
-        return direct
+        return transcript_paths.inside("grok", root, direct)
     try:
         for cwd_dir in root.iterdir():
             if not cwd_dir.is_dir():
                 continue
             candidate = cwd_dir / session_id / "chat_history.jsonl"
             if candidate.is_file():
-                return candidate
+                return transcript_paths.inside("grok", root, candidate)
     except OSError:
         return None
     return None

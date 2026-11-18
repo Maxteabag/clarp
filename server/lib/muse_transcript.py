@@ -16,6 +16,7 @@ from typing import Any, Iterator
 
 from .claude_transcript import summarise_tool, truncate
 from .voice_preamble import strip_voice_preamble
+from . import transcript_paths
 
 
 def muse_home() -> pathlib.Path:
@@ -194,7 +195,7 @@ def parse_turns(path) -> list[dict]:
 
 def find_latest_jsonl(session_id: str, *, home: pathlib.Path | None = None):
     """``sessions/YYYY/MM/DD/<id>/session.jsonl``, newest day first."""
-    if not session_id or not _SESSION_ID.match(session_id):
+    if not session_id or not _SESSION_ID.fullmatch(session_id):
         return None
     root = sessions_root(home)
     if not root.is_dir():
@@ -204,7 +205,7 @@ def find_latest_jsonl(session_id: str, *, home: pathlib.Path | None = None):
                       reverse=True)
     except OSError:
         return None
-    return next((p for p in hits if p.is_file()), None)
+    return next((p for p in hits if p.is_file() and transcript_paths.inside("muse", root, p)), None)
 
 
 def _session_facts(path: pathlib.Path) -> tuple[str, str]:
