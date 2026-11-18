@@ -42,7 +42,17 @@ fn described(value: &J) -> Value {
         J::Float(_) => json!(["float"]),
         J::Text(Text::Valid(text)) => json!(["text", text]),
         J::Text(Text::Lone(points)) => json!(["lone", points]),
-        J::Array(items) => json!(["array", items.iter().map(described).collect::<Vec<_>>()]),
+        J::Array(items) => {
+            // A chain of lists, each holding only the next, is said as its length.
+            let (mut inner, mut depth) = (items, 0);
+            while let [J::Array(next)] = inner.as_slice() {
+                (inner, depth) = (next, depth + 1);
+            }
+            if depth > 0 {
+                return json!(["nest", depth, described(&J::Array(inner.clone()))]);
+            }
+            json!(["array", items.iter().map(described).collect::<Vec<_>>()])
+        }
         J::Object(fields) => json!([
             "object",
             fields
