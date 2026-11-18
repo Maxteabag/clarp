@@ -6,8 +6,7 @@
 //! (`clarp_backend::limits`), kept for the tool (`clarp_kernel::quota`), and what follows
 //! from it is told to the apps: a warning at four fifths of the five-hour window, a hard
 //! limit, and when either is over. An app's usage screen is shown what is kept
-//! (`GET /backend-usage`). Nobody is asked anything: a Host whose agents run no turn learns
-//! nothing new, and what it shows says how old its word is.
+//! (`GET /backend-usage`). The optional collectors also write their observations here.
 //!
 //! An agent's row says of its tool that its account is used up (`backend_quota`) while a
 //! window that was said to be all used is fresh and no turn of the tool completed since:
@@ -201,10 +200,10 @@ impl Desk {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner) = Some(with.now_ms);
             }
-            let answer = provider.ask(name, home, with.now_ms).await;
+            let answer = provider.ask(name, home, with.now_ms,before).await;
             let with = With::of(app, home);
             let mut known = self.known.lock().await;
-            if before != stamp() {
+            if before != stamp() || (name==CODEX && known.login(with,CODEX,false).await.as_ref().map(Named::login)!=login.as_ref().map(Named::login)) {
                 continue;
             }
             if name == "agy" {

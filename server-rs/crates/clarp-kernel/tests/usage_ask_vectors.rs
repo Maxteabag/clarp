@@ -59,5 +59,12 @@ fn asks_when_the_reference_does_and_shows_every_model_group_bucket() {
         );
         count += 1;
     }
-    assert_eq!(count, 29);
+    for case in fixture["agy"].as_array().unwrap() {
+        let now=case["now"].as_i64().unwrap();
+        let read=agy_groups(&case["body"]).map(|groups|agy_provider("a-host:agy",&groups,now,now));
+        assert_eq!(json!(read),case["projected"]);
+        count+=1;
+    }
+    assert_eq!(count, fixture["ages"].as_array().unwrap().len()+fixture["cases"].as_array().unwrap().len()+fixture["agy"].as_array().unwrap().len());
+    println!("{count} projection and refresh steps");
 }

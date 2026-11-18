@@ -73,7 +73,59 @@ def cases(place):
                 active[0] = account
                 ages.append({"now": now[0], "active": account, "done": completed,
                              "claude": claude._claude_needs_refresh(), "codex": codex._codex_needs_refresh()})
-    return {"at": began, "payload": payload, "cases": rows, "direct": direct, "ages": ages}
+    origins = []
+    for base in ["https://chatgpt.com", "https://chat.openai.com:443/backend-api/",
+                 "https://CHATGPT.COM/backend-api///", "https://chatgpt.com/ ",
+                 "http://chatgpt.com", "https://fixture.invalid", "https://chatgpt.com:444",
+                 "https://guest@chatgpt.com", "https://chatgpt.com/path", "https://chatgpt.com/?q=1",
+                 "https://chatgpt.com/#no", "https://chatgpt.com:bad", "file:///tmp/home"]:
+        try:
+            url = codex._codex_usage_url(base)
+        except RuntimeError:
+            url = None
+        origins.append({"base": base, "url": url})
+    blocks = []
+    for flag in [{"allowed": False}, {"limit_reached": True}, {"allowed": True}, {"allowed": 0},
+                 {"limit_reached": 1}, {}, {"allowed": False, "limit_reached": False}]:
+        for kind, reset in [("workspace_CREDITS", began // 1000), ("usage_limit", str(began // 1000)),
+                            (None, None), ("", -1)]:
+            body = {"rate_limit": flag, "rate_limit_reached_type": {"type": kind},
+                    "rate_limit_upsell": {"reset_at": reset}}
+            blocked = codex._codex_block_from_payload(body)
+            if blocked:
+                del blocked["provider_reason"]
+            blocks.append({"body": body, "blocked": blocked})
+    import urllib.request
+    usage._read_claude_auth = lambda: ("synthetic", 0, "")
+    usage._active_claude_account_ref = lambda **kwargs: None
+    readings = []
+    for payload in [{}, {"five_hour": None}, {"seven_day_oauth_apps": {}, "seven_day": {"utilization": " 7 "}},
+                    {"five_hour": {"utilization": 1, "resets_at": began // 1000}, "seven_day": {"utilization": 55}},
+                    {"five_hour": {"utilization": 0.5, "resets_at": "2030-01-02T00:00:00+00:00"},
+                     "seven_day_oauth_apps": {"utilization": 87}, "seven_day": {"utilization": 12}},
+                    {"five_hour": {"utilization": False}}, {"five_hour": {"utilization": "bad"}},
+                    {"five_hour": {"utilization": None}}, {"seven_day_oauth_apps": ["invalid"], "seven_day": {"utilization": 12}}]:
+        urllib.request.urlopen = lambda *a, **kw: io.BytesIO(json.dumps(payload).encode())
+        try:
+            windows = usage.fetch_claude_usage()["windows"]
+        except RuntimeError:
+            windows = None
+        readings.append({"payload": payload, "windows": windows})
+    agy_cases = []
+    for val in [None, [], [{"name": "empty"}], [{"name": "x", "buckets": [
+                    {"window": "weekly", "remaining_fraction": "0.5"}, {},
+                    {"window": "strange", "remaining_fraction": 1.2, "reset_time": "bad"},
+                    {"window": "5h", "remaining_fraction": -0.01}, {"remaining_fraction": False}]}]]:
+        body = {"command": {"data": {"groups": val}}}
+        agy._run_agy_usage = lambda *_: (json.dumps(body), "", 0)
+        try:
+            agy.fetch_agy_usage()
+            projected = usage._structured_provider("agy", now[0])
+        except RuntimeError:
+            projected = None
+        agy_cases.append({"body": body, "projected": projected, "now": now[0]})
+    return {"at": began, "payload": {"command": {"data": {"groups": groups}}}, "cases": rows, "direct": direct,
+            "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
 
 
 if __name__ == "__main__":

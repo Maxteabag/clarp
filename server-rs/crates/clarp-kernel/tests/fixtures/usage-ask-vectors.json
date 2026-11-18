@@ -141,7 +141,587 @@
    "now": 1900000300001
   }
  ],
+ "agy": [
+  {
+   "body": {
+    "command": {
+     "data": {
+      "groups": null
+     }
+    }
+   },
+   "now": 1900000300001,
+   "projected": null
+  },
+  {
+   "body": {
+    "command": {
+     "data": {
+      "groups": []
+     }
+    }
+   },
+   "now": 1900000300001,
+   "projected": null
+  },
+  {
+   "body": {
+    "command": {
+     "data": {
+      "groups": [
+       {
+        "name": "empty"
+       }
+      ]
+     }
+    }
+   },
+   "now": 1900000300001,
+   "projected": {
+    "freshness": "unknown",
+    "observed_at": null,
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "No structured usage evidence for this provider",
+     "kind": "unavailable"
+    },
+    "windows": []
+   }
+  },
+  {
+   "body": {
+    "command": {
+     "data": {
+      "groups": [
+       {
+        "buckets": [
+         {
+          "remaining_fraction": "0.5",
+          "window": "weekly"
+         },
+         {},
+         {
+          "remaining_fraction": 1.2,
+          "reset_time": "bad",
+          "window": "strange"
+         },
+         {
+          "remaining_fraction": -0.01,
+          "window": "5h"
+         },
+         {
+          "remaining_fraction": false
+         }
+        ],
+        "name": "x"
+       }
+      ]
+     }
+    }
+   },
+   "now": 1900000300001,
+   "projected": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:51:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "x",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:51:40Z",
+      "resets_at": "bad",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": -20.0,
+      "window_id": "puw-b2caef26a40574ec13b6f1b933b05b16"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "label": "x",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:51:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 101.0,
+      "window_id": "puw-722428851eacc51016d6b3c85fff2fb8"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "x",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:51:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-b2caef26a40574ec13b6f1b933b05b16"
+     }
+    ]
+   }
+  }
+ ],
  "at": 1900000000000,
+ "blocks": [
+  {
+   "blocked": {
+    "reason": "credits_depleted",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "credits_depleted",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "limit_reached": true
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "limit_reached": true
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "limit_reached": true
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "limit_reached": true
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": true
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": true
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": true
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": true
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": 0
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": 0
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": 0
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "allowed": 0
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "limit_reached": 1
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "limit_reached": 1
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "limit_reached": 1
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {
+     "limit_reached": 1
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {},
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {},
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {},
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": null,
+   "body": {
+    "rate_limit": {},
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "credits_depleted",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false,
+     "limit_reached": false
+    },
+    "rate_limit_reached_type": {
+     "type": "workspace_CREDITS"
+    },
+    "rate_limit_upsell": {
+     "reset_at": 1900000000
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": "2030-03-17T17:46:40Z"
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false,
+     "limit_reached": false
+    },
+    "rate_limit_reached_type": {
+     "type": "usage_limit"
+    },
+    "rate_limit_upsell": {
+     "reset_at": "1900000000"
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false,
+     "limit_reached": false
+    },
+    "rate_limit_reached_type": {
+     "type": null
+    },
+    "rate_limit_upsell": {
+     "reset_at": null
+    }
+   }
+  },
+  {
+   "blocked": {
+    "reason": "usage_limit",
+    "resets_at": null
+   },
+   "body": {
+    "rate_limit": {
+     "allowed": false,
+     "limit_reached": false
+    },
+    "rate_limit_reached_type": {
+     "type": ""
+    },
+    "rate_limit_upsell": {
+     "reset_at": -1
+    }
+   }
+  }
+ ],
  "cases": [
   {
    "due": false,
@@ -1008,6 +1588,117 @@
    }
   }
  ],
+ "claude": [
+  {
+   "payload": {},
+   "windows": null
+  },
+  {
+   "payload": {
+    "five_hour": null
+   },
+   "windows": null
+  },
+  {
+   "payload": {
+    "seven_day": {
+     "utilization": " 7 "
+    },
+    "seven_day_oauth_apps": {}
+   },
+   "windows": {
+    "seven_day": {
+     "resets_at": "",
+     "used_percentage": 7.0,
+     "window_minutes": 10080
+    }
+   }
+  },
+  {
+   "payload": {
+    "five_hour": {
+     "resets_at": 1900000000,
+     "utilization": 1
+    },
+    "seven_day": {
+     "utilization": 55
+    }
+   },
+   "windows": {
+    "five_hour": {
+     "resets_at": "2030-03-17T17:46:40Z",
+     "used_percentage": 1.0,
+     "window_minutes": 300
+    },
+    "seven_day": {
+     "resets_at": "",
+     "used_percentage": 55.0,
+     "window_minutes": 10080
+    }
+   }
+  },
+  {
+   "payload": {
+    "five_hour": {
+     "resets_at": "2030-01-02T00:00:00+00:00",
+     "utilization": 0.5
+    },
+    "seven_day": {
+     "utilization": 12
+    },
+    "seven_day_oauth_apps": {
+     "utilization": 87
+    }
+   },
+   "windows": {
+    "five_hour": {
+     "resets_at": "2030-01-02T00:00:00Z",
+     "used_percentage": 0.5,
+     "window_minutes": 300
+    },
+    "seven_day": {
+     "resets_at": "",
+     "used_percentage": 87.0,
+     "window_minutes": 10080
+    }
+   }
+  },
+  {
+   "payload": {
+    "five_hour": {
+     "utilization": false
+    }
+   },
+   "windows": null
+  },
+  {
+   "payload": {
+    "five_hour": {
+     "utilization": "bad"
+    }
+   },
+   "windows": null
+  },
+  {
+   "payload": {
+    "five_hour": {
+     "utilization": null
+    }
+   },
+   "windows": null
+  },
+  {
+   "payload": {
+    "seven_day": {
+     "utilization": 12
+    },
+    "seven_day_oauth_apps": [
+     "invalid"
+    ]
+   },
+   "windows": null
+  }
+ ],
  "direct": {
   "rate_limit": {
    "primary_window": {
@@ -1017,6 +1708,60 @@
    }
   }
  },
+ "origins": [
+  {
+   "base": "https://chatgpt.com",
+   "url": "https://chatgpt.com/backend-api/wham/usage"
+  },
+  {
+   "base": "https://chat.openai.com:443/backend-api/",
+   "url": "https://chat.openai.com/backend-api/wham/usage"
+  },
+  {
+   "base": "https://CHATGPT.COM/backend-api///",
+   "url": "https://chatgpt.com/backend-api/wham/usage"
+  },
+  {
+   "base": "https://chatgpt.com/ ",
+   "url": "https://chatgpt.com/backend-api/wham/usage"
+  },
+  {
+   "base": "http://chatgpt.com",
+   "url": null
+  },
+  {
+   "base": "https://fixture.invalid",
+   "url": null
+  },
+  {
+   "base": "https://chatgpt.com:444",
+   "url": null
+  },
+  {
+   "base": "https://guest@chatgpt.com",
+   "url": null
+  },
+  {
+   "base": "https://chatgpt.com/path",
+   "url": null
+  },
+  {
+   "base": "https://chatgpt.com/?q=1",
+   "url": null
+  },
+  {
+   "base": "https://chatgpt.com/#no",
+   "url": null
+  },
+  {
+   "base": "https://chatgpt.com:bad",
+   "url": null
+  },
+  {
+   "base": "file:///tmp/home",
+   "url": null
+  }
+ ],
  "payload": {
   "command": {
    "data": {
