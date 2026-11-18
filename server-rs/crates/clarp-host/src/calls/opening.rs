@@ -174,6 +174,16 @@ impl Desk {
         Ok(Ok(applied.answer))
     }
 
+    pub(crate) async fn bind_clip(&self,app:&App,id:&str,agent:&str,binding:clarp_kernel::rings::binding::Binding)->Result<(),Unavailable>{
+        self.with_opening(app,id,|rings,_,with,(out,_)|{
+            rings.change_opening(id,with.at.now_ms,out,|r,fx|{
+                if r.agent_id == agent {
+                    fx.dirty = binding.record(&mut r.opening);
+                }
+            });
+        }).await
+    }
+
     pub(crate) async fn greeting_admitted(
         &self,
         app: &App,
@@ -376,7 +386,15 @@ impl Desk {
             },
             text: rules::header(op),
         };
-        if member.agent.send(msg, Admission::Later).await?.duplicate {
+        let _guard = app.mouth.binding_admission.write().await;
+        let sent = member.agent.send(msg, Admission::Later).await?;
+        if let Some(turn) = sent.turn {
+            self.bind_clip(app,ring_id,&member.record.agent_id,clarp_kernel::rings::binding::Binding {
+                turn_id: turn.0, kind: clarp_kernel::rings::binding::Kind::Initiative,
+                admission_id:id.into(),epoch:op["epoch"].as_u64().unwrap_or(1)
+            }).await?;
+        }
+        if sent.duplicate {
             // Another send may have won the id after our initial read. Only
             // the actor can establish the provenance of the winning message.
             let winner = member.agent.opening_row(id).await?;
@@ -439,6 +457,41 @@ impl Desk {
         for op in pending {
             self.materialize(app, &op).await?;
         }
+        Ok(())
+    }
+
+    /// Prune from the call's durable end time even after its public history
+    /// has rolled over. Update the ring list and delete lookup keys together.
+    pub async fn prune_openings(&self, app:&App)->Result<(),Unavailable> {
+        let _serial=self.opening_turn.lock().await;
+        let mut held=self.books.lock().await;
+        let books=Self::read(&mut held,app).await?;
+        let now=app.clock.now_ms();
+        let archived=Self::archived_openings(app).await?;
+        let mut rings=books.rings.clone();
+        let mut deletes=Vec::new();
+        let mut hot_changed=false;
+        for (ring,hot) in books.rings.opening_records().map(|r|(r,true)).chain(archived.iter().map(|r|(r,false))) {
+            let op=&ring.opening;
+            let known=books.calls.of(op["principal"].as_str().unwrap_or("")).iter().find(|c| c.call_id==ring.call_id);
+            let ended = match known {
+                Some(call) if call.state=="live" => None,
+                Some(call) => call.ended_at,
+                None => op["call_ended_at"].as_i64(),
+            };
+            if !clarp_kernel::rings::binding::expired(op["retired"]["at"].as_i64(),ended,now) {continue}
+            if hot { rings.forget_opening(&ring.ring_id); hot_changed=true; }
+            deletes.push(("opening_history",ring.ring_id.clone()));
+            deletes.push(("opening_by_call",ring.call_id.clone()));
+            if let Some(token)=op["token"].as_str(){deletes.push(("opening_by_token",token.into()));}
+            for binding in op["clip_bindings"].as_array().into_iter().flatten(){
+                if let Some(key)=binding["turn_id"].as_u64().and_then(|turn|clarp_kernel::rings::binding::key(&ring.agent_id,turn)) {deletes.push(("opening_by_turn",key));}
+            }
+        }
+        let mut writes=Vec::new();
+        if hot_changed {writes.push((super::RINGS,super::RINGS_KEPT.into(),serde_json::to_vec(rings.rings()).map_err(|e|Unavailable(e.to_string()))?));}
+        app.fleet.change_together(writes,deletes).await?;
+        books.rings=rings;
         Ok(())
     }
 

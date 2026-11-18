@@ -189,10 +189,11 @@ impl KeyValue for MemTables {
         Ok(())
     }
 
-    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError> {
+    fn put_together(&mut self, writes: &[clarp_ports::kv::Write]) -> Result<(), StoreError> {
         let mut tables = self.tables.lock().map_err(|_| lost())?;
         for (table, key, value) in writes {
-            tables.insert((table.clone(), key.clone()), value.clone());
+            let entry = (table.clone(),key.clone());
+            if let Some(value) = value { tables.insert(entry,value.clone()); } else { tables.remove(&entry); }
         }
         Ok(())
     }
