@@ -926,7 +926,10 @@ class Conversation:
             if pause_after and index + 1 < relay.total and relay.key in self.result_findings:
                 # Paused at the part limit: a deliberate pause, not a cut. A later
                 # call does not go on past it by itself; it stays readable on request.
+                # Nor this call: an answer still waiting in pending (it came while the
+                # user spoke, then was read on request) leaves it too.
                 self.silenced_results.add(relay.key)
+                self.pending = [row for row in self.pending if row["delegation_id"] != relay.key]
             if index + 1 == relay.total and relay.key in self.result_findings:
                 self.results_sent.add(relay.key)
                 self.results_seen.add(relay.key)

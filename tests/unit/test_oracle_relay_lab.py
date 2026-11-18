@@ -875,3 +875,44 @@ def test_a_save_refused_because_another_connection_took_the_thread_still_ends_th
     oracle_memory.open_thread("owner", "theo", connection_id="connection-2")
     with pytest.raises(ValueError, match="Stale Oracle connection"):
         call.conv.checkpoint()
+
+
+def test_a_pending_answer_read_on_request_to_the_limit_is_not_told_on_by_itself_in_the_same_call(lab):
+    """The answer arrived while the user spoke, so it waited in pending; then it was read on request up
+    to the part limit. That pause holds in this call too: nothing more by itself, part 9 on request."""
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 600}
+    ident = row["delegation_id"]
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    call.conv.last_input = call.now[0]                     # the user is speaking: the answer waits
+    call.conv.tick()
+    assert [r["delegation_id"] for r in call.conv.pending] == [ident]
+    call.conv.read_result(ident)
+    _tell_on(call, mod.oracle_relay.AUTO_PARTS + 4)
+    chunks = call.conv.relays[ident].chunks
+    assert [_body(p) for p in call.parts()] == chunks[:mod.oracle_relay.AUTO_PARTS]
+    assert _cues(call) == [] and call.conv.pending == []
+    call.conv.read_result(ident)
+    assert _body(call.parts()[-1]) == chunks[mod.oracle_relay.AUTO_PARTS]
+
+
+def test_a_checkpoint_the_database_refuses_does_not_end_the_call(lab, monkeypatch):
+    """A save the database refuses (not one over the bound) is logged once and the call goes on."""
+    import sqlite3
+    from lib import oracle_memory
+    faults = []
+    monkeypatch.setattr(mod, "log_fault", lambda code, exc, **kw: faults.append((code, type(exc).__name__)))
+    store = oracle_memory.open_thread("owner", "theo", connection_id="connection-1")
+    monkeypatch.setattr(store, "save", lambda state: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120}
+    call = lab(rows=[row])
+    call.conv.memory = store
+    try:
+        call.conv.tick()
+        call.now[0] += 10
+        call.conv.tick()
+        _tell_on(call, 3)
+    except sqlite3.Error as exc:
+        pytest.fail(f"the refused save escaped the relay: {exc!r}")
+    assert len(call.parts()) == 4 and not call.conv.stop.is_set()
+    assert faults == [("oracleCheckpointNotSaved", "OperationalError")]
