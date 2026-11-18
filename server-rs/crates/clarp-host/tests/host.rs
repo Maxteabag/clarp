@@ -26871,14 +26871,22 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
             .iter()
             .any(|row| row["role"] == "assistant" && row["text"] == text)
     };
-    for (id, request) in [("e-1", "Look once."), ("e-2", "Look twice."), ("e-3", "Look thrice.")] {
+    for (id, request) in [
+        ("e-1", "Look once."),
+        ("e-2", "Look twice."),
+        ("e-3", "Look thrice."),
+    ] {
         assert_eq!(hand(&host, asked(id, request)).0, 200);
         wait_for("an answer nobody read the book for", || answered(request));
         wait_for("the agent to rest", || host.state(&theo) == "done");
     }
     let (status, again) = hand(&host, asked("e-1", "Look once."));
     assert_eq!(
-        (status, &again["delegation"]["status"], &again["delegation"]["result_text"]),
+        (
+            status,
+            &again["delegation"]["status"],
+            &again["delegation"]["result_text"]
+        ),
         (200, &json!("completed"), &json!("Look once."))
     );
     assert_eq!(ack(&host, json!("e-2")), (200, json!({ "ok": true })));
@@ -26887,7 +26895,10 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         "/oracle/delegations/cancel",
         Some(&json!({ "delegation_id": "e-3" })),
     );
-    assert_eq!((status, &said["delegation"]["status"]), (200, &json!("completed")));
+    assert_eq!(
+        (status, &said["delegation"]["status"]),
+        (200, &json!("completed"))
+    );
 
     // Work for an agent that is busy waits in its queue. It is not called off by its id
     // while it is not over: that is the agent's to stop.

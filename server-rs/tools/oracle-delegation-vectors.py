@@ -78,6 +78,7 @@ STORIES = [
           op('recent', all_of=PHONE)),
     story('a delegation that waits in the queue of a busy agent',
           dispatch('d-2', queued=True, queue='queued', backend='thread-7'),
+          op('dispatched', delegation_id=' d-2 ', backend='thread-8', queued=True, queue='queued'),
           op('undelivered'),
           op('active', agent='theo', trace='oracle-d-2'),
           op('acknowledge', delegation_id='d-2'),

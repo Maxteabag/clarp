@@ -112,6 +112,8 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
         let mut before: Vec<Delegation> = Vec::new();
         for step in story["steps"].as_array().unwrap() {
             let at = step["at"].as_i64().unwrap();
+            // What was given to write in the middle of this step.
+            let mut early: Vec<Delegation> = Vec::new();
             let owner = step["owner"].as_str().unwrap_or(ADMINISTRATOR);
             let limit = step["limit"].as_i64().unwrap_or(SHOWN_USUALLY);
             match text(step, "op") {
@@ -146,6 +148,18 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                             });
                             assert_eq!(sent, step["admitted"], "{step}");
                             admitted += 1;
+                            // A delegation that is new is kept as taken before its turn is
+                            // admitted: it is given to write at once, and it is not yet said
+                            // to wait.
+                            if !before
+                                .iter()
+                                .any(|row| row.delegation_id == admit.delegation_id)
+                            {
+                                early = book.written();
+                                let new = book.get(&admit.delegation_id).unwrap();
+                                assert_eq!(new.status, Status::Accepted, "{step}");
+                                assert_eq!(early, [new.clone()], "{step}");
+                            }
                             if let Some(why) = step["raises"].as_str() {
                                 book.fail(&admit.delegation_id, why, at);
                                 assert_eq!(
@@ -302,8 +316,15 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
             assert_eq!(whole(&book), step["rows"], "after {step}");
             // What the Host is given to write is exactly what changed in this step, each
             // row as it is now, and nothing is given twice.
-            let written = book.written();
+            let mut written = book.written();
             assert!(book.written().is_empty());
+            // A row that was given early and again counts as it was given last.
+            early.retain(|row| {
+                !written
+                    .iter()
+                    .any(|later| later.delegation_id == row.delegation_id)
+            });
+            written.append(&mut early);
             let now: BTreeMap<&str, &Delegation> = by_id(book.rows());
             let was: BTreeMap<&str, &Delegation> = by_id(&before);
             let changed = now.iter().filter(|(id, row)| was.get(*id) != Some(*row));
@@ -320,7 +341,7 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
         kept.reverse();
         assert_eq!(Book::kept(kept).rows(), book.rows(), "{}", story["name"]);
     }
-    assert_eq!((steps, refusals, admitted, ended), (191, 28, 57, 18));
+    assert_eq!((steps, refusals, admitted, ended), (192, 28, 57, 18));
 }
 
 #[test]
