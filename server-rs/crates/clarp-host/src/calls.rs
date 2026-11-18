@@ -1247,15 +1247,6 @@ async fn ring_voip_token(
     answered(left.await)
 }
 
-/// What of rings this Host does not have: a ring that listens first. Said in words, and
-/// nothing is done.
-async fn not_this_ring() -> ApiError {
-    ApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "This Host has no ring that listens first",
-    )
-}
-
 pub fn routes() -> Router<App> {
     // A route for each change there is: anything else under `/calls/` is no route, as on
     // the Python Host.
@@ -1274,10 +1265,7 @@ pub fn routes() -> Router<App> {
             get(ring_settings).post(ring_settings_change),
         )
         .route("/calls/ring/voip-token", post(ring_voip_token));
-    let router = live::routes(router).route(
-        "/calls/ring/{*rest}",
-        get(not_this_ring).post(not_this_ring),
-    );
+    let router = live::routes(router);
     changes.iter().fold(router, |router, action| {
         let (path, action) = (format!("/calls/{action}"), (*action).to_string());
         let change = move |app: State<App>, principal: Extension<Principal>, bytes: Bytes| {

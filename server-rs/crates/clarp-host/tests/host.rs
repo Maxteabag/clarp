@@ -30131,7 +30131,9 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     let speaker = cartesia_stand_in(vec![7; 5000]);
     let settings = place.root.join("speech.toml");
     std::fs::write(&settings,"[tts]\nprovider='cartesia'\n[cartesia]\napi_key='fixture'\n[cartesia.voices]\nAlma='fixture'\n").unwrap();
-    let args = ["--speech-keys", settings.to_str().unwrap()];
+    // Keep this fixture's shim records so the test can count successful
+    // invocations after the actor has filed the recovered turn's final reply.
+    let args = ["--speech-keys", settings.to_str().unwrap(), "--keep-spools"];
     let env = [
         ("CLARP_CARTESIA_ENDPOINT", speaker.address.as_str()),
         ("OPENAI_API_KEY", ""),
@@ -30145,6 +30147,17 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     );
     let (phone, _) = pair(&host, "Phone", "full");
     let (other, _) = pair(&host, "Other", "full");
+    // An unknown ring action takes the same missing-route path as other calls.
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/ring/missing-action",
+            Some(&json!({}))
+        )
+        .0,
+        404
+    );
     let alma = host.new_agent("Alma");
     let ring = |host: &Host, agent: &str| {
         host.post("/calls/ring",json!({"agent":agent,"opening_mode":"listen_first","reason":"Water","opening_line":"Hello?"}))["ring"].clone()
