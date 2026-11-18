@@ -152,13 +152,40 @@ def test_the_refusal_is_recorded_under_its_own_key(effects):
     assert outcome.decision["phrase_key"] == "no_such_agent"
 
 
-def test_a_model_chosen_key_plays_its_clip_as_on_main_reported_not_decided(effects, played):
-    """As on main, by decision (issue 360, R76): a clarification under a key the model or
-    _as_clarify chose plays its cached clip whatever words were meant. Here "Was that for
-    Antoni?" is heard as the clip "Was that for me?" in Mike's voice; reported to the release
-    owner, not changed in this PR."""
+# ---- R80: one rule for every path: a clip plays only of the very words meant ---------------------
+
+def test_the_question_about_another_agent_is_said_not_played_as_the_default_clip(effects, played, monkeypatch):
+    """On main "Was that for Antoni?" went out under _as_clarify's default key and the cached
+    clip "Was that for me?" played instead, in the voice of the agent spoken to; a yes then sent
+    the message to Antoni."""
+    lines = []
+    monkeypatch.setattr(orchestrator, "log", lambda event, detail="", **_: lines.append((event, detail)))
     say, _ = router(lambda packet: {"kind": "agent_message", "target_session": "antoni",
                                     "confidence": 0.5, "reason": "unsure"}, effects)
     _cache("clarify_target", "Was that for me?")
     say("send the report")
+    assert played == [] and effects["spoken"] == ["Was that for Antoni?"]
+    assert ("orchestratorPhraseMismatch", "key=clarify_target") in lines
+
+
+def test_the_cached_sentence_itself_still_plays_its_clip(effects, played):
+    say, _ = router(lambda packet: {"kind": "clarify", "confidence": 0.9, "reason": "who",
+                                    "phrase_key": "clarify_target", "spoken_text": "Was that for me?"}, effects)
+    _cache("clarify_target", "Was that for me?")
+    say("send the report")
     assert [clip["phrase_key"] for clip in played] == ["clarify_target"] and effects["spoken"] == []
+
+
+def test_a_key_the_model_names_with_other_words_is_said(effects, played):
+    say, _ = router(lambda packet: {"kind": "clarify", "confidence": 0.9, "reason": "which",
+                                    "phrase_key": "repeat_missing", "spoken_text": "Which report did you mean?"},
+                    effects)
+    _cache("repeat_missing", "I do not have anything recent to replay.")
+    say("send the report")
+    assert played == [] and effects["spoken"] == ["Which report did you mean?"]
+
+
+def test_no_caller_can_play_a_clip_without_the_sentence_it_must_be():
+    import inspect
+    parameter = inspect.signature(orchestrator.OrchestratorService._play_cached_phrase).parameters["expected_text"]
+    assert parameter.default is inspect.Parameter.empty
