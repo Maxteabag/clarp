@@ -1,0 +1,516 @@
+{
+ "deepgram": [
+  {
+   "voice": "flux-example",
+   "text": "Say <break time=\"1s\"/> this.",
+   "request": {
+    "url": "https://api.deepgram.com/v2/speak?model=flux-example&encoding=mp3&container=none",
+    "method": "POST",
+    "headers": {
+     "Authorization": "Token unit",
+     "Content-type": "application/json",
+     "Accept": "audio/mpeg"
+    },
+    "body": {
+     "text": "Say this."
+    },
+    "timeout": 30.0
+   },
+   "size": 13,
+   "chunks": [
+    [
+     0,
+     "fixture audio"
+    ]
+   ]
+  },
+  {
+   "voice": "aura-2-example-en",
+   "text": "Say <break time=\"1s\"/> this.",
+   "request": {
+    "url": "https://api.deepgram.com/v1/speak?model=aura-2-example-en&encoding=mp3&container=none",
+    "method": "POST",
+    "headers": {
+     "Authorization": "Token unit",
+     "Content-type": "application/json",
+     "Accept": "audio/mpeg"
+    },
+    "body": {
+     "text": "Say this."
+    },
+    "timeout": 30.0
+   },
+   "size": 13,
+   "chunks": [
+    [
+     0,
+     "fixture audio"
+    ]
+   ]
+  },
+  {
+   "voice": "Flux-other",
+   "text": "Say <break time=\"1s\"/> this.",
+   "request": {
+    "url": "https://api.deepgram.com/v1/speak?model=Flux-other&encoding=mp3&container=none",
+    "method": "POST",
+    "headers": {
+     "Authorization": "Token unit",
+     "Content-type": "application/json",
+     "Accept": "audio/mpeg"
+    },
+    "body": {
+     "text": "Say this."
+    },
+    "timeout": 30.0
+   },
+   "size": 13,
+   "chunks": [
+    [
+     0,
+     "fixture audio"
+    ]
+   ]
+  },
+  {
+   "voice": "with space/+",
+   "text": "Say <break time=\"1s\"/> this.",
+   "request": {
+    "url": "https://api.deepgram.com/v1/speak?model=with+space%2F%2B&encoding=mp3&container=none",
+    "method": "POST",
+    "headers": {
+     "Authorization": "Token unit",
+     "Content-type": "application/json",
+     "Accept": "audio/mpeg"
+    },
+    "body": {
+     "text": "Say this."
+    },
+    "timeout": 30.0
+   },
+   "size": 13,
+   "chunks": [
+    [
+     0,
+     "fixture audio"
+    ]
+   ]
+  }
+ ],
+ "google_input": [
+  {
+   "text": "",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "one  two",
+   "spoken": {
+    "text": "one two"
+   }
+  },
+  {
+   "text": "A & B < C",
+   "spoken": {
+    "text": "A & B < C"
+   }
+  },
+  {
+   "text": "[happy] Hello",
+   "spoken": {
+    "text": "Hello"
+   }
+  },
+  {
+   "text": "one<speed x=\"2\">two</speed>",
+   "spoken": {
+    "text": "one two"
+   }
+  },
+  {
+   "text": "a<break/>b",
+   "spoken": {
+    "text": "a b"
+   }
+  },
+  {
+   "text": "a<break time=\"0s\"/>b",
+   "spoken": {
+    "text": "a b"
+   }
+  },
+  {
+   "text": "<BREAK TIME=\"0.001s\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"1ms\"/></speak>"
+   }
+  },
+  {
+   "text": "x<break time=\"3000ms\"/>y",
+   "spoken": {
+    "ssml": "<speak>x<break time=\"3000ms\"/>y</speak>"
+   }
+  },
+  {
+   "text": "<break time=\"3001ms\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"3000ms\"/></speak>"
+   }
+  },
+  {
+   "text": "<break time=\"0.0025s\"/>",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "<break time=\"0.0035s\"/>",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "<break time=\"1.234s\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"1234ms\"/></speak>"
+   }
+  },
+  {
+   "text": "<break time=\"1234567s\"/>",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "<emotion>Hi</emotion><break time=\"2s\"/> & <untrusted>",
+   "spoken": {
+    "ssml": "<speak>Hi <break time=\"2000ms\"/> &amp; &lt;untrusted&gt;</speak>"
+   }
+  },
+  {
+   "text": "<break time=\"1ms\"/>\u0001",
+   "spoken": {
+    "ssml": "<speak><break time=\"1ms\"/></speak>"
+   }
+  }
+ ],
+ "eleven": [
+  {
+   "events": [
+    {
+     "audio": "YQ=="
+    },
+    {
+     "audio": "Yg==",
+     "isFinal": true
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [
+    [
+     0,
+     "YQ=="
+    ],
+    [
+     1,
+     "Yg=="
+    ]
+   ],
+   "size": 2,
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "audio": "",
+     "isFinal": true
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": 0,
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "message": "busy",
+     "code": "busy"
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "busy"
+  },
+  {
+   "events": [
+    {
+     "error": "rejected"
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "rejected"
+  },
+  {
+   "events": [
+    {
+     "audio": "YQ=="
+    },
+    {
+     "message": "closed"
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [
+    [
+     0,
+     "YQ=="
+    ]
+   ],
+   "size": null,
+   "error": "closed"
+  },
+  {
+   "events": [
+    {
+     "audio": "a",
+     "isFinal": true
+    }
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "bad base64 from server: Invalid base64-encoded string: number of data characters (1) cannot be 1 more than a multiple of 4"
+  },
+  {
+   "events": [
+    ""
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "empty frame from server"
+  },
+  {
+   "events": [
+    "bad-json"
+   ],
+   "url": "wss://api.elevenlabs.io/v1/text-to-speech/example/stream-input?model_id=model&output_format=mp3_44100_128",
+   "sent": [
+    {
+     "text": " ",
+     "xi_api_key": "unit",
+     "voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "speed": 1.1
+     },
+     "generation_config": {
+      "chunk_length_schedule": [
+       50,
+       90,
+       120,
+       150,
+       200
+      ]
+     }
+    },
+    {
+     "text": "A line."
+    },
+    {
+     "text": ""
+    }
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "server sent non-JSON frame: Expecting value: line 1 column 1 (char 0)"
+  }
+ ]
+}
