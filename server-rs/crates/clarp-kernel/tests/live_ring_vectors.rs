@@ -584,7 +584,19 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                 // The Host starts again: no call of the Host before it has a session.
                 "restart" => {
                     unsettled.clear();
-                    Ok(json!({ "retired": rings.orphaned(&mut out).len() }))
+                    let retired = rings.orphaned(&mut out).len();
+                    // What is kept of every call after it: where it is, and why it is over.
+                    let kept = serde_json::to_value(rings.rings()).unwrap();
+                    let mut calls: Vec<Value> = Vec::new();
+                    for ring in kept.as_array().unwrap() {
+                        let live = &ring["_live"];
+                        if live["call_id"].as_str().is_some_and(|id| !id.is_empty()) {
+                            let (phase, why) = (&live["phase"], &live["retired_reason"]);
+                            calls.push(json!([live["call_id"], phase, why]));
+                        }
+                    }
+                    calls.sort_by_key(Value::to_string);
+                    Ok(json!({ "retired": retired, "kept": calls }))
                 }
                 "session" => {
                     let (call_id, epoch) = of_ring(&rings);
@@ -724,6 +736,6 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             );
         }
     }
-    assert_eq!((steps, refusals, placed, joined), (653, 185, 63, 14));
-    assert_eq!((closes_between, call_pushes_sent), (3, 80));
+    assert_eq!((steps, refusals, placed, joined), (743, 196, 72, 20));
+    assert_eq!((closes_between, call_pushes_sent), (3, 92));
 }
