@@ -590,10 +590,11 @@ impl Reader<'_> {
     /// `\uXXXX`, joined with a `\uXXXX` that follows when the two are a pair.
     fn escaped_unit(&mut self) -> Option<u32> {
         let unit = self.hex()?;
-        let room = self.at + 6 < self.text.len();
+        // Python's scanner also asks that something follow the second escape: in a text
+        // that is read whole, its closing quote always does.
         let next_is_escape = self.text.get(self.at) == Some(&0x5c)
             && self.text.get(self.at + 1) == Some(&u32::from('u'));
-        if (0xd800..0xdc00).contains(&unit) && room && next_is_escape {
+        if (0xd800..0xdc00).contains(&unit) && next_is_escape {
             let mark = self.at;
             self.at += 2;
             let low = self.hex()?;

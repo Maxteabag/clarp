@@ -515,11 +515,11 @@ async fn page_of(app: &App, page: &Page) -> Option<String> {
 pub(crate) async fn shown(app: &App, mut row: Value, representation: &str, capable: bool) -> Value {
     // A render spec's row is the same in every representation: plain, or with what was
     // left out for a client that can see the spec.
-    if row["type"] == spec::KIND {
-        if capable && let Some(artifact) = spec_of(app, row["artifact_id"].as_str().unwrap_or("")) {
-            spec::marked(&mut row, &artifact);
-        }
-        return row;
+    if row["type"] == spec::KIND
+        && capable
+        && let Some(artifact) = spec_of(app, row["artifact_id"].as_str().unwrap_or(""))
+    {
+        spec::marked(&mut row, &artifact);
     }
     let page = reports::named_page(&mut row);
     let mut row = represented(row, representation);

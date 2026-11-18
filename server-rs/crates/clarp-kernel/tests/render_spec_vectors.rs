@@ -383,7 +383,12 @@ fn a_catalog_is_loaded_or_not_as_the_python_host_loads_it() {
         .iter()
         .map(|text| text.as_str().unwrap())
         .collect();
-    let base = json::read(vectors["base_form"].as_str().unwrap().as_bytes()).unwrap();
+    let probes: Vec<J> = vectors["probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|text| json::read(text.as_str().unwrap().as_bytes()).unwrap())
+        .collect();
     let (mut loaded, mut not) = (0, 0);
     for case in vectors["catalogs"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
@@ -404,11 +409,14 @@ fn a_catalog_is_loaded_or_not_as_the_python_host_loads_it() {
                     .map(|text| catalog.ident.matches(text))
                     .collect();
                 assert_eq!(json!(matched), case["loaded"]["identifiers"], "{name}");
-                let verdict = match spec::validate(&catalog, &base) {
-                    Ok(()) => json!("valid"),
-                    Err(refusal) => refusal.triple(Ok(&catalog)),
-                };
-                assert_eq!(verdict, case["base_form"], "{name}");
+                let verdicts: Vec<Value> = probes
+                    .iter()
+                    .map(|probe| match spec::validate(&catalog, probe) {
+                        Ok(()) => json!("valid"),
+                        Err(refusal) => refusal.triple(Ok(&catalog)),
+                    })
+                    .collect();
+                assert_eq!(json!(verdicts), case["loaded"]["probes"], "{name}");
                 loaded += 1;
             }
         }

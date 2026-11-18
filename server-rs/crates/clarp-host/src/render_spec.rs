@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use clarp_kernel::artifacts::render_spec::{
     self as spec, CATALOG_UNAVAILABLE, Catalog, J, KIND, Obj, Publish, Refusal, Unavailable,
 };
-use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Why};
+use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused};
 use clarp_kernel::python;
 use clarp_speech::markup::strip_hidden_blocks;
 use serde_json::{Value, json};
@@ -62,10 +62,10 @@ pub(crate) fn answer(refusal: &Refusal, catalog: Result<&Catalog, Unavailable>) 
 
 /// A refusal of the rules of artifacts, where it may be one of a render spec.
 fn refused(why: Refused, catalog: Result<&Catalog, Unavailable>) -> ApiError {
-    match (Refusal::of(&why), why.why) {
-        (Some(refusal), _) => answer(&refusal, catalog),
-        (None, Why::Permission) => ApiError::new(StatusCode::FORBIDDEN, why.message),
-        (None, _) => ApiError::new(StatusCode::CONFLICT, why.message),
+    // What else is refused here is a name that is taken, as the reference's database says.
+    match Refusal::of(&why) {
+        Some(refusal) => answer(&refusal, catalog),
+        None => ApiError::new(StatusCode::CONFLICT, why.message),
     }
 }
 
@@ -111,8 +111,8 @@ fn valid_id(id: &str) -> bool {
 /// Whether a request asks to check only (`?validate_only=1`, said once, as `parse_qs`
 /// reads it).
 pub(crate) fn validate_only(query: Option<&str>) -> bool {
+    // A `+` would be a blank: neither the name nor the one value counted has either.
     let decoded = |part: &str| {
-        let part = part.replace('+', " ");
         let bytes = part.as_bytes();
         let mut out = Vec::with_capacity(bytes.len());
         let mut at = 0;
@@ -333,9 +333,6 @@ pub(crate) async fn submit(
     if !capable {
         return Err(no("client_contract", "", known));
     }
-    if form.deleted_at.is_some() {
-        return Err(no("not_open", "", known));
-    }
     let Ok(catalog) = known else {
         return Err(no(CATALOG_UNAVAILABLE, "", known));
     };
@@ -344,15 +341,11 @@ pub(crate) async fn submit(
     let sid = data.get("submission_id").and_then(J::str);
     let elsewhere = sid.and_then(|sid| {
         let directory = app.fleet.directory();
-        directory
-            .members
-            .iter()
-            .filter(|other| other.record.agent_id != holder.record.agent_id)
-            .find_map(|other| {
-                let view = other.agent.view();
-                let (artifact, submission) = view.books.artifacts.submission(sid)?;
-                Some((artifact.artifact_id.clone(), submission.clone()))
-            })
+        directory.members.iter().find_map(|other| {
+            let view = other.agent.view();
+            let (artifact, submission) = view.books.artifacts.submission(sid)?;
+            Some((artifact.artifact_id.clone(), submission.clone()))
+        })
     });
     let want = Want::SpecSubmit {
         artifact_id: form.artifact_id.clone(),

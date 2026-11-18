@@ -20,8 +20,6 @@ pub const DEPTH_MOST: usize = 12;
 /// How long a version and a submit label may be, in signs.
 pub const VERSION_MOST: usize = 80;
 pub const LABEL_MOST: usize = 40;
-/// How deep the check for keys that come twice and for `on` goes.
-const UNIQUE_DEEPEST: usize = 64;
 
 /// The fields of a payload, each required.
 const FIELDS: [&str; 6] = [
@@ -236,7 +234,7 @@ impl Checks<'_> {
         let named = kind.and_then(J::str);
         let listed = rule.get("enum").filter(|members| **members != J::Null);
         if (kind.is_some() && !matches!(named, Some("string" | "boolean" | "integer")))
-            || (!kind.is_some_and(J::truthy) && listed.is_none())
+            || (kind.is_none() && listed.is_none())
         {
             return Err(Refusal::new("schema_shape", at));
         }
@@ -406,9 +404,10 @@ impl Checks<'_> {
         let pointer = operator
             .and_then(|operator| value.get(operator))
             .and_then(J::str);
+        // A key of the answer schema is an identifier: one the schema has is one.
         let key = pointer
             .and_then(|pointer| pointer.strip_prefix('/'))
-            .filter(|key| self.ident().matches(key) && fields.contains(key));
+            .filter(|key| fields.contains(key));
         key.map(str::to_string).ok_or_else(wrong)
     }
 
@@ -436,10 +435,8 @@ impl Checks<'_> {
         let mut bound = BTreeSet::new();
         for name in json::ordered(nodes)? {
             let at = self.step(path, name);
-            if name
-                .as_str()
-                .is_none_or(|name| !self.ident().matches(name) || name == "on")
-            {
+            // An element called `on` was refused as a key `on` before.
+            if name.as_str().is_none_or(|name| !self.ident().matches(name)) {
                 return Err(Refusal::new("element_id", &at));
             }
             let node = nodes.at(name).unwrap_or(&J::Null);
@@ -605,27 +602,23 @@ impl Checks<'_> {
         Ok(())
     }
 
-    /// No key twice and no `on`, anywhere below (`render_spec.check_unique`).
-    fn unique(&self, value: &J, path: &str, depth: usize) -> Result<(), Refusal> {
-        if depth > UNIQUE_DEEPEST {
-            return Err(Refusal::new("invalid_json", path));
-        }
+    /// No `on`, anywhere below (`render_spec.check_unique`): the reference's check also
+    /// refuses a key twice and a value too deep, which the canonical form of the payload
+    /// refused before.
+    fn unique(&self, value: &J, path: &str) -> Result<(), Refusal> {
         match value {
             J::Object(fields) => {
-                if fields.duplicate {
-                    return Err(Refusal::new("invalid_object", path));
-                }
                 if fields.contains("on") {
                     return Err(Refusal::new("unknown_key", &self.step_str(path, "on")));
                 }
                 for key in json::ordered(fields)? {
                     let item = fields.at(key).unwrap_or(&J::Null);
-                    self.unique(item, &self.step(path, key), depth + 1)?;
+                    self.unique(item, &self.step(path, key))?;
                 }
             }
             J::Array(items) => {
                 for (at, item) in items.iter().enumerate() {
-                    self.unique(item, &index(path, at), depth + 1)?;
+                    self.unique(item, &index(path, at))?;
                 }
             }
             _ => {}
@@ -654,9 +647,8 @@ pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
     if *field("catalog") != catalog.name {
         return Err(Refusal::new("unknown_catalog", "/catalog"));
     }
-    if !matches!(field("catalog_version"), J::Int(_))
-        || *field("catalog_version") != catalog.version
-    {
+    // Equal only as the same type: a truth is no whole number here.
+    if *field("catalog_version") != catalog.version {
         return Err(Refusal::new("catalog_version", "/catalog_version"));
     }
     match field("version") {
@@ -667,7 +659,7 @@ pub fn validate(catalog: &Catalog, payload: &J) -> Result<(), Refusal> {
     if checks.canonical(spec, "")?.len() > SPEC_MOST {
         return Err(Refusal::new("spec_size", "/spec"));
     }
-    checks.unique(spec, "/spec", 0)?;
+    checks.unique(spec, "/spec")?;
     let parts = ["root", "elements", "state"];
     let spec = checks.closed(spec, "/spec", &parts, &parts, "unknown_key")?;
     let state = spec.get("state").unwrap_or(&J::Null);
