@@ -901,12 +901,12 @@ impl Rings {
         ring.call_id = call["call_id"].as_str().unwrap_or("").to_string();
         if let Some(proof) = world.opening.filter(|_| listen) {
             let token = if capable {
-                format!("opn_{}", given.minted.ticket)
+                format!("opn_{}", python::first(given.minted.ticket, 32))
             } else {
                 String::new()
             };
             let nonce = if capable {
-                format!("own_{}", given.minted.nonce)
+                format!("own_{}", python::first(given.minted.nonce, 32))
             } else {
                 String::new()
             };

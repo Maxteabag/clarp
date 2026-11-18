@@ -51,7 +51,7 @@ impl Desk {
                 Change::Claim(b) | Change::Greeting { body: b, .. } => *b,
             };
             let token = &body["token"];
-            let found = rings.opening(token);
+            let found = rings.by_opening_token(token);
             let ring = found.map(|ring| ring.ring_id.clone()).unwrap_or_default();
             let fence = found.and_then(|ring| {
                 with.world
@@ -230,7 +230,10 @@ impl Desk {
     async fn saved_opening(&self, app: &App, token: &Value) -> Result<Option<Value>, Unavailable> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
-        Ok(books.rings.opening(token).map(|r| r.opening.clone()))
+        Ok(books
+            .rings
+            .by_opening_token(token)
+            .map(|r| r.opening.clone()))
     }
 
     async fn queue_row(&self, app: &App, op: &Value) -> Result<Value, Unavailable> {
@@ -260,6 +263,8 @@ impl Desk {
         let row = self.queue_row(app, &original).await?;
         let mut applied = self.apply_opening(app, owner, change, &row).await?;
         if applied.withdraw
+            && row["foreign"] != true
+            && row["trace_id"] == original["intent"]["trace_id"]
             && let Some(turn) = row["turn"].as_u64()
             && let Some(member) = original["session"].as_str().and_then(|s| app.member(s))
         {
@@ -282,7 +287,7 @@ impl Desk {
 
     /// Called under opening_turn. An admitted-but-not-yet-written agent row
     /// can be recovered using its reserved id; a foreign row is never adopted.
-    async fn materialize(&self, app: &App, op: &Value) -> Result<(), Unavailable> {
+    pub(super) async fn materialize(&self, app: &App, op: &Value) -> Result<(), Unavailable> {
         use clarp_kernel::conversation::Message;
         use clarp_kernel::turn::{Admission, Origin};
         let id = op["intent"]["admission_id"].as_str().unwrap_or("");
@@ -327,6 +332,94 @@ impl Desk {
             text: rules::header(op),
         };
         let _ = member.agent.send(msg, Admission::Later).await?;
+        Ok(())
+    }
+}
+
+impl Desk {
+    /// A process may stop between the intent commit and the agent's idempotent
+    /// admission. Recover only the reservation that is still current.
+    pub async fn recover_openings(&self, app: &App) -> Result<(), Unavailable> {
+        let _guard = self.opening_turn.lock().await;
+        let pending = {
+            let mut held = self.books.lock().await;
+            let books = Self::read(&mut held, app).await?;
+            books
+                .rings
+                .rings()
+                .iter()
+                .filter(|r| {
+                    r.opening["retired"].is_null()
+                        && matches!(
+                            r.opening["intent"]["state"].as_str(),
+                            Some("admitted" | "intended")
+                        )
+                })
+                .map(|r| r.opening.clone())
+                .collect::<Vec<_>>()
+        };
+        for op in pending {
+            self.materialize(app, &op).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn retire_openings(
+        &self,
+        app: &App,
+        principal: Option<&str>,
+    ) -> Result<(), Unavailable> {
+        let _guard = self.opening_turn.lock().await;
+        let retired = {
+            let mut held = self.books.lock().await;
+            let books = Self::read(&mut held, app).await?;
+            books
+                .rings
+                .rings()
+                .iter()
+                .filter(|r| !r.opening.is_null() && r.opening["retired"].is_null())
+                .filter_map(|r| {
+                    let reason = if let Some(owner) = principal {
+                        (r.opening["principal"] == owner).then(|| "auth_revoked".to_string())
+                    } else {
+                        let call = books.calls.by_id(&r.call_id, app.clock.now_ms())?;
+                        (call["state"] != "live")
+                            .then(|| format!("call_{}", call["reason"].as_str().unwrap_or("ended")))
+                    }?;
+                    Some((r.opening.clone(), reason))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (op, reason) in retired {
+            let row = self.queue_row(app, &op).await?;
+            let id = op["ring_id"].as_str().unwrap_or("");
+            let withdraw = self
+                .rings(app, |rings, _, with, (out, _)| {
+                    let generation = proven(with);
+                    let world = rules::World {
+                        now: with.at.now_ms,
+                        generation: &generation,
+                        host: with.at.host_id,
+                        queue: &row,
+                        fence: None,
+                        nonce: "",
+                        trace: "",
+                    };
+                    let changed = rings.change_opening(id, with.at.now_ms, out, |r, fx| {
+                        fx.announce = rules::retire_current(&mut r.opening, &reason, &world, fx);
+                    });
+                    changed.is_some_and(|(_, fx)| fx.withdraw && row["foreign"] != true)
+                })
+                .await?;
+            if withdraw
+                && let Some(turn) = row["turn"].as_u64()
+                && let Some(m) = op["session"].as_str().and_then(|s| app.member(s))
+            {
+                m.agent
+                    .withdraw(clarp_kernel::turn::TurnId(turn), reason)
+                    .await?;
+            }
+        }
         Ok(())
     }
 }

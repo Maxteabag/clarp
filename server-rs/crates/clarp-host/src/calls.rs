@@ -169,7 +169,12 @@ impl Desk {
         };
         let mut out = Effects::default();
         let answer = ask(&mut books.calls, at, (&roster, &ids::hex(16)), &mut out);
+        let ended = out.events.iter().any(|e| e["state"] == "ended");
         Self::done(app, &directory, &books.calls, out, at.now_ms).await?;
+        drop(held);
+        if ended {
+            self.retire_openings(app, None).await?;
+        }
         Ok(answer)
     }
 
@@ -739,7 +744,19 @@ impl Desk {
                 text,
             })
             .collect();
-        call.header(session, &said)
+        let opening = {
+            let held = self.books.lock().await;
+            held.as_ref()
+                .and_then(|b| {
+                    b.rings
+                        .rings()
+                        .iter()
+                        .find(|r| r.call_id == call.call_id && !r.opening.is_null())
+                })
+                .and_then(|r| r.opening["state"].as_str())
+                .map(str::to_owned)
+        };
+        call.header_with_opening(session, &said, opening.as_deref())
     }
 }
 
@@ -939,6 +956,9 @@ async fn ring_look(
     let desk = app.calls.clone();
     // What a client is shown is what it may be told of: a live ring only a phone that can
     // hold one, a call the user started only its own phone.
+    if let Err(why) = desk.recover_openings(&app).await {
+        return ApiError::from(why).into_response();
+    }
     let looked = desk.rings(&app, |rings, _, with, (out, _)| {
         rings.look_as((&ring_id, &caller), &with.world, with.at.now_ms, out)
     });

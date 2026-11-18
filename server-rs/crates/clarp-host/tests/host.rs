@@ -30125,6 +30125,171 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
             .any(|r| r["status"] == "not_done" && r["error"] == "call ended before the request")
     );
     assert!(upstream.of_kind("session.commentary.append").is_empty());
+    // A listen-first ring still voices its fallback when placed. The capable
+    // phone receives its own opening token; ordinary reads contain no secrets.
+    let place = Place::new("listen-first");
+    let speaker = cartesia_stand_in(vec![7; 5000]);
+    let settings = place.root.join("speech.toml");
+    std::fs::write(&settings,"[tts]\nprovider='cartesia'\n[cartesia]\napi_key='fixture'\n[cartesia.voices]\nAlma='fixture'\n").unwrap();
+    let args = ["--speech-keys", settings.to_str().unwrap()];
+    let env = [
+        ("CLARP_CARTESIA_ENDPOINT", speaker.address.as_str()),
+        ("OPENAI_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+    ];
+    let host = place.start_in("test-only", &args, &env);
+    let (phone, _) = pair(&host, "Phone", "full");
+    let (other, _) = pair(&host, "Other", "full");
+    let alma = host.new_agent("Alma");
+    let ring = |host: &Host, agent: &str| {
+        host.post("/calls/ring",json!({"agent":agent,"opening_mode":"listen_first","reason":"Water","opening_line":"Hello?"}))["ring"].clone()
+    };
+    let answer = |host: &Host, r: &Value, capable: bool| {
+        let mut body = json!({"ring_id":r["ring_id"]});
+        if capable {
+            body["opening_mode"] = json!("listen_first");
+        }
+        host.ask_as(&phone, "POST", "/calls/ring/answer", Some(&body))
+    };
+    let claim = |host: &Host, caller: &str, op: &Value, kind: &str, id: &str, extra: Value| {
+        let mut body =
+            json!({"claim":kind,"request_id":id,"epoch":op["epoch"],"token":op["token"]});
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        host.ask_as(caller, "POST", "/calls/ring/opening", Some(&body))
+    };
+    let r = ring(&host, &alma);
+    assert_eq!(r["opening_mode"], "listen_first");
+    let (status, taken) = answer(&host, &r, true);
+    assert_eq!(status, 200, "{taken}");
+    let op = taken["opening"].clone();
+    assert_eq!(op["state"], "pending");
+    assert_eq!(op["silence_ms"], 1250);
+    assert_eq!(op["token"].as_str().unwrap().len(), 36);
+    assert_eq!(op["owner_nonce"].as_str().unwrap().len(), 36);
+    assert!(op.get("text").is_none() && op.get("audio_url").is_none());
+    let show = |host: &Host, id: &Value| {
+        host.ask_as(
+            &phone,
+            "GET",
+            &format!("/calls/ring?ring_id={}", id.as_str().unwrap()),
+            None,
+        )
+        .1["ring"]
+            .clone()
+    };
+    let seen = show(&host, &r["ring_id"]);
+    assert!(seen["opening"].get("token").is_none() && seen["opening"].get("owner_nonce").is_none());
+    assert_eq!(seen["opening"]["epoch"], 1);
+    let denied = claim(&host, &other, &op, "speech_started", "other", json!({}));
+    assert_eq!(denied.0, 403);
+    assert!(denied.1["opening"].get("token").is_none());
+    let ready = claim(
+        &host,
+        &phone,
+        &op,
+        "listening",
+        "ready",
+        json!({"capture_gen":4,"at_ms":900}),
+    );
+    assert_eq!(ready.1["opening"]["state"], "listening");
+    let onset = claim(&host, &phone, &op, "speech_started", "onset", json!({}));
+    assert_eq!(onset.1["opening"]["state"], "speech_latched");
+    assert_eq!(
+        claim(
+            &host,
+            &phone,
+            &op,
+            "silence",
+            "no",
+            json!({"at_ms":1251,"watermark_ms":1251})
+        )
+        .0,
+        409
+    );
+    let renewal = json!({"owner_nonce":op["owner_nonce"],"expected_epoch":1});
+    let renewed = claim(&host, &phone, &op, "renew", "renew", renewal.clone()).1["opening"].clone();
+    assert_eq!(renewed["epoch"], 2);
+    assert_ne!(renewed["owner_nonce"], op["owner_nonce"]);
+    assert_eq!(
+        claim(&host, &phone, &op, "renew", "renew", renewal).1["opening"],
+        renewed
+    );
+    assert_eq!(
+        claim(&host, &phone, &op, "listening", "old", json!({})).0,
+        409
+    );
+
+    // The captured speech goes to the agent that rang, bypassing hands-free
+    // selection. Replaying that client message leaves a single greeting.
+    let body = json!({"session":alma,"text":"Hello from the user","trace_id":"test-greeting","client_msg_id":"greet-1",
+        "hands_free":true,"call_id":op["call_id"],"call_opening":{"token":op["token"],"epoch":2}});
+    let (status, greeted) = host.ask_as(&phone, "POST", "/send", Some(&body));
+    assert_eq!(status, 200, "{greeted}");
+    assert_eq!(greeted["opening"]["state"], "greeting");
+    assert_eq!(greeted["session"], alma);
+    assert_eq!(host.ask_as(&phone, "POST", "/send", Some(&body)).0, 200);
+    wait_for("one greeting reaches the scripted agent", || {
+        host.conversation(&alma)
+            .iter()
+            .filter(|(role, text)| role == "user" && text == "Hello from the user")
+            .count()
+            == 1
+    });
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["retired"],
+        "call_ended"
+    );
+    assert_eq!(answer(&host, &r, true).0, 409);
+
+    // The microphone's deadline requires both watermarks. The admitted
+    // initiative is the only turn, even if the phone repeats the claim.
+    let another = host.new_agent("Second");
+    let r = ring(&host, &another);
+    let op = answer(&host, &r, true).1["opening"].clone();
+    let short = claim(
+        &host,
+        &phone,
+        &op,
+        "silence",
+        "short",
+        json!({"at_ms":1250,"watermark_ms":1249}),
+    );
+    assert_eq!(short.0, 400);
+    let silence = json!({"at_ms":1250,"watermark_ms":1250});
+    let silent = claim(&host, &phone, &op, "silence", "silence", silence.clone());
+    assert_eq!(silent.0, 200, "{:?}", silent.1);
+    assert_eq!(silent.1["opening"]["intent"]["gen"], 1);
+    assert_eq!(
+        claim(&host, &phone, &op, "silence", "silence", silence).1["changed"],
+        false
+    );
+    wait_for("the launch gate commits the initiative", || {
+        show(&host, &r["ring_id"])["opening"]["state"] == "initiative_started"
+    });
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+
+    // A phone without the capability gets the already voiced opening line.
+    let legacy = host.new_agent("Third");
+    let r = ring(&host, &legacy);
+    let fallback = answer(&host, &r, false);
+    assert_eq!(fallback.0, 200);
+    assert_eq!(fallback.1["opening"]["text"], "Hello?");
+    assert!(fallback.1["opening"].get("token").is_none());
+    assert_eq!(fallback.1["ring"]["opening"]["state"], "fallback");
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its
