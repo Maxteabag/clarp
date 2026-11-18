@@ -826,7 +826,9 @@ def _join(principal: str, event: Any) -> dict:
     with agent_rings._lock:
         records = agent_rings._load()
         ring = next((r for r in records if r.get("_live_call_id") == event["call_id"]), None)
+        # compare_digest raises on a str outside ASCII: such a nonce or ticket is simply wrong.
         if (ring is None or ring.get("answered_by") != principal or not isinstance(event["owner_nonce"], str)
+                or not event["owner_nonce"].isascii()
                 or not hmac.compare_digest(str(ring.get("_live_owner_nonce") or ""), event["owner_nonce"])
                 or event["attempt_id"] != ring.get("_live_attempt_id")):
             raise Refused("live_owner_conflict")
@@ -836,7 +838,7 @@ def _join(principal: str, event: Any) -> dict:
                 or event["ring_id"] != ring["ring_id"] or event["call_epoch"] != ring.get("_live_call_epoch")
                 or event["context_digest"] != ring.get("_live_context_digest")):
             raise Refused("live_call_stale")
-        if not isinstance(event["join_ticket"], str) or \
+        if not isinstance(event["join_ticket"], str) or not event["join_ticket"].isascii() or \
                 not hmac.compare_digest(str(ring.get("_live_join_ticket") or ""), event["join_ticket"]):
             raise Refused("live_owner_conflict")
         if ring.get("_live_join_consumed"):

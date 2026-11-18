@@ -322,6 +322,8 @@ def _attachment_values(values, agent_id: str, template_id: str = "task-labels") 
             if field in config and (isinstance(config[field], bool) or not isinstance(config[field], int) or not low <= config[field] <= high):
                 raise JanitorError(f"Invalid {field.replace('_', ' ')}")
         if definition["kind"] == "schedule":
+            if not isinstance(config.get("cron"), str):
+                raise JanitorError("Use a valid five-field schedule and IANA timezone")
             try:
                 scheduler.parse_cron(config["cron"])
                 ZoneInfo(config["timezone"])
@@ -367,11 +369,11 @@ def _execution(template_id: str, value, backend: str) -> dict:
     if not isinstance(value, dict) or set(value) - {"executor", "provider", "isolated"}:
         raise JanitorError("Invalid demand execution configuration")
     isolated = value.get("isolated", False)
-    isolating = backends.get(value.get("provider", backend))
+    provider = value.get("provider", backend)
+    isolating = backends.get(provider) if isinstance(provider, str) else None
     if not isinstance(isolated, bool) or (isolated and (isolating is None or isolating.isolated_oneshot is None)):
         # Antigravity today: a stripped HOME, empty cwd, print timeout and conversation cleanup.
         raise JanitorError("Isolated execution is an Antigravity option")
-    provider = value.get("provider", backend)
     if value.get("executor", "ephemeral") != "ephemeral" or not isinstance(provider, str):
         raise JanitorError("Demand jobs require an ephemeral executor")
     if provider != "openai" and not any(v.id == provider for v in backends.routing_adapters()):

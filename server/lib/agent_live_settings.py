@@ -93,8 +93,11 @@ def frozen_config(profile: dict, story: str) -> dict | None:
 
     def invalid(why: str) -> None:
         log("agentLiveToolsInvalid", f"profile={profile.get('profile_id')} {why}")
+    rows = block.get("agents") or []
+    if not isinstance(rows, list):
+        return invalid("agents must be a list")
     agents = []
-    for row in block.get("agents") or []:
+    for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("session"), str) or \
                 not _SESSION.fullmatch(row["session"]):
             return invalid("bad agent entry")
