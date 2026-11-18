@@ -306,13 +306,19 @@ impl Mouth {
         if provider == "none" {
             return Err("server audio is disabled: no voice provider".into());
         }
-        let preview=self.preview(&provider,voice,text,None).await?;
-        let Preview::Temporary(bytes)=preview else{return Err("text preview unexpectedly cached".into())};
-        let (_,name,path,mut clip)=self.new_clip(session).map_err(|e|e.to_string())?;
-        let write=tokio::task::spawn_blocking(move||{
-            clip.write_all(&bytes).inspect_err(|_|{let _=std::fs::remove_file(&path);})
-        }).await.map_err(|_|"preview writer ended".to_string())?;
-        write.map_err(|e|e.to_string())?;
+        let preview = self.preview(&provider, voice, text, None).await?;
+        let Preview::Temporary(bytes) = preview else {
+            return Err("text preview unexpectedly cached".into());
+        };
+        let (_, name, path, mut clip) = self.new_clip(session).map_err(|e| e.to_string())?;
+        let write = tokio::task::spawn_blocking(move || {
+            clip.write_all(&bytes).inspect_err(|_| {
+                let _ = std::fs::remove_file(&path);
+            })
+        })
+        .await
+        .map_err(|_| "preview writer ended".to_string())?;
+        write.map_err(|e| e.to_string())?;
         self.hub.publish(json!({"type":"audio","url":format!("/audio/{name}"),"name":name,"session":session,"preview":true}),self.now_ms());
         Ok(name)
     }
@@ -325,15 +331,30 @@ impl Mouth {
         text: &str,
         name: Option<&str>,
     ) -> Result<Preview, String> {
-        let file=name.map(|n|self.previews.join(format!("{n}.mp3")));
-        let _lock=if let Some(name)=name {
-            let bucket=name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
+        let file = name.map(|n| self.previews.join(format!("{n}.mp3")));
+        let _lock = if let Some(name) = name {
+            let bucket =
+                name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
             Some(self.preview_locks[bucket].lock().await)
-        }else{None};
-        if let Some(file)=&file && file.symlink_metadata().is_ok_and(|m|m.is_file()) {return Ok(Preview::Cached(file.clone()));}
+        } else {
+            None
+        };
+        if let Some(file) = &file
+            && file.symlink_metadata().is_ok_and(|m| m.is_file())
+        {
+            return Ok(Preview::Cached(file.clone()));
+        }
         let owners = self.owners();
         let primary = self
-            .engine(&owners, provider, if name.is_none(){SpeechUse::TextPreview}else{SpeechUse::VoicePreview})
+            .engine(
+                &owners,
+                provider,
+                if name.is_none() {
+                    SpeechUse::TextPreview
+                } else {
+                    SpeechUse::VoicePreview
+                },
+            )
             .ok_or_else(|| format!("no engine named {provider} is built"))?;
         let voices = owner::voices(&owners);
         let route = said::Route {
@@ -369,7 +390,16 @@ impl Mouth {
                 "google" => Some("nb-NO-Chirp3-HD-Kore".into()),
                 _ => None,
             };
-            self.engine(&owners, fallback, if name.is_none() && matches!(provider,"cartesia"|"elevenlabs"){SpeechUse::TextPreview}else{SpeechUse::Turn}).zip(chosen)
+            self.engine(
+                &owners,
+                fallback,
+                if name.is_none() && matches!(provider, "cartesia" | "elevenlabs") {
+                    SpeechUse::TextPreview
+                } else {
+                    SpeechUse::Turn
+                },
+            )
+            .zip(chosen)
         } else {
             None
         };
@@ -412,7 +442,9 @@ impl Mouth {
                 }
                 return Err(why);
             }
-            let Some(file)=file else{return Ok(Preview::Temporary(Bytes::from(bytes)))};
+            let Some(file) = file else {
+                return Ok(Preview::Temporary(Bytes::from(bytes)));
+            };
             std::fs::DirBuilder::new()
                 .recursive(true)
                 .mode(0o700)
@@ -439,8 +471,12 @@ impl Mouth {
     }
 }
 
-#[derive(Clone,Copy,PartialEq,Eq)]
-enum SpeechUse { Turn, VoicePreview, TextPreview }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SpeechUse {
+    Turn,
+    VoicePreview,
+    TextPreview,
+}
 
 pub(crate) enum Preview {
     Cached(PathBuf),
@@ -687,7 +723,7 @@ impl Mouth {
 
     /// An engine of this Host, with its key read where the owner keeps it at the moment it
     /// is needed.
-    fn engine(&self, file: &Table, provider: &str, usage:SpeechUse) -> Option<Box<dyn Speaker>> {
+    fn engine(&self, file: &Table, provider: &str, usage: SpeechUse) -> Option<Box<dyn Speaker>> {
         let keys = self.owner.clone();
         let key = key_of(provider, file);
         let read = Box::new(move || keys.key(key));
@@ -710,13 +746,13 @@ impl Mouth {
             }
             said::ELEVENLABS => Some(Box::new(clarp_speech::eleven_voice::ElevenVoice {
                 key: read,
-                model: if usage==SpeechUse::VoicePreview {
+                model: if usage == SpeechUse::VoicePreview {
                     "eleven_multilingual_v2".into()
                 } else {
                     owner::text_at(file, &["elevenlabs", "model"])
                         .unwrap_or_else(|| "eleven_flash_v2_5".into())
                 },
-                speed: if usage==SpeechUse::VoicePreview {
+                speed: if usage == SpeechUse::VoicePreview {
                     1.0
                 } else {
                     file.get("elevenlabs")
@@ -725,7 +761,7 @@ impl Mouth {
                         .unwrap_or(1.2)
                 },
                 base: self.eleven_at.clone(),
-                file:usage==SpeechUse::TextPreview,
+                file: usage == SpeechUse::TextPreview,
             })),
             "deepgram" => Some(Box::new(clarp_speech::deepgram_voice::DeepgramVoice {
                 key: read,
@@ -1140,7 +1176,10 @@ impl Mouth {
         let engines: Vec<(Box<dyn Speaker>, String)> = by
             .iter()
             .filter_map(|(provider, voice)| {
-                Some((self.engine(&owners, provider, SpeechUse::Turn)?, voice.clone()))
+                Some((
+                    self.engine(&owners, provider, SpeechUse::Turn)?,
+                    voice.clone(),
+                ))
             })
             .collect();
         let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());

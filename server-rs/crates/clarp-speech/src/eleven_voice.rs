@@ -14,7 +14,7 @@ pub struct ElevenVoice {
     pub key: Key,
     pub model: String,
     pub speed: f64,
-    pub file:bool,
+    pub file: bool,
     /// Empty for ElevenLabs itself; an explicit base is a loopback test server.
     pub base: String,
 }
@@ -37,15 +37,38 @@ impl Speaker for ElevenVoice {
             return Err(Mute::Unavailable("voice_id required".into()));
         }
         if self.file {
-            let base=if self.base.is_empty(){"https://api.elevenlabs.io"}else{self.base.trim_end_matches('/')};
-            let url=format!("{base}/v1/text-to-speech/{}",line.voice);
-            let agent:ureq::Agent=ureq::Agent::config_builder().max_redirects(0).http_status_as_error(false).timeout_global(Some(Duration::from_secs(20))).build().into();
-            let fail=|why:String|Mute::Failed{why,begun:false};
-            let body=json!({"text":line.text,"model_id":self.model,"voice_settings":{"stability":0.5,"similarity_boost":0.75,"speed":self.speed}});
-            let mut r=agent.post(url).header("xi-api-key",key).header("Accept","audio/mpeg").send_json(body).map_err(|e|fail(format!("ElevenLabs request failed: {e}")))?;
-            if !r.status().is_success(){return Err(fail(format!("ElevenLabs HTTP {}",r.status())));}
-            let bytes=r.body_mut().with_config().limit(64*1024*1024).read_to_vec().map_err(|_|fail("ElevenLabs audio could not be read".into()))?;
-            if bytes.is_empty(){return Err(fail("ElevenLabs returned empty body".into()));}
+            let base = if self.base.is_empty() {
+                "https://api.elevenlabs.io"
+            } else {
+                self.base.trim_end_matches('/')
+            };
+            let url = format!("{base}/v1/text-to-speech/{}", line.voice);
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                .max_redirects(0)
+                .http_status_as_error(false)
+                .timeout_global(Some(Duration::from_secs(20)))
+                .build()
+                .into();
+            let fail = |why: String| Mute::Failed { why, begun: false };
+            let body = json!({"text":line.text,"model_id":self.model,"voice_settings":{"stability":0.5,"similarity_boost":0.75,"speed":self.speed}});
+            let mut r = agent
+                .post(url)
+                .header("xi-api-key", key)
+                .header("Accept", "audio/mpeg")
+                .send_json(body)
+                .map_err(|e| fail(format!("ElevenLabs request failed: {e}")))?;
+            if !r.status().is_success() {
+                return Err(fail(format!("ElevenLabs HTTP {}", r.status())));
+            }
+            let bytes = r
+                .body_mut()
+                .with_config()
+                .limit(64 * 1024 * 1024)
+                .read_to_vec()
+                .map_err(|_| fail("ElevenLabs audio could not be read".into()))?;
+            if bytes.is_empty() {
+                return Err(fail("ElevenLabs returned empty body".into()));
+            }
             sink(&bytes);
             return Ok(bytes.len() as u64);
         }

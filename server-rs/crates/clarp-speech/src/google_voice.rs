@@ -71,34 +71,31 @@ fn spoken(text: &str) -> Value {
     }
 }
 
-fn status_ok(status:u16)->Result<(),&'static str>{
-        match status {
-            200 => Ok(()),
-            401 | 403 => Err("google_auth_failed"),
-            429 => Err("google_quota"),
-            _ => Err("google_http_error"),
-        }
+fn status_ok(status: u16) -> Result<(), &'static str> {
+    match status {
+        200 => Ok(()),
+        401 | 403 => Err("google_auth_failed"),
+        429 => Err("google_quota"),
+        _ => Err("google_http_error"),
+    }
 }
 
-fn decode(raw:&[u8])->Result<Vec<u8>,&'static str>{
-        if raw.len() > RESPONSE_MAX {
-            return Err("google_audio_too_large");
-        }
-        let data: Value =
-            serde_json::from_slice(raw).map_err(|_| "google_bad_response")?;
-        let encoded = data["audioContent"]
-            .as_str()
-            .ok_or("google_bad_response")?;
-        if encoded.len() / 4 * 3 > AUDIO_MAX {
-            return Err("google_audio_too_large");
-        }
-        let bytes = STANDARD
-            .decode(encoded)
-            .map_err(|_| "google_bad_response")?;
-        if bytes.is_empty() {
-            return Err("google_empty_audio");
-        }
- Ok(bytes)
+fn decode(raw: &[u8]) -> Result<Vec<u8>, &'static str> {
+    if raw.len() > RESPONSE_MAX {
+        return Err("google_audio_too_large");
+    }
+    let data: Value = serde_json::from_slice(raw).map_err(|_| "google_bad_response")?;
+    let encoded = data["audioContent"].as_str().ok_or("google_bad_response")?;
+    if encoded.len() / 4 * 3 > AUDIO_MAX {
+        return Err("google_audio_too_large");
+    }
+    let bytes = STANDARD
+        .decode(encoded)
+        .map_err(|_| "google_bad_response")?;
+    if bytes.is_empty() {
+        return Err("google_empty_audio");
+    }
+    Ok(bytes)
 }
 
 pub struct GoogleVoice {
@@ -133,10 +130,17 @@ impl Speaker for GoogleVoice {
             &self.token_url
         };
         let (token, _) = crate::chirp::Chirp::refresh_token(&path, token_url).map_err(|error| {
-            let code=match error.split_once("Google token HTTP ").and_then(|(_,after)|after.get(..3)).and_then(|s|s.parse::<u16>().ok()){
-                Some(429)=>"google_quota",Some(500..)=>"google_http_error",Some(_)=>"google_auth_failed",
-                None if error.contains("timed out")=>"google_timeout",
-                None if error.contains("request failed")=>"google_request_failed",None=>"google_auth_failed",
+            let code = match error
+                .split_once("Google token HTTP ")
+                .and_then(|(_, after)| after.get(..3))
+                .and_then(|s| s.parse::<u16>().ok())
+            {
+                Some(429) => "google_quota",
+                Some(500..) => "google_http_error",
+                Some(_) => "google_auth_failed",
+                None if error.contains("timed out") => "google_timeout",
+                None if error.contains("request failed") => "google_request_failed",
+                None => "google_auth_failed",
             };
             failed(code)
         })?;
@@ -180,7 +184,7 @@ impl Speaker for GoogleVoice {
             .take(RESPONSE_MAX as u64 + 1)
             .read_to_end(&mut raw)
             .map_err(|_| failed("google_request_failed"))?;
-        let bytes=decode(&raw).map_err(failed)?;
+        let bytes = decode(&raw).map_err(failed)?;
         for chunk in bytes.chunks(64 * 1024) {
             sink(chunk);
         }
@@ -207,17 +211,23 @@ mod tests {
         }
     }
     #[test]
-    fn google_http_results_follow_the_reference(){
-        let v:Value=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/speech-engines-vectors.json")).unwrap();
-        for case in v["google_http"].as_array().unwrap(){
-            let result=status_ok(case["status"].as_u64().unwrap() as u16).and_then(|()|decode(case["payload"].to_string().as_bytes()));
-            match result{
-                Ok(bytes)=>assert_eq!(case["chunks"][0],String::from_utf8(bytes).unwrap()),
-                Err(code)=>assert_eq!(case["error"],code),
+    fn google_http_results_follow_the_reference() {
+        let v: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/speech-engines-vectors.json"
+        ))
+        .unwrap();
+        for case in v["google_http"].as_array().unwrap() {
+            let result = status_ok(case["status"].as_u64().unwrap() as u16)
+                .and_then(|()| decode(case["payload"].to_string().as_bytes()));
+            match result {
+                Ok(bytes) => assert_eq!(case["chunks"][0], String::from_utf8(bytes).unwrap()),
+                Err(code) => assert_eq!(case["error"], code),
             }
         }
-        assert_eq!(decode(b"{"),Err("google_bad_response"));
-        assert_eq!(decode(&vec![b'x';RESPONSE_MAX+1]),Err("google_audio_too_large"));
+        assert_eq!(decode(b"{"), Err("google_bad_response"));
+        assert_eq!(
+            decode(&vec![b'x'; RESPONSE_MAX + 1]),
+            Err("google_audio_too_large")
+        );
     }
-
 }
