@@ -630,3 +630,44 @@ def test_repeated_inactive_expiries_keep_the_same_evidence_retry_budget(lane, mo
         clock[0] += 30_000
         runner.tick()
     assert len(calls) == 2
+
+
+def _local(ms, zone):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(ms / 1000, ZoneInfo(zone)).strftime("%a %d %H:%M")
+
+
+def _named_runs(lane, cron, zone, start, count, **options):
+    """The times a task that keeps its pace runs at (idle runs, max_interval_seconds 0)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    store, source, calls, clock, make = lane
+    store.rows[0].update(trigger_id="schedule", options={"max_interval_seconds": 0, **options},
+                         config={"cron": cron, "timezone": zone, "coalesce_seconds": 0})
+    clock[0] = int(datetime.fromisoformat(start).replace(tzinfo=ZoneInfo(zone)).timestamp() * 1000)
+    make().tick()
+    runs = [store.progress["attachment"]["next_run_at"]]
+    for _ in range(count - 1):
+        _due(store, clock, make)
+        runs.append(store.progress["attachment"]["next_run_at"])
+    return [_local(ms, zone) for ms in runs]
+
+
+def test_working_days_first_run_on_a_thursday_runs_every_working_day(lane):
+    """R31: the gap measured at the first close (Friday to Monday) is no wait for Monday to Tuesday."""
+    assert _named_runs(lane, "0 9 * * 1-5", "UTC", "2026-11-19T08:00", 8) == [
+        "Thu 19 09:00", "Fri 20 09:00", "Mon 23 09:00", "Tue 24 09:00", "Wed 25 09:00",
+        "Thu 26 09:00", "Fri 27 09:00", "Mon 30 09:00"]
+
+
+def test_a_daily_task_first_run_two_days_before_the_clocks_go_back_runs_every_day(lane):
+    """R31: the 25-hour day measured at the first close is no wait for the 24-hour days after it."""
+    assert _named_runs(lane, "0 9 * * *", "Europe/Oslo", "2026-10-23T08:00", 6) == [
+        "Fri 23 09:00", "Sat 24 09:00", "Sun 25 09:00", "Mon 26 09:00", "Tue 27 09:00", "Wed 28 09:00"]
+
+
+def test_a_daily_task_runs_on_the_23_hour_day(lane):
+    """R31: a 24-hour wait from Saturday nine passes over Sunday nine when the clocks go forward."""
+    assert _named_runs(lane, "0 9 * * *", "Europe/Oslo", "2027-03-25T08:00", 6) == [
+        "Thu 25 09:00", "Fri 26 09:00", "Sat 27 09:00", "Sun 28 09:00", "Mon 29 09:00", "Tue 30 09:00"]
