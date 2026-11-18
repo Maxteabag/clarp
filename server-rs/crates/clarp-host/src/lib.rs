@@ -72,6 +72,7 @@ pub mod telling;
 pub mod terminal;
 pub mod tools;
 pub mod usage;
+mod usage_provider;
 pub mod voice;
 pub mod voices;
 pub mod wire;

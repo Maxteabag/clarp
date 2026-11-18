@@ -19,7 +19,7 @@ use crate::fleet::FleetHandle;
 
 /// What stands for a login file as it is now: nothing of what is in it. `None` when the file
 /// is not there or cannot be read.
-fn digest(path: &Path) -> Option<[u8; 32]> {
+pub(crate) fn digest(path: &Path) -> Option<[u8; 32]> {
     std::fs::read(path)
         .ok()
         .map(|bytes| Sha256::digest(&bytes).into())

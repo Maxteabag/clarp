@@ -9,10 +9,8 @@
 //!
 //! `GET /backend-usage` answers with the sums ([`clarp_kernel::usage`], the Python Host's
 //! rule) for each tool this Host runs. That is what was spent through this Host. How much
-//! of an account is left is another thing. This Host asks no provider for it; where a tool
-//! says it of itself (Codex, in its conversation's record, read when a turn of it ends:
-//! [`crate::quota`]), what it said is shown beside the sums, and for a tool that says
-//! nothing the answer says that nobody was asked.
+//! of an account is left comes from the tools' streams and, with `--ask-usage`, the
+//! provider collectors. Their windows and limits share the same quota desk.
 
 use std::sync::Arc;
 
@@ -173,9 +171,19 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
 /// `GET /backend-usage`: what this Host's turns used on each tool, over the last five hours
 /// and the last seven days, and what a tool said is left of its account, in the Python
 /// Host's fields.
-async fn told(State(app): State<App>) -> Json<Value> {
-    let now = app.clock.now_ms();
+async fn told(
+    State(app): State<App>,
+    axum::extract::Query(query): axum::extract::Query<Vec<(String, String)>>,
+) -> Json<Value> {
     let home = crate::config::home();
+    let mut events = Vec::new();
+    if app.config.ask_usage {
+        let force = query.iter().any(|(k, v)| {
+            k == "refresh" && matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true")
+        });
+        events = app.limits.refresh(&app, &home, force).await;
+    }
+    let now = app.clock.now_ms();
     let with = quota::With {
         fleet: &app.fleet,
         hub: &app.hub,
@@ -184,6 +192,8 @@ async fn told(State(app): State<App>) -> Json<Value> {
         now_ms: now,
     };
     let left = app.limits.asked(with, quota::CODEX).await;
+    events.extend(left.events);
+    let agy = app.limits.asked_agy(with).await;
     let of_claude = app.limits.asked_claude(with).await;
     let kept = app.fleet.kept_all(KIND).await.unwrap_or_default();
     let kept: Vec<Used> = kept
@@ -219,6 +229,8 @@ async fn told(State(app): State<App>) -> Json<Value> {
                 left.provider.clone()
             } else if *tool == quota::CLAUDE {
                 of_claude.clone()
+            } else if app.config.ask_usage || !agy["observed_at"].is_null() {
+                agy.clone()
             } else {
                 json!({
                     "freshness": "unknown", "observed_at": null, "provider_id": tool,
@@ -234,7 +246,7 @@ async fn told(State(app): State<App>) -> Json<Value> {
         "backends": backends,
         "capability_catalog_schema_version": 2,
         "computer_id": app.server_id,
-        "limit_events": left.events,
+        "limit_events": events,
         "observed_at": crate::wire::iso(now),
         "providers": providers,
         "schema_version": 1,

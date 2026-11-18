@@ -39,6 +39,8 @@ pub struct Config {
     /// program's name or its path. Empty: this Host was told none, reads no seat, and says
     /// that the tool is not installed.
     pub seats_tool: String,
+    pub ask_usage: bool,
+    pub usage_loopback: Option<std::net::SocketAddr>,
     /// How often the logins of the agents' tools are looked at, where turns wait for an
     /// account.
     pub logins_checked_every_ms: u64,
@@ -137,7 +139,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--seats-tool PROGRAM] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
@@ -275,6 +277,7 @@ impl Config {
             .unwrap_or_else(|| "Clarp Host".to_string());
         let mut default_cwd = home();
         let mut keep_spools = false;
+        let mut ask_usage = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut seats_tool = String::new();
         let mut logins_checked_every_ms = 5_000;
@@ -312,6 +315,7 @@ impl Config {
                 "--name" => name = value("a name")?,
                 "--cwd" => default_cwd = PathBuf::from(value("a directory")?),
                 "--keep-spools" => keep_spools = true,
+                "--ask-usage" => ask_usage = true,
                 "--accounts" => {
                     let named = value("none or follow")?;
                     accounts = clarp_kernel::recovery::Accounts::by_name(&named)
@@ -477,6 +481,16 @@ impl Config {
             default_cwd,
             keep_spools,
             accounts,
+            ask_usage,
+            usage_loopback: match std::env::var_os("CLARP_USAGE_LOOPBACK") {
+                None => None,
+                Some(raw) => Some(
+                    raw.to_str()
+                        .and_then(|s| s.parse::<std::net::SocketAddr>().ok())
+                        .filter(|addr| addr.ip().is_loopback())
+                        .ok_or("CLARP_USAGE_LOOPBACK must be a numeric loopback socket address")?,
+                ),
+            },
             seats_tool,
             logins_checked_every_ms,
             jobs_checked_every_ms,
