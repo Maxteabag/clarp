@@ -747,6 +747,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let call_id = joined.call_id.clone();
     let call = (call_id.as_str(), joined.call_epoch);
     let principal = joined.principal.clone();
+    let transcript = super::transcript::Transcript::start(app,&joined);
     let mut machine = Session::new(joined, &ids::hex(16), seconds(began));
     let (stops, mut stopped) = mpsc::unbounded_channel::<String>();
     let (is_over, over) = watch::channel(false);
@@ -829,6 +830,14 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
+                    if let Some(transcript)=&transcript && let Some(delta)=event["delta"].as_str().filter(|text| !python::strip(text).is_empty()) {
+                        let role=match event["type"].as_str(){
+                            Some("session.input_transcript.delta")=>Some("user"),
+                            Some("session.output_transcript.delta")=>Some("assistant"),
+                            _=>None,
+                        };
+                        if let Some(role)=role {transcript.add("text",json!({"role":role,"text":delta}),app.clock.now_ms());}
+                    }
                     let said = desk.step(app, call, |book| machine.voice(&event, book, &mut told, now));
                     let _ = said.await;
                 }
@@ -872,6 +881,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         }
     }
     drop(voice);
+    if let Some(transcript)=transcript {transcript.finish().await;}
     desk.ended(&call_id).await;
     let _ = is_over.send(true);
 }

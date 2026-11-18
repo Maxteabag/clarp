@@ -183,3 +183,17 @@ fn a_callback_belongs_to_its_phone_and_its_one_due_owner() {
     }
     assert_eq!(steps, 220);
 }
+
+#[test]
+fn transcript_fragments_and_receipts_are_retained_across_intervening_events() {
+    use clarp_kernel::live_call::transcript;
+    let fixture:Value=serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let meta=json!({"call_id":"one","principal":"device-a","agent_session":"guard","agent":"Guard"});
+    let mut runs=0;
+    for case in fixture["transcripts"].as_array().unwrap(){
+        assert_eq!(json!(transcript::name(case["id"].as_str().unwrap())),case["name"]);
+        assert_eq!(transcript::document(&meta,"T0","T20",case["entries"].as_array().unwrap()),case["document"]);
+        runs+=1;
+    }
+    assert_eq!(runs,10);
+}
