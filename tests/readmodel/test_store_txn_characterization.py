@@ -294,12 +294,22 @@ def test_a_reply_adopts_the_live_row_of_its_own_turn_exact_text_first(clock):
     assert "live-prefix" not in {r["message_id"] for r in rows()}   # cleanup removed it
 
 
+def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(clock):
+    client("c0", "ask", at=0, trace="tr-0")
+    assistant_row("live-other", "live:tr-9", "answer", at=4, trace="tr-9")
+    turns = [u("ask", 0.2), a("answer", 5)]
+    for _ in range(2):
+        store(turns)
+        assert {r["message_id"]: r["source_file"] for r in rows()}["live-other"] == "live:tr-9"
+        assert len(transcript_rows()) == 1
+
+
 @pytest.mark.parametrize("primary_fault, fallback_fault", [
     ("normal", "none"), ("sink", "none"), ("import", "none"),
     ("sink", "oserror"), ("import", "oserror"),
     ("sink", "short"), ("import", "short"),
 ])
-def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(
+def test_a_decline_guard_diagnostic_failure_never_changes_import_products(
         clock, monkeypatch, capfd, primary_fault, fallback_fault):
     """A failed optional diagnostic cannot change the actual import/twin result.
 
@@ -311,12 +321,13 @@ def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(
 
     sensitive = "SENSITIVE-DIAGNOSTIC-SENTINEL"
     trace, live_id = f"tr-0-{sensitive}", f"live-other-{sensitive}"
-    event = "transcriptLiveTwinOtherTurn"
-    detail = f"agent={AGENT} trace={trace} kept={live_id}"
+    event = "transcriptLiveDeclineGuardFail"
+    detail = "reason=obsolete_decision count=1"
     fallback = b"transcriptDiagnosticFallback code=primary_log_failed count=1\n"
     client("c0", "ask", at=0, trace=trace)
     assistant_row(live_id, "live:tr-9", "answer", at=4, trace="tr-9")
-    turns = [u("ask", 0.2), a("answer", 5)]
+    assistant_row("live-ambiguous", "live:own", "answer", at=4, trace=trace, seq=-1001)
+    turns = [u("ask", 0.2), a("answer", 5), a("answer more", 6)]
     mode = {"primary": "normal"}
     diagnoses, primary_calls, fallback_attempts = [], [], []
     real_log, real_import, real_write = log_module.log, builtins.__import__, os.write
@@ -376,7 +387,7 @@ def test_a_live_row_of_another_turn_is_neither_adopted_nor_removed(
     assert tuple(connection.iterdump()) == expected_products
     assert not connection.in_transaction
     assert {r["message_id"]: r["source_file"] for r in rows()}[live_id] == "live:tr-9"
-    assert len(transcript_rows()) == 1
+    assert len(transcript_rows()) == 2
     stderr = capfd.readouterr().err
     if primary_fault == "normal":
         assert primary_calls == [(event, detail)] * len(expected_diagnoses)

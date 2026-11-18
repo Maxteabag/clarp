@@ -342,9 +342,8 @@ def test_two_untraced_prefix_related_rows_survive_a_reply_of_unknown_turn(host):
             assert owners[id_][0] == text
 
 
-def test_a_failing_diagnostic_never_fails_the_import(host, monkeypatch):
-    """A known-turn reply whose only candidate is another turn's row triggers
-    the other-turn diagnostic; a logger that raises changes nothing."""
+def test_traced_lookup_neither_adopts_nor_reports_another_turn(host, monkeypatch):
+    """A point lookup cannot see another turn; a broken logger is immaterial."""
     from lib import log as log_module
     calls = []
 
@@ -358,8 +357,7 @@ def test_a_failing_diagnostic_never_fails_the_import(host, monkeypatch):
     _prompt(agent_id, "trace-b", "second prompt")          # turn B streams nothing
     _import(agent_id, _ONLY_B + [{"role": "assistant", "text": "Done.",
                                   "timestamp": "2026-10-18T09:31:10Z"}])
-    # The import's probe and locked passes both evaluate the match.
-    assert calls and set(calls) == {"transcriptLiveTwinOtherTurn"}
+    assert calls == []
     owners = _owners(agent_id)
     assert owners[a] == ("Done.", "trace-a")
     assert sorted(v for k, v in owners.items() if k != a) == [("Done.", "trace-b")]

@@ -1252,7 +1252,12 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
-    final_rows = _FinalRows(database, agent_id, backend_session_id)
+    final_rows = _FinalRows(database, agent_id, backend_session_id,
+                            turns=turns, visible_replies=visible_replies,
+                            start_seq=start_seq, turn_index=turn_index,
+                            client_rows=prelude.client_rows, provenance=provenance,
+                            current_trace=(carry or {}).get("current_request_trace", ""),
+                            unanswered_key=(carry or {}).get("unanswered_key", ""))
     # Rows this import already wrote: never moved again (RM-N1).
     placed_ids: set[str] = set()
     # For the carried-inputs guard (lib.message_carry), recorded with the
@@ -1549,7 +1554,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                    source_file=source_file,
                    batch_finals=batch_finals, total_turns=total_turns,
                    skipped_slot_removed=skipped_slot_removed,
-                   latest_revision=latest_revision, authority_tools=agy.tools)
+                   latest_revision=latest_revision, authority_tools=agy.tools,
+                   final_rows=final_rows)
     return out
 
 
@@ -1559,13 +1565,15 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                    source_file: str,
                    batch_finals: list[tuple[str, str]], total_turns: int,
                    skipped_slot_removed: bool, latest_revision: int,
-                   authority_tools: dict[str, tuple[str, list, list]]) -> None:
+                   authority_tools: dict[str, tuple[str, list, list]],
+                   final_rows: _FinalRows) -> None:
     """The import's work after its rows: leftover live twins, parked replies
     nothing re-adopted (RM-N1c), the stale tail, the replace revision,
     stream-owned agy tools and the conversation head."""
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
+    deleted_stamps = set()
     # A leftover live row goes only when a reply of ITS OWN turn landed in
     # this batch; another turn's kept row waits for its own reply, and a reply
     # of unknown turn clears nothing.
@@ -1576,7 +1584,7 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
     # total_turns is already known; choosing the shape needs no COUNT query.
     if len(traces) > max(1, total_turns // 5):
         live_rows = database.execute(
-            """SELECT message_id, text, trace_id FROM messages
+            """SELECT message_id, text, trace_id, (turn_json IS NOT NULL) AS has_turn FROM messages
                 WHERE agent_id = ? AND backend_session_id = ?
                   AND source_file LIKE 'live:%'
                   AND role = 'assistant'""",
@@ -1586,13 +1594,15 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
         for start in range(0, len(traces), 32):
             selected = traces[start:start + 32]
             live_rows.extend(database.execute(
-                """SELECT message_id, text, trace_id FROM messages INDEXED BY idx_messages_trace
+                """SELECT message_id, text, trace_id, (turn_json IS NOT NULL) AS has_turn FROM messages INDEXED BY idx_messages_trace
                     WHERE agent_id = ? AND backend_session_id = ?
                       AND source_file LIKE 'live:%' AND role = 'assistant'
                       AND trace_id IN (""" + ",".join("?" for _ in selected) + ")",
                 (agent_id, backend_session_id, *selected),
             ).fetchall())
     for live in live_rows:
+        if final_rows.keep_declined_live(live):
+            continue
         live_text = _strip_voice_markup(live["text"])
         if not live_text:
             continue
@@ -1605,6 +1615,8 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+            if live["has_turn"] and live_trace:
+                deleted_stamps.add(live_trace)
     if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
         skipped_slot_removed = True
     stale = database.execute(
@@ -1630,6 +1642,8 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
         if stale is not None or skipped_slot_removed else 0)
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
+    latest_revision = max(latest_revision, final_rows.stamp_after_cleanup(
+        deleted_stamps, stamp_turn, _next_revision))
     latest_revision = max(latest_revision,
                           _attach_authority_tools(database, agent_id, authority_tools))
     head = database.execute(
