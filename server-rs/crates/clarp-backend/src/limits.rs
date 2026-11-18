@@ -267,3 +267,16 @@ pub fn codex(payload: &Value) -> Result<Value, String> {
         "windows": windows,
     }))
 }
+
+/// Anthropic's OAuth endpoint reports utilization in percent, including fractions of one percent.
+pub fn claude_oauth(payload: &Value) -> Option<Value> {
+    let apps = &payload["seven_day_oauth_apps"];
+    let weekly = if clarp_kernel::python::truthy(apps) {apps} else {&payload["seven_day"]};
+    let mut out = Map::new();
+    for (kind, minutes, row) in [("five_hour",300,&payload["five_hour"]),("seven_day",10080,weekly)] {
+        if let Some(used) = number(&row["utilization"]).filter(|n| n.is_finite()) {
+            out.insert(kind.to_string(),json!({"used_percentage":used,"window_minutes":minutes,"resets_at":time(row.get("resets_at"))}));
+        }
+    }
+    (!out.is_empty()).then_some(Value::Object(out))
+}
