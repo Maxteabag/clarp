@@ -1344,6 +1344,29 @@ the vectors made against the fixed reference, by the tests, and by the wrong rul
 commit that is installed (what agents finished 78 of 78, the call 93 of 93, the conversation 475 of 475, the
 delegations 165 of 165).
 
+## With calls put through to agents (18 Nov 2026, L37)
+
+The installed Host is `ca35c8acf826`, installed at 16:44:34, without the word for a push key; the relay was
+back 92 ms after the start, and its 23 agents were as before (`verify-rows.py`). At its door, with the
+Host's own token and no call open, so that every request is one the Host answers without doing anything:
+
+| Asked | Answered |
+|---|---|
+| `GET /server-info` | `contract.host` 101; the feature `oracle_handoff` is 22 |
+| `GET /oracle/handoff?principal=` a phone nobody has | 200: no handoff, none active, and the Host's own id |
+| `GET /oracle/handoff` without the Host's token | 401 |
+| `POST /oracle/connect` with an agent nobody has | 404, `no live Oracle call` |
+| `POST /oracle/connect` with `agent: oracle` (the way back) | 404, `no active handoff` |
+| `POST /oracle/connect` with nothing | 400, `agent required` |
+| `POST /oracle/connect` with what is no JSON | 400, `bad json` |
+| `POST /oracle/handoffs/ack` for a handoff nobody has | 404, `unknown_handoff` |
+| `POST /oracle/handoffs/ack` without a step | 400, `handoff_id, generation and a known phase are required` |
+
+The Oracle's other routes answered as the build before it did. A handoff itself cannot be made at this
+door: it takes a call, which reaches a paid voice. It is held by the vectors of the Python Host's own
+module (15 stories, 568 steps), by the Host's test, and by the wrong rules those caught on the commit that
+is installed (handoffs 173 of 173, the call 93 of 93, what agents finished 78 of 78).
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart
