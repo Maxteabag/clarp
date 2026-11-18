@@ -807,6 +807,23 @@ def test_an_answer_paused_at_the_part_limit_stays_paused_in_the_next_call(lab):
     assert _cues(call) == ["result"]
 
 
+def test_a_checkpoint_keeps_only_this_calls_work(lab):
+    earlier = {**_theo_row(), "delegation_id": "earlier", "result_text": "An earlier answer."}
+    row = {**_theo_row(), "result_text": "All clear."}
+    call = lab(rows=[row], prior_rows=[earlier])
+    call.conv.memory = FakeMemory()
+    call.conv.read_result("earlier")
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    assert {"earlier", row["delegation_id"]} <= call.conv.results_sent
+    call.conv.forwarded_findings = {f"finding-{i}": f"op-{i}" for i in range(mod.FORWARDED_FINDINGS_KEPT + 100)}
+    call.conv.checkpoint()
+    saved = call.conv.memory.state
+    assert saved["results_sent"] == [row["delegation_id"]]
+    assert list(saved["forwarded_findings"]) == [f"finding-{i}" for i in range(100, mod.FORWARDED_FINDINGS_KEPT + 100)]
+
+
 def test_a_stop_holds_across_three_calls_and_the_answer_stays_readable(lab):
     row = {**_theo_row(), "result_text": "The old reading."}
     call = lab(rows=[row])
