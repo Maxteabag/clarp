@@ -28770,6 +28770,7 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
     assert!(line["vocab_run_id"].as_i64().unwrap() > 0);
     let judge = judgments.lock().unwrap()[0].clone();
     let asked: Value = serde_json::from_str(judge.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(asked["model"], "jev-latest");
     assert_eq!(asked["questions"]["junk"], fixture["question"]);
     assert_eq!(asked["state"], json!({"transcript":"Okay."}));
     assert!(requests.lock().unwrap()[1].contains("name=\"keyterms\"\r\n\r\nPlover"));
