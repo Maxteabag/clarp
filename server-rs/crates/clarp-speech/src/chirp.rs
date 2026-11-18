@@ -276,6 +276,7 @@ impl Chirp {
         what: &str,
     ) -> Result<Value, String> {
         let config = ureq::Agent::config_builder()
+            .max_redirects(0)
             .timeout_global(Some(timeout))
             .http_status_as_error(false)
             .build();
@@ -312,6 +313,15 @@ impl Chirp {
         {
             return Ok(token.clone());
         }
+        let (token,lasts) = Self::refresh_token(credentials,&self.token_url)?;
+        let runs_out = Instant::now() + Duration::from_secs_f64(lasts.unwrap_or(3_600.0));
+        self.tokens()
+            .insert(credentials.to_path_buf(), (token.clone(), runs_out));
+        Ok(token)
+    }
+
+    /// Exchange an authorized-user ADC refresh token for a short-lived access token.
+    pub(crate) fn refresh_token(credentials:&Path,token_url:&str)->Result<(String,Option<f64>),String> {
         let read = std::fs::read_to_string(credentials)
             .map_err(|error| error.to_string())
             .and_then(|text| {
@@ -333,7 +343,7 @@ impl Chirp {
         ]);
         let kind = [("Content-Type", "application/x-www-form-urlencoded")];
         let bought = Self::post(
-            &self.token_url,
+            token_url,
             &kind,
             form.as_bytes(),
             Duration::from_secs(15),
@@ -346,10 +356,7 @@ impl Chirp {
             return Err("Google token response had no access_token".to_string());
         };
         let lasts = bought["expires_in"].as_f64().filter(|lasts| *lasts > 0.0);
-        let runs_out = Instant::now() + Duration::from_secs_f64(lasts.unwrap_or(3_600.0));
-        self.tokens()
-            .insert(credentials.to_path_buf(), (token.to_string(), runs_out));
-        Ok(token.to_string())
+        Ok((token.to_string(),lasts))
     }
 
     /// A clip as plain sound, whatever it was recorded as.

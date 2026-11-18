@@ -81,7 +81,7 @@ const KEPT_BYTES: u64 = 256 * 1024 * 1024;
 const SPEECH_OFF: &str = "speech out is turned off on this Host";
 
 /// The engines that speak which are built into this Host.
-pub(crate) const BUILT: [&str; 3] = [said::CARTESIA, said::GEMINI,"deepgram"];
+pub(crate) const BUILT: [&str; 5] = [said::CARTESIA, said::GEMINI,"deepgram",said::ELEVENLABS,"google"];
 
 /// The way to the one that speaks. Telling it never waits.
 #[derive(Clone)]
@@ -168,6 +168,9 @@ pub struct Mouth {
     /// Stand-ins on this machine in place of the engines' own addresses. Empty: the real.
     cartesia_at: String,
     deepgram_at: String,
+    eleven_at:String,
+    google_at:String,
+    google_token_at:String,
     gemini_at: String,
     /// The clips that are being made now, by their number.
     growing: Mutex<HashMap<u64, Arc<Growing>>>,
@@ -200,7 +203,7 @@ impl Mouth {
 
     /// Whether an engine that speaks has its key.
     pub(crate) fn has_key(&self, provider: &str, owners: &Table) -> bool {
-        self.owner.key(key_of(provider, owners)).is_some()
+        if provider=="google" { owner::google_voice_error(owners).is_none() } else { self.owner.key(key_of(provider, owners)).is_some() }
     }
 
     /// The ids of Cartesia's voices as this Host last listed them, however long ago, without
@@ -333,6 +336,9 @@ impl Waiting {
             language: works.config.speech_language.clone(),
             cartesia_at: works.config.cartesia_endpoint.clone(),
             deepgram_at: works.config.deepgram_voice_endpoint.clone(),
+            eleven_at:works.config.eleven_voice_endpoint.clone(),
+            google_at:works.config.google_voice_endpoint.clone(),
+            google_token_at:works.config.google_token_endpoint.clone(),
             gemini_at: works.config.gemini_endpoint.clone(),
             growing: Mutex::default(),
             at_once: Semaphore::new(AT_ONCE),
@@ -435,6 +441,7 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
                 voice.map(|voice| voices.gemini_voice_at(voice, vertex))
             }
             said::ELEVENLABS => clip.elevenlabs.clone(),
+            "google" => said::voice_for(stored,&route,"google").or_else(|| stored.map(str::trim).filter(|v|clarp_kernel::voices::google_has(v)).map(str::to_string)).or_else(||Some("nb-NO-Chirp3-HD-Kore".into())),
             "deepgram" => said::voice_for(stored,&route,"deepgram").or_else(|| Some(owner::text_at(file,&["deepgram","model"]).unwrap_or_else(||"flux-haley-en".into()))),
             _ => None,
         };
@@ -481,6 +488,7 @@ fn key_of(provider: &str, file: &Table) -> &'static str {
     match provider {
         said::CARTESIA => "cartesia",
         "deepgram" => "deepgram",
+        said::ELEVENLABS=>"elevenlabs",
         said::GEMINI if owner::gemini(file).vertex => "vertex",
         said::GEMINI => "gemini",
         _ => "",
@@ -517,6 +525,20 @@ impl Mouth {
         let key = key_of(provider, file);
         let read = Box::new(move || keys.key(key));
         match provider {
+            "google" => {
+                // Both legs must stay on the same side of the stand-in boundary.
+                if self.google_at.is_empty()!=self.google_token_at.is_empty() {return None;}
+                let owner=self.owner.clone();
+                Some(Box::new(clarp_speech::google_voice::GoogleVoice{
+                    endpoint:self.google_at.clone(),token_url:self.google_token_at.clone(),allowed:clarp_kernel::voices::google_has,
+                    account:Box::new(move ||owner::google_voice_account(&owner.read().unwrap_or_default()).map_err(str::to_string)),
+                }))
+            },
+            said::ELEVENLABS=>Some(Box::new(clarp_speech::eleven_voice::ElevenVoice{
+                key:read,model:owner::text_at(file,&["elevenlabs","model"]).unwrap_or_else(||"eleven_flash_v2_5".into()),
+                speed:file.get("elevenlabs").and_then(|v|v.get("speed")).and_then(|v|v.as_float().or_else(||v.as_integer().map(|n|n as f64))).unwrap_or(1.2),
+                base:self.eleven_at.clone(),
+            })),
             "deepgram" => Some(Box::new(clarp_speech::deepgram_voice::DeepgramVoice { key:read, base:self.deepgram_at.clone() })),
             said::CARTESIA => {
                 let engine = Cartesia::new(owner::cartesia_model(file), &self.language, read);
@@ -607,7 +629,7 @@ impl Mouth {
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
         let owners = self.owner.read().unwrap_or_default();
-        let has_key = |provider: &str| self.owner.key(key_of(provider, &owners)).is_some();
+        let has_key = |provider: &str| self.has_key(provider,&owners);
         let by = match chosen(&owners, record, &has_key) {
             Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, false).await,
             Chosen::Nobody { why, told } => {
