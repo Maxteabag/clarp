@@ -464,6 +464,7 @@ fn conflict(why: Refused) -> ApiError {
     let status = match why.why {
         Why::Permission => StatusCode::FORBIDDEN,
         Why::Value | Why::Integrity => StatusCode::CONFLICT,
+        Why::Spec(_) => return render_spec::said(why),
     };
     ApiError::new(status, why.message)
 }

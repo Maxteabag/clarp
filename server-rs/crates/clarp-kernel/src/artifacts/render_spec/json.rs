@@ -692,7 +692,7 @@ pub fn sorted<'a>(keys: impl Iterator<Item = &'a Text>) -> Result<Vec<&'a Text>,
         };
         keyed.push((units, key));
     }
-    keyed.sort();
+    keyed.sort_by(|one, two| one.0.cmp(&two.0));
     Ok(keyed.into_iter().map(|(_, key)| key).collect())
 }
 
