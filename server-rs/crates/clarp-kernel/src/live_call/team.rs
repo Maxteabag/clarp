@@ -139,3 +139,53 @@ pub fn prompted(member: &str, id: &str, outcome: Prompt<'_>) -> Value {
 pub fn prompt(name: &str, request: &str) -> String {
     format!("Fra {name} (teamleder), rett fra telefonsamtalen med Peter: {request}")
 }
+
+pub struct Question {
+    pub id: String,
+    pub request: String,
+}
+
+impl Question {
+    pub fn new(bound: [&str; 4], name: &str, question: &Value) -> Result<Self, Value> {
+        let normalized = if python::truthy(question) {
+            string(question)
+        } else {
+            String::new()
+        };
+        let question = normalized
+            .split(python::blank)
+            .filter(|word| !word.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if question.is_empty() || question.chars().count() > 4000 {
+            return Err(
+                json!({"tool":"ask_my_agent","status":"refused","reason":if question.is_empty(){"empty question"}else{"question too long"}}),
+            );
+        }
+        let [host, phone, call, session] = bound;
+        let id = operation(
+            "sandra-",
+            &[host, phone, call, session, &question.to_lowercase()],
+        );
+        let request = format!(
+            "Spørsmål fra {name}s Live-samtale med Peter (svar kort og muntlig, på norsk; slå opp det som trengs med verktøyene dine): {question}"
+        );
+        Ok(Self { id, request })
+    }
+
+    pub fn already_asked(&self) -> Value {
+        json!({"tool":"ask_my_agent","status":"already_asked","operation_id":self.id,"note":"already asked in this call; the answer comes back by itself (read_result replays it)"})
+    }
+
+    pub fn asked(&self, row: &Value) -> Value {
+        json!({"tool":"ask_my_agent","status":"asked","operation_id":self.id,"regi_status":Value::Null,"reason":if row["status"]=="failed"{row["error"].clone()}else{Value::Null},"note":"say briefly that you are checking (\"jeg sjekker\"); the answer comes back in parts"})
+    }
+
+    pub fn missing(&self, unknown: bool) -> Value {
+        if unknown {
+            json!({"tool":"ask_my_agent","status":"unknown","operation_id":self.id,"reason":"RuntimeError","note":"not known whether the question went out; not resent; say so"})
+        } else {
+            json!({"tool":"ask_my_agent","status":"failed","reason":"RuntimeError","note":"the question could not be sent; say so"})
+        }
+    }
+}

@@ -43,6 +43,7 @@ def record(root):
     def hear(receipts):
         notes.append(dict(receipts=receipts, notes=tools.host_note(receipts)))
     hear([])
+    hear([{}])
     for name in ('delegate_to_agent','schedule_callback','cancel_callback','get_agent_status',
                  'read_agent_transcript','ask_my_agent','read_result','other',''):
         for extra in ({},dict(minutes=5,at='12:34:56 UTC',replaced={'minutes':1},regi_status='venter'),
@@ -60,7 +61,7 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools),'routes':[routing(root,tools)],'answers':answers(root,tools)}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools),'routes':[routing(root,tools)],'answers':answers(root,tools),'asks':asks(root,tools)}
 
 
 def calls(root, tools):
@@ -231,6 +232,42 @@ def answers(root,tools):
             cases.append(dict(text=text,steps=steps))
             call.close()
     return cases
+
+
+def asks(root, tools):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    stories=[]
+    for outcome in ('accepted','failed-row','lookup-found','lookup-empty','lookup-failed','ended'):
+        effects=[]
+        def ask(id,session,question,owner):
+            effects.append(['ask',id,session,question,owner])
+            if outcome.startswith('lookup-'): raise RuntimeError('uncertain')
+            return {'status':'failed','error':'unavailable'} if outcome=='failed-row' else {'status':'accepted'}
+        def delegation(id):
+            effects.append(['get',id])
+            if outcome=='lookup-failed': raise OSError('unavailable')
+            return {'status':'queued'} if outcome=='lookup-found' else None
+        cfg={'from':'guard','contact':{'session':'contact','name':'Contact'}}
+        snapshot={'live_tools':cfg,'profile':{'display_name':'Guard'},'agent':{'session':'guard'},'host_id':'host-test'}
+        with patch.object(tools,'log'),patch.object(tools,'log_exception'):
+            call=tools.CallTools(snapshot,'call',lambda *_:False,SimpleNamespace(ask=ask,delegation=delegation),
+                                 current=lambda:outcome!='ended',principal='device-one',ledger=tools.Ledger(root/'asks'/'ledger.json'))
+            steps=[]
+            for question in (None,'','  ','What  happened?',' WHAT happened?','Q'*4000,'Q'*4001):
+                effects.clear()
+                receipt=call.execute('ask_my_agent',{'question':question})
+                # Repeated long inputs are expanded by the test. Their complete
+                # operation IDs and the receipt are from the reference.
+                seen=[e.copy() for e in effects]
+                for e in seen:
+                    if len(e)>3 and question=='Q'*4000:
+                        assert e[3].endswith(question)
+                        e[3]=e[3][:-4000]+'{question}'
+                steps.append(dict(question=question if not isinstance(question,str) or len(question)<4000 else {'Q':len(question)},receipt=receipt,effects=seen))
+            stories.append(dict(outcome=outcome,steps=steps))
+            call.close()
+    return stories
 
 
 def callbacks(root, tools):

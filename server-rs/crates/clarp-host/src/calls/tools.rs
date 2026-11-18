@@ -28,6 +28,7 @@ pub struct Worker {
     pub asked: std::collections::BTreeSet<String>,
     pub answers: clarp_kernel::live_call::answers::Answers,
     pub auto_decided: bool,
+    pub pacing: tokio::sync::mpsc::UnboundedSender<(String, String)>,
     pub reconciled: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
@@ -89,6 +90,38 @@ impl Worker {
             .is_ok()
     }
 
+    /// Prune abandoned attempts as well as callback slots. Re-read each old
+    /// row under its own slot lock so a new booking cannot be removed by a
+    /// sweep that observed the old booking.
+    async fn prune(&self) {
+        let now = self.app.clock.now_ms() as f64 / 1000.0;
+        let Ok(rows) = self.app.fleet.kept_all("live_tools").await else {
+            return;
+        };
+        for (key, bytes) in rows {
+            let Ok(row) = serde_json::from_slice::<Value>(&bytes) else {
+                continue;
+            };
+            if row["at"].as_f64().is_none_or(|at| now - at < 86400.0) {
+                continue;
+            }
+            let mutex = self.app.calls.tool_slot(&key);
+            let _guard = mutex.lock().await;
+            if self
+                .app
+                .fleet
+                .kept("live_tools", key.clone())
+                .await
+                .ok()
+                .flatten()
+                .as_ref()
+                == Some(&bytes)
+            {
+                let _ = self.app.fleet.keep("live_tools", key, None).await;
+            }
+        }
+    }
+
     async fn callback(&self, name: &str, args: &Value, explicit: bool) -> Value {
         let b = self.binding();
         let slot = b.slot();
@@ -139,49 +172,35 @@ impl Worker {
     }
 
     async fn ask(&mut self, args: &Value) -> Value {
-        let question = args["question"]
+        let snap = &self.call.snapshot;
+        let session = snap["live_tools"]["contact"]["session"]
             .as_str()
-            .unwrap_or("")
-            .split(clarp_kernel::python::blank)
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut receipt = json!({"tool":"ask_my_agent"});
-        if question.is_empty() || question.chars().count() > 4000 {
-            receipt["status"] = json!("refused");
-            receipt["reason"] = json!(if question.is_empty() {
-                "empty question"
-            } else {
-                "question too long"
-            });
-            return receipt;
-        }
-        let contact = &self.call.snapshot["live_tools"]["contact"];
-        let session = contact["session"].as_str().unwrap_or("");
-        let id = team::operation(
-            "sandra-",
-            &[
+            .unwrap_or("");
+        let name = snap["profile"]["display_name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("the agent");
+        let question = match team::Question::new(
+            [
                 &self.app.server_id,
                 &self.call.principal,
                 &self.call.call_id,
                 session,
-                &question.to_lowercase(),
             ],
-        );
-        if self.asked.contains(&id) || self.answers.contains(&id) {
-            return json!({"tool":"ask_my_agent","status":"already_asked","operation_id":id,"note":"already asked in this call; the answer comes back by itself (read_result replays it)"});
+            name,
+            &args["question"],
+        ) {
+            Ok(question) => question,
+            Err(refused) => return refused,
+        };
+        let id = &question.id;
+        if self.asked.contains(id) || self.answers.contains(id) {
+            return question.already_asked();
         }
-        let name = self.call.snapshot["profile"]["display_name"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-            .unwrap_or("the agent");
-        let request = format!(
-            "Spørsmål fra {name}s Live-samtale med Peter (svar kort og muntlig, på norsk; slå opp det som trengs med verktøyene dine): {question}"
-        );
         let row = match crate::oracle::live_ask(
             &self.app,
             &self.call.principal,
-            (&id, session, &request),
+            (id, session, &question.request),
         )
         .await
         {
@@ -192,17 +211,17 @@ impl Worker {
                     Ok(rows) => match rows.first() {
                         Some(row) => row.told(),
                         None => {
-                            return json!({"tool":"ask_my_agent","status":"failed","reason":"RuntimeError","note":"the question could not be sent; say so"});
+                            return question.missing(false);
                         }
                     },
                     Err(_) => {
-                        return json!({"tool":"ask_my_agent","status":"unknown","operation_id":id,"reason":"RuntimeError","note":"not known whether the question went out; not resent; say so"});
+                        return question.missing(true);
                     }
                 }
             }
         };
         self.asked.insert(id.clone());
-        json!({"tool":"ask_my_agent","status":"asked","operation_id":id,"regi_status":Value::Null,"reason":if row["status"]=="failed"{row["error"].clone()}else{Value::Null},"note":"say briefly that you are checking (\"jeg sjekker\"); the answer comes back in parts"})
+        question.asked(&row)
     }
 
     pub fn adopt(&mut self, rows: Vec<clarp_kernel::oracle::delegations::Delegation>) {
@@ -227,6 +246,15 @@ impl Worker {
                     .is_ok()
             {
                 self.asked.remove(&row.delegation_id);
+                let _ = self.pacing.send((
+                    "agentLiveAskAnswered".into(),
+                    format!(
+                        "call={} op={} status={}",
+                        self.call.call_id,
+                        row.delegation_id,
+                        row.status.word()
+                    ),
+                ));
             }
         }
     }
@@ -474,6 +502,10 @@ impl Worker {
     }
 
     pub async fn route(&mut self, key: &str, route: &Route) -> Option<Vec<Value>> {
+        if !self.current().await {
+            return None;
+        }
+        self.prune().await;
         if !self.current().await {
             return None;
         }

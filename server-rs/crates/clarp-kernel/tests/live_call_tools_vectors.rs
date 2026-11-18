@@ -24,7 +24,7 @@ fn the_voice_is_told_exactly_what_the_director_confirmed() {
         );
         notes += 1;
     }
-    assert_eq!((answers, notes), (129, 102));
+    assert_eq!((answers, notes), (129, 103));
 }
 #[test]
 fn tool_proposals_and_direct_prompts_follow_the_frozen_team() {
@@ -289,4 +289,66 @@ fn returned_answers_advance_only_on_delivery_and_replay_from_the_requested_part(
         }
     }
     assert_eq!(count, 100);
+}
+
+#[test]
+fn questions_are_normalized_and_remain_bound_to_the_contact_and_call() {
+    use clarp_kernel::live_call::team::{Question, ended};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let mut steps = 0;
+    for story in fixture["asks"].as_array().unwrap() {
+        let mut asked = std::collections::HashSet::new();
+        let outcome = story["outcome"].as_str().unwrap();
+        for step in story["steps"].as_array().unwrap() {
+            let q = step["question"]["Q"].as_u64().map_or_else(
+                || step["question"].clone(),
+                |len| json!("Q".repeat(len as usize)),
+            );
+            let mut effects = Vec::new();
+            let receipt =
+                match Question::new(["host-test", "device-one", "call", "contact"], "Guard", &q) {
+                    Err(r) => r,
+                    Ok(q) if asked.contains(&q.id) => q.already_asked(),
+                    Ok(_) if outcome == "ended" => ended("ask_my_agent"),
+                    Ok(question) => {
+                        let request = if q.as_str().is_some_and(|s| s.len() == 4000) {
+                            format!(
+                                "{}{{question}}",
+                                question.request.strip_suffix(q.as_str().unwrap()).unwrap()
+                            )
+                        } else {
+                            question.request.clone()
+                        };
+                        effects.push(json!([
+                            "ask",
+                            question.id,
+                            "contact",
+                            request,
+                            "device-one"
+                        ]));
+                        if outcome.starts_with("lookup-") {
+                            effects.push(json!(["get", question.id]));
+                        }
+                        match outcome {
+                            "lookup-empty" | "lookup-failed" => {
+                                question.missing(outcome == "lookup-failed")
+                            }
+                            _ => {
+                                asked.insert(question.id.clone());
+                                question.asked(&if outcome == "failed-row" {
+                                    json!({"status":"failed","error":"unavailable"})
+                                } else {
+                                    json!({"status":"accepted"})
+                                })
+                            }
+                        }
+                    }
+                };
+            assert_eq!(receipt, step["receipt"], "{outcome} step {steps}");
+            assert_eq!(json!(effects), step["effects"], "{outcome} step {steps}");
+            steps += 1;
+        }
+    }
+    assert_eq!(steps, 42);
 }
