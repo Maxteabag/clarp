@@ -379,6 +379,7 @@ impl Desk {
                 show_reason,
                 without: without.clone(),
                 calls: Vec::new(),
+                calls_asked: false,
             });
         }
     }
@@ -500,15 +501,18 @@ impl Desk {
                 show_reason,
                 without: without.clone(),
                 calls: Vec::new(),
+                calls_asked: false,
             };
             if !begins {
                 app.pusher.rung(rung);
                 continue;
             }
-            let calls = placed.calls.clone();
-            let told = app
-                .pusher
-                .rung_and_told(crate::pusher::Rung { calls, ..rung });
+            let (calls, calls_asked) = (placed.calls.clone(), placed.calls_asked);
+            let told = app.pusher.rung_and_told(crate::pusher::Rung {
+                calls,
+                calls_asked,
+                ..rung
+            });
             match tokio::time::timeout(PUSH_WAIT, told).await {
                 Ok(Ok(told)) => rang = Some(told),
                 // The pusher is gone with the Host; nothing was sent.

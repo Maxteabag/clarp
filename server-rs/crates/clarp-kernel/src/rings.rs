@@ -1072,11 +1072,16 @@ mod tests {
         }
         let admitted = rings.admit(&asked(&Value::Null, None), people, &world, 1_000, &mut out);
         let ring = rings.place(placed(admitted.unwrap()), "", "1", 1_000, &mut out);
-        // The Python Host pushes the call to every phone that left a token for one; here
-        // only the phone that is still paired with all rights is rung.
+        // The ring is for every phone that left a token for calls; it is pushed as a call
+        // only to the phone that is still paired with all rights, and a token once.
         let theirs = rings.sent(&ring, "ring", &world).voip.unwrap();
         assert_eq!(theirs, ["device_a", "device_gone", "administrator"]);
-        assert_eq!(rings.rung_as_calls(&ring, &world), ["device_a"]);
+        let its_token = (
+            "device_a".to_string(),
+            "ab".repeat(32),
+            "production".to_string(),
+        );
+        assert_eq!(rings.rung_as_calls(&ring, &world), [its_token]);
         assert_eq!(
             rings.call_token("device_a"),
             Some((&*"ab".repeat(32), "production"))
