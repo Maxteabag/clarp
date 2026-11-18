@@ -70,7 +70,91 @@ def reference(root):
                 size,error=None,str(exc)
         assert closed == [True]
         eleven.append(dict(events=events,url=urls[0],sent=sent,chunks=chunks,size=size,error=error))
-    return dict(deepgram=deepgram,google_input=google,eleven=eleven)
+    from lib import cartesia_stt_ws as ink, tts_service, tts_mode
+    from lib.tts_provider import AudioSink
+    from types import SimpleNamespace
+    ink_queries=[]
+    for words in ([], [' one ', '', 'two'], ['x']*99, ['x']*100,['x']*101,
+                  ['x'*1199,'y'], ['x'*1200,'z'], ['x'*1201,'after'], ['a/b','two words',chr(0xdf)]):
+        ink_queries.append(dict(words=words,url=ink.connection_url(model='ink-2',sample_rate=16000,keyterms=words,language='nb')))
+    ink_streams=[]
+    for events in ([],[{'type':'done'}],[{'type':'transcript','text':'partial'}],
+                   [{'type':'transcript','text':' first','is_final':True},'bad json',[],{'type':'transcript','text':' second ','is_final':True},{'type':'done'}],
+                   [{'type':'error','message':'message','title':'title'}],[{'type':'error','title':'title'}],[{'type':'error'}]):
+        class Stream:
+            def send_binary(self,data): sent.append(len(data))
+            def send(self,op): sent.append(op)
+            def recv(self): return next(incoming,'')
+            def close(self): closed.append(True)
+        for n in (0,3199,3200,3201):
+            sent,closed=[],[]
+            incoming=iter(e if isinstance(e,str) else json.dumps(e) for e in events)
+            try:
+                result,error=ink.transcribe_pcm(Stream(),pcm=bytes(n)),None
+            except ink.CartesiaSTTStreamError as exc:
+                result,error=None,str(exc)
+            assert closed==[True]
+            ink_streams.append(dict(events=events,bytes=n,sent=sent,result=result,error=error))
+    ladders=[]
+    for fallback in ('none','deepgram','gemini'):
+        for primary in ('success','failed','partial'):
+            for second in ('success','failed'):
+                calls,chunks,events=[],[],[]
+                class Engine:
+                    available=True
+                    voice='test'
+                    def __init__(self,name,mode): self.id,self.mode=name,mode
+                    def synthesize(self,text,sink):
+                        calls.append([self.id,text])
+                        if self.mode!='failed': sink.on_chunk(0,b'x')
+                        if self.mode!='success': raise RuntimeError(self.id+' refused')
+                        return 1
+                engines={'deepgram':Engine('deepgram',primary),'gemini':Engine('gemini',second)}
+                registry=SimpleNamespace(cartesia_voice=None,get=engines.__getitem__)
+                try:
+                    size=tts_service.synth('[happy] sound',tts_mode.Route('deepgram',None,fallback),
+                        AudioSink(root/'unused',on_chunk=lambda i,b:chunks.append(b.decode())),
+                        'turn',cfg=SimpleNamespace(),raw_voice=None,agent={},emit=lambda source,event,**kw:events.append(event),
+                        context=lambda:None,registry=registry)
+                    error=None
+                except RuntimeError as exc:
+                    size,error=None,str(exc)
+                ladders.append(dict(primary=primary,second=second,fallback=fallback,calls=calls,chunks=chunks,size=size,error=error))
+    google_http=[]
+    for status,payload in [(200,{'audioContent':'YWJj'}),(200,{}),(200,[]),(200,{'audioContent':17}),
+                            (200,{'audioContent':'!!!!'}),(200,{'audioContent':''}),
+                            (401,{}),(403,{}),(429,{}),(500,{}),(201,{})]:
+        requests, chunks=[],[]
+        def transport(url,body,headers,deadline,maximum):
+            requests.append(dict(url=url,body=json.loads(body),headers=headers,maximum=maximum))
+            return status,json.dumps(payload).encode()
+        with patch.object(google_tts,'refuse_if_collision',lambda:None):
+            try:
+                size=google_tts.synthesize(text='a<break time="1s"/>b',voice='nb-NO-Chirp3-HD-Kore',out_path=root/'audio',
+                    creds=google_tts.Credentials('google_tts','fixture','test-project',''),
+                    token=lambda *_a,**_kw:'unit',transport=transport,on_chunk=lambda i,b:chunks.append(b.decode()))
+                error=None
+            except google_tts.GoogleTTSError as exc:
+                size,error=None,exc.code
+        google_http.append(dict(status=status,payload=payload,request=requests[0],chunks=chunks,size=size,error=error))
+
+    from lib import cartesia_stt
+    from email import message_from_bytes
+    ink_batch=[]
+    for ctype,duration in [('audio/mp4',1),('audio/webm','1.25'),('',None),('audio/wav','bad')]:
+        requests=[]
+        def receive(req,timeout):
+            fields=[]
+            message=message_from_bytes(('Content-Type: '+req.get_header('Content-type')+'\r\n\r\n').encode()+req.data)
+            for part in message.get_payload():
+                fields.append(dict(name=part.get_param('name',header='content-disposition'),filename=part.get_filename(),
+                                   body=part.get_payload(decode=True).decode()))
+            requests.append(dict(url=req.full_url,version=req.get_header('Cartesia-version'),auth=req.get_header('Authorization'),fields=fields))
+            return io.BytesIO(json.dumps({'text':'heard','duration':duration}).encode())
+        with patch.object(cartesia_stt.urllib.request,'urlopen',receive):
+            heard=cartesia_stt.transcribe(audio_bytes=b'clip',content_type=ctype,api_key='unit',language='nb',keyterms=['never sent'])
+        ink_batch.append(dict(ctype=ctype,duration=duration,heard=heard,request=requests[0]))
+    return dict(deepgram=deepgram,google_input=google,eleven=eleven,ink_queries=ink_queries,ink_streams=ink_streams,ladders=ladders,google_http=google_http,ink_batch=ink_batch)
 
 
 if __name__ == '__main__':
