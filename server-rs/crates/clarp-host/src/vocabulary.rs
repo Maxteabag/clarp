@@ -15,7 +15,8 @@ mod compile;
 pub(crate) mod judge;
 mod store;
 pub(crate) mod workspace;
-pub(crate) use compile::{compile, finish, stream_run};
+pub(crate) use compile::{compile, stream_run};
+pub(crate) use store::Desk;
 
 async fn perform(
     app: &App,
@@ -28,36 +29,17 @@ async fn perform(
     let directory = app.fleet.directory();
     let agent = data["agent_id"].as_str().unwrap_or("").trim();
     let known = directory.members.iter().any(|m| m.record.agent_id == agent);
-    let result = tokio::task::spawn_blocking(move || {
-        let mut db = store::open(&root)?;
-        let mode = if write {
-            rusqlite::TransactionBehavior::Immediate
-        } else {
-            rusqlite::TransactionBehavior::Deferred
-        };
-        let tx = db
-            .transaction_with_behavior(mode)
-            .map_err(store::unavailable)?;
-        let value = if write {
-            store::change(&tx, &action, &data, now, known)?
-        } else {
-            store::read(&tx, &action, &data)?
-        };
-        let mut value = value;
-        if action == "run" {
-            let trace = store::text(&data["trace_id"]);
-            if audio::exists(&root, &trace) {
-                value["audio_url"] = json!(format!("/transcription-audio?trace_id={trace}"));
-            }
-        }
-        tx.commit().map_err(store::unavailable)?;
-        Ok::<_, store::Failure>(value)
-    })
-    .await
-    .map_err(|_| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "vocabulary worker ended"))?;
-    result
-        .map(Json)
-        .map_err(|(status, why)| ApiError::new(status, why))
+    let book=&app.ears.vocab;
+    let mut value=if !write && matches!(action.as_str(),"runs"|"run"){
+        book.report(&app.fleet,&action,&data).await
+    }else{book.administration(&app.fleet,&action,&data,now,known,write).await}
+    .map_err(|(status,why)|ApiError::new(status,why))?;
+    if action=="run"{
+        let trace=clarp_kernel::vocabulary::book::text(&data["trace_id"]);
+        let url=format!("/transcription-audio?trace_id={trace}");
+        if tokio::task::spawn_blocking(move||audio::exists(&root,&trace)).await.unwrap_or(false){value["audio_url"]=json!(url);}
+    }
+    Ok(Json(value))
 }
 
 async fn view(

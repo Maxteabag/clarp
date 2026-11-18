@@ -226,6 +226,7 @@ pub fn compile(packs: &[Pack], budget: &Budget) -> Value {
         "headroom":capacity-selection.used,"rarity_floor":floor,"included":included,"dropped":selection.dropped})
 }
 pub mod sources;
+pub mod book;
 
 #[allow(clippy::expect_used)]
 pub static JUNK_QUESTION: LazyLock<Value> = LazyLock::new(|| {
