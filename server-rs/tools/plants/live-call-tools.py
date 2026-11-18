@@ -231,5 +231,14 @@ for what,old,new in [
     ('a matching admission ignores the retained fence','retire(op, reason, w, fx);\n        return "fenced";','return "fenced";'),
 ]:
     PLANTS.append((O,'openings',what,old,new))
+for file,what,old,new in [
+    ('clarp-host/src/calls.rs','the token index records the wrong ring','token.into(),\n                        dropped.ring_id.as_bytes().to_vec()','token.into(),\n                        dropped.agent_id.as_bytes().to_vec()'),
+    ('clarp-host/src/calls.rs','eviction files an opening under its agent','"opening_history",\n                        dropped.ring_id.clone()','"opening_history",\n                        dropped.agent_id.clone()'),
+    ('clarp-host/src/calls.rs','a change to an archived opening is forgotten','if archived.get(&ring.ring_id) != Some(&ring.opening)','if archived.get(&ring.ring_id) == Some(&ring.opening)'),
+    ('clarp-host/src/calls.rs','archived clips retain old playback rights','for ring in rings.opening_records() {','for ring in rings.rings() {'),
+    ('clarp-host/src/calls/opening.rs','revocation scans the wrong archive','.kept_all("opening_history")','.kept_all("absent_openings")'),
+    ('clarp-kernel/src/rings/opening.rs','opening changes cannot reach an evicted ring','.chain(self.archived.iter_mut())','.chain(self.archived.iter_mut().take(0))'),
+]:
+    PLANTS.append((file,'host',what,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
