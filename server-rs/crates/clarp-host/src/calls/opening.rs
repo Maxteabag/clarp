@@ -396,9 +396,9 @@ impl Desk {
         if !authorized {
             return Ok(());
         }
-        let (id, marked) = Message::filed(id);
+        let (filed, marked) = Message::filed(id);
         let msg = Message {
-            id,
+            id: filed,
             marked,
             unminted: true,
             call: None,
@@ -412,7 +412,29 @@ impl Desk {
             },
             text: rules::header(op),
         };
-        let _ = member.agent.send(msg, Admission::Later).await?;
+        if member.agent.send(msg, Admission::Later).await?.duplicate {
+            // Another send may have won the id after our initial read. Only
+            // the actor can establish the provenance of the winning message.
+            let winner = member.agent.opening_row(id).await?;
+            if winner["foreign"] == true || winner["trace_id"] != trace {
+                self.rings(app, |rings, _, with, (out, _)| {
+                    rings.change_opening(ring_id, with.at.now_ms, out, |r, fx| {
+                        if r.opening["intent"]["admission_id"] == id
+                            && r.opening["intent"]["trace_id"] == trace
+                            && r.opening["intent"]["state"] == "admitted"
+                        {
+                            r.opening["intent"]["state"] = json!("unknown");
+                            if r.opening["retired"].is_null() {
+                                r.opening["state"] = json!("unknown");
+                            }
+                            fx.dirty = true;
+                            fx.announce = true;
+                        }
+                    });
+                })
+                .await?;
+            }
+        }
         Ok(())
     }
 }

@@ -212,9 +212,16 @@ for mod,what,old,new in [
     ('calls/opening','the greeting is never confirmed','rules::greeting_admitted(&mut ring.opening, message, ok, &world, fx)','rules::greeting_admitted(&mut ring.opening, message, !ok, &world, fx)'),
     ('calls/opening','retire does not look at the revoked phone','r.opening["principal"] == owner','r.opening["principal"] != owner'),
     ('calls/generation','a full device loses its auth proof','d.device_id == principal','d.device_id != principal'),
-    ('calls/opening_launch','a final check returns no launch','result=="launch"','result=="never-launch"'),
+    ('calls/opening_launch','a final check returns no launch','result == "launch"','result == "never-launch"'),
     ('voice','drop the greeting trace tag','event[k] = v.clone()','event[k] = Value::Null'),
 ]:
     PLANTS.append(('clarp-host/src/'+mod+'.rs','host',what,old,new))
+for file,what,old,new in [
+    ('clarp-actor/src/lib.rs','pre-spawn refusal ends an opening','live.opening && !stopping','!live.opening && !stopping'),
+    ('clarp-actor/src/lib.rs','the previous attempt cannot prove it was unsent','let previous_unsent = attempt > 1','let previous_unsent = attempt > u32::MAX - 1'),
+    ('clarp-host/src/calls/opening_launch.rs','the restarted gate discards the previous attempt proof','op["launch_attempt"] == attempt - 1','op["launch_attempt"] == attempt'),
+    ('clarp-host/src/calls/opening_launch.rs','the gate forgets which attempt claimed the initiative','op["launch_attempt"] = json!(attempt);','op["launch_attempt"] = json!(0);'),
+]:
+    PLANTS.append((file,'host',what,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
