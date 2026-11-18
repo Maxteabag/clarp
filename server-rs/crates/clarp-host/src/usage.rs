@@ -9,10 +9,8 @@
 //!
 //! `GET /backend-usage` answers with the sums ([`clarp_kernel::usage`], the Python Host's
 //! rule) for each tool this Host runs. That is what was spent through this Host. How much
-//! of an account is left is another thing. This Host asks no provider for it; where a tool
-//! says it of itself (Codex, in its conversation's record, read when a turn of it ends:
-//! [`crate::quota`]), what it said is shown beside the sums, and for a tool that says
-//! nothing the answer says that nobody was asked.
+//! of an account is left comes from the tools' streams and, with `--ask-usage`, the
+//! provider collectors. Their windows and limits share the same quota desk.
 
 use std::sync::Arc;
 

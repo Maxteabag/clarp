@@ -1,6 +1,8 @@
 //! Provider transports. Only normalized measurements leave this module. Errors never include
 //! headers, subprocess output, request URLs, or the contents of a credential file.
+use clarp_ports::usage::UsageReader;
 use serde_json::{Value, json};
+use sha2::{Digest,Sha256};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -30,6 +32,10 @@ fn codex_url(home: &Path) -> Option<String> {
                 .filter(|s| !s.is_empty())
         })
         .unwrap_or_else(|| "https://chatgpt.com/backend-api/".into());
+    approved_url(&base)
+}
+
+fn approved_url(base:&str) -> Option<String> {
     let uri: axum::http::Uri = base.trim().parse().ok()?;
     let auth = uri.authority()?;
     let host = auth.host().to_ascii_lowercase();
@@ -45,15 +51,19 @@ fn codex_url(home: &Path) -> Option<String> {
     Some(format!("https://{host}/backend-api/wham/usage"))
 }
 
-fn http(tool: &str, file: PathBuf, local: Option<SocketAddr>, now: i64) -> Option<Reading> {
-    let cred: Value = serde_json::from_slice(&std::fs::read(&file).ok()?).ok()?;
+fn http(tool: &str, file: PathBuf, local: Option<SocketAddr>, now: i64, stamp: [u8;32]) -> Option<Reading> {
+    let bytes=std::fs::read(&file).ok()?;
+    if <[u8;32]>::from(Sha256::digest(&bytes))!=stamp {return None;}
+    let cred: Value = serde_json::from_slice(&bytes).ok()?;
     let claude = tool == "claude";
     let (url, token, account) = if claude {
         let auth = &cred["claudeAiOauth"];
-        let expiry = auth["expiresAt"]
-            .as_i64()
-            .or_else(|| auth["expiresAt"].as_str()?.parse().ok())
-            .unwrap_or(0);
+        let expiry = match &auth["expiresAt"] {
+            v if !clarp_kernel::python::truthy(v) => 0,
+            Value::Number(n) => n.as_i64()?,
+            Value::String(s) => s.trim().parse().ok()?,
+            _ => return None,
+        };
         if expiry != 0 && expiry <= now {
             return None;
         }
@@ -118,14 +128,16 @@ fn http(tool: &str, file: PathBuf, local: Option<SocketAddr>, now: i64) -> Optio
         .limit(LIMIT)
         .read_json()
         .ok()?;
-    if claude {
+    let reading = if claude {
         Some(Reading {
             value: clarp_backend::limits::claude_oauth(&body)?,
             source: "anthropic-oauth-usage",
         })
     } else {
         codex_read(&body, "/wham/usage")
-    }
+    }?;
+    // A malformed response might echo the authorization into a nominally textual reset.
+    (!reading.value.to_string().contains(token)).then_some(reading)
 }
 
 fn codex_read(body: &Value, source: &'static str) -> Option<Reading> {
@@ -143,9 +155,9 @@ fn codex_read(body: &Value, source: &'static str) -> Option<Reading> {
             .contains("credit");
         let reset = body
             .pointer("/rate_limit_upsell/reset_at")
-            .and_then(Value::as_i64)
-            .filter(|at| *at > 0)
-            .and_then(|at| at.checked_mul(1000))
+            .and_then(|value|value.as_f64().or_else(||value.as_str()?.parse::<f64>().ok()))
+            .filter(|at| (1.0..253_402_300_800.0).contains(at))
+            .map(|at| (at as i64)*1000)
             .map(clarp_kernel::quota::moment);
         value["blocked"] = json!({"reason":if credits {"credits_depleted"} else {"usage_limit"},"resets_at":reset});
     }
@@ -201,7 +213,8 @@ async fn rpc(approval: &str) -> Result<Reading, bool> {
             .write_all(format!("{request}\n").as_bytes())
             .await
             .map_err(|_| false)?;
-        while let Some(line) = lines.next_line().await.map_err(|_| false)? {
+        loop {
+            let line=lines.next_line().await.map_err(|_|false)?.ok_or(false)?;
             let msg: Value = serde_json::from_str(&line).map_err(|_| false)?;
             if msg["id"] != id {
                 continue;
@@ -240,17 +253,26 @@ async fn agy() -> Option<Reading> {
         .stdin(Stdio::null())
         .spawn()
         .ok()?;
-    let _group = Group(proc.id()? as i32);
+    let group = Group(proc.id()? as i32);
     let mut bytes = Vec::new();
-    proc.stdout
-        .take()?
-        .take(LIMIT + 1)
-        .read_to_end(&mut bytes)
-        .await
-        .ok()?;
-    if bytes.len() as u64 > LIMIT || !proc.wait().await.ok()?.success() {
-        return None;
-    }
+    let mut stdout=proc.stdout.take()?.take(LIMIT+1);
+    let finish=async {
+        stdout.read_to_end(&mut bytes).await.ok()?;
+        if bytes.len() as u64>LIMIT {return None}
+        proc.wait().await.ok()
+    };
+    let status=match tokio::time::timeout(Duration::from_secs(20),finish).await {
+        Ok(done)=>done?,
+        Err(_)=>{
+            // The command may have exited while a descendant still holds stdout. Its
+            // answer stands. Ending its process group closes the inherited pipe.
+            let done=proc.try_wait().ok()??;
+            drop(group);
+            tokio::time::timeout(Duration::from_secs(2),stdout.read_to_end(&mut bytes)).await.ok()?.ok()?;
+            done
+        }
+    };
+    if !status.success() || bytes.len() as u64>LIMIT {return None}
     let parsed = serde_json::from_slice(&bytes).ok()?;
     Some(Reading {
         value: clarp_kernel::usage_ask::agy_groups(&parsed)?,
@@ -258,30 +280,74 @@ async fn agy() -> Option<Reading> {
     })
 }
 
-impl Provider {
-    pub async fn ask(&self, tool: &'static str, home: &Path, now: i64) -> Option<Reading> {
-        if tool == "agy" {
-            return tokio::time::timeout(Duration::from_secs(20), agy())
-                .await
-                .ok()
-                .flatten();
-        }
-        let file = clarp_backend::by_id(tool)?.login_file(home)?;
-        let local = self.loopback;
-        let direct = tokio::task::spawn_blocking(move || http(tool, file, local, now))
-            .await
-            .ok()
-            .flatten();
-        if direct.is_some() || tool != "codex" {
-            return direct;
-        }
+struct Https {
+    tool: &'static str,
+    file: PathBuf,
+    loopback: Option<SocketAddr>,
+    now_ms: i64,
+    stamp: [u8;32],
+}
+
+impl UsageReader for Https {
+    type Reading = Reading;
+    async fn read(self)->Option<Reading>{
+        tokio::task::spawn_blocking(move || http(self.tool,self.file,self.loopback,self.now_ms,self.stamp)).await.ok().flatten()
+    }
+}
+
+struct AppServer;
+impl UsageReader for AppServer {
+    type Reading=Reading;
+    async fn read(self)->Option<Reading>{
         for approval in ["never", "on-request", ""] {
-            match tokio::time::timeout(DIRECT, rpc(approval)).await {
-                Ok(Ok(answer)) => return Some(answer),
-                Ok(Err(true)) => continue,
-                _ => break,
+            match tokio::time::timeout(DIRECT,rpc(approval)).await {
+                Ok(Ok(answer))=>return Some(answer),
+                Ok(Err(true))=>continue,
+                _=>break,
             }
         }
         None
+    }
+}
+
+struct AgyCommand;
+impl UsageReader for AgyCommand {
+    type Reading=Reading;
+    async fn read(self)->Option<Reading>{
+        agy().await
+    }
+}
+
+impl Provider {
+    pub async fn ask(&self, tool: &'static str, home: &Path, now_ms: i64, stamp:Option<[u8;32]>) -> Option<Reading> {
+        if tool=="agy" {return AgyCommand.read().await;}
+        let file=clarp_backend::by_id(tool)?.login_file(home)?;
+        let direct= match stamp {
+            Some(stamp)=> Https{tool,file,loopback:self.loopback,now_ms,stamp}.read().await,
+            None=>None,
+        };
+        if direct.is_some() || tool != "codex" {return direct;}
+        AppServer.read().await
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_readers_agree_with_the_isolated_reference(){
+        let fixture:Value=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/usage-ask-vectors.json")).unwrap();
+        for case in fixture["origins"].as_array().unwrap(){
+            assert_eq!(json!(approved_url(case["base"].as_str().unwrap())),case["url"],"{case}");
+        }
+        for case in fixture["blocks"].as_array().unwrap(){
+            let result=codex_read(&case["body"],"/wham/usage").map(|r|r.value["blocked"].clone());
+            assert_eq!(json!(result),case["blocked"],"{case}");
+        }
+        for case in fixture["claude"].as_array().unwrap(){
+            assert_eq!(json!(clarp_backend::limits::claude_oauth(&case["payload"])),case["windows"],"{case}");
+        }
     }
 }
