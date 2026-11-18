@@ -1546,11 +1546,12 @@ def record(build: Path, chosen, run: Run, jobs: int) -> tuple:
 
 
 def planted_copy(build: Path, change: dict, where: Path) -> Path:
-    """A copy of the build's server with one change planted; static and bin are shared."""
+    """A copy of the build's server with one change planted; static, bin and contract are shared
+    (the server reads the catalog of render specs beside itself, in `contract/catalogs`)."""
     if change.get('from_harness'):
         change = {**harness_planted.BY_ID[change['from_harness']], 'id': change['id']}
     shutil.copytree(build / 'server', where / 'server', ignore=shutil.ignore_patterns('__pycache__'))
-    for shared in ('static', 'bin'):
+    for shared in ('static', 'bin', 'contract'):
         (where / shared).symlink_to(build / shared)
     harness_planted.apply(change, where)
     return where
