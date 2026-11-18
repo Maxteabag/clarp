@@ -17,6 +17,7 @@
 
 use std::sync::{Arc, Mutex, mpsc};
 
+use clarp_kernel::alert_routes::{Path, Routes};
 use clarp_kernel::devices::PushRow;
 use clarp_kernel::presence::Presence;
 use clarp_kernel::push::{self, Asked, Told};
@@ -217,11 +218,7 @@ impl Waiting {
                         _ => true,
                     };
                     if alerted {
-                        // Without a relay what is handed over is taken and let go.
-                        rang.alert = Some(match &works.relay {
-                            Some(relay) => deliver(relay, &works, &job),
-                            None => Counted::default(),
-                        });
+                        rang.alert = Some(deliver(&works, &job));
                     }
                     if let Some(told) = told {
                         let _ = told.send(rang);
@@ -347,7 +344,13 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
 }
 
 /// Sends one job to every row of the register that is to have it. Answers what became of it.
-fn deliver(relay: &Relay, works: &Works, job: &Job) -> Counted {
+fn deliver(works: &Works, job: &Job) -> Counted {
+    let (mode, key) = works.direct.alert_settings();
+    let relay = works.relay.as_deref();
+    let mut routes = Routes::new(&mode, relay.is_some(), relay.is_some_and(Relay::has_credential), key.is_some());
+    if !routes.enabled() {
+        return Counted::default();
+    }
     let directory = works.fleet.directory();
     let now = works.clock.now_ms();
     let (_, name) = payload(job, &works.server_id, ("", false));
@@ -414,15 +417,37 @@ fn deliver(relay: &Relay, works: &Works, job: &Job) -> Counted {
             .map_or(("", false), |(address, own)| (address.as_str(), *own));
         let (payload, _) = payload(job, &works.server_id, face);
         let collapse_id = push::collapse_id(&payload);
-        let delivery = relay.send(
-            row,
-            &Push {
-                payload: &payload,
-                collapse_id: &collapse_id,
-                push_type: "alert",
-                priority: "10",
-            },
-        );
+        let push = Push {
+            payload: &payload,
+            collapse_id: &collapse_id,
+            push_type: "alert",
+            priority: "10",
+        };
+        let delivery = routes.send(!row.push_grant.is_empty(), |path| match path {
+            Path::Grant => relay.map_or(Outcome::NoPath, |relay| relay.to_grant(&row.push_grant, &push)),
+            Path::Account => relay.map_or(Outcome::NoPath, |relay| relay.to_token(&row.token, &row.environment, &push)),
+            Path::Direct => key.as_ref().map_or(Outcome::NoPath, |key| {
+                let request = clarp_kernel::direct_push::Push {
+                    push_type: push.push_type,
+                    payload: push.payload,
+                    priority: push.priority,
+                    collapse_id: push.collapse_id,
+                    expiration: None,
+                };
+                match works.runtime.block_on(works.direct.push(key, (&row.token, &row.environment), &request)) {
+                    Ok((200, _, _)) => Outcome::Sent,
+                    Ok((status, reason, _)) => {
+                        let reason = reason.as_str().unwrap_or("");
+                        if status == 410 || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason) {
+                            Outcome::Dead(reason.to_string())
+                        } else {
+                            Outcome::Refused { status, reason: reason.to_string() }
+                        }
+                    }
+                    Err(crate::direct::Unsent(why)) => Outcome::Down(why),
+                }
+            }),
+        });
         if delivery.grant_revoked {
             works.fleet.pushed(row.token.clone(), Pushed::GrantRevoked);
         }
