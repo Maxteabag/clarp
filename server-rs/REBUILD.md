@@ -1835,6 +1835,30 @@ following; the way back by a call that names it, with its cue and the word to th
 answers failing in ten seconds, asked for with the agent's tool; and the tool's own words where it is
 asked wrongly.
 
+**The Oracle: the words an owner prepared for its contact** (18 Nov 2026). An owner can prepare, for the
+agent that is the Oracle's contact, the names and words that occur in what is said to it: a small file that
+names the contact, the text the words were taken from (by its path and its digest) and the words. Where such
+a file is named (`CLARP_ORACLE_VOICE_CONTEXT_FILE` in the Host's environment, else `[openai]
+oracle_voice_context_file` in the owner's own file; the environment's word is the first, and an empty one
+is none), a call of the Oracle reads it when its contact is known and before anything else is asked of the
+call. The voice of a call with that contact is told the words, after who the agents are and who its contact
+is, as reference for hearing and saying them and no change to what it may do. A file that is not as it must
+be is no call: it is refused in words (400) before the voice is reached, and so is a call that has another
+contact, or none, while the file is named. Which file is one is the kernel's rule (`oracle/voice.rs`,
+`prepared`: the Python Host's `oracle_voice_context.load`, run as it is on files of the generator's own,
+`tools/oracle-vocabulary-vectors.py`: 63 cases): at most 16,384 bytes of JSON that is an object of the first
+version for this contact; the text at a whole path, a file of at most two mebibytes whose digest is the one
+written; one to sixty-four words, each a text of one to 160 signs on one line that stands in the text
+whatever the case of its letters (folded as Python folds them), 3,000 signs together at most. The words
+are told as they stand in the file, in its order. The kernel is handed the bytes of the small file and
+something that reads a text at a path; the Host reads both on a thread of their own, and never more of
+either than it may have and a byte. Where the Python Host refuses in the words of its language (a file
+that is not there or is no JSON, a path that is no text, a text that is not UTF-8), this Host says in
+words of its own what could not be read; and a small file that is JSON to Python's reader alone is none
+here (`docs/differences.md`). The Host's test holds a call with the words told, each refusal at the door
+with the voice not reached, the two bounds from both sides, a path from where the Host stands, what is no
+file, the owner's file in place of the environment and the environment before it.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

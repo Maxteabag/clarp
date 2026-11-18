@@ -96,7 +96,7 @@ PLANTS = [
     (K, 'vectors', 'the words together may have a sign more', '    if signs > WORDS_SIGNS_MOST {', '    if signs > WORDS_SIGNS_MOST + 1 {'),
     (K, 'vectors', 'as many signs as the words may have together are too many', '    if signs > WORDS_SIGNS_MOST {', '    if signs >= WORDS_SIGNS_MOST {'),
     # What is said of a vocabulary that is taken.
-    (K, 'vectors', 'the words are told in the order of their letters', TOLD, TOLD.replace('"terms": words,', '"terms": { let mut told = words.clone(); told.sort_by_key(Value::to_string); told },')),
+    (K, 'vectors', 'the words are told from the last to the first', TOLD, TOLD.replace('"terms": words,', '"terms": words.iter().rev().collect::<Vec<_>>(),')),
     (K, 'vectors', 'the digest of a small file leaves out the mark of its order', '        "sidecar_sha256": hex(&Sha256::digest(file)),', '        "sidecar_sha256": hex(&Sha256::digest(written)),'),
     # How the Host finds the file, reads it and the text, and tells the voice.
     (C, 'host', 'the words that were read are not told', '        vocabulary: prepared.map(|context| &context["terms"]),', '        vocabulary: None,'),
