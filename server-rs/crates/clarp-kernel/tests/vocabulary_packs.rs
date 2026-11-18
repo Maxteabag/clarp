@@ -160,6 +160,10 @@ fn names_members_and_assignments_survive_round_trips_and_delete_with_their_owner
             .is_err()
     );
     apply(&mut b, "packs/delete", json!({"pack_id":"pk-a"}), "");
+    let remaining = b.read("packs", &Value::Null).unwrap();
+    let packs = remaining["packs"].as_array().unwrap();
+    assert_eq!(packs.len(), 1);
+    assert_eq!(packs[0]["pack_id"], "pk-b");
     let profiles = b.read("profiles", &Value::Null).unwrap();
     assert_eq!(profiles["profiles"][0]["packs"], 1);
     assert_eq!(profiles["profiles"][1]["packs"], 0);
