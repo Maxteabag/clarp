@@ -118,9 +118,11 @@ pub(crate) fn installed(program: &str) -> bool {
 
 /// The tools this Host runs that a person signs in to, as an app's screen of accounts names
 /// them: the tool, its name, and how one signs in to it.
-const TOOLS: [(&str, &str, &str); 2] = [
+const TOOLS: [(&str, &str, &str); 4] = [
     ("claude", "Claude", "cli"),
     ("codex", "Codex", "device_code"),
+    ("grok", "Grok", "device_code"),
+    ("muse", "Muse Code", "none"),
 ];
 
 /// A tool's sign-in as an app is told it (`GET /backend-auth`), in the Python Host's fields.
@@ -131,6 +133,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
     let files = files(home);
     let rows: Vec<Value> = TOOLS
         .iter()
+        .filter(|(_, _, login_kind)| every || *login_kind != "none")
         .map(|(tool, name, login_kind)| {
             let mut row = json!({ "id": tool, "name": name, "login_kind": login_kind });
             if every {
@@ -149,6 +152,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 .get(tool)
                 .map_or((false, 0), |file| credential(tool, file));
             let state = match (present, expires_at) {
+                _ if matches!(*tool, "muse" | "grok") => "unverified",
                 (false, _) => "signed_out",
                 (true, at) if at > 0 && at <= now_ms => "expired",
                 (true, _) => "unverified",
@@ -179,6 +183,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
     };
     let tasks: serde_json::Map<String, Value> = TOOLS
         .iter()
+        .filter(|(_, _, login_kind)| *login_kind != "none")
         .map(|(tool, _, _)| ((*tool).to_string(), idle(tool)))
         .collect();
     json!({ "backends": rows, "tasks": tasks })

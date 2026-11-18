@@ -290,6 +290,9 @@ impl Drop for Host {
     }
 }
 
+/// The tools a Host runs, in the order it lists them: the order of the Python Host's registry.
+const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
+
 fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !ready() {
@@ -2378,7 +2381,7 @@ fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
         .iter()
         .map(|tool| tool["id"].as_str().unwrap())
         .collect();
-    assert_eq!(tools, ["claude", "codex", "agy"]);
+    assert_eq!(tools, TOOLS);
     assert_eq!(settings["recent_decisions"], json!([]));
     assert_eq!(
         host.get("/orchestrator/decisions"),
@@ -9829,7 +9832,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     let tools: Vec<&String> = told["providers"].as_object().unwrap().keys().collect();
     assert_eq!(
         tools,
-        ["claude", "codex", "agy"],
+        TOOLS,
         "the tools this Host runs, and no other"
     );
     let ids = |row: &Value| -> Vec<String> {
@@ -13263,7 +13266,7 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     let models = host.get("/agent-model-options");
     assert_eq!(models["schema_version"], 2);
     let tools: Vec<&String> = models["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(tools, ["claude", "codex", "agy"]);
+    assert_eq!(tools, TOOLS);
     assert!(models["observed_at"].is_string() && models["freshness"].is_string());
 
     // On a Host that asks for no token, nobody is known to be a person.
@@ -16932,7 +16935,8 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             .iter()
             .map(|row| row["id"].as_str().unwrap())
             .collect();
-        assert_eq!(tools, ["claude", "codex"], "{path}");
+        let wanted = if path.ends_with("all") { &["claude", "codex", "grok", "muse"][..] } else { &["claude", "codex", "grok"][..] };
+        assert_eq!(tools, wanted, "{path}");
         assert_eq!(logins["tasks"]["claude"]["status"], "idle");
         let every = path.ends_with("all");
         assert_eq!(
@@ -21253,6 +21257,81 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     wait_for("the fifth turn to be over", || over(&host, "u-5"));
     assert_eq!(starts()[4]["given"], "conv-2");
 }
+
+#[test]
+fn grok_and_muse_run_stop_and_resume_the_same_session() {
+    for (tool, variable) in [("grok", "CLARP_GROK_PROGRAM"), ("muse", "CLARP_MUSE_PROGRAM")] {
+        let place = Place::new(tool);
+        let binary = place.root.join(tool);
+        program(&binary, r#"#!/usr/bin/env python3
+import json, os, signal, sys
+tool = os.path.basename(sys.argv[0])
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("stand-in 1")
+    sys.exit(0)
+if args == ["models"]:
+    print("synthetic")
+    sys.exit(0)
+flag = "--resume" if "--resume" in args else "--session-id"
+sid = args[args.index(flag)+1]
+prompt = open("/dev/stdin").read() if "--prompt-file" in args else args[-1]
+with open(os.path.join(os.environ["HOME"], "calls"), "a") as calls:
+    calls.write(json.dumps([flag, sid, prompt[-20:]])+"\n")
+def emit(**event):
+    print(json.dumps(event),flush=True)
+if tool == "grok":
+    emit(type="turn_started",sessionId=sid)
+else:
+    emit(stream={"kind":"session","id":sid},payload_type="run.lifecycle.started",payload={})
+if prompt.endswith("hold"):
+    signal.pause()
+elif prompt.endswith("refuse"):
+    if tool == "grok":
+        emit(type="error",error={"message":"recorded failure"})
+    else:
+        emit(payload_type="run.terminal.failed",payload={"reason":"recorded failure"})
+elif tool == "grok":
+    emit(type="text",data="Answer.")
+    emit(type="end",sessionId=sid,usage={"input_tokens":10,"output_tokens":2})
+else:
+    emit(payload_type="run.output.delta",payload={"text":"Answer."})
+    emit(payload_type="run.usage",payload={"models":[{"input_tokens":10,"output_tokens":2}]})
+    emit(payload_type="run.terminal.completed",payload={"text":"Answer."})
+"#);
+        let world = [("HOME",place.root.to_str().unwrap()),(variable,binary.to_str().unwrap())];
+        let host = place.start_in("",&[],&world);
+        let agent = host.post("/agents",json!({"name":"Recorder","backend":tool}))["session"].as_str().unwrap().to_string();
+        let calls = || -> Vec<Value> {
+            std::fs::read_to_string(place.root.join("calls")).unwrap_or_default().lines()
+                .filter_map(|line| serde_json::from_str(line).ok()).collect()
+        };
+        let over = |id: &str| {
+            let rows = host.turns(&agent);
+            rows.iter().position(|r| r["id"] == id).is_some_and(|at| rows[at..].iter().any(|r| r["turn"].is_object()))
+        };
+        host.send(&agent,"begin","u-1");
+        wait_for("first answer",|| over("u-1"));
+        assert!(host.turns(&agent).iter().any(|r| r["text"] == "Answer."));
+        host.send(&agent,"hold","u-2");
+        wait_for("second launch",|| calls().len() == 2);
+        host.post("/stop",json!({"session":agent}));
+        wait_for("stop",|| over("u-2"));
+        host.send(&agent,&format!("{}refuse","x".repeat(66*1024)),"u-3");
+        wait_for("failure",|| over("u-3"));
+        assert!(host.turns(&agent).iter().any(|r| r.to_string().contains("recorded failure")));
+        let seen = calls();
+        assert_eq!(seen.len(),3);
+        assert_eq!(seen[0][0],"--session-id");
+        assert!(seen[0][1].as_str().is_some_and(|s| !s.is_empty()));
+        for call in &seen[1..] {
+            assert_eq!(call[0],if tool=="grok" {"--resume"} else {"--session-id"});
+            assert_eq!(call[1],seen[0][1]);
+        }
+        assert!(seen[2][2].as_str().unwrap().ends_with("refuse"));
+    }
+}
+
 
 #[test]
 fn what_codex_wrote_of_its_accounts_limits_is_shown_and_its_limits_are_told() {

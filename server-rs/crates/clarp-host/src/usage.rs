@@ -35,7 +35,7 @@ const KIND: &str = "used";
 /// And the kind of the moment from which this Host has counted.
 const SINCE: &str = "counted-since";
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 3] = ["claude", "codex", "agy"];
+const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
 /// After how many turns what is too old to count is looked for and let go.
 const LOOKED_OVER_EVERY: u32 = 200;
 /// What is said where an app looks for how much of an account is left.
