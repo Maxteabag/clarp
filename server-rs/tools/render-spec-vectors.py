@@ -161,6 +161,13 @@ def describe(value):
             return ['lone', [ord(c) for c in value]]
         return ['text', value]
     if isinstance(value, list):
+        # A chain of lists, each holding only the next, is said as its length: a reader of plain JSON
+        # stops 128 levels down.
+        depth = 0
+        while isinstance(value, list) and len(value) == 1 and isinstance(value[0], list):
+            value, depth = value[0], depth + 1
+        if depth:
+            return ['nest', depth, describe(value)]
         return ['array', [describe(v) for v in value]]
     return ['object', [[describe(k), describe(v)] for k, v in value.items()], bool(getattr(value, 'duplicate', False))]
 
