@@ -1046,3 +1046,15 @@ def test_a_slow_google_never_drops_the_newest_decision(tmp_path, rsa_key, monkey
     assert sent[0] == "decision-d0" and sent[-1] == "decision-d4"         # the newest always goes
     assert len(sent) == 1 + apns.ANDROID_MAX_WAITING
     assert [d.split("notification=")[1].split()[0] for d in dropped] == ["decision-d1", "decision-d2"]
+
+
+def test_only_an_agents_working_summary_carries_a_collapse_key(fcm_host, google):
+    """The summary is a state, so only the newest matters; an alert is never collapsed."""
+    from lib import config, fcm
+    transport = fcm.Transport(config.load())
+    payload = {"kind": "agents-working", "aps": {}}
+    transport.send(ANDROID, payload, push_type="liveactivity", priority="5", collapse_id="agents-working")
+    transport.send(ANDROID, payload, push_type="alert", collapse_id="agents-working")
+    first, second = (call["json"]["message"]["android"] for call in google.send_calls)
+    assert first == {"priority": "NORMAL", "collapse_key": "agents-working"}
+    assert second == {"priority": "HIGH"}
