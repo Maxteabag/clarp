@@ -24673,6 +24673,438 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
 }
 
 #[test]
+fn the_desk_and_automatic_switcher_move_only_an_owned_idle_login() {
+    let place = Place::new("switch-accounts");
+    let home = place.root.to_str().unwrap();
+    let seat = place.root.join("seat-tool");
+    let record = place.root.join("seat-calls");
+    let script = r#"#!/usr/bin/env python3
+from pathlib import Path
+import sys,json
+root=Path(__file__).parent
+args=sys.argv[1:]
+with (root/'seat-calls').open('a') as f: print(json.dumps(args),file=f)
+codex=args[0] in ('codex','codex-account')
+tool='codex' if codex else 'claude'
+active=root/(tool+'.active')
+before=active.read_text() if active.exists() else 'current'
+if args in (['list','--json'],['codex','--json'],['codex','--no-quota','--json']):
+    if before=='unreadable': sys.exit(1)
+    def row(alias):
+        amount=1.0 if alias=='current' else 0.05
+        if (root/'exhausted').exists():amount=1.0
+        return dict(alias=alias,is_active=before==alias,usage=dict(used_5h=amount,used_7d=0,worst_used=amount))
+    print(json.dumps({'accounts':[row('current'),row('backup')]}))
+elif args[0] in ('switch','codex-account'):
+    target=args[1] if not codex else args[2]
+    assert args==(['switch',target,'--yes','--json'] if not codex else ['codex-account','switch',target])
+    if (root/'deny').exists():
+        if codex:sys.exit(1)
+        print('{"switched":false}')
+    else:
+        active.write_text(target)
+        if not codex: print('{"switched":true}')
+        else:print('changed')
+elif args==['tui','--snapshot']:
+    print(json.dumps({'accounts':[dict(provider='claude',alias=a,active=a==before,can_switch=True) for a in ['current','backup']]}))
+elif args==['bridge','work']:print('{"items":[]}')
+else:sys.exit(2)
+"#;
+    program(&seat, script);
+    let mut world = vec![
+        ("HOME", home),
+        ("CLARP_CODEX_PROGRAM", "/bin/false"),
+        ("CLARP_CLAUDE_PROGRAM", "/bin/false"),
+    ];
+    let (claude, out_of_usage, started) = claude_that_is_out(&place);
+    world[2].1 = claude.to_str().unwrap();
+    let tool = seat.to_str().unwrap();
+    let start = |mode: &str| {
+        place.start_in(
+            "",
+            &[
+                "--accounts",
+                mode,
+                "--seats-tool",
+                tool,
+                "--janitors-checked-every-ms",
+                "100",
+            ],
+            &world,
+        )
+    };
+    let switch = |h: &Host, provider: &str, alias: &str| {
+        h.ask(
+            "POST",
+            "/hotseat/switch",
+            Some(&json!({"provider":provider,"alias":alias})),
+        )
+    };
+    // Persist an enabled, due switcher before restarting in each restricted setup.
+    // A paused or absent Janitor would never reach the guard under test.
+    for (mode, configured) in [("follow", true), ("none", true), ("select", false)] {
+        let isolated = Place::new(&format!("switch-negative-{mode}"));
+        let root = &isolated.root;
+        let hotseat = root.join("hotseat");
+        program(&hotseat, script);
+        let (negative_claude, out, attempts) = claude_that_is_out(&isolated);
+        let selector = root.join("selector");
+        program(
+            &selector,
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"available\":false}'\n",
+        );
+        let config = root.join("owner.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "[agents]\nclaude_account_switch_command = [\"{}\"]\n",
+                selector.display()
+            ),
+        )
+        .unwrap();
+        let mut path = vec![root.clone()];
+        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let path = std::env::join_paths(path).unwrap();
+        let env = [
+            ("HOME", root.to_str().unwrap()),
+            ("PATH", path.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", negative_claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", "/bin/false"),
+        ];
+        let launch = |mode: &str, configured: bool, interval: &str| {
+            let mut flags = vec![
+                "--accounts",
+                mode,
+                "--speech-keys",
+                config.to_str().unwrap(),
+                "--janitors-checked-every-ms",
+                interval,
+                "--logins-checked-every-ms",
+                "600000",
+            ];
+            if configured {
+                flags.extend(["--seats-tool", hotseat.to_str().unwrap()]);
+            }
+            isolated.start_in("", &flags, &env)
+        };
+        let seed = launch("select", true, "600000");
+        let owner = seed.post("/agents", json!({"name":"Scanner","backend":"codex"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let job = seed.post(
+            "/janitors",
+            json!({"session":owner,"template_id":"account-hotseat"}),
+        );
+        let enable = format!("/janitors/{owner}/enabled");
+        let on = seed.post(
+            &enable,
+            json!({"enabled":true,"expected_revision":job["janitor"]["revision"]}),
+        );
+        let revision = &on["janitor"]["revision"];
+        assert_eq!(on["janitor"]["enabled"], true);
+        let runs = format!("/janitors/{owner}/runs?limit=5");
+        assert_eq!(seed.get(&runs), json!({"runs":[]}));
+        drop(seed);
+        let calls = || {
+            std::fs::read_to_string(root.join("seat-calls"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        for tool in ["claude", "codex"] {
+            std::fs::write(root.join(format!("{tool}.active")), "current").unwrap();
+        }
+        std::fs::write(out, "").unwrap();
+        let h = launch(mode, configured, "50");
+        let worker = h.post("/agents", json!({"name":"Worker","backend":"claude"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        h.send(&worker, "use the exhausted account", "quota-denied");
+        let state = || {
+            let snapshot = h.get("/agents/snapshot");
+            let row = snapshot["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["session"] == worker)
+                .unwrap();
+            (
+                row["latest_state"].clone(),
+                row["live_activity"]["state"].clone(),
+            )
+        };
+        wait_for(
+            "the provider rejection to settle according to the account mode",
+            || {
+                if mode == "none" {
+                    state().0 == "interrupted"
+                } else {
+                    state().1 == "limited"
+                }
+            },
+        );
+        let before = state();
+        assert_eq!(
+            std::fs::read_to_string(&attempts).unwrap().lines().count(),
+            1
+        );
+        // Several ordinary worker ticks have elapsed; the enabled Janitor could have
+        // selected the healthy backup from either provider if it had been allowed.
+        std::thread::sleep(Duration::from_millis(350));
+        assert_eq!(calls(), 0, "{mode}: a disabled switcher invoked the tool");
+        assert_eq!(
+            h.get(&runs),
+            json!({"runs":[]}),
+            "{mode}: a forbidden check began"
+        );
+        assert_eq!(h.get("/hotseat/status")["switcher"]["enabled"], false);
+        assert!(h.get("/server-info")["contract"]["features"]["hotseat_desk_actions"].is_null());
+        let (code, reply) = h.ask(
+            "POST",
+            &enable,
+            Some(&json!({"enabled":true,"expected_revision":revision})),
+        );
+        assert_eq!(
+            (code, &reply["code"]),
+            (503, &json!("janitor_runtime_unavailable"))
+        );
+        for provider in ["claude", "codex"] {
+            let (code, body) = switch(&h, provider, "backup");
+            let expected = if configured {
+                (
+                    409,
+                    json!({"ok":false,"error":"logins_kept_elsewhere","provider":provider,"alias":"backup",
+                    "message":"This Host reads the account seats and moves none. The account in use is changed where the logins of this machine are kept."}),
+                )
+            } else {
+                (
+                    503,
+                    json!({"ok":false,"error":"hotseat_unavailable","provider":provider,"alias":"backup",
+                    "message":"Hotseat could not say which account is in use. Nothing was switched."}),
+                )
+            };
+            assert_eq!((code, body), expected);
+            assert_eq!(
+                std::fs::read_to_string(root.join(format!("{provider}.active"))).unwrap(),
+                "current"
+            );
+        }
+        assert_eq!(h.get("/hotseat/desk")["switches"], json!([]));
+        assert_eq!(calls(), 0);
+        assert_eq!(state(), before);
+        assert_eq!(
+            std::fs::read_to_string(&attempts).unwrap().lines().count(),
+            1
+        );
+    }
+    let h = start("select");
+    assert_eq!(
+        h.get("/server-info")["contract"]["features"]["hotseat_desk_actions"],
+        86
+    );
+    assert_eq!(switch(&h, "agy", "example").0, 400);
+    assert_eq!(switch(&h, "codex", "-switch").1["error"], "invalid_alias");
+    assert!(!record.exists());
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/accounts-switch-vectors.json"
+    ))
+    .unwrap();
+    for c in vectors["manual"].as_array().unwrap() {
+        let provider = c["provider"].as_str().unwrap();
+        let file = place.root.join(format!("{provider}.active"));
+        std::fs::write(&file, c["before"].as_str().unwrap_or("")).unwrap();
+        let deny = place.root.join("deny");
+        if c["confirmed"] == true {
+            let _ = std::fs::remove_file(&deny);
+        } else {
+            std::fs::write(&deny, "").unwrap();
+        }
+        let (code, answer) = switch(&h, provider, "backup");
+        assert_eq!(json!(code), c["status"], "{c}");
+        assert_eq!(answer, c["body"]);
+        let desk = h.get("/hotseat/desk");
+        let result = desk["switches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["provider"] == provider)
+            .unwrap();
+        let mut expected = c["record"].clone();
+        for k in ["requested_at", "finished_at"] {
+            assert!(result[k].as_i64().unwrap() > 0);
+            expected[k] = result[k].clone();
+        }
+        assert!(result["requested_at"].as_i64() <= result["finished_at"].as_i64());
+        assert_eq!(result, &expected);
+    }
+    let _ = std::fs::remove_file(place.root.join("deny"));
+    let agent = h.post("/agents", json!({"name":"Worker","backend":"claude"}))["session"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::fs::write(&out_of_usage, "").unwrap();
+    h.send(&agent, "work on this", "one");
+    wait_for("the rejected turn to run", || started.exists());
+    let row = |h: &Host| {
+        let snapshot = h.get("/agents/snapshot");
+        snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == agent)
+            .unwrap()
+            .clone()
+    };
+    wait_for("the worker to wait for a seat", || {
+        row(&h)["live_activity"]["state"] == "limited"
+    });
+    std::fs::remove_file(&out_of_usage).unwrap();
+    assert_eq!(switch(&h, "claude", "current").1["switched"], true);
+    wait_for("the waiting turn to answer", || h.state(&agent) == "done");
+    assert!(h.conversation(&agent).contains(&said("assistant", "on it")));
+
+    // The stand-in tool stays in a live shim through a Host restart. Its provider cannot
+    // move until that actual tool exits, while another provider remains switchable.
+    let release = place.root.join("release-live-tool");
+    let ran = place.root.join("live-tool-started");
+    let script = format!(
+        "#!/bin/sh\nread msg\ndate > '{}'\nfor i in $(seq 1 600); do [ -f '{}' ] && break; sleep 0.1; done\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ok\"}}'\n",
+        ran.display(),
+        release.display()
+    );
+    program(&claude, &script);
+    h.send(&agent, "hold this turn", "live-lock");
+    wait_for("the live tool to start", || ran.exists());
+    drop(h);
+    let h = start("select");
+    std::thread::scope(|scope| {
+        let pending=scope.spawn(||{
+            let body=json!({"provider":"claude","alias":"backup"}).to_string();
+            let mut stream=TcpStream::connect(&h.address).unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(45))).unwrap();
+            write!(stream,"POST /hotseat/switch HTTP/1.1\r\nHost: test\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+            let mut answer=String::new();
+            stream.read_to_string(&mut answer).unwrap();
+            assert!(answer.starts_with("HTTP/1.1 202"),"{answer}");
+            let (_,body)=answer.split_once("\r\n\r\n").unwrap();
+            let pending:Value=serde_json::from_str(body).unwrap();
+            assert_eq!(pending,json!({"ok":true,"switched":false,"pending":true,"reason":"switch_in_progress","provider":"claude","alias":"backup","message":"The switch is still running. The desk shows how it ended."}));
+        });
+        wait_for("the pending Claude switch", || {
+            h.get("/hotseat/desk")["switches"][0]["state"] == "running"
+        });
+        assert_eq!(switch(&h, "codex", "current").1["switched"], true);
+        pending.join().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(place.root.join("claude.active")).unwrap(),
+            "current"
+        );
+        std::fs::write(release, "").unwrap();
+        wait_for("the pending switch to complete", || {
+            h.get("/hotseat/desk")["switches"][0]["state"] == "switched"
+        });
+    });
+    drop(h);
+    let h = start("select");
+    let desk = h.get("/hotseat/desk");
+    assert_eq!(desk["switches"][0]["alias"], "backup");
+    assert_eq!(desk["switches"][0]["state"], "switched");
+    std::fs::write(place.root.join("claude.active"), "current").unwrap();
+    let owner = h.post("/agents", json!({"name":"Scanner","backend":"codex"}))["session"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let config = h.post(
+        "/janitors",
+        json!({"session":owner,"template_id":"account-hotseat"}),
+    );
+    let rev = &config["janitor"]["revision"];
+    let heard = h.listen();
+    let enabled = h.post(
+        &format!("/janitors/{owner}/enabled"),
+        json!({"enabled":true,"expected_revision":rev}),
+    );
+    assert_eq!(enabled["janitor"]["enabled"], true);
+    wait_for("automatic switch of both providers", || {
+        ["claude", "codex"].iter().all(|p| {
+            std::fs::read_to_string(place.root.join(format!("{p}.active"))).unwrap() == "backup"
+        })
+    });
+    wait_for("a recorded switch action for each provider", || {
+        let status = h.get("/hotseat/status");
+        status["actions"]
+            .as_array()
+            .is_some_and(|v| v.len() == 2 && v.iter().all(|a| a["kind"] == "switched"))
+    });
+    wait_for("the Janitor change event", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["kind"] == "janitor-changed")
+    });
+    let janitor = format!("/janitors/{owner}");
+    let version = || h.get(&janitor)["janitor"]["revision"].clone();
+    let toggle = |on: bool| {
+        h.post(
+            &format!("{janitor}/enabled"),
+            json!({"enabled":on,"expected_revision":version()}),
+        )
+    };
+    toggle(false);
+    for tool in ["claude", "codex"] {
+        std::fs::write(place.root.join(format!("{tool}.active")), "current").unwrap();
+    }
+    h.post(
+        &format!("{janitor}/configure"),
+        json!({"expected_revision":version(),"options":{"mode":"notify"}}),
+    );
+    toggle(true);
+    let actions_are = |kind: &str| {
+        let status = h.get("/hotseat/status");
+        status["actions"]
+            .as_array()
+            .is_some_and(|v| v.len() == 2 && v.iter().all(|a| a["kind"] == kind))
+    };
+    wait_for("notify mode to record advice without moving a seat", || {
+        actions_are("would_switch")
+    });
+    for tool in ["claude", "codex"] {
+        assert_eq!(
+            std::fs::read_to_string(place.root.join(format!("{tool}.active"))).unwrap(),
+            "current"
+        );
+    }
+    toggle(false);
+    std::fs::write(place.root.join("exhausted"), "").unwrap();
+    h.post(
+        &format!("{janitor}/configure"),
+        json!({"expected_revision":version(),"options":{"mode":"automatic"}}),
+    );
+    toggle(true);
+    wait_for("both providers to be exhausted", || {
+        actions_are("exhausted")
+    });
+    let summary = h.get(&format!("{janitor}/runs?limit=8"));
+    assert!(
+        summary.to_string().contains("no saved account has more"),
+        "{summary}"
+    );
+    for tool in ["claude", "codex"] {
+        assert_eq!(
+            std::fs::read_to_string(place.root.join(format!("{tool}.active"))).unwrap(),
+            "current"
+        );
+    }
+    let calls = std::fs::read_to_string(record).unwrap();
+    assert!(calls.contains(r#"["codex", "--no-quota", "--json"]"#));
+    assert!(calls.contains(r#"["codex", "--json"]"#));
+    assert!(!calls.contains("reset"));
+}
+
+#[test]
 fn what_claude_code_says_of_its_accounts_windows_is_shown_and_marks_its_agents_when_used_up() {
     let place = Place::new("claude-windows");
     let own = place.root.join("claude-own");
@@ -25875,16 +26307,12 @@ fn a_host_that_puts_the_logins_in_place_itself_leaves_a_waiting_turn_to_its_sele
         "Worker waits for an account. This Host's selector takes it up when one serves it."
     );
     assert!(waits());
-    // Switching from the desk is this Host's to do where it keeps the logins, and it is not
-    // built: it says that, and still refuses what it cannot read.
+    // Its stand-in has no confirmed switch to report.
     let switch = |asked: Value| host.ask("POST", "/hotseat/switch", Some(&asked));
     let (status, said) = switch(json!({ "provider": "claude", "alias": "spare" }));
     assert_eq!(
         (status, said["error"].as_str()),
-        (
-            501,
-            Some("Changing the account seats is not built on this Host yet")
-        )
+        (409, Some("switch_failed"))
     );
     assert_eq!(
         switch(json!({ "provider": "claude", "alias": "a b" })).1["error"],

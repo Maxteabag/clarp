@@ -204,13 +204,12 @@ async fn hotseat_switch(
     if !asked.is_object() {
         return bad("bad json").into_response();
     }
-    match crate::seats::switch(&app, &asked) {
-        Some((status, said)) => {
-            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            (status, Json(said)).into_response()
-        }
-        None => no_hotseat().await.into_response(),
-    }
+    let (status, said) = crate::seats::switch(&app, &asked).await;
+    (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        Json(said),
+    )
+        .into_response()
 }
 
 async fn no_hotseat() -> ApiError {

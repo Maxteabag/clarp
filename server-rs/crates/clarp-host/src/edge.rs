@@ -69,12 +69,15 @@ const SEATS: &str = "hotseat_desk";
 /// The features this Host has now: all of [`FEATURES`], without what it cannot do as it is
 /// set up.
 fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
+    let actions =
+        app.config.accounts == clarp_kernel::recovery::Accounts::Select && app.seats.told();
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
     let seats = app.seats.told();
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)
+            && (*feature != "hotseat_desk_actions" || actions)
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
     })
 }
@@ -190,8 +193,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The desk of the machine's account seats (`GET /hotseat/desk`): every saved account of
     // the agents' tools with its windows, its state and its clocks, read with the owner's
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
-    // Reading only: switching and continuing (`hotseat_desk_actions`) are not built.
     (SEATS, 84),
+    ("hotseat_desk_actions", 86),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
@@ -254,6 +257,7 @@ pub struct App {
     pub limits: Arc<crate::quota::Desk>,
     /// The desk of the machine's account seats, as the owner's own tool says them.
     pub seats: Arc<crate::seats::Desk>,
+    pub pools: Vec<Arc<crate::pool::Service>>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
