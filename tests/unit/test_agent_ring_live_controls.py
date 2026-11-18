@@ -97,7 +97,8 @@ def test_close_is_idempotent_and_a_retry_stops_the_session_again(grant):
     assert order == [("retire", "user_hangup", "retired")] and session.stops == 3
 
 
-@pytest.mark.parametrize("change", [{"owner_nonce": "f" * 64}, {"attempt_id": "att_other"}, {"call_id": "alv_nope"}])
+@pytest.mark.parametrize("change", [{"owner_nonce": "f" * 64}, {"attempt_id": "att_other"}, {"call_id": "alv_nope"},
+                                    {"owner_nonce": "nønce"}, {"owner_nonce": "\u2603" * 32}])
 def test_close_by_a_wrong_grant_is_an_owner_conflict(grant, change):
     _refused(409, "live_owner_conflict", _close, grant, **change)
     assert _ring_of(grant)["_live_phase"] == "answered_waiting_join"
@@ -241,3 +242,10 @@ def test_a_retired_or_fallen_back_live_call_drops_its_snapshot(grant, end):
     assert "_live_snapshot" in _ring_of(grant)
     (_close if end == "close" else _fallback)(grant)
     assert "_live_snapshot" not in _ring_of(grant) and _ring_of(grant)["_live_context_digest"]
+
+
+@pytest.mark.parametrize("nonce", ["nønce", "\u2603" * 32])
+def test_a_fallback_with_a_nonce_outside_ascii_is_an_owner_conflict(grant, nonce):
+    """R65: compare_digest raises on such a str; the answer is the same 409 as any other wrong nonce."""
+    _refused(409, "live_owner_conflict", _fallback, grant, owner_nonce=nonce)
+    assert _ring_of(grant)["_live_phase"] == "answered_waiting_join"
