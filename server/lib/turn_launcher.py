@@ -286,13 +286,14 @@ class LauncherMixin:
                 from . import turn_usage
                 detail = _result_detail(event, trace_id=trace_id)
                 raw_cost = {}
-                if turn_usage.reports_session_cost(spec.backend or backends.CLAUDE):
+                cost_backend = spec.backend or backends.CLAUDE
+                if turn_usage.reports_session_cost(cost_backend):
                     total = detail.get("cost_usd")
                     native = (event.get("session_id") or state.get("backend_session_id")
                               or spec.backend_session_id)
                     fresh = spec.is_new_session and native == spec.backend_session_id
                     try:
-                        detail["cost_usd"] = turn_usage.claude_cost_delta(native, total, fresh=fresh)
+                        detail["cost_usd"] = turn_usage.session_cost_delta(cost_backend, native, total, fresh=fresh)
                     except Exception:  # noqa: BLE001 - accounting failure must not suppress DONE
                         detail["cost_usd"] = None
                         log("claudeTurnCostUnknown", "reason=cursor_unavailable")
