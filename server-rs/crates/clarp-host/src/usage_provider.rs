@@ -198,6 +198,15 @@ fn child(tool: &str) -> Option<Command> {
     Some(cmd)
 }
 
+fn app_server_read(result: &Value) -> Option<Reading> {
+    if !clarp_kernel::python::truthy(&result["rateLimits"])
+        && !clarp_kernel::python::truthy(&result["rateLimitsByLimitId"])
+    {
+        return None;
+    }
+    codex_read(result, "account/rateLimits/read")
+}
+
 async fn rpc(approval: &str) -> Result<Reading, bool> {
     let mut command = child("codex").ok_or(false)?;
     command.args(["-s", "read-only"]);
@@ -236,7 +245,7 @@ async fn rpc(approval: &str) -> Result<Reading, bool> {
                 return Err(s.contains("approval") || s.contains("invalid value"));
             }
             if id == 2 {
-                return codex_read(&msg["result"], "account/rateLimits/read").ok_or(false);
+                return app_server_read(&msg["result"]).ok_or(false);
             }
             input
                 .write_all(b"{\"method\":\"initialized\",\"params\":{}}\n")
@@ -392,6 +401,10 @@ mod tests {
                 case["url"],
                 "{case}"
             );
+        }
+        for case in fixture["app_server"].as_array().unwrap() {
+            let windows = app_server_read(&case["result"]).map(|r| r.value["windows"].clone());
+            assert_eq!(json!(windows), case["windows"], "{case}");
         }
         for case in fixture["blocks"].as_array().unwrap() {
             let result =

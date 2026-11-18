@@ -89,7 +89,7 @@ for before,after,reason in [
     ('["--output-format", "json", "-p", "/usage"]','["--output-format", "json", "-p", "/status"]','ask agy the wrong command'),
     ('msg["id"] != id','msg["id"] == id','consume unrelated JSON-RPC messages'),
     ('source: "anthropic-oauth-usage"','source: "none"','mislabel Claude OAuth source'),
-    ('"account/rateLimits/read").ok_or(false)','"app-server").ok_or(false)','mislabel app-server evidence'),
+    ('codex_read(result, "account/rateLimits/read")','codex_read(result, "app-server")','mislabel app-server evidence'),
 ]:
     PLANTS.append((P,"host",reason,before,after))
 
@@ -122,6 +122,11 @@ PLANTS.extend([
     (Q, "vectors", "mislabel the source in the legacy response", 'self.authoritative_ms.is_some() {"codex-usage-endpoint"}', 'self.authoritative_ms.is_some() {"codex-app-server"}'),
 ])
 
+
+PLANTS.extend([
+    (P, "reader", "drop sibling Codex buckets from the app-server result", 'codex_read(result, "account/rateLimits/read")', 'codex_read(&json!({"rateLimits":result["rateLimits"]}), "account/rateLimits/read")'),
+    (P, "reader", "accept an HTTPS-shaped result from the RPC method", 'if !clarp_kernel::python::truthy(&result["rateLimits"])', 'if result.get("rate_limit").is_none() && !clarp_kernel::python::truthy(&result["rateLimits"])'),
+])
 
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
