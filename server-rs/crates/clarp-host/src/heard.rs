@@ -54,6 +54,7 @@ const WAITS: Duration = Duration::from_secs(10);
 
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
+    pub(crate) judge:crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
     own: Option<(Arc<dyn Listener>, String)>,
@@ -158,6 +159,7 @@ impl Ears {
         };
         Self {
             own,
+            judge:Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
             ink: ink("ink-2"),
@@ -507,11 +509,17 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
-    let text = heard::kept(&heard::joined(&said.segments));
+    let text = crate::vocabulary::judge::kept(app,heard::joined(&said.segments)).await;
     let mut answer = heard::answer(&text, &trace, hands_free);
     if run_id>0 {
         crate::vocabulary::finish(app.config.data_dir.clone(),run_id,text.clone(),began.elapsed().as_millis() as i64).await;
         answer["vocab_run_id"]=json!(run_id);
+    }
+    if crate::vocabulary::audio::enabled(&app.fleet.directory()){
+        let root=app.config.data_dir.clone();
+        let (trace,model,session)=(trace.clone(),requested.clone(),session.to_string());
+        let now=app.clock.now_ms();
+        let _=tokio::task::spawn_blocking(move||crate::vocabulary::audio::retain(&root,&trace,&audio,&content_type,&session,run_id,&model,now)).await;
     }
     // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
     // the app is told, and sends nothing.
@@ -698,7 +706,7 @@ fn status(app: &App) -> Value {
         "call_engines": "",
         "call_policy_error": "",
         "turn_taking": turn_taking(&directory),
-        "retain_audio": false,
+        "retain_audio": crate::vocabulary::audio::enabled(&directory),
         "long_form_model": "",
         "long_form_threshold_sec": long_form_threshold(&directory),
         "long_form_threshold_range": { "min": 1, "max": 3600 },
@@ -771,10 +779,8 @@ async fn set_providers(
         return Err(bad(&format!("unknown turn-taking strategy: {strategy}")));
     }
     match named("retain_audio") {
-        Some(Value::Bool(false)) | None => {}
-        Some(Value::Bool(true)) => {
-            return Err(bad("clips are not kept on this Host yet (retain_audio)"));
-        }
+        Some(Value::Bool(value))=>settings.push(("transcription.retain_audio".into(),value.to_string())),
+        None=>{}
         Some(_) => return Err(bad("retain_audio must be boolean")),
     }
     match named("long_form_model") {

@@ -138,14 +138,6 @@ async fn no_pictures() -> ApiError {
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
 
-async fn judgments() -> Json<Value> {
-    Json(kept("/judgments/settings"))
-}
-
-async fn no_judgments() -> ApiError {
-    not_built("Judgments are")
-}
-
 async fn diagnostics() -> Json<Value> {
     Json(kept("/diagnostics/settings"))
 }
@@ -373,7 +365,6 @@ pub fn routes() -> Router<App> {
             get(portrait_generation).post(no_pictures),
         )
         .route("/avatar-settings", get(avatar_settings).post(no_pictures))
-        .route("/judgments/settings", get(judgments).post(no_judgments))
         .route(
             "/diagnostics/settings",
             get(diagnostics).post(no_diagnostics),

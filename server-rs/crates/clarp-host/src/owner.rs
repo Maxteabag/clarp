@@ -271,6 +271,7 @@ impl OwnerFile {
     /// Host's own environment has. Read now, kept nowhere.
     pub fn key(&self, provider: &str) -> Option<String> {
         let (path, variable): (&[&str], &str) = match provider {
+            "typesafe" => (&["typesafe","api_key"],"TYPESAFE_API_KEY"),
             "elevenlabs" => (&["elevenlabs", "api_key"], "ELEVEN_API_KEY"),
             "cartesia" => (&["cartesia", "api_key"], "CARTESIA_API_KEY"),
             "deepgram" => (&["deepgram", "api_key"], "DEEPGRAM_API_KEY"),

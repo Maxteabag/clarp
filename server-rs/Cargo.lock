@@ -203,6 +203,7 @@ dependencies = [
  "nix",
  "pty-process",
  "ring",
+ "rusqlite",
  "rustls",
  "serde",
  "serde_json",
