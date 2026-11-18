@@ -3,6 +3,8 @@
 import runner
 
 RUNS = {
+    'android': ['test', '--test', 'fcm_vectors'],
+    'activity': ['test', '--test', 'direct_activity_vectors'],
     'vectors': ['test', '--test', 'push_direct_vectors'],
     'host': ['test', '--test', 'host', '--', 'an_alert_uses_the_hosts_key'],
 }
@@ -52,5 +54,78 @@ PLANTS = [
     ('clarp-host/src/direct.rs', 'host', 'mode is read from the wrong section', 'text_at(&file, &["apns", "mode"])', 'text_at(&file, &["other", "mode"])'),
     ('clarp-host/src/direct.rs', 'host', 'uppercase direct is treated as auto', '|mode| mode.to_lowercase()', '|mode| mode'),
 ]
+F = 'clarp-kernel/src/fcm.rs'
+for what, old, new in [
+    ('null is sent as text', 'Value::Null => None', 'Value::Null => Some("null".into())'),
+    ('whole float keeps decimal', 'Some(format!("{:.0}", n.as_f64()? + 0.0))', 'Some(python::canonical(value))'),
+    ('nested maps keep insertion order', 'value => Some(python::canonical(value))', 'value => Some(python::compact(value))'),
+    ('wrong payload version', 'json!("1")', 'json!("2")'),
+    ('null alert value becomes a label', 'if !value.is_null() && value != ""', 'if value != ""'),
+    ('empty alert value is sent', 'if !value.is_null() && value != ""', 'if !value.is_null()'),
+    ('APS sent as a data field', 'if key != "aps"', 'if true'),
+    ('context overwrites the payload', 'data.entry(key.clone()).or_insert(json!(text));', 'data.insert(key.clone(),json!(text));'),
+    ('collapse id overrides context', 'data.entry("collapse_id").or_insert(json!(collapse));', 'data.insert("collapse_id".into(),json!(collapse));'),
+    ('collapse id sent even when absent', 'if !collapse.is_empty()', 'if true'),
+    ('time supplied by payload accepted', 'data.insert("sent_at".into(), json!(now_ms.to_string()));', 'data.entry("sent_at").or_insert(json!(now_ms.to_string()));'),
+    ('reserved google prefix allowed', '!k.starts_with("google")', '!k.starts_with("google.")'),
+    ('reserved gcm prefix allowed', '!k.starts_with("gcm")', '!k.starts_with("gcm.never.")'),
+    ('the data fits one byte fewer', 'usize = 4096', 'usize = 4095'),
+    ('the data fits one byte more', 'usize = 4096', 'usize = 4097'),
+    ('reason can be cut on ordinary alerts', 'if key == "reason" && data["kind"] != "agent-ring"', 'if false'),
+    ('ring reason cannot be shortened', 'if key == "reason" && data["kind"] != "agent-ring"', 'if key == "reason"'),
+    ('escape expansion ignored', 'let bytes = json!(c.to_string()).to_string().len() - 2;', 'let bytes = c.len_utf8();'),
+    ('omit truncation suffix', "prefix.push('…');", "prefix.push('.');"),
+    ('reference timestamp shifted', 'json!(now_ms.to_string())', 'json!((now_ms+1).to_string())'),
+    ('transport high priority wrong', 'if priority == "10"', 'if priority == "5"'),
+    ('collapse group always present', 'if !collapse_key.is_empty()', 'if true'),
+    ('activity needs active and waiting agents', '|| python::truthy(&state["needs_you"])', '&& python::truthy(&state["needs_you"])'),
+    ('idle activity reported as update', '{"update"} else {"end"}', '{"update"} else {"update"}'),
+    ('empty host id is sent', 'if !server.is_empty()', 'if true'),
+    ('wrong accepted message name', 'body["name"].as_str()', 'body["id"].as_str()'),
+    ('refusal never refreshes bearer', 'if status == 401 && !self.refreshed', 'if status == 402 && !self.refreshed'),
+    ('refresh repeated indefinitely', 'self.refreshed = true;', 'self.refreshed = false;'),
+    ('explicit token retirement ignored', 'code == "UNREGISTERED"', 'code == "RETIRED"'),
+    ('all 404 errors retire the token', '(status == 404 && code.is_empty())', '(status == 404)'),
+    ('incorrect status for retired token', '410, "Unregistered".into()', '404, "Unregistered".into()'),
+    ('payload field attributed to token', 'if !other {', 'if true {'),
+    ('wrong invalid registration reason', '410, "InvalidRegistration".into()', '410, "Invalid".into()'),
+    ('invalid argument RPC status ignored', '|| rpc == "INVALID_ARGUMENT"', '|| rpc == "OTHER"'),
+    ('invalid argument FCM code ignored', 'code == "INVALID_ARGUMENT"', 'code == "OTHER"'),
+    ('first server failure never retried', 'status >= 500', 'status > 500'),
+    ('last client failure retried', 'status >= 500', 'status >= 499'),
+    ('network failure not retried', 'let transient = status == 0', 'let transient = status == 503'),
+    ('rate limit not retried', '|| status == 429', '|| status == 430'),
+    ('one fewer retry', 'self.transient < 2', 'self.transient < 1'),
+    ('one extra retry', 'self.transient < 2', 'self.transient < 3'),
+    ('backoff starts too high', 'let backoff = 1 <<', 'let backoff = 2 <<'),
+    ('retry header wins over backoff', 'backoff.max(wait)', 'wait'),
+    ('retry header capped too early', '.unwrap_or(u64::MAX).min(10)', '.unwrap_or(u64::MAX).min(9)'),
+    ('retry header capped too late', '.unwrap_or(u64::MAX).min(10)', '.unwrap_or(u64::MAX).min(11)'),
+    ('ring pushed at expiration', 'now >= expires', 'now > expires'),
+    ('superseded ringing state delivered', 'later || now >= expires', 'now >= expires'),
+    ('known ring closes on untried tokens', 'tried.contains(token)', '!tried.contains(token)'),
+    ('unknown ring end dropped', 'None => rows,', 'None => Vec::new(),'),
+    ('ring forgotten at expiry plus ten minutes', '*expiry >= now.saturating_sub(600_000)', '*expiry > now.saturating_sub(600_000)'),
+]:
+    PLANTS.append((F, 'android', what, old, new))
+for key in ('title', 'subtitle', 'body'):
+    PLANTS.append((F, 'android', 'alert drops ' + key, 'for key in ["title", "body", "subtitle"]',
+                   'for key in [' + ', '.join('"' + k + '"' for k in ('title','body','subtitle') if k != key) + ']'))
+for key in ('from','notification','message_type','collapse_key'):
+    old = '"from" | "notification" | "message_type" | "collapse_key"'
+    PLANTS.append((F,'android','reserved key accepted: '+key,old,old.replace('"'+key+'"','"other-key"')))
+for src,dst in [('sound','sound'),('category','category'),('thread-id','thread_id'),('interruption-level','interruption_level')]:
+    PLANTS.append((F,'android','wrong Android field for '+src, f'("{src}", "{dst}")',f'("{src}", "wrong")'))
+for code in ('QUOTA_EXCEEDED','INTERNAL','UNAVAILABLE'):
+    old = '"QUOTA_EXCEEDED" | "UNAVAILABLE" | "INTERNAL"'
+    PLANTS.append((F,'android','no retry on '+code,old,old.replace(code,'OTHER')))
+for what, old, new in [
+    ('activity base ignores mode', 'Routes::new(mode, account, account, key)', 'Routes::new("relay", account, account, key)'),
+    ('uncertain reservation is replayed', 'self.fallback && !uncertain', 'self.fallback'),
+    ('definite outage never switches', 'self.fallback && !uncertain', 'false'),
+    ('unreachable relay is retried', 'self.relay_down = true;', 'self.relay_down = false;'),
+]:
+    PLANTS.append((K,'activity',what,old,new))
+
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
