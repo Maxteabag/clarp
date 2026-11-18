@@ -548,15 +548,19 @@ def _capture_step_usage(update: dict[str, Any], evidence: dict[str, Any],
     duration = update.get("duration_seconds")
     step_index = update.get("step_index")
     step_key = str(step_index) if step_index is not None else evidence["provider_event_ref"]
-    if step_key in st.seen_usage_steps:
-        return
-    st.seen_usage_steps.add(step_key)
-    if usage:
+    # Duration belongs to the first DONE. Usage can arrive on a later DONE
+    # for the same step, so claim the two observations independently.
+    done_key = f"done:{step_key}"
+    if done_key not in st.seen_usage_steps:
+        st.seen_usage_steps.add(done_key)
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+            st.turn_duration_seconds += max(0.0, float(duration))
+    usage_key = f"usage:{step_key}"
+    if usage.keys() - {"total_tokens"} and usage_key not in st.seen_usage_steps:
+        st.seen_usage_steps.add(usage_key)
         st.usage_refs.append(evidence["provider_event_ref"])
         for key, amount in usage.items():
             st.turn_usage[key] = st.turn_usage.get(key, 0) + amount
-    if isinstance(duration, (int, float)) and not isinstance(duration, bool):
-        st.turn_duration_seconds += max(0.0, float(duration))
 
 
 def _finish_result(event: dict[str, Any], st: _TurnState, *, on_result) -> None:

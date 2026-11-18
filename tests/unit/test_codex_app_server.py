@@ -1006,7 +1006,13 @@ def test_healthy_pool_undo_delegates_once_and_preserves_native_errors():
     assert owner.state == "CLOSED"
 
 
-def test_usage_counts_each_turn_from_thread_total_without_counting_repeats(monkeypatch):
+@pytest.mark.parametrize("order,expected", [
+    ("ABBC", (801274, 621)), ("ABCB", (801274, 621)), ("ACB", (801274, 621)),
+    ("ACLB", (801274, 621)),  # L falls below the opening balance
+    ("ACM", (801274, 621)),   # M falls between entry and highest total
+    ("ACX", (801283, 621)), ("ACY", (801274, 628)),  # independent components
+])
+def test_usage_counts_each_turn_from_thread_total_without_counting_repeats(monkeypatch, order, expected):
     # Three calls from one Codex 0.167.1 rollout. Cached input is part of input.
     samples = [(426539683, 1158861, 265385, 200, 264704),
                (426807055, 1159192, 267372, 331, 265216),
@@ -1032,14 +1038,17 @@ def test_usage_counts_each_turn_from_thread_total_without_counting_repeats(monke
         client._notification("turn/completed", {"threadId": "thread", "turn": {"id": turn, "status": "completed"}})
 
     start("first")
-    for sample in (samples[0], samples[1], samples[1], samples[2]):
-        notify("first", sample)
+    sequence = dict(zip("ABC", samples))
+    sequence.update(L=(1, 1, 1, 1, 0), M=(426540000, 1158862, 10, 1, 0),
+                    X=(427075581, 1, 9, 1, 0), Y=(1, 1159289, 1, 7, 0))
+    for letter in order:
+        notify("first", sequence[letter])
     finish("first")
     start("second")
     notify("first", samples[-1])  # late notification for the previous turn
     notify("second", (427075582, 1159286, 10, 4, 8))
     finish("second")
     assert [r["usage"] for r in results] == [
-        {"input_tokens": 801274, "output_tokens": 621},
+        {"input_tokens": expected[0], "output_tokens": expected[1]},
         {"input_tokens": 10, "output_tokens": 4},
     ]
