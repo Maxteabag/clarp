@@ -41,6 +41,7 @@ pub mod keeper;
 pub mod launcher;
 pub mod library;
 pub mod line;
+pub mod listening;
 pub mod logins;
 pub mod media;
 pub mod models;

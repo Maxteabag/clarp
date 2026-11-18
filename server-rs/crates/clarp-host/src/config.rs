@@ -92,6 +92,10 @@ pub struct Config {
     pub transcription_engine: String,
     /// Another address for ElevenLabs Scribe: a stand-in on this machine. Empty: the real one.
     pub scribe_endpoint: String,
+    /// The same for Deepgram's engine that hears clips, and for its engine that finds the
+    /// ends of turns on a stream of speech, which is a socket on this machine.
+    pub nova_endpoint: String,
+    pub flux_endpoint: String,
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
     pub gemini_endpoint: String,
@@ -396,6 +400,15 @@ impl Config {
             }
         };
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
+        let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
+        // The engine of a stream is reached by a socket: its stand-in is one on this machine.
+        let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
+        let local = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
+        if !flux_endpoint.is_empty() && !local.iter().any(|begin| flux_endpoint.starts_with(begin))
+        {
+            let not_here = format!("CLARP_FLUX_ENDPOINT {flux_endpoint}: a socket on this machine");
+            return Err(not_here);
+        }
         let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
         let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
@@ -465,6 +478,8 @@ impl Config {
             static_dir,
             transcription_engine,
             scribe_endpoint,
+            nova_endpoint,
+            flux_endpoint,
             cartesia_endpoint,
             gemini_endpoint,
             google_token_endpoint,

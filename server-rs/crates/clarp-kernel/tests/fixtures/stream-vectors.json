@@ -1,0 +1,2630 @@
+{
+ "what": "The stream of speech, by server/lib/stt_stream.py: the address of the engine (_float, flux_url), what a message of the engine means (normalize_flux_message), the books of one stream (TurnLedger) and the sound of a turn as a file (pcm16_wav). Sound is bytes that count up modulo 251 from where the stream is.",
+ "defaults": {
+  "model": "flux-general-en",
+  "url": "wss://api.deepgram.com/v2/listen",
+  "sample_rate": 16000,
+  "eot_threshold": 0.7,
+  "eager_eot_threshold": 0.5,
+  "eot_timeout_ms": 60000,
+  "flush_grace_s": 4.0,
+  "upstream_timeout_s": 15.0
+ },
+ "addresses": [
+  {
+   "threshold": null,
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.49",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1.01",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.625",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.62&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.875",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.88&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.705",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.715",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.71&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.995",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.99&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.999",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.3",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.29",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.9",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.90&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.91",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.91&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.305",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.895",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.90&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1e-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "7e-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": " 0.8 ",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.8x",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "nan",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "-inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": ".5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "5.",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "+0.6",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.60&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "NaN",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "Infinity",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0_7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.6_5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.65&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0x10",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "seven",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0,7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.7\n",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1e400",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "-0.0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "_0.8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.8_",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0._8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0__8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "8e-1_0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.50&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "\u00a00.8\u2003",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "INF",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "-nan",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "+inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=1.00&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.8e",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1e",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": ".",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "0.8 5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "threshold": "1,000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": null,
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0.7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.70"
+  },
+  {
+   "eager": "0.5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0.49",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.49"
+  },
+  {
+   "eager": "1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "1.01",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.625",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.62"
+  },
+  {
+   "eager": "0.875",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.88"
+  },
+  {
+   "eager": "0.705",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.70"
+  },
+  {
+   "eager": "0.715",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.71"
+  },
+  {
+   "eager": "0.995",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.999",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.3",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "0.29",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "0.9",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.91",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.305",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "0.895",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "1e-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "7e-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.70"
+  },
+  {
+   "eager": " 0.8 ",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.80"
+  },
+  {
+   "eager": "0.8x",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "nan",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "-inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "-1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": ".5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "5.",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "+0.6",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.60"
+  },
+  {
+   "eager": "NaN",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "Infinity",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0_7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.6_5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.65"
+  },
+  {
+   "eager": "0x10",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "seven",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0,7",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0.7\n",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.70"
+  },
+  {
+   "eager": "1e400",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "-0.0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "_0.8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0.8_",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0._8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0__8",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "8e-1_0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.30"
+  },
+  {
+   "eager": "\u00a00.8\u2003",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.80"
+  },
+  {
+   "eager": "INF",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "-nan",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "+inf",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.90"
+  },
+  {
+   "eager": "0.8e",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "1e",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": ".",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "0.8 5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "eager": "1,000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": null,
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "60000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "500",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=500&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "499",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=500&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "100000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "5000.9",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=5000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "5000.1",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=5000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "-5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=500&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "0",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=500&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "1e3",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=1000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "abc",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": " 700 ",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=700&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "60000.999",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=60000&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "59999.5",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=59999&eager_eot_threshold=0.50"
+  },
+  {
+   "timeout": "nan",
+   "url": {
+    "fails": "ValueError"
+   }
+  },
+  {
+   "timeout": "inf",
+   "url": {
+    "fails": "OverflowError"
+   }
+  },
+  {
+   "timeout": "-inf",
+   "url": {
+    "fails": "OverflowError"
+   }
+  },
+  {
+   "timeout": "1e400",
+   "url": {
+    "fails": "OverflowError"
+   }
+  },
+  {
+   "timeout": "2_000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.70&eot_timeout_ms=2000&eager_eot_threshold=0.50"
+  },
+  {
+   "model": "flux-general-en",
+   "keyterms": [],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40"
+  },
+  {
+   "model": "flux-general-en",
+   "keyterms": [
+    "Clarp"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=Clarp"
+  },
+  {
+   "model": "flux-general-en",
+   "keyterms": [
+    "two words",
+    "Clarp"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=two+words&keyterm=Clarp"
+  },
+  {
+   "model": "flux-general-en",
+   "keyterms": [
+    "\u00fcn\u00ef",
+    "a&b=c",
+    "x/y?z",
+    "it's",
+    "100%",
+    "a+b",
+    "~tilde",
+    "dot.dash-under_score",
+    "emoji \ud83d\ude42",
+    "",
+    " ",
+    "#:@!$,;*()[]"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=%C3%BCn%C3%AF&keyterm=a%26b%3Dc&keyterm=x%2Fy%3Fz&keyterm=it%27s&keyterm=100%25&keyterm=a%2Bb&keyterm=~tilde&keyterm=dot.dash-under_score&keyterm=emoji+%F0%9F%99%82&keyterm=&keyterm=+&keyterm=%23%3A%40%21%24%2C%3B%2A%28%29%5B%5D"
+  },
+  {
+   "model": "another model/2",
+   "keyterms": [],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=another+model%2F2&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40"
+  },
+  {
+   "model": "another model/2",
+   "keyterms": [
+    "Clarp"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=another+model%2F2&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=Clarp"
+  },
+  {
+   "model": "another model/2",
+   "keyterms": [
+    "two words",
+    "Clarp"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=another+model%2F2&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=two+words&keyterm=Clarp"
+  },
+  {
+   "model": "another model/2",
+   "keyterms": [
+    "\u00fcn\u00ef",
+    "a&b=c",
+    "x/y?z",
+    "it's",
+    "100%",
+    "a+b",
+    "~tilde",
+    "dot.dash-under_score",
+    "emoji \ud83d\ude42",
+    "",
+    " ",
+    "#:@!$,;*()[]"
+   ],
+   "threshold": "0.8",
+   "eager": "0.4",
+   "timeout": "7000",
+   "url": "wss://api.deepgram.com/v2/listen?model=another+model%2F2&encoding=linear16&sample_rate=16000&eot_threshold=0.80&eot_timeout_ms=7000&eager_eot_threshold=0.40&keyterm=%C3%BCn%C3%AF&keyterm=a%26b%3Dc&keyterm=x%2Fy%3Fz&keyterm=it%27s&keyterm=100%25&keyterm=a%2Bb&keyterm=~tilde&keyterm=dot.dash-under_score&keyterm=emoji+%F0%9F%99%82&keyterm=&keyterm=+&keyterm=%23%3A%40%21%24%2C%3B%2A%28%29%5B%5D"
+  }
+ ],
+ "messages": [
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "StartOfTurn",
+    "turn_index": 0,
+    "transcript": ""
+   },
+   "means": {
+    "kind": "start",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 1,
+    "transcript": "hello there",
+    "end_of_turn_confidence": 0.12
+   },
+   "means": {
+    "kind": "update",
+    "turn": 1,
+    "text": "hello there",
+    "confidence": 0.12
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "EagerEndOfTurn",
+    "turn_index": 1,
+    "transcript": "hello there",
+    "end_of_turn_confidence": 0.6
+   },
+   "means": {
+    "kind": "eager",
+    "turn": 1,
+    "text": "hello there",
+    "confidence": 0.6
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "TurnResumed",
+    "turn_index": 1,
+    "transcript": "hello there you"
+   },
+   "means": {
+    "kind": "resumed",
+    "turn": 1,
+    "text": "hello there you",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "EndOfTurn",
+    "turn_index": 1,
+    "transcript": "hello there you",
+    "end_of_turn_confidence": 0.91,
+    "words": [
+     {
+      "word": "hello"
+     },
+     "not a word",
+     {
+      "word": "there"
+     }
+    ]
+   },
+   "means": {
+    "kind": "end",
+    "turn": 1,
+    "text": "hello there you",
+    "confidence": 0.91
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "SomethingNew",
+    "turn_index": 1,
+    "transcript": "x"
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "",
+    "turn_index": 1
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "turn_index": 1
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": null
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "endofturn"
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": " EndOfTurn "
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": 7
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": [
+     "EndOfTurn"
+    ]
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "turninfo",
+    "event": "EndOfTurn"
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "Connected",
+    "request_id": "r"
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "type": "Error",
+    "description": "no"
+   },
+   "means": null
+  },
+  {
+   "said": {
+    "event": "EndOfTurn"
+   },
+   "means": null
+  },
+  {
+   "said": {},
+   "means": null
+  },
+  {
+   "said": "EndOfTurn",
+   "means": null
+  },
+  {
+   "said": [
+    "TurnInfo"
+   ],
+   "means": null
+  },
+  {
+   "said": null,
+   "means": null
+  },
+  {
+   "said": 7,
+   "means": null
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": "4",
+    "transcript": "a text index"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 4,
+    "text": "a text index",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": " 5 ",
+    "transcript": "blanks"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 5,
+    "text": "blanks",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 2.9,
+    "transcript": "a part"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 2,
+    "text": "a part",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": -3.9,
+    "transcript": "below"
+   },
+   "means": {
+    "kind": "update",
+    "turn": -3,
+    "text": "below",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": true
+   },
+   "means": {
+    "kind": "update",
+    "turn": 1,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": false
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": null
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": "four"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": "2.5"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": [
+     3
+    ]
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": {
+     "n": 3
+    }
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": "1_0"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 10,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 12345678901234567890
+   },
+   "means": {
+    "kind": "update",
+    "turn": 12345678901234567890,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": "0.5"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 0.5
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": " 0.25 "
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 0.25
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": "high"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": null
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": 1
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 1.0
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": 0
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 0.0
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": true
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 1.0
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": [
+     0.5
+    ]
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "end_of_turn_confidence": "1e-3"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": 0.001
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": null
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": 0
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": 12
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "12",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": 1.5
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "1.5",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": true
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "True",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": false
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": [
+     "a",
+     1,
+     null
+    ]
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "['a', 1, None]",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": {
+     "text": "it's",
+     "n": 1.0
+    }
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "{'text': \"it's\", 'n': 1.0}",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": []
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": "  kept with its blanks  "
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "  kept with its blanks  ",
+    "confidence": null
+   }
+  },
+  {
+   "said": {
+    "type": "TurnInfo",
+    "event": "Update",
+    "turn_index": 0,
+    "transcript": "na\u00efve \ud83d\ude42"
+   },
+   "means": {
+    "kind": "update",
+    "turn": 0,
+    "text": "na\u00efve \ud83d\ude42",
+    "confidence": null
+   }
+  }
+ ],
+ "stories": [
+  {
+   "story": "a turn of speech from its first sound to its end",
+   "steps": [
+    {
+     "heard": 3200,
+     "trace_id": "trace-1",
+     "held": 3200
+    },
+    {
+     "wait": 0.2
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "StartOfTurn",
+      "turn_index": 0,
+      "transcript": ""
+     },
+     "told": {
+      "type": "turn",
+      "event": "start",
+      "turn": 0,
+      "text": "",
+      "trace_id": "trace-1"
+     },
+     "trace_id": "trace-1",
+     "held": 3200,
+     "ended": 0
+    },
+    {
+     "heard": 6400,
+     "trace_id": "trace-1",
+     "held": 9600
+    },
+    {
+     "wait": 0.4
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "hello",
+      "end_of_turn_confidence": 0.1234
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "hello",
+      "trace_id": "trace-1",
+      "confidence": 0.123
+     },
+     "trace_id": "trace-1",
+     "held": 9600,
+     "ended": 0
+    },
+    {
+     "heard": 3200,
+     "trace_id": "trace-1",
+     "held": 12800
+    },
+    {
+     "wait": 1.0345
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EagerEndOfTurn",
+      "turn_index": 0,
+      "transcript": "hello there",
+      "end_of_turn_confidence": 0.55551
+     },
+     "told": {
+      "type": "turn",
+      "event": "eager",
+      "turn": 0,
+      "text": "hello there",
+      "trace_id": "trace-1",
+      "confidence": 0.556
+     },
+     "trace_id": "trace-1",
+     "held": 12800,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "TurnResumed",
+      "turn_index": 0,
+      "transcript": "hello there"
+     },
+     "told": {
+      "type": "turn",
+      "event": "resumed",
+      "turn": 0,
+      "text": "hello there",
+      "trace_id": "trace-1"
+     },
+     "trace_id": "trace-1",
+     "held": 12800,
+     "ended": 0
+    },
+    {
+     "heard": 3201,
+     "trace_id": "trace-1",
+     "held": 16001
+    },
+    {
+     "wait": 0.5
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "hello there you",
+      "end_of_turn_confidence": 0.9995
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "hello there you",
+      "trace_id": "trace-1",
+      "confidence": 1.0,
+      "vocab_run_id": 41,
+      "turn_ms": 2134
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    }
+   ],
+   "answers": [
+    41
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "hello there you",
+     "latency_ms": 2134
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 16045,
+     "sha256": "110e685d25b45fec9dfba8a194d900352e1cd34698ebf03aae0e5dbcb1d6f3d0"
+    }
+   ]
+  },
+  {
+   "story": "turns that follow one another each have a name and their own sound",
+   "steps": [
+    {
+     "heard": 100,
+     "trace_id": "trace-1",
+     "held": 100
+    },
+    {
+     "wait": 1
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "one"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "one",
+      "trace_id": "trace-1",
+      "vocab_run_id": 7,
+      "turn_ms": 1000
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    },
+    {
+     "heard": 200,
+     "trace_id": "trace-2",
+     "held": 200
+    },
+    {
+     "heard": 300,
+     "trace_id": "trace-2",
+     "held": 500
+    },
+    {
+     "wait": 2.5
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 1,
+      "transcript": "two"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 1,
+      "text": "two",
+      "trace_id": "trace-2",
+      "vocab_run_id": 8,
+      "turn_ms": 2500
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 2
+    },
+    {
+     "wait": 0.001
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "StartOfTurn",
+      "turn_index": 2,
+      "transcript": ""
+     },
+     "told": {
+      "type": "turn",
+      "event": "start",
+      "turn": 2,
+      "text": "",
+      "trace_id": "trace-3"
+     },
+     "trace_id": "trace-3",
+     "held": 0,
+     "ended": 2
+    },
+    {
+     "wait": 0.0004
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 2,
+      "transcript": "three"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 2,
+      "text": "three",
+      "trace_id": "trace-3",
+      "vocab_run_id": 9,
+      "turn_ms": 0
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 3
+    }
+   ],
+   "answers": [
+    7,
+    8,
+    9
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "one",
+     "latency_ms": 1000
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-2",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "two",
+     "latency_ms": 2500
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-3",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "three",
+     "latency_ms": 0
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 144,
+     "sha256": "c22f32f861814f83f008e2db273b1e1502299a3837d5eb4a9b3223358d685bab"
+    },
+    {
+     "trace_id": "trace-2",
+     "bytes": 544,
+     "sha256": "32b71721da9368962e2bbed5259d127f4b81a4b8a1a6b219b15629f3736d344c"
+    }
+   ]
+  },
+  {
+   "story": "the engine speaks before any sound was heard",
+   "steps": [
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "StartOfTurn",
+      "turn_index": 0,
+      "transcript": ""
+     },
+     "told": {
+      "type": "turn",
+      "event": "start",
+      "turn": 0,
+      "text": "",
+      "trace_id": "trace-1"
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "wait": 3
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "early"
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "early",
+      "trace_id": "trace-1"
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "wait": 0.9999
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "early"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "early",
+      "trace_id": "trace-1",
+      "vocab_run_id": 1,
+      "turn_ms": 3999
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    }
+   ],
+   "answers": [
+    1
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "early",
+     "latency_ms": 3999
+    }
+   ],
+   "kept": []
+  },
+  {
+   "story": "a turn that ends with no sound is written down and nothing is kept of it",
+   "steps": [
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": ""
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "",
+      "trace_id": "trace-1",
+      "vocab_run_id": 5,
+      "turn_ms": 0
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    },
+    {
+     "heard": 0,
+     "trace_id": "trace-2",
+     "held": 0
+    },
+    {
+     "wait": 0.5
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 1,
+      "transcript": "silence"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 1,
+      "text": "silence",
+      "trace_id": "trace-2",
+      "vocab_run_id": 6,
+      "turn_ms": 500
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 2
+    }
+   ],
+   "answers": [
+    5,
+    6
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "",
+     "latency_ms": 0
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-2",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "silence",
+     "latency_ms": 500
+    }
+   ],
+   "kept": []
+  },
+  {
+   "story": "a run that cannot be written is not worth a turn",
+   "steps": [
+    {
+     "heard": 640,
+     "trace_id": "trace-1",
+     "held": 640
+    },
+    {
+     "wait": 0.25
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "not written"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "not written",
+      "trace_id": "trace-1",
+      "vocab_run_id": null,
+      "turn_ms": 250
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    },
+    {
+     "heard": 640,
+     "trace_id": "trace-2",
+     "held": 640
+    },
+    {
+     "wait": 0.25
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 1,
+      "transcript": "written as nothing"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 1,
+      "text": "written as nothing",
+      "trace_id": "trace-2",
+      "vocab_run_id": null,
+      "turn_ms": 250
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 2
+    },
+    {
+     "heard": 640,
+     "trace_id": "trace-3",
+     "held": 640
+    },
+    {
+     "wait": 0.25
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 2,
+      "transcript": "written"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 2,
+      "text": "written",
+      "trace_id": "trace-3",
+      "vocab_run_id": 12,
+      "turn_ms": 250
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 3
+    }
+   ],
+   "answers": [
+    null,
+    0,
+    12
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "not written",
+     "latency_ms": 250
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-2",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "written as nothing",
+     "latency_ms": 250
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-3",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "written",
+     "latency_ms": 250
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 684,
+     "sha256": "ffc0e7c5d061f626b24c0c764efb10b90dc76c2b98a00c65b2e7995ca0f480a7"
+    },
+    {
+     "trace_id": "trace-2",
+     "bytes": 684,
+     "sha256": "f56f68c031c6e531681a1a94c8290c3e7dba2beef0aca5de9a57bde1f81418d2"
+    },
+    {
+     "trace_id": "trace-3",
+     "bytes": 684,
+     "sha256": "ad6e240127cc8008cd51f39dad6753c1078b1d808cfdf4c8f3151fa22faeb683"
+    }
+   ]
+  },
+  {
+   "story": "sound that cannot be kept is not worth a turn",
+   "steps": [
+    {
+     "heard": 1000,
+     "trace_id": "trace-1",
+     "held": 1000
+    },
+    {
+     "wait": 0.1
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "not kept"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "not kept",
+      "trace_id": "trace-1",
+      "vocab_run_id": 3,
+      "turn_ms": 100
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    },
+    {
+     "heard": 2,
+     "trace_id": "trace-2",
+     "held": 2
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 1,
+      "transcript": "nor this"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 1,
+      "text": "nor this",
+      "trace_id": "trace-2",
+      "vocab_run_id": 4,
+      "turn_ms": 0
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 2
+    }
+   ],
+   "answers": [
+    3,
+    4
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "not kept",
+     "latency_ms": 100
+    },
+    {
+     "session": "a-session",
+     "trace_id": "trace-2",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "nor this",
+     "latency_ms": 0
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 1044,
+     "sha256": "c8293da23fe1e135c8f174bf842667d1d04e1a5f7b06076dc2d2e04de46b4296"
+    },
+    {
+     "trace_id": "trace-2",
+     "bytes": 46,
+     "sha256": "062f2664037bfff96be1a9d147f020a1cab4f08325bd854422c15811b90ef586"
+    }
+   ]
+  },
+  {
+   "story": "of a long turn the last two minutes are kept",
+   "steps": [
+    {
+     "heard": 3000000,
+     "trace_id": "trace-1",
+     "held": 3000000
+    },
+    {
+     "heard": 839999,
+     "trace_id": "trace-1",
+     "held": 3839999
+    },
+    {
+     "heard": 1,
+     "trace_id": "trace-1",
+     "held": 3840000
+    },
+    {
+     "heard": 1,
+     "trace_id": "trace-1",
+     "held": 3840000
+    },
+    {
+     "heard": 500000,
+     "trace_id": "trace-1",
+     "held": 3840000
+    },
+    {
+     "wait": 130
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 0,
+      "transcript": "long"
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 0,
+      "text": "long",
+      "trace_id": "trace-1",
+      "vocab_run_id": 2,
+      "turn_ms": 130000
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    }
+   ],
+   "answers": [
+    2
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "long",
+     "latency_ms": 130000
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 3840044,
+     "sha256": "3a5f0828816b44f5243c6a8a4ce3cba04dd6609e450d0667721bc62d201c6761"
+    }
+   ]
+  },
+  {
+   "story": "what the engine says that is no event of a turn changes nothing",
+   "steps": [
+    {
+     "heard": 10,
+     "trace_id": "trace-1",
+     "held": 10
+    },
+    {
+     "said": {
+      "type": "Connected"
+     },
+     "told": null,
+     "trace_id": "trace-1",
+     "held": 10,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Other"
+     },
+     "told": null,
+     "trace_id": "trace-1",
+     "held": 10,
+     "ended": 0
+    },
+    {
+     "wait": 1
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 3,
+      "transcript": "still the first turn",
+      "end_of_turn_confidence": null
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 3,
+      "text": "still the first turn",
+      "trace_id": "trace-1"
+     },
+     "trace_id": "trace-1",
+     "held": 10,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 3,
+      "transcript": "a confidence of nothing",
+      "end_of_turn_confidence": 0
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 3,
+      "text": "a confidence of nothing",
+      "trace_id": "trace-1",
+      "confidence": 0.0
+     },
+     "trace_id": "trace-1",
+     "held": 10,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 3,
+      "transcript": "one in a text",
+      "end_of_turn_confidence": "0.33349"
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 3,
+      "text": "one in a text",
+      "trace_id": "trace-1",
+      "confidence": 0.333
+     },
+     "trace_id": "trace-1",
+     "held": 10,
+     "ended": 0
+    },
+    {
+     "wait": 1
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "EndOfTurn",
+      "turn_index": 3,
+      "transcript": "ended",
+      "end_of_turn_confidence": 0.0005
+     },
+     "told": {
+      "type": "turn",
+      "event": "end",
+      "turn": 3,
+      "text": "ended",
+      "trace_id": "trace-1",
+      "confidence": 0.001,
+      "vocab_run_id": 9,
+      "turn_ms": 2000
+     },
+     "trace_id": "",
+     "held": 0,
+     "ended": 1
+    }
+   ],
+   "answers": [
+    9
+   ],
+   "written": [
+    {
+     "session": "a-session",
+     "trace_id": "trace-1",
+     "provider": "deepgram",
+     "model": "flux-general-en",
+     "keyterms": [
+      "Clarp",
+      "two words"
+     ],
+     "capacity": 50,
+     "transcript": "ended",
+     "latency_ms": 2000
+    }
+   ],
+   "kept": [
+    {
+     "trace_id": "trace-1",
+     "bytes": 54,
+     "sha256": "09146f2fd83fe49f747db81faf234eedb199c3a751c7bf87d31c86115981f8bc"
+    }
+   ]
+  },
+  {
+   "story": "confidences are told to three places",
+   "steps": [
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.0005
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.001
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.0015
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.002
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.0025
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.003
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.1235
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.123
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.9995
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 1.0
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.99949
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.999
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 1
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 1.0
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.5
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.5
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 1e-09
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.0
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.123456789
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.123
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 2.675
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 2.675
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": -0.0004
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": -0.0
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.0625
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.062
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.1875
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.188
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    },
+    {
+     "said": {
+      "type": "TurnInfo",
+      "event": "Update",
+      "turn_index": 0,
+      "transcript": "a",
+      "end_of_turn_confidence": 0.3125
+     },
+     "told": {
+      "type": "turn",
+      "event": "update",
+      "turn": 0,
+      "text": "a",
+      "trace_id": "trace-1",
+      "confidence": 0.312
+     },
+     "trace_id": "trace-1",
+     "held": 0,
+     "ended": 0
+    }
+   ],
+   "answers": [],
+   "written": [],
+   "kept": []
+  }
+ ],
+ "wavs": [
+  {
+   "bytes": 0,
+   "head": "524946462400000057415645666d74201000000001000100803e0000007d0000020010006461746100000000",
+   "whole": 44,
+   "sha256": "ba584a378b11d9e9c98736fd8c256fe1453a84ee4139416d24b07acff424f0fb"
+  },
+  {
+   "bytes": 1,
+   "head": "524946462500000057415645666d74201000000001000100803e0000007d0000020010006461746101000000",
+   "whole": 45,
+   "sha256": "beef4a05db2f89df70b2f12475040fbc70d9204f1a6a38f2b7a6497dd54950f8"
+  },
+  {
+   "bytes": 2,
+   "head": "524946462600000057415645666d74201000000001000100803e0000007d0000020010006461746102000000",
+   "whole": 46,
+   "sha256": "f84825ff8ccef4dab4373a8b4f277d0268a153b9ac632a6908ae0dd9a7e51cc2"
+  },
+  {
+   "bytes": 3,
+   "head": "524946462700000057415645666d74201000000001000100803e0000007d0000020010006461746103000000",
+   "whole": 47,
+   "sha256": "48d5a084b5460e0b7b64bcd3d93fad57a4c0b118e5fe483ff1ec83dfb7ec4dc9"
+  },
+  {
+   "bytes": 320,
+   "head": "524946466401000057415645666d74201000000001000100803e0000007d0000020010006461746140010000",
+   "whole": 364,
+   "sha256": "e8cd37b3f51eb96ba606afc7177db7335455f663eddc04a1ba5e7d6c19abfac3"
+  },
+  {
+   "bytes": 32000,
+   "head": "52494646247d000057415645666d74201000000001000100803e0000007d00000200100064617461007d0000",
+   "whole": 32044,
+   "sha256": "59e0c42c00102a8163b57a983cffb185fb89f12108bf422a384acc74dc63856a"
+  },
+  {
+   "bytes": 65537,
+   "head": "524946462500010057415645666d74201000000001000100803e0000007d0000020010006461746101000100",
+   "whole": 65581,
+   "sha256": "3a81717a1d1b297f65f69ef89dff449d0ae57d77165f772077382c68291bf822"
+  }
+ ]
+}

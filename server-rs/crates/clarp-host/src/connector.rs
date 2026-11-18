@@ -343,7 +343,7 @@ impl Connector {
 
 /// How the connector trusts the relay to be the relay: by the authorities the web is trusted
 /// by, with nothing of this machine's own added and nothing left to a default.
-fn trust_of_the_web() -> Option<tokio_tungstenite::Connector> {
+pub(crate) fn trust_of_the_web() -> Option<tokio_tungstenite::Connector> {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let provider = Arc::new(rustls::crypto::ring::default_provider());
