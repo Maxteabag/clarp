@@ -15,6 +15,7 @@ use clarp_kernel::oracle::delegations::{
     normalize_id,
 };
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 fn vectors() -> Value {
     serde_json::from_str(include_str!("fixtures/oracle-delegation-vectors.json")).unwrap()
@@ -45,6 +46,11 @@ fn same_refusal(step: &Value, refused: &Refused) {
         json!([step["refused"], step["words"]]),
         "{step}"
     );
+}
+
+fn by_id(rows: &[Delegation]) -> BTreeMap<&str, &Delegation> {
+    let rows = rows.iter().map(|row| (row.delegation_id.as_str(), row));
+    rows.collect()
 }
 
 /// The whole book, by the ids of its rows, as the Python Host's table is written down.
@@ -103,6 +109,7 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
     let (mut steps, mut refusals, mut admitted, mut ended) = (0, 0, 0, 0);
     for story in vectors["stories"].as_array().unwrap() {
         let mut book = Book::default();
+        let mut before: Vec<Delegation> = Vec::new();
         for step in story["steps"].as_array().unwrap() {
             let at = step["at"].as_i64().unwrap();
             let owner = step["owner"].as_str().unwrap_or(ADMINISTRATOR);
@@ -154,6 +161,13 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                             }
                         }
                     }
+                }
+                "dispatched" => {
+                    let waits = step["queued"] == true && step["queue"] == "queued";
+                    let id = text(step, "delegation_id");
+                    let row = book.dispatched(id, text(step, "backend"), waits, at);
+                    let row = row.map_or(Value::Null, Delegation::told);
+                    assert_eq!(row, step["answer"], "{step}");
                 }
                 "completed" => {
                     let done = book.completed(
@@ -255,7 +269,7 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                         }
                         let ids: Vec<String> =
                             found.iter().map(|one| one.delegation_id.clone()).collect();
-                        let called_off = book.called_off(&ids, owner, at);
+                        let called_off = book.called_off(&ids, at);
                         let called_off: Vec<&Delegation> = called_off.iter().collect();
                         assert_eq!(told(&called_off), step["answer"], "{step}");
                         let waited = found.iter().filter(|one| one.waited);
@@ -286,19 +300,27 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                 other => panic!("a step of a kind this test does not know: {other}"),
             }
             assert_eq!(whole(&book), step["rows"], "after {step}");
-            // What changed is what the Host is given to write, and nothing is given twice.
+            // What the Host is given to write is exactly what changed in this step, each
+            // row as it is now, and nothing is given twice.
             let written = book.written();
             assert!(book.written().is_empty());
-            for row in &written {
-                assert_eq!(book.get(&row.delegation_id), Some(row));
-            }
+            let now: BTreeMap<&str, &Delegation> = by_id(book.rows());
+            let was: BTreeMap<&str, &Delegation> = by_id(&before);
+            let changed = now.iter().filter(|(id, row)| was.get(*id) != Some(*row));
+            let changed: Vec<&Delegation> = changed.map(|(_, row)| *row).collect();
+            let mut given: Vec<&Delegation> = written.iter().collect();
+            given.sort_by(|one, other| one.delegation_id.cmp(&other.delegation_id));
+            assert_eq!(given, changed, "after {step}");
+            before = book.rows().to_vec();
             steps += 1;
         }
-        // A book that is kept and read again is the same book.
-        let again = Book::kept(book.rows().to_vec());
-        assert_eq!(whole(&again), whole(&book));
+        // A book that is kept and read again, its rows in whatever order they come back in,
+        // is the same book in the same order.
+        let mut kept = book.rows().to_vec();
+        kept.reverse();
+        assert_eq!(Book::kept(kept).rows(), book.rows(), "{}", story["name"]);
     }
-    assert_eq!((steps, refusals, admitted, ended), (181, 27, 55, 16));
+    assert_eq!((steps, refusals, admitted, ended), (191, 28, 57, 18));
 }
 
 #[test]
@@ -320,6 +342,42 @@ fn an_id_of_a_delegation_is_short_and_of_plain_signs() {
             (400, "invalid delegation_id"),
             "{none:?}"
         );
+    }
+    // Two hundred are shown at most, and one at least, whatever number is asked for.
+    let mut book = Book::default();
+    let theo = Agent {
+        agent_id: "a-theo",
+        janitor: false,
+    };
+    for number in 0..205_i64 {
+        let id = format!("d-{number}");
+        let asked = Asked {
+            delegation_id: &id,
+            session: "theo",
+            request: "Look.",
+            owner: ADMINISTRATOR,
+        };
+        assert!(matches!(
+            book.take(&asked, Some(theo), false, number),
+            Ok(Taken::ToAdmit(_))
+        ));
+        assert!(book.completed(&format!("oracle-{id}"), "m-1", "Done.", 1_000 + number));
+    }
+    for (asked, shown) in [
+        (500, 200),
+        (200, 200),
+        (201, 200),
+        (199, 199),
+        (1, 1),
+        (0, 1),
+        (-7, 1),
+    ] {
+        assert_eq!(
+            book.undelivered(ADMINISTRATOR, asked).len(),
+            shown,
+            "{asked}"
+        );
+        assert_eq!(book.recent(ADMINISTRATOR, asked).len(), shown, "{asked}");
     }
     // What is over is told as over, in the words a phone reads.
     for (status, word, active) in [

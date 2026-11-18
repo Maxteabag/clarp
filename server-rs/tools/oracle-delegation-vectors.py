@@ -61,6 +61,9 @@ STORIES = [
           op('failed', delegation_id='d-1', reason='too late'),
           op('failed_for_trace', trace='oracle-d-1', reason='too late'),
           op('started', trace='oracle-d-1'),
+          op('dispatched', delegation_id=' d-1 ', backend='thread-9', queued=False),
+          op('dispatched', delegation_id='d-1', backend='thread-9', queued=True, queue='queued'),
+          op('dispatched', delegation_id='d-0', backend='thread-9', queued=False),
           dispatch('d-1'),
           dispatch('d-1', request='Look into the other pump.'),
           op('undelivered'),
@@ -77,7 +80,10 @@ STORIES = [
           dispatch('d-2', queued=True, queue='queued', backend='thread-7'),
           op('undelivered'),
           op('active', agent='theo', trace='oracle-d-2'),
-          op('started', trace='oracle-d-2'),
+          op('acknowledge', delegation_id='d-2'),
+          op('cancel', delegation_id='d-2'),
+          op('started', trace=' oracle-d-2 '),
+          op('acknowledge', delegation_id='d-2'),
           op('started', trace='oracle-d-2'),
           op('started', trace='oracle-d-0'),
           op('started', trace=''),
@@ -118,7 +124,7 @@ STORIES = [
           dispatch('d-3'),
           op('failed', delegation_id=' d-3 ', reason=LONG),
           dispatch('d-4'),
-          op('failed_for_trace', trace='oracle-d-4', reason='The tool gave up.'),
+          op('failed_for_trace', trace=' oracle-d-4 ', reason='The tool gave up.'),
           op('failed_for_trace', trace='oracle-d-4', reason='again'),
           op('failed_for_trace', trace='oracle-d-0', reason='nobody'),
           dispatch('d-5'),
@@ -157,7 +163,7 @@ STORIES = [
           op('recent'),
           op('stop', session='theo'),
           op('undelivered'), op('undelivered', owner=PHONE),
-          op('stop', session='theo', owner=PHONE),
+          op('stop', session='theo', owner=' ' + PHONE + ' '),
           op('recent', all_of=PHONE)),
     story('a stop whose turn failed or ended while it was stopped',
           dispatch('d-1'),
@@ -176,6 +182,8 @@ STORIES = [
           dispatch('sandra-' + HEX[1:] + '0', request=ASK.replace(chr(0xf8), chr(0xd8))),
           dispatch('sandra-' + HEX[2:] + '00', request='x ' + ASK),
           dispatch('sandra-' + HEX[3:] + '000', request='Look into the pump.'),
+          dispatch('sandra-' + HEX[4:] + '0000', request=ASK.replace('Live-samtale', 'samtale')),
+          dispatch('sandra-' + HEX[5:] + '00000', request=ASK[:len(ASK) // 2]),
           dispatch('b-late'), dispatch('a-late'),
           op('completed', trace='oracle-sandra-' + HEX, message='m-1', text='Yes.'),
           op('completed', trace='oracle-sandra-' + HEX[:23], message='m-2', text='Yes.'),
@@ -185,6 +193,8 @@ STORIES = [
           op('completed', trace='oracle-sandra-' + HEX[1:] + '0', message='m-6', text='Yes.'),
           op('completed', trace='oracle-sandra-' + HEX[2:] + '00', message='m-7', text='Yes.'),
           op('failed', delegation_id='sandra-' + HEX[3:] + '000', reason='no'),
+          op('completed', trace='oracle-sandra-' + HEX[4:] + '0000', message='m-9', text='Yes.'),
+          op('completed', trace='oracle-sandra-' + HEX[5:] + '00000', message='m-10', text='Yes.'),
           op('undelivered'),
           op('recent'),
           op('acknowledge', delegation_id='sandra-' + HEX),
@@ -319,6 +329,16 @@ def run() -> dict:
             said['agent'] = None if agent is None else {'session': agent['session'], 'janitor': bool(agent['is_janitor'])}
             said['admitted'] = world.get('admitted')
             return said
+        if kind == 'dispatched':
+            # What admits a turn says of it, said of a delegation as it is.
+            if step.get('queue'):
+                db.conn().execute(
+                    'INSERT OR REPLACE INTO queued_turns (queue_id, agent_id, session, text, trace_id, status, enqueued_at)'
+                    ' VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    ('oracle-' + step['delegation_id'].strip(), ids['theo'], 'theo', 'x', 'oracle-' + step['delegation_id'].strip(),
+                     step['queue'], clock['now']))
+            return tried(lambda: told(book.mark_dispatched(step['delegation_id'], backend_session_id=step['backend'],
+                                                           queued=step['queued'])))
         if kind == 'completed':
             return tried(lambda: book.complete_for_trace(trace_id=step['trace'], message_id=step['message'], text=step['text']))
         if kind == 'failed':

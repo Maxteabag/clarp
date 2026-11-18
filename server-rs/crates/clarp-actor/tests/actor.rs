@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::conversation::Which;
-use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder};
+use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder, TurnFate};
 use clarp_backend::Backend;
 use clarp_backend::claude::Claude;
 use clarp_backend::scripted::Scripted;
@@ -1755,4 +1755,95 @@ fn a_turn_that_is_stopped_for_its_account_waits_and_is_taken_up() {
         actor.status().last.map(|last| last.outcome),
         Some(Outcome::Completed)
     );
+}
+
+#[test]
+fn what_became_of_the_turn_of_a_message_is_told_by_the_messages_id() {
+    let mut world = World::new("fate");
+    let mut actor = world.open();
+    let fate = |actor: &Actor, id: &str| actor.fate_of(id).unwrap();
+    // A message nobody sent has no turn.
+    assert_eq!(fate(&actor, "u-0"), TurnFate::Unknown);
+
+    // One that runs, and two that were left for later and wait behind it.
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    world.send(&mut actor, "u-2", "then this", Admission::Later);
+    world.send(&mut actor, "u-3", "and this", Admission::Later);
+    assert_eq!(fate(&actor, "u-1"), TurnFate::Runs);
+    assert_eq!(fate(&actor, "u-2"), TurnFate::Waits);
+    assert_eq!(fate(&actor, "u-3"), TurnFate::Waits);
+    // One that is taken back before its turn began is gone: it will never run.
+    let now = world.tick();
+    let (was_waiting, out) = actor.withdraw(TurnId(3), "peter", now).unwrap();
+    assert!(was_waiting);
+    world.carry_out(&mut actor, out);
+    assert_eq!(fate(&actor, "u-3"), TurnFate::Gone);
+
+    // The turn answers and ends: how it ended, the row that closed it, what that row
+    // says, and when.
+    world.says(1, "the answer");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let end = actor.end_of("u-1").unwrap().unwrap();
+    assert_eq!(
+        fate(&actor, "u-1"),
+        TurnFate::Ended {
+            status: "completed".to_string(),
+            closes: end.closes.clone(),
+            text: "the answer".to_string(),
+            ended_at_ms: end.ended_at_ms,
+        }
+    );
+    assert_ne!(
+        end.closes, "u-1",
+        "the answer closed the turn, not its message"
+    );
+    // What waited runs now.
+    assert_eq!(fate(&actor, "u-2"), TurnFate::Runs);
+
+    // A turn that fails is told with the words that stand under its message, and one that
+    // ends with nothing said left nothing.
+    world.says(2, r#"{"fail": "the model said no"}"#);
+    world.exits(2, Some(1), None);
+    world.hint(&mut actor);
+    let TurnFate::Ended { status, text, .. } = fate(&actor, "u-2") else {
+        panic!("the turn that failed is over");
+    };
+    assert_eq!(status, "failed");
+    assert!(text.contains("the model said no"), "{text}");
+    world.send(&mut actor, "u-4", "say nothing", Admission::Queue);
+    world.says(4, r#"{"activity": "thinking"}"#);
+    world.exits(4, Some(0), None);
+    world.hint(&mut actor);
+    let TurnFate::Ended {
+        status,
+        closes,
+        text,
+        ..
+    } = fate(&actor, "u-4")
+    else {
+        panic!("the turn that said nothing is over");
+    };
+    assert_eq!(
+        (status.as_str(), closes.as_str(), text.as_str()),
+        ("completed", "u-4", "")
+    );
+
+    // A turn that is stopped ends with no words of its own.
+    world.send(&mut actor, "u-5", "go on", Admission::Queue);
+    let now = world.tick();
+    let (told, out) = actor.stop("peter", now).unwrap();
+    assert_eq!(told, 1);
+    world.carry_out(&mut actor, out);
+    assert_eq!(
+        fate(&actor, "u-5"),
+        TurnFate::Runs,
+        "until the tool is gone"
+    );
+    world.exits(5, None, Some(15));
+    world.hint(&mut actor);
+    let TurnFate::Ended { status, text, .. } = fate(&actor, "u-5") else {
+        panic!("the turn that was stopped is over");
+    };
+    assert_eq!((status.as_str(), text.as_str()), ("interrupted", ""));
 }
