@@ -127,9 +127,19 @@ def test_section_eight_pure_verdicts():
         status = None
         prior = {}
         for step in case["steps"]:
+            if step["action"] == "read":
+                from lib import json_depth
+                assert json_depth.too_deep(step["body_text"].encode()) == (step["http"] == 400), case["name"]
+                status = "ready" if step["http"] == 201 else status    # the body read is a whole publish
+                assert status == step["stored_status"] and len(prior) == step["submission_count"], case["name"]
+                continue
             try:
+                if "envelope_text" in step or "envelope" in step:
+                    spec.envelope(json.loads(step["envelope_text"]) if "envelope_text" in step
+                                  else step["envelope"])
                 if step["action"] == "submit":
-                    body = step["body"]
+                    body = (json.loads(step["body_text"], object_pairs_hook=spec.JsonObject)
+                            if "body_text" in step else step["body"])
                     sid = body["submission_id"]
                     result = spec.admit(case["artifact_id"], stored, status, body, prior.get(sid))
                     assert result["repeat"] == (sid in prior)
@@ -151,6 +161,8 @@ def test_section_eight_pure_verdicts():
                         assert spec.content_identity(stored["spec"], stored["version"]) == step["identity"]
             except spec.Refusal as exc:
                 assert exc.triple() == step.get("error"), case["name"]
+            except Exception as exc:  # every verdict is a refusal triple, never another error
+                pytest.fail(f"{case['name']}: {exc!r}")
             else:
                 assert "error" not in step, case["name"]
             assert status == step["stored_status"] and len(prior) == step["submission_count"], case["name"]
@@ -245,3 +257,56 @@ def test_closed_tree_and_expression_contract(form, defect, code, path):
         nodes["topic"]["props"]["text"] = chr(0xD800)
     with refused(code, path):
         spec.validate(form)
+
+
+# R74: the branches removed from check_unique, _elements and _expression were never the ones that
+# decided. Each input below reaches where they stood; the verdict is the earlier check's, the
+# same with them as without them (these tests pass on main too).
+
+def test_a_duplicate_key_inside_the_spec_is_refused_by_the_canonical_walk_first(form):
+    text = json.dumps(form).replace('"text": "Build decision"', '"text": "Build decision", "text": "Again"')
+    payload = json.loads(text, object_pairs_hook=spec.JsonObject)
+    with refused("invalid_object", "/spec/elements/topic/props"):
+        spec.validate(payload)
+
+
+def test_a_spec_nested_past_64_is_refused_by_the_canonical_walk_first(form):
+    deep = node = []
+    for _ in range(70):
+        node.append([])
+        node = node[0]
+    form["spec"]["state"]["deep"] = deep
+    # The walk counts from the payload: spec 1, state 2, deep 3; level 65 is refused.
+    with refused("invalid_json", "/spec/state/deep" + "/0" * 62):
+        spec.validate(form)
+
+
+def test_an_element_named_on_is_refused_by_the_on_rule_first(form):
+    form["spec"]["elements"]["on"] = {"type": "divider", "props": {}}
+    form["spec"]["elements"]["root"]["children"].append("on")
+    with refused("unknown_key", "/spec/elements/on"):
+        spec.validate(form)
+
+
+def test_a_bound_pointer_that_is_no_identifier_is_refused_as_an_expression(form):
+    form["spec"]["elements"]["selection"]["props"]["value"] = {"$bindState": "/not an id"}
+    with refused("expression", "/spec/elements/selection/props/value"):
+        spec.validate(form)
+
+
+@pytest.mark.parametrize("field,value", [("title", 7), ("summary", None), ("status", ["ready"]), ("title", 1.5)])
+def test_an_update_whose_title_summary_or_status_is_not_text_is_refused_at_that_field(tmp_path, form, field, value):
+    """R72: refused with the contract's triple at the field, never an interpreter error."""
+    from lib import agents, artifacts
+    agents.create_agent(persona="Builder", session="build", voice_id="v", cwd=str(tmp_path))
+    ident = artifacts.create(type="render_spec", session="build", title="Build", payload=form)["artifact_id"]
+    revised = {**form, "version": "build-2"}
+    try:
+        artifacts.update(ident, {"payload": revised, "expected_version": "build-1", field: value})
+    except spec.Refusal as exc:
+        assert exc.triple() == spec.Refusal("invalid_json", "/" + field).triple()
+    except Exception as exc:  # the defect: TypeError or AttributeError out of publish()
+        pytest.fail(f"not refused as the contract says: {exc!r}")
+    else:
+        pytest.fail("accepted")
+    assert artifacts.get(ident)["title"] == "Build"
