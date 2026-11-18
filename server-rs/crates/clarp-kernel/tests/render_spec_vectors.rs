@@ -168,7 +168,7 @@ fn a_body_is_read_and_written_canonically_as_the_python_host_does() {
             example["sha256"]
         );
     }
-    assert_eq!((read, written, refused, not_json), (53, 16, 37, 37));
+    assert_eq!((read, written, refused, not_json), (56, 16, 40, 39));
 }
 
 #[test]
@@ -293,6 +293,23 @@ fn the_reference_vectors_play_through_as_the_python_host_plays_them() {
         let mut kept: BTreeMap<String, (String, bool)> = BTreeMap::new();
         for step in flow["steps"].as_array().unwrap() {
             steps_played += 1;
+            // The texts besides the payload are checked first (R71, R72).
+            if let Some(texts) = step["envelope"].as_str() {
+                let texts = json::read(texts.as_bytes()).unwrap();
+                let given = given_texts(&texts);
+                if let Err(refusal) = spec::envelope(&given) {
+                    let triple = refusal.triple(Ok(&catalog));
+                    assert_eq!(triple, step["refused"], "{name}");
+                    assert_eq!(triple, step["expected_error"], "{name}");
+                    continue;
+                }
+            }
+            // A body is read, or refused as too deep before it is parsed (R73).
+            if step["action"] == "read" {
+                let read = json::read(step["text"].as_str().unwrap().as_bytes());
+                assert_eq!(json!(read.is_some()), step["read"], "{name}");
+                continue;
+            }
             let data = json::read(step["text"].as_str().unwrap().as_bytes()).unwrap();
             if step["action"] == "submit" {
                 let payload = stored.clone().unwrap_or(J::Null);
@@ -366,8 +383,41 @@ fn the_reference_vectors_play_through_as_the_python_host_plays_them() {
     }
     assert_eq!(
         (vectors["flows"].as_array().unwrap().len(), steps_played),
-        (35, 56)
+        (47, 72)
     );
+}
+
+/// The texts of an object, by their keys.
+fn given_texts(texts: &J) -> Vec<(&str, &J)> {
+    let fields = texts.object().unwrap();
+    fields
+        .iter()
+        .map(|(key, value)| (key.as_str().unwrap(), value))
+        .collect()
+}
+
+#[test]
+fn the_texts_besides_a_payload_are_checked_as_the_python_host_checks_them() {
+    let (vectors, catalog) = (vectors(), catalog());
+    let (mut taken, mut refused) = (0, 0);
+    for case in vectors["envelopes"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let texts = json::read(case["text"].as_str().unwrap().as_bytes()).unwrap();
+        match spec::envelope(&given_texts(&texts)) {
+            Ok(()) => {
+                assert!(
+                    case["refused"].is_null(),
+                    "{name}: taken here, refused there"
+                );
+                taken += 1;
+            }
+            Err(refusal) => {
+                assert_eq!(refusal.triple(Ok(&catalog)), case["refused"], "{name}");
+                refused += 1;
+            }
+        }
+    }
+    assert_eq!((taken, refused), (7, 26));
 }
 
 #[test]

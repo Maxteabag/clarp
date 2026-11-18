@@ -1399,6 +1399,28 @@ pub fn routes() -> Router<App> {
 mod tests {
     use super::*;
 
+    /// How deep a body of an ordinary route (`POST /decisions`, `/decisions/<id>/...`,
+    /// `/artifacts/<id>` for a kind other than a render spec) may nest, measured through its
+    /// reader: the outermost container is the first level. serde_json stops by its own limit,
+    /// below the 512 levels of the render spec's reader (`docs/differences.md`).
+    #[test]
+    fn an_ordinary_body_is_read_to_serde_jsons_depth_and_refused_below_it() {
+        // `{"a":0}`, `{"a":[0]}`, `{"a":[[0]]}`: the object and the lists inside it.
+        let nested = |levels: usize| {
+            let inner = levels - 1;
+            format!("{{\"a\":{}0{}}}", "[".repeat(inner), "]".repeat(inner))
+        };
+        let deepest = (1..=600)
+            .take_while(|levels| object(nested(*levels).as_bytes()).is_ok())
+            .last();
+        assert_eq!(deepest, Some(127));
+        let refused = object(nested(128).as_bytes()).unwrap_err();
+        assert_eq!(
+            (refused.status(), refused.message()),
+            (StatusCode::BAD_REQUEST, "json object required")
+        );
+    }
+
     #[test]
     fn a_list_leaves_a_plans_history_out_and_says_what_it_left_out() {
         let row = json!({

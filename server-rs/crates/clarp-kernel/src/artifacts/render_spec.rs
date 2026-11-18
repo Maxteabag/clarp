@@ -111,6 +111,32 @@ pub const STRUCTURAL_KEYS: [&str; 26] = [
     "$bindState",
 ];
 
+/// The texts of a publication or a revision besides its payload, in the order they are
+/// checked, by the request's own keys.
+pub const ENVELOPE_TEXTS: [&str; 6] = [
+    "session",
+    "title",
+    "summary",
+    "status",
+    "reference_id",
+    "artifact_id",
+];
+
+/// Every envelope text given is text that UTF-8 can carry, checked before anything else
+/// reads it (`render_spec.envelope`, the reference's PR 438: R71 and R72). A value that is
+/// no text, null among them, or a text with half a pair is refused at its field.
+pub fn envelope(given: &[(&str, &J)]) -> Result<(), Refusal> {
+    for key in ENVELOPE_TEXTS {
+        let found = given.iter().find(|(name, _)| *name == key);
+        if let Some((_, value)) = found
+            && !matches!(value, J::Text(Text::Valid(_)))
+        {
+            return refuse("invalid_json", &format!("/{key}"));
+        }
+    }
+    Ok(())
+}
+
 /// A refusal: its code and the pointer to what it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
