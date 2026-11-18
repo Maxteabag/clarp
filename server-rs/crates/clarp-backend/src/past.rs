@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use clarp_kernel::python;
+use clarp_kernel::{native_session_name as one_name, python};
 use serde_json::{Value, json};
 
 /// How many lines from the start of a transcript are read, how much of its end, and how
@@ -583,11 +583,6 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
 // directory (`cache/last_conversations.json`). The rule is the Python Host's
 // (`server/lib/agy_transcript.py`, `list_sessions`), held by
 // `tests/fixtures/agy-sessions-vectors.json`.
-
-/// A name that is the name of one thing in a directory, and not a way out of it.
-fn one_name(name: &str) -> bool {
-    !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != ".."
-}
 
 /// Whether agy still has the conversation of this name. It lets go of all but the newest
 /// few hundred, and what it lets go of leaves its transcript behind: only the conversation's

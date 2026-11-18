@@ -333,6 +333,9 @@ fn seen_models(tool: &str, declared: &Value, said: Option<&str>, observed_at: &s
     match (tool, said) {
         ("codex", Some(said)) => codex_models(said, observed_at),
         ("claude", Some(kept)) => claude_models(kept, &declared["efforts"], observed_at),
+        ("opencode" | "deepseek", Some(said)) => {
+            clarp_kernel::opencode::models(said, tool == "deepseek", observed_at)
+        }
         ("agy", Some(said)) => agy_models(said, observed_at),
         ("grok", Some(said)) => grok_models(said, &declared["efforts"], observed_at),
         ("muse", Some(said)) => muse_models(said, &declared["efforts"], observed_at),

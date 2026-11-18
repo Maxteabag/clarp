@@ -131,7 +131,7 @@ fn step_of(row: &Map<String, Value>) -> Option<i64> {
 }
 
 /// A text with every word begun with a capital and gone on in small letters (`str.title`).
-fn title(text: &str) -> String {
+pub(super) fn title(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut within = false;
     for sign in text.chars() {
@@ -365,7 +365,7 @@ fn cell_of(used: &Used) -> (Value, Option<(String, String)>) {
 
 /// The cells of a turn with every run of looking around as one cell, a line for each thing
 /// that was looked at (`opencode_transcript._coalesce_exploration`).
-fn gathered(cells_of_turn: Vec<(Value, Option<(String, String)>)>) -> Vec<Value> {
+pub(super) fn gathered(cells_of_turn: Vec<(Value, Option<(String, String)>)>) -> Vec<Value> {
     fn one(run: &mut Vec<(Value, (String, String))>, out: &mut Vec<Value>) {
         if run.is_empty() {
             return;

@@ -19,6 +19,8 @@
 //! A spool that says "spawned" belongs to a turn that must never be started again. A spool that
 //! does not belongs to a turn whose program was never given anything to do.
 
+mod opencode;
+
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -27,14 +29,15 @@ use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, PoisonError, TryLockError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, TryLockError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use clarp_shim::{EXIT_NOT_STARTED, EXIT_TURN_TAKEN, Reply, Request, SOCKET_ENV, take_lines};
 use clarp_spool::{Entry, MAX_OUTPUT_CHUNK, Record, ShimEvent, SpoolWriter};
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
-use nix::sys::signal::{SigSet, Signal, killpg};
+use nix::sys::signal::{SigSet, Signal, kill, killpg};
+use nix::sys::wait::{Id, WaitPidFlag, waitid};
 use nix::unistd::{Pid, setsid};
 
 /// How long a tool gets to end by itself when the shim is told to go.
@@ -46,6 +49,7 @@ const HOOK_WAITS: Duration = Duration::from_millis(250);
 const READ_AT_ONCE: usize = 64 * 1024;
 
 struct Args {
+    before_stop: Option<(Signal, Duration)>,
     spool: PathBuf,
     socket: PathBuf,
     cwd: Option<PathBuf>,
@@ -57,11 +61,25 @@ struct Args {
 }
 
 fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
+    let mut before_stop = None;
     let (mut spool, mut socket, mut cwd, mut stdin_file) = (None, None, None, None);
     let mut named_session = None;
     let mut prompt_as_file = false;
     loop {
         match argv.next().as_deref() {
+            Some("--before-stop") => {
+                let signal = argv
+                    .next()
+                    .ok_or("missing direct child signal")?
+                    .parse()
+                    .map_err(|_| "invalid direct child signal")?;
+                let ms: u64 = argv
+                    .next()
+                    .ok_or("missing stop wait")?
+                    .parse()
+                    .map_err(|_| "invalid stop wait")?;
+                before_stop = Some((signal, Duration::from_millis(ms)));
+            }
             Some("--spool") => spool = argv.next().map(PathBuf::from),
             Some("--socket") => socket = argv.next().map(PathBuf::from),
             Some("--named-session") => {
@@ -77,6 +95,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
     }
     let program = argv.next().ok_or("missing PROGRAM after --")?;
     Ok(Args {
+        before_stop,
         spool: spool.ok_or("missing --spool FILE")?,
         socket: socket.ok_or("missing --socket PATH")?,
         cwd,
@@ -254,7 +273,23 @@ fn stdin_thread(mut stdin: ChildStdin, requests: mpsc::Receiver<ToStdin>) {
     // Dropping the handle closes the pipe.
 }
 
+#[derive(Default)]
+enum StopStage {
+    #[default]
+    Ready,
+    Asked,
+    Signalled,
+}
+
+struct BeforeStop {
+    signal: Signal,
+    wait: Duration,
+    stage: Mutex<StopStage>,
+    changed: Condvar,
+}
+
 struct Control {
+    before_stop: Option<BeforeStop>,
     pid: u32,
     exited: Arc<AtomicBool>,
     to_spool: Sender<ToSpool>,
@@ -308,6 +343,29 @@ impl Control {
 
     fn stop(&self, grace_ms: u64) {
         if self.exited.load(Ordering::SeqCst) {
+            return;
+        }
+        if let Some(early) = &self.before_stop {
+            let mut stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
+            if !matches!(*stage, StopStage::Ready) || self.exited.load(Ordering::SeqCst) {
+                return;
+            }
+            *stage = StopStage::Asked;
+            let pid = Pid::from_raw(self.pid as i32);
+            let _ = kill(pid, early.signal);
+            let (stage, _) = early
+                .changed
+                .wait_timeout_while(stage, early.wait, |_| !self.exited.load(Ordering::SeqCst))
+                .unwrap_or_else(PoisonError::into_inner);
+            Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
+            // This stop runs after the socket reply on a dedicated thread. Keep
+            // the process group reserved until every descendant has had its grace.
+            drop(stage);
+            std::thread::sleep(Duration::from_millis(grace_ms));
+            Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
+            let mut stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
+            *stage = StopStage::Signalled;
+            early.changed.notify_all();
             return;
         }
         Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
@@ -511,6 +569,12 @@ fn run(args: Args) -> Result<u8, String> {
         }));
     }
     let control = Arc::new(Control {
+        before_stop: args.before_stop.map(|(signal, wait)| BeforeStop {
+            signal,
+            wait,
+            stage: Mutex::default(),
+            changed: Condvar::new(),
+        }),
         pid,
         exited: exited.clone(),
         to_spool: to_spool.clone(),
@@ -525,13 +589,38 @@ fn run(args: Args) -> Result<u8, String> {
             }
         });
     }
+    let listener_control = control.clone();
     std::thread::spawn(move || {
+        let control = listener_control;
         for connection in listener.incoming().flatten() {
             let control = control.clone();
             std::thread::spawn(move || serve(connection, &control));
         }
     });
 
+    if let Some(early) = &control.before_stop {
+        // Observe exit without reaping: while Stop owns the group, its numeric
+        // id must not be reusable between the gentle signal and the final kill.
+        loop {
+            match waitid(
+                Id::Pid(Pid::from_raw(pid as i32)),
+                WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT,
+            ) {
+                Ok(_) => break,
+                Err(Errno::EINTR) => continue,
+                Err(e) => return Err(format!("observing {}: {e}", args.program)),
+            }
+        }
+        exited.store(true, Ordering::SeqCst);
+        let stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
+        early.changed.notify_all();
+        drop(
+            early
+                .changed
+                .wait_while(stage, |s| matches!(s, StopStage::Asked))
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+    }
     let status = child
         .wait()
         .map_err(|e| format!("waiting for {}: {e}", args.program))?;
@@ -552,7 +641,18 @@ fn run(args: Args) -> Result<u8, String> {
 }
 
 fn main() -> ExitCode {
-    match parse(std::env::args().skip(1)).and_then(run) {
+    let mut argv = std::env::args().skip(1).peekable();
+    if argv.peek().is_some_and(|word| word == "opencode-turn") {
+        argv.next();
+        return match opencode::run(&argv.next().unwrap_or_else(|| "opencode".into())) {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    match parse(argv).and_then(run) {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
             eprintln!("clarp-shim: {error}");

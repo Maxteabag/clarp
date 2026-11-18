@@ -110,6 +110,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D22 | A message that waits outside the conversation is a log item of its own kind (`WAITING`). When its turn starts, the same message is written as a conversation row in the write that starts the turn; the journal does this, not the actor. The row that closed the turn before is told its end after that row | The conversation is what was said to the agent, in the order it reached it. One write, so a crash cannot start a turn whose message is not in the conversation. The order is the reference's, at no cost |
 | D23 | A conversation's head revision is the revision of its newest change (its newest item in the log, or a reply being written), not of the log's newest item | A client compares the head with what it holds to know whether to ask. Bookkeeping must not make it ask |
 | D24 | Every turn's end is told to the apps, also when the next turn begins in the same write: first how the one ended, then that the next began. The answer a turn ended on is found by the row that closed it, not by being the newest row | An app that waits for an agent to be done must hear it, and the user is notified of every answer |
+| D26 | A shim never waits for the Host, and asks a tool to stop in the tool's own way through one signal to its direct child, bounded, before it signals the group | A restart must never hold a turn. The reference aborts a served tool before it ends it. OpenCode gives its abort request three seconds |
 | D25 | `busy` and `turn_started_at` in the snapshot are what an app counts a running turn from (issue 354). `busy` is true exactly while a turn holds the agent. `turn_started_at` is then the moment that turn was taken up: not when its message was accepted, not when one of its tools started, never an earlier turn's, and the same for as long as the turn runs. At rest it is 0, however the last turn ended (the Python Host kept the start of a turn that did not complete until its fix of 15 Nov 2026, PR 357) | The timer in the apps is the turn's time. Held by the conformance scenarios `turn-timer` and `turn-timer-after-stop` |
 | D15 | A conversation's revision is `seq * 2^20 + n`: the log position, with room in between for the changes of a reply that is shown while it is written and not stored. A restart that rejoins a turn writes once, so later revisions are above earlier ones | Clients sync by revision; the log gives it for free; a growing reply needs revisions of its own |
 | D16 | A turn starts at most once by construction: the shim creates the turn's spool exclusively; "spawned" is durable before the tool is given the message; the shim prints `ready`; a second shim for the turn leaves with exit 125 | Rule 1 must not depend on the server remembering what it started |
@@ -1410,6 +1411,15 @@ there, and one that began as a continuation read back without the Host's record.
 cheapest model): the picker, the 61 conversations it kept offered, an agent's turn with a command, its
 conversation in agy's own store, and that conversation taken up by another agent from agy's transcript
 (`docs/battle-test.md`). Not there yet: making a conversation of Antigravity shorter from an app.
+
+**OpenCode and DeepSeek** (18 Nov 2026). The two backends use the same OpenCode executable and native
+session store. A served turn runs under a driver in the shim binary. It contacts a per-turn server on
+loopback, verifies the continued session or creates a fresh one, writes and flushes its ID, subscribes
+to events and submits the prompt. A startup failure before any submission permits the command-line
+fallback. Stop signals the driver once and allows three seconds for its HTTP abort (D26). The picker
+reads the command's model listing once for both cards and filters the DeepSeek card by family.
+The actor counts each step's usage and the turn's own charge. Native history reads the messages and
+parts from the shared SQLite store.
 
 **A conversation made shorter** (17 Nov 2026). `POST /compact`, for Claude Code. The Python Host starts
 the tool's own screen in a terminal and types into it; this Host has no terminal. Measured first, with

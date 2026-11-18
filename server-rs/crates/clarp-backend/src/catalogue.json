@@ -666,6 +666,152 @@
    "within_s": 5.0
   }
  },
+ "opencode": {
+  "shown": {
+   "label": "OpenCode",
+   "detail": "Runs on OpenCode.",
+   "badge": "BackendOpenCode",
+   "symbol": "chevron.left.forwardslash.chevron.right",
+   "brand": {
+    "field_top": "#16352b",
+    "field_bottom": "#0b1c16",
+    "tint_dark": "#5ee4b5",
+    "tint_light": "#1f8a65"
+   },
+   "sort_index": 4,
+   "hidden": false,
+   "supports_fork": false,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": false,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": false,
+   "supports_usage": false,
+   "login_kind": "none",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "opencode",
+  "efforts": [
+   "none",
+   "minimal",
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max"
+  ],
+  "effort_scope": "model",
+  "models": [
+   {
+    "id": "opencode/big-pickle",
+    "label": "Big Pickle",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "huggingface/deepseek-ai/DeepSeek-V4.1-Flash",
+    "label": "DeepSeek V4.1 Flash (Hugging Face)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "fireworks-ai/accounts/fireworks/models/kimi-k3",
+    "label": "Kimi K3 (Fireworks)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "huggingface/zai-org/GLM-5.3",
+    "label": "GLM-5.3 (Hugging Face)",
+    "default_effort": null,
+    "supported_efforts": null
+   }
+  ],
+  "asked": {
+   "how": "listing",
+   "with": [],
+   "detail": "opencode models",
+   "source_kind": "cli_probe",
+   "known_too": false,
+   "within_s": null
+  }
+ },
+ "deepseek": {
+  "shown": {
+   "label": "DeepSeek",
+   "detail": "Runs DeepSeek models through OpenCode.",
+   "badge": "BackendDeepSeek",
+   "symbol": "water.waves",
+   "brand": {
+    "field_top": "#4d6bfe",
+    "field_bottom": "#2b47d6",
+    "tint_dark": "#6f88ff",
+    "tint_light": "#3554e6"
+   },
+   "sort_index": 5,
+   "hidden": false,
+   "supports_fork": false,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": false,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": false,
+   "supports_usage": false,
+   "login_kind": "none",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "opencode",
+  "efforts": [
+   "none",
+   "minimal",
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max"
+  ],
+  "effort_scope": "model",
+  "models": [
+   {
+    "id": "fireworks-ai/accounts/fireworks/routers/deepseek-flash-latest",
+    "label": "DeepSeek Flash (latest, Fireworks)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash",
+    "label": "DeepSeek V4.1 Flash (Fireworks)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "huggingface/deepseek-ai/DeepSeek-V4-Pro",
+    "label": "DeepSeek V4 Pro (Hugging Face)",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "huggingface/deepseek-ai/DeepSeek-V4.1-Flash",
+    "label": "DeepSeek V4.1 Flash (Hugging Face)",
+    "default_effort": null,
+    "supported_efforts": null
+   }
+  ],
+  "asked": {
+   "how": "listing",
+   "with": [],
+   "detail": "opencode models (deepseek)",
+   "source_kind": "cli_probe",
+   "known_too": false,
+   "within_s": null
+  }
+ },
  "muse": {
   "shown": {
    "label": "Muse Code",
