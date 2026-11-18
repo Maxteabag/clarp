@@ -535,7 +535,15 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         let _ = tokio::task::spawn_blocking(move || {
             crate::vocabulary::audio::retain(
                 &root,
-                crate::vocabulary::audio::Clip{trace:&trace,data:&audio,kind:&content_type,session:&session,run:run_id,model:&model},now,
+                crate::vocabulary::audio::Clip {
+                    trace: &trace,
+                    data: &audio,
+                    kind: &content_type,
+                    session: &session,
+                    run: run_id,
+                    model: &model,
+                },
+                now,
             )
         })
         .await;
