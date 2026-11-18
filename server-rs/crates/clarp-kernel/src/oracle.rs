@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 
 use crate::python;
 
+pub mod delegations;
+
 /// Under what the contact is kept, and how long a name of one may be.
 pub const CONTACT_KEY: &str = "oracle.contact_session";
 pub const CONTACT_LONGEST: usize = 160;
