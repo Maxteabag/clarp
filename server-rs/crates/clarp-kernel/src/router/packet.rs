@@ -253,9 +253,14 @@ pub fn packet(shown: &Shown<'_>) -> Value {
             "state": state, "recent_user_messages": told, "recent_agent_messages": said,
         }));
     }
-    // The newest of the messages that are held and whose time is not up.
+    // The newest of the messages that are held in this session and whose time is not up: a
+    // message held while speaking to another agent is that conversation's.
     let mut held: Vec<&Pending> = shown.pending.iter().collect();
-    held.retain(|held| held.status == "pending" && held.expires_at > shown.now_ms);
+    held.retain(|held| {
+        held.status == "pending"
+            && held.expires_at > shown.now_ms
+            && held.requested_session == shown.requested_session
+    });
     held.sort_by_key(|held| std::cmp::Reverse(held.created_at));
     let held: Vec<Value> = held
         .into_iter()

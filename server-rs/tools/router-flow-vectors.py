@@ -71,8 +71,8 @@ SOUND_ALIKE = [
 def message(what, text, decide, **more):
     """One message of a story: what it shows, what was said, what the model answers (a dict, a list of
     dicts for more than one asking, a text to answer as it is, or an exception's words to fail with),
-    and how it is sent (`session`, `hands_free`, `fallback`, `id`, `at`, `dispatch`: a status to
-    fail with, `only`: the sessions of a call)."""
+    and how it is sent (`session`, `hands_free`, `fallback`, `id`, `dispatch`: a status to fail with,
+    `only`: the sessions of a call, `wait`: seconds that pass before it beyond the ten of every message)."""
     return {'what': what, 'text': text, 'decide': decide, **more}
 
 
@@ -81,6 +81,8 @@ def to(session, confidence=0.93, **more):
             'reason': 'named', **more}
 
 
+# The stories: (what they show, their messages[, agents made as they begin: (persona, session, tool,
+# voice, put away)]).
 STORIES = [
     ('the router is off, or the message is none of its kind', [
         message('off', 'Anna, ship it.', to('anna'), janitor=None),
@@ -185,6 +187,126 @@ STORIES = [
                  'reason': 'unclear answer'}, id='r-2'),
         message('the answer: what is given is what was held', 'yes', to('zoe', 0.95, pending_id='held-r-1'), id='r-3'),
     ]),
+    ('a held message belongs to the session it was made in', [
+        message('a message that is held, said to Anna', 'send the deck', to('zoe', 0.6), id='h-1', session='anna'),
+        message('confirmed while speaking to Mike: it is not his to release', 'yes, Zoe',
+                to('zoe', 0.95, pending_id='held-h-1'), id='h-2'),
+        message('asked about again while speaking to Mike: a hold of his own, in his words', 'what?',
+                {'kind': 'clarify', 'confidence': 0.4, 'pending_id': 'held-h-1', 'spoken_text': 'Was the deck for Zoe?',
+                 'reason': 'asked elsewhere'}, id='h-3'),
+        message('asked about again while speaking to Anna: her hold keeps its words, only the question is new', 'hm?',
+                {'kind': 'ambiguous', 'target_session': 'mike', 'confidence': 0.5, 'pending_id': 'held-h-1',
+                 'reason': 'asked again'}, id='h-4', session='anna'),
+        message('confirmed while speaking to Anna: what was held is given', 'yes, Zoe',
+                to('zoe', 0.95, pending_id='held-h-1'), id='h-5', session='anna'),
+        message('asked about again once it was given: a new hold', 'and again?',
+                {'kind': 'clarify', 'confidence': 0.4, 'pending_id': 'held-h-1', 'reason': 'once more'}, id='h-6',
+                session='anna'),
+        message('an app asks while speaking to Anna, and the model confirms what Mike held: said all the same',
+                'is it for Anna?', to('anna', 0.95, pending_id='held-h-3'), id='h-7', session='anna', fallback=True),
+        message('confirmed when its time is up', 'yes', to('zoe', 0.95, pending_id='held-h-6'), id='h-8', session='anna',
+                wait=130),
+        message('asked about again when its time is up: a new hold', 'hm?',
+                {'kind': 'clarify', 'confidence': 0.4, 'pending_id': 'held-h-6', 'reason': 'late'}, id='h-9',
+                session='anna'),
+    ]),
+    ('a name given anywhere is the target, resolved as a voice name', [
+        message('switch by a name in other letters: case and accents aside', 'switch to Zoe',
+                {'kind': 'agent_control', 'control_action': 'switch', 'target_session': 'ZO' + chr(0xcb), 'confidence': 0.9},
+                id='n-1'),
+        message('switch back, by a name in other case', 'switch to Mike',
+                {'kind': 'agent_control', 'control_action': 'switch', 'target_session': 'mIKE', 'confidence': 0.9}, id='n-2'),
+        message('stop an agent by its name alone, which is not its session', 'stop Renee',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'renee', 'confidence': 0.9}, id='n-3'),
+        message('a session as it is: that agent, though another has the name in other letters', 'stop kai',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'kai', 'confidence': 0.9}, id='n-4'),
+        message('a name two agents have, one of them put away', 'stop Kai',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'KAI', 'confidence': 0.9}, id='n-5'),
+        message('an agent that was put away, by its name in other case', 'restart Gone',
+                {'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'GONE', 'confidence': 0.9}, id='n-6'),
+        message('a janitor by its name', 'stop the message delegator',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'message delegator', 'confidence': 0.9},
+                id='n-7'),
+        message('a name in the payload that is another agent than the one named', 'restart Zoe as Anna',
+                {'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'zoe', 'confidence': 0.9,
+                 'control_payload': {'name': 'Anna'}}, id='n-8'),
+        message('a name in the payload that is the one named, in other letters', 'restart Zoe',
+                {'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'zoe', 'confidence': 0.9,
+                 'control_payload': {'name': ' ZO' + chr(0xcb) + ' '}}, id='n-9'),
+        message('a name in the payload that is no text', 'restart Zoe',
+                {'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'zoe', 'confidence': 0.9,
+                 'control_payload': {'name': 7}}, id='n-10'),
+        message('a name in the payload that is blank', 'restart Zoe',
+                {'kind': 'agent_control', 'control_action': 'restart', 'target_session': 'zoe', 'confidence': 0.9,
+                 'control_payload': {'name': '   '}}, id='n-11'),
+        message('a name in the payload alone', 'restart Anna',
+                {'kind': 'agent_control', 'control_action': 'restart', 'confidence': 0.9,
+                 'control_payload': {'name': 'anna'}}, id='n-12'),
+        message('a name nobody has in the payload alone', 'restart Bob',
+                {'kind': 'agent_control', 'control_action': 'restart', 'confidence': 0.9,
+                 'control_payload': {'name': 'Bob'}}, id='n-13'),
+        message('say again what another agent said, by its name in other case', 'say that again for Anna',
+                {'kind': 'control', 'control_action': 'repeat_last', 'target_session': 'ANNA', 'confidence': 0.9}, id='n-14'),
+        message('a payload of a command to the router is no name', 'who is this?',
+                {'kind': 'control', 'control_action': 'who_am_i_talking_to', 'confidence': 0.9,
+                 'control_payload': {'name': 'Bob'}}, id='n-15'),
+        message('a command to the router for an agent nobody has', 'say again for Bob',
+                {'kind': 'control', 'control_action': 'repeat_last', 'target_session': 'bob', 'confidence': 0.9}, id='n-16'),
+        message('make an agent while naming one nobody has', 'make Bob',
+                {'kind': 'agent_control', 'control_action': 'create', 'target_session': 'bob', 'confidence': 0.9,
+                 'control_payload': {'name': 'Bob'}}, id='n-17'),
+        message('fork an agent nobody has', 'fork Bob',
+                {'kind': 'agent_control', 'control_action': 'fork', 'target_session': 'bob', 'confidence': 0.9}, id='n-18'),
+        message('not sure of a command for an agent nobody has', 'stop Bob maybe',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'bob', 'confidence': 0.5}, id='n-19'),
+        message('a command exactly as sure as it has to be', 'stop Anna',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'anna', 'confidence': 0.78}, id='n-20'),
+        message('a command a little less sure', 'stop Anna',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'anna', 'confidence': 0.77}, id='n-21'),
+        message('a command by no name, said to no agent', 'stop',
+                {'kind': 'agent_control', 'control_action': 'interrupt', 'confidence': 0.9}, id='n-22', session='nobody'),
+        message('an app asks, and the model commands for an agent nobody has', 'stop Bob',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'bob', 'confidence': 0.9}, id='n-23',
+                fallback=True),
+        message('an app asks, and the model commands for an agent there is: nothing is done', 'stop Mike',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'MIKE', 'confidence': 0.9}, id='n-24',
+                fallback=True),
+        message('a command for an agent of no call, by its name in other letters', 'stop Zoe',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'ZO' + chr(0xcb), 'confidence': 0.95},
+                id='n-25', only=['mike', 'anna']),
+        message('how an agent is doing, by its name in other letters', 'how is Zoe doing?',
+                {'kind': 'status_query', 'target_session': 'ZO' + chr(0xcb), 'confidence': 0.9}, id='n-26'),
+        message('how an agent is doing whose name two have: the model\'s words are not said', 'how is Kai doing?',
+                {'kind': 'status_query', 'target_session': 'KAI', 'confidence': 0.9, 'status_text': 'Kai is fine.'}, id='n-27'),
+        message('how an agent is doing that was put away', 'how is Gone doing?',
+                {'kind': 'status_query', 'target_session': 'gone', 'confidence': 0.9}, id='n-28'),
+        message('how a janitor is doing', 'how is the delegator doing?',
+                {'kind': 'status_query', 'target_session': 'Message Delegator', 'confidence': 0.9}, id='n-29'),
+        message('how an agent of no call is doing', 'how is Zoe doing?',
+                {'kind': 'status_query', 'target_session': 'zoe', 'confidence': 0.9}, id='n-30', only=['mike', 'anna']),
+        message('how it is going, by no name, in the model\'s words', 'how is it going?',
+                {'kind': 'status_query', 'confidence': 0.9, 'status_text': ' All is well. '}, id='n-31'),
+        message('how an agent is doing, by its name alone, in the model\'s words', 'how is Renee doing?',
+                {'kind': 'status_query', 'target_session': 'Renee', 'confidence': 0.9, 'status_text': ' Renee is fine. '},
+                id='n-32'),
+        message('a name the compatibility decomposition makes, with a blank at its end', 'switch to Zoe',
+                {'kind': 'agent_control', 'control_action': 'switch', 'target_session': 'ZOE' + chr(0xa8), 'confidence': 0.9},
+                id='n-33'),
+        message('fork, as a command to the router', 'fork',
+                {'kind': 'control', 'control_action': 'fork', 'confidence': 0.9}, id='n-34'),
+        message('create, as a command to the router', 'create',
+                {'kind': 'control', 'control_action': 'create', 'confidence': 0.9}, id='n-35'),
+        message('something nobody knows how to do, for an agent by its name in other case', 'paint Mike blue',
+                {'kind': 'agent_control', 'control_action': 'paint', 'target_session': 'MIKE', 'confidence': 0.95}, id='n-36'),
+        message('a session in other case', 'stop agent seven',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'AGENT-7', 'confidence': 0.9}, id='n-37'),
+        message('a name whose case folds to more letters', 'stop Gauss',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'GAUSS', 'confidence': 0.9}, id='n-38'),
+        message('a name that folds to nothing: no agent, not even one with no name', 'stop that',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': chr(0xa8), 'confidence': 0.9}, id='n-39'),
+    ], [('Ren' + chr(0xe9) + 'e', 'agent-7', 'codex', 'voice-renee', False), ('Kai', 'kai', 'claude', 'voice-kai', False),
+        ('K' + chr(0xe1) + 'i', 'kai-old', 'codex', 'voice-kai-old', True),
+        ('Gau' + chr(0xdf), 'agent-8', 'codex', 'voice-gauss', False), ('', 'nameless', 'codex', 'voice-nameless', False)]),
 ]
 
 
@@ -291,6 +413,9 @@ def run() -> dict:
         return json.loads(json.dumps(answer))
 
     service = orchestrator.OrchestratorService(ctx, model_call=model, now=lambda: clock['now'])
+    # Whose last clip it is asked to play again: nobody of the stories has one.
+    replayed: list = []
+    service._replay_last_clip = lambda session: replayed.append(session) and False
     given: list = []
 
     @dataclasses.dataclass
@@ -298,12 +423,30 @@ def run() -> dict:
         session: str
         backend: str
 
+    def state_of(session):
+        # What the agent was last doing, as the router reads it: written when the agent was made.
+        row = orchestrator_context._latest_state(ids[session])
+        return dict(row) if row else None
+
+    def agent_row(persona, session, backend, voice, put_away):
+        return {'agent_id': f'id-{session}', 'session': session, 'persona': persona, 'backend': backend,
+                'voice_id': voice, 'cwd': '/srv/work', 'archived': put_away,
+                'created_at': agents.get_by_session(session)['created_at'], 'state': state_of(session),
+                'last_activity': agents.last_activity(ids[session])}
+
     told = []
     at = T0
-    for name, messages in STORIES:
+    for name, messages, *more in STORIES:
         rows = []
+        added = []
+        for persona, session, backend, voice, put_away in (more[0] if more else ()):
+            ids[session] = agents.create_agent(persona=persona, voice_id=voice, cwd='/srv/work', session=session,
+                                               backend=backend)
+            if put_away:
+                agents.set_archived(ids[session], True)
+            added.append((persona, session, backend, voice, put_away))
         for one in messages:
-            at += 10 * S
+            at += 10 * S + one.get('wait', 0) * S
             clock['now'] = at
             if 'janitor' in one:
                 current = janitors.get(router['session'])
@@ -315,7 +458,7 @@ def run() -> dict:
             decide = one['decide']
             del answers[:]
             answers.extend(decide if isinstance(decide, list) else [decide])
-            del shown[:], given[:], ctx.said[:], ctx.stream.told[:], made[:], stopped[:]
+            del shown[:], given[:], ctx.said[:], ctx.stream.told[:], made[:], stopped[:], replayed[:]
             state['pause'] = bool(one.get('pause_at_model'))
             fails_with = one.get('dispatch')
 
@@ -359,7 +502,7 @@ def run() -> dict:
                 'dispatch_fails_with': fails_with, 'pause_at_model': bool(one.get('pause_at_model')),
                 'janitor': one.get('janitor', 'as it was'),
                 'shown': shown[:], 'given': given[:], 'said': ctx.said[:], 'told': ctx.stream.told[:],
-                'made': made[:], 'stopped': stopped[:],
+                'made': made[:], 'stopped': stopped[:], 'replayed': replayed[:],
                 'answered': answered, 'decisions': decisions, 'held': held_now,
                 'run': None if run_of is None else {key: run_of[key] for key in ('status', 'outcome', 'error', 'demand_result')},
                 'focus': agents.get_focus(),
@@ -368,21 +511,16 @@ def run() -> dict:
                     'WHERE trace_id = ? ORDER BY rowid', (f'trace-{message_id}',))],
             }
             rows.append(named(row))
-        told.append({'name': name, 'messages': rows})
+        story = {'name': name, 'messages': rows}
+        if added:
+            story['agents'] = [agent_row(*agent) for agent in added]
+        told.append(story)
     alike = []
     for said_words, people in SOUND_ALIKE:
         listed = [{'session': session, 'persona': persona} for session, persona in people]
         alike.append({'utterance': said_words, 'agents': listed, 'found': orchestrator_context._name_candidates(said_words, listed)})
 
-    def state_of(session):
-        # What the agent was last doing, as the router reads it: written when the agent was made.
-        row = orchestrator_context._latest_state(ids[session])
-        return dict(row) if row else None
-
-    return {'agents': [{'agent_id': f'id-{session}', 'session': session, 'persona': persona, 'backend': backend,
-                        'voice_id': voice, 'cwd': '/srv/work', 'archived': session == 'gone',
-                        'created_at': agents.get_by_session(session)['created_at'], 'state': state_of(session),
-                        'last_activity': agents.last_activity(ids[session])}
+    return {'agents': [agent_row(persona, session, backend, voice, session == 'gone')
                        for persona, session, backend, voice in AGENTS],
             'said_before': [{'session': session, 'role': role, 'text': text, 'at': T0 - before * S, 'trace_id': f'before-{before}'}
                             for session, role, text, before in SAID],
@@ -410,7 +548,8 @@ def main() -> int:
         if part == 'stories':
             out.append(f' "{part}": [')
             for number, story in enumerate(rows):
-                out.append('  {"name": ' + json.dumps(story['name']) + ', "messages": [')
+                agents = (', "agents": ' + json.dumps(story['agents'], ensure_ascii=True)) if 'agents' in story else ''
+                out.append('  {"name": ' + json.dumps(story['name']) + agents + ', "messages": [')
                 out.extend('   ' + json.dumps(row, ensure_ascii=True) + (',' if n < len(story['messages']) - 1 else '')
                            for n, row in enumerate(story['messages']))
                 out.append('  ]}' + (',' if number < len(rows) - 1 else ''))

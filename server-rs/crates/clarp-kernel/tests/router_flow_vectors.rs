@@ -2,18 +2,10 @@
 //! router did with the same messages (`tests/fixtures/router-flow-vectors.json`, written by
 //! `server-rs/tools/router-flow-vectors.py`, which drives `OrchestratorService` with a model
 //! that answers what each story says, and a Host around it that writes down what it is
-//! asked to do).
-//!
-//! Three things this router does otherwise, on purpose. Each is named here with what the
-//! Python Host did, so that the day it does otherwise is noticed:
-//!
-//! - `s-4`: asked how an agent is doing that nobody has, the Python Host says how the agent
-//!   is doing that the message was said to. This router says that it sees no such agent.
-//! - `s-16`: told to start again an agent nobody has, the Python Host makes a new agent.
-//!   This router makes none, and says that it sees no such agent.
-//! - `r-2`, `r-3`: a held message whose user is asked a second time is replaced, in the
-//!   Python Host, by the words of the unclear answer, and those are given in the end. Here
-//!   the held message keeps its own words, its own id and its own way in.
+//! asked to do), as that router is since its PR 436 of 18 Nov 2026: a command is never
+//! held, a held message belongs to the session it was made in, and a name given anywhere is
+//! the target, resolved as a voice name. Where only the words of an error are another's,
+//! `expected` says so.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -38,14 +30,27 @@ fn word(value: &Value) -> String {
     value.as_str().unwrap_or_default().to_string()
 }
 
-const NOT_SEEN: &str = "I do not see that agent running.";
-/// The story whose messages the two Hosts do differently: the last, so that what it leaves
-/// behind is told to no story after it.
 const HELD_TWICE: &str = "a question is asked a second time about a message that is held";
+const HELD_HERE: &str = "a held message belongs to the session it was made in";
 
 /// The Host the janitors' book asks: its agents, and nothing else that a story needs.
 struct Host {
     agents: BTreeMap<String, Agent>,
+}
+
+impl Host {
+    /// An agent of a story joins the Host.
+    fn join(&mut self, agent: &Value) {
+        let made = Agent {
+            agent_id: word(&agent["agent_id"]),
+            session: word(&agent["session"]),
+            name: word(&agent["persona"]),
+            backend: word(&agent["backend"]),
+            archived: agent["archived"] == true,
+            ..Agent::default()
+        };
+        self.agents.insert(made.agent_id.clone(), made);
+    }
 }
 
 impl World for Host {
@@ -106,12 +111,16 @@ struct Seen {
     told: Vec<Value>,
     made: Vec<Start>,
     stopped: Vec<String>,
+    /// Whose last clip the Host was asked to play again.
+    replayed: Vec<String>,
     answered: Option<Outcome>,
 }
 
 /// The made-up Host the stories happen on, as the Python Host's stories began.
 struct Stage {
     vectors: Value,
+    /// The agents of the Host: those it began with, and those a story made as it began.
+    agents: Vec<Value>,
     host: Host,
     janitors: Janitors,
     book: Book,
@@ -151,16 +160,9 @@ impl Stage {
         let mut host = Host {
             agents: BTreeMap::new(),
         };
-        for agent in vectors["agents"].as_array().unwrap() {
-            let made = Agent {
-                agent_id: word(&agent["agent_id"]),
-                session: word(&agent["session"]),
-                name: word(&agent["persona"]),
-                backend: word(&agent["backend"]),
-                archived: agent["archived"] == true,
-                ..Agent::default()
-            };
-            host.agents.insert(made.agent_id.clone(), made);
+        let agents = vectors["agents"].as_array().unwrap().clone();
+        for agent in &agents {
+            host.join(agent);
         }
         let own = &vectors["router"];
         let router = (word(&own["agent_id"]), word(&own["session"]));
@@ -212,6 +214,7 @@ impl Stage {
         Self {
             focus: word(&vectors["focus"]),
             vectors,
+            agents,
             host,
             janitors,
             book: Book::default(),
@@ -220,11 +223,20 @@ impl Stage {
         }
     }
 
+    /// A story begins: the agents it makes as it begins are made.
+    fn begin(&mut self, story: &Value) {
+        let made = story["agents"].as_array().cloned().unwrap_or_default();
+        for agent in made {
+            self.host.join(&agent);
+            self.agents.push(agent);
+        }
+    }
+
     /// The agents as the router sees them: each with what it was told and said before the
     /// first story and what the router gave it since; and the router's own janitor, which
     /// is looked at and not spoken to.
     fn members(&self) -> Vec<Member> {
-        let agents = self.vectors["agents"].as_array().unwrap().iter();
+        let agents = self.agents.iter();
         let mut all: Vec<Member> = agents
             .map(|agent| {
                 let (id, session) = (word(&agent["agent_id"]), word(&agent["session"]));
@@ -316,7 +328,10 @@ impl Stage {
                 Effect::Say(say) => seen.said.push(said_row(say)),
                 // Nothing was said aloud by anybody in these stories: there is nothing to
                 // play again.
-                Effect::Repeat { or, .. } => seen.said.extend(or.as_ref().map(said_row)),
+                Effect::Repeat { session, or } => {
+                    seen.replayed.push(session.clone());
+                    seen.said.extend(or.as_ref().map(said_row));
+                }
                 Effect::Focus { agent_id, session } => {
                     self.focus.clone_from(agent_id);
                     let told = json!({
@@ -485,7 +500,7 @@ impl Stage {
     /// What the router gave agents under a trace, as the Python Host's story reads it.
     fn given_under(&self, trace: &str) -> Value {
         let mut rows = Vec::new();
-        for agent in self.vectors["agents"].as_array().unwrap() {
+        for agent in &self.agents {
             for said in self.book.given_to(agent["agent_id"].as_str().unwrap()) {
                 if said.trace_id == trace {
                     rows.push(json!({
@@ -504,8 +519,8 @@ impl Stage {
     fn made_row(&self, start: &Start) -> Value {
         match &start.again {
             Some(session) => {
-                let agents = self.vectors["agents"].as_array().unwrap();
-                let agent = agents
+                let agent = self
+                    .agents
                     .iter()
                     .find(|agent| agent["session"] == session.as_str());
                 let agent = agent.unwrap();
@@ -553,54 +568,23 @@ fn answered_row(outcome: Option<&Outcome>, theirs: &Value) -> Value {
     })
 }
 
-/// What the Python Host did with a message, put right in the three places this router
-/// does otherwise on purpose (and one where only the words of an error are another's).
+/// What the Python Host did with a message, but for the one place where only the words of an
+/// error are another's.
 fn expected(message: &Value) -> Value {
     let mut want = message.clone();
-    match message["id"].as_str().unwrap() {
-        "s-4" => {
-            let theirs = "Mike was last working on: Version bumped to 2.4.1 and tagged.";
-            assert_eq!(
-                want["said"][0]["text"], theirs,
-                "the Python Host answers for another"
-            );
-            want["said"][0]["text"] = json!(NOT_SEEN);
+    if message["id"] == "w-1" {
+        // The Python Host says it in the words of its JSON reader.
+        for place in ["/answered/error", "/decisions/0/error"] {
+            let place = want.pointer_mut(place).unwrap();
+            assert_eq!(*place, "Expecting value: line 1 column 1 (char 0)");
+            *place = json!("the model's answer is no JSON");
         }
-        "s-16" => {
-            let made = json!([{ "synthesize_audio": true }]);
-            assert_eq!(
-                want["made"], made,
-                "the Python Host makes an agent of a name alone"
-            );
-            want["made"] = json!([]);
-            let voice = want["shown"][0]["packet"]["settings"]["voice_id"].clone();
-            want["said"] = json!([{ "text": NOT_SEEN, "voice_id": voice, "session": null }]);
-            for place in [
-                "/answered/session",
-                "/told/0/target_session",
-                "/decisions/0/target_session",
-            ] {
-                let place = want.pointer_mut(place).unwrap();
-                assert_eq!(*place, "new-agent");
-                *place = json!("bob");
-            }
-        }
-        "w-1" => {
-            // The Python Host says it in the words of its JSON reader.
-            for place in ["/answered/error", "/decisions/0/error"] {
-                let place = want.pointer_mut(place).unwrap();
-                assert_eq!(*place, "Expecting value: line 1 column 1 (char 0)");
-                *place = json!("the model's answer is no JSON");
-            }
-        }
-        _ => {}
     }
     want
 }
 
-/// Holds what happened to a message here against what happened to it there, but for the
-/// parts named in `but`.
-fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str, but: &[&str]) {
+/// Holds what happened to a message here against what happened to it there.
+fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str) {
     let id = want["id"].as_str().unwrap();
     let trace = format!("trace-{id}");
     let ours = |part: &str| match part {
@@ -614,6 +598,7 @@ fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str, but: &[&str]) {
             .map(|start| stage.made_row(start))
             .collect(),
         "stopped" => json!(seen.stopped),
+        "replayed" => json!(seen.replayed),
         "answered" => answered_row(seen.answered.as_ref(), &want["answered"]),
         "decisions" => {
             let kept = stage.book.decisions.iter();
@@ -633,6 +618,7 @@ fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str, but: &[&str]) {
         "told",
         "made",
         "stopped",
+        "replayed",
         "answered",
         "decisions",
         "held",
@@ -641,9 +627,6 @@ fn compare(stage: &Stage, seen: &Seen, want: &Value, what: &str, but: &[&str]) {
         "routing_messages",
     ];
     for part in parts {
-        if but.contains(&part) {
-            continue;
-        }
         let ours = ours(part);
         assert_eq!(ours, want[part], "{what}: {part}");
         // In the same order too: a model reads a packet as text, an app a row. (What a
@@ -663,11 +646,12 @@ fn a_messages_way_is_the_python_hosts_message_by_message() {
     let mut stage = Stage::new();
     let stories = stage.vectors["stories"].as_array().unwrap().clone();
     let (mut messages, mut asked, mut given, mut said) = (0, 0, 0, 0);
-    for story in stories.iter().filter(|story| story["name"] != HELD_TWICE) {
+    for story in &stories {
+        stage.begin(story);
         for message in story["messages"].as_array().unwrap() {
             let what = format!("{}: {} ({})", story["name"], message["what"], message["id"]);
             let seen = stage.send(message);
-            compare(&stage, &seen, &expected(message), &what, &[]);
+            compare(&stage, &seen, &expected(message), &what);
             messages += 1;
             asked += seen.shown.len();
             given += seen.given.len();
@@ -675,106 +659,117 @@ fn a_messages_way_is_the_python_hosts_message_by_message() {
         }
     }
     // Every message of the stories, and what the stories are there to show: a model asked
-    // once and twice, messages given, and words aloud (one more than in the Python Host:
-    // what is said instead of making an agent of a name alone).
-    assert_eq!((messages, asked, given, said), (50, 67, 10, 18));
+    // once and twice, messages given, and words aloud.
+    assert_eq!((messages, asked, given, said), (101, 162, 11, 53));
+}
+
+/// Plays the stories up to the one named, and answers its messages by their ids.
+fn up_to(stage: &mut Stage, name: &str) -> BTreeMap<String, Value> {
+    let stories = stage.vectors["stories"].as_array().unwrap().clone();
+    for story in &stories {
+        stage.begin(story);
+        if story["name"] == name {
+            let messages = story["messages"].as_array().unwrap().iter();
+            return messages
+                .map(|one| (word(&one["id"]), one.clone()))
+                .collect();
+        }
+        for message in story["messages"].as_array().unwrap() {
+            stage.send(message);
+        }
+    }
+    panic!("no story {name}");
+}
+
+/// The row of a held message, as the stage keeps it now.
+fn held_row(stage: &Stage, id: &str) -> Value {
+    let held = stage.held();
+    let row = held
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["pending_id"] == id);
+    row.cloned().unwrap_or(Value::Null)
 }
 
 #[test]
 fn a_held_message_keeps_its_own_words_when_its_user_is_asked_a_second_time() {
     let mut stage = Stage::new();
-    let stories = stage.vectors["stories"].as_array().unwrap().clone();
-    let (before, last) = stories.split_at(stories.len() - 1);
-    assert_eq!(last[0]["name"], HELD_TWICE);
-    for story in before {
-        for message in story["messages"].as_array().unwrap() {
-            stage.send(message);
-        }
+    let messages = up_to(&mut stage, HELD_TWICE);
+    stage.send(&messages["r-1"]);
+    let first = held_row(&stage, "held-r-1");
+    // Asked again of the same held message: its words, id, trace, time and way in stay;
+    // whom it may be for, why it is asked and until when are the second question's.
+    stage.send(&messages["r-2"]);
+    let again = held_row(&stage, "held-r-1");
+    for same in [
+        "utterance",
+        "trace_id",
+        "created_at",
+        "prompt_admission_json",
+    ] {
+        assert_eq!(again[same], first[same], "{same}");
     }
-    let messages = last[0]["messages"].as_array().unwrap();
-    let (held, asked_again, answer) = (&messages[0], &messages[1], &messages[2]);
-    let of_r1 = |row: &Value| row["pending_id"] == "held-r-1";
-    let theirs_of = |message: &Value| {
-        let held = message["held"].as_array().unwrap();
-        held.iter().find(|row| of_r1(row)).unwrap().clone()
-    };
-
-    // A message is held while its user is asked whom it was for: as in the Python Host.
-    let seen = stage.send(held);
-    compare(&stage, &seen, held, "the message is held", &[]);
-
-    // What the user says to the question is not understood, and the model asks again of
-    // the same held message. All of it is as in the Python Host, but what is held now.
-    let seen = stage.send(asked_again);
-    compare(&stage, &seen, asked_again, "asked a second time", &["held"]);
-    let theirs = theirs_of(asked_again);
-    assert_eq!(
-        theirs["utterance"], "what?",
-        "the Python Host holds the answer instead"
-    );
-    assert_eq!(theirs["trace_id"], "trace-r-2");
-    let ours = stage.held();
-    let ours = ours
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| of_r1(row))
-        .unwrap();
-    let first = theirs_of(held);
-    assert_eq!(ours["utterance"], "send the report");
-    assert_eq!(ours["trace_id"], "trace-r-1");
-    assert_eq!(
-        ours["prompt_admission_json"],
-        first["prompt_admission_json"]
-    );
-    // Whom it may be for stays where the second question names nobody; why it is asked,
-    // and until when it is held, are the second question's.
-    assert_eq!(ours["candidate_session"], "zoe");
-    assert_eq!(ours["reason"], "unclear answer");
-    assert_eq!(ours["created_at"], theirs["created_at"]);
-    assert_eq!(ours["expires_at"], theirs["expires_at"]);
-    assert_eq!(ours["status"], "pending");
-
+    assert_eq!(again["utterance"], "send the report");
+    assert_eq!(again["candidate_session"], "");
+    assert_eq!(again["reason"], "unclear answer");
+    assert_ne!(again["expires_at"], first["expires_at"]);
     // The answer: the held message is given, in its own words and by its own way in.
-    let seen = stage.send(answer);
-    let but = ["shown", "given", "decisions", "held", "routing_messages"];
-    compare(&stage, &seen, answer, "the answer", &but);
-    assert_eq!(
-        answer["given"][0]["text"], "what?",
-        "the Python Host gives the answer instead"
-    );
-    assert_eq!(answer["given"][0]["client_msg_id"], "r-2");
+    let seen = stage.send(&messages["r-3"]);
     let gave = given_row(&seen.given[0]);
     assert_eq!(gave["text"], "send the report");
     assert_eq!(gave["forced_session"], "zoe");
     assert_eq!(gave["client_msg_id"], "r-1");
-    assert_eq!(gave["prompt_admission"]["original_text"], "send the report");
-    let kept = stage.given_under("trace-r-3");
-    assert_eq!(kept[0]["text"], "send the report");
-    assert_eq!(kept[0]["session"], "zoe");
-    // The model was shown the held message in its own words, both times it was asked.
-    assert_eq!(seen.shown.len(), 2);
-    for (ours, theirs) in seen.shown.iter().zip(answer["shown"].as_array().unwrap()) {
-        let held = |shown: &Value| shown["packet"]["pending"][0].clone();
-        assert_eq!(held(ours)["pending_id"], "held-r-1");
-        assert_eq!(held(ours)["utterance"], "send the report");
-        assert_eq!(held(theirs)["utterance"], "what?");
-    }
-    let ours = stage.held();
-    let ours = ours
+    assert_eq!(held_row(&stage, "held-r-1")["status"], "sent");
+}
+
+#[test]
+fn a_held_message_belongs_to_the_session_it_was_made_in() {
+    let mut stage = Stage::new();
+    let messages = up_to(&mut stage, HELD_HERE);
+    let gone = "That message is no longer waiting. Please say it again.";
+    let pending = |seen: &Seen| seen.shown[0]["packet"]["pending"].clone();
+    stage.send(&messages["h-1"]);
+    let first = held_row(&stage, "held-h-1");
+    assert_eq!(first["requested_session"], "anna");
+    // Not shown, claimed or renewed while speaking to another agent.
+    let seen = stage.send(&messages["h-2"]);
+    assert_eq!(pending(&seen), json!([]));
+    assert!(seen.given.is_empty());
+    assert_eq!(
+        seen.said,
+        [json!({ "text": gone, "voice_id": "voice-mike", "session": "mike" })]
+    );
+    assert_eq!(held_row(&stage, "held-h-1"), first);
+    stage.send(&messages["h-3"]);
+    assert_eq!(held_row(&stage, "held-h-1"), first);
+    let other = held_row(&stage, "held-h-3");
+    assert_eq!(other["utterance"], "what?");
+    assert_eq!(other["requested_session"], "mike");
+    // In its own session: shown without the other's, renewed, and given.
+    let seen = stage.send(&messages["h-4"]);
+    let shown = pending(&seen);
+    let shown: Vec<&Value> = shown
         .as_array()
         .unwrap()
         .iter()
-        .find(|row| of_r1(row))
-        .unwrap();
-    assert_eq!(ours["status"], "sent");
-    // The decision is kept as the Python Host keeps it, but for the mark of what the
-    // model was shown.
-    let kept = stage.book.decisions.last().unwrap().row();
-    let mut theirs = answer["decisions"][0].clone();
-    assert_ne!(kept["context_hash"], theirs["context_hash"]);
-    theirs["context_hash"] = kept["context_hash"].clone();
-    assert_eq!(kept, theirs);
+        .map(|held| &held["pending_id"])
+        .collect();
+    assert_eq!(shown, [&json!("held-h-1")]);
+    let renewed = held_row(&stage, "held-h-1");
+    assert_eq!(renewed["utterance"], "send the deck");
+    assert_eq!(renewed["candidate_session"], "mike");
+    assert_eq!(renewed["created_at"], first["created_at"]);
+    let seen = stage.send(&messages["h-5"]);
+    assert_eq!(given_row(&seen.given[0])["text"], "send the deck");
+    assert_eq!(given_row(&seen.given[0])["client_msg_id"], "h-1");
+    // Given, it is no longer renewed: the question holds the new message.
+    stage.send(&messages["h-6"]);
+    assert_eq!(held_row(&stage, "held-h-6")["utterance"], "and again?");
+    // Said even where an app asked: the other's hold is not released from here.
+    let seen = stage.send(&messages["h-7"]);
+    assert_eq!(seen.said[0]["text"], gone);
+    assert_eq!(held_row(&stage, "held-h-3")["status"], "pending");
 }
 
 #[test]
@@ -814,6 +809,7 @@ fn the_decisions_are_shown_the_newest_first_and_no_more_than_are_asked_for() {
     let mut stage = Stage::new();
     let stories = stage.vectors["stories"].as_array().unwrap().clone();
     for story in &stories {
+        stage.begin(story);
         for message in story["messages"].as_array().unwrap() {
             stage.send(message);
         }

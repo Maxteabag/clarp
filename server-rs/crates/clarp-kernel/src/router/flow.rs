@@ -9,22 +9,19 @@
 //! (a message given to an agent, a word aloud, a message held while its user is asked, an
 //! agent opened, stopped or started); [`Book::finish`] keeps what came of it.
 //!
-//! The rules are the Python Host's (`server/lib/orchestrator.py`, `handle_send` and
-//! `_apply_decision`), held message by message by
-//! `tests/fixtures/router-flow-vectors.json`. Where this router does otherwise, it is on
-//! purpose, and `tests/router_flow_vectors.rs` names each such message:
-//!
-//! - A message that is held keeps its own words when its user is asked a second time. The
-//!   Python Host puts the words of the unclear answer in their place, and gives those.
-//! - To start again an agent nobody has makes no agent. The Python Host makes a new one.
-//! - Asked how an agent is doing that nobody has, it says that it sees none. The Python
-//!   Host says how the agent is doing that the message was said to.
+//! The rules are the Python Host's (`server/lib/orchestrator.py`, `handle_send`,
+//! `_apply_decision` and `_command_check`, as they are since its PR 436 of 18 Nov 2026),
+//! held message by message by `tests/fixtures/router-flow-vectors.json`. A command is never
+//! held; a held message belongs to the session it was made in; a name given anywhere is the
+//! target, resolved as a voice name.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::canonical_combining_class;
 
 use super::packet::{self, Came, Member, Pending, Said, Shown};
 use super::{
@@ -59,6 +56,18 @@ const RETRYABLE: &str = "dispatch_retryable";
 const CHANGED: &str = "Message delegator configuration changed";
 const FAILED: &str = "Message routing failed";
 const NOT_SEEN: &str = "I do not see that agent running.";
+/// What a command or a question about an agent is answered where it is not carried out. A
+/// refused command keeps the phrase key its model gave, which is none: the Python Host gives
+/// those sentences no key of their own (its `_command_check`, until its R76).
+const NO_SUCH_AGENT: &str = "I do not have an agent by that name.";
+const WHICH_AGENT: &str = "Which agent did you mean?";
+const CANNOT_CHECK: &str = "I cannot check on that agent from here.";
+const CANNOT_COMMAND: &str = "I cannot do that for that agent from here.";
+const UNSURE_COMMAND: &str = "I am not sure what you wanted me to do.";
+const NO_VOICE_COMMANDS: &str = "That agent does not accept voice commands.";
+const FORK_IN_APP: &str = "Please fork agents from the app.";
+/// A confirmation of a message that is no longer held here: nothing is given in its place.
+const HELD_MESSAGE_GONE: &str = "That message is no longer waiting. Please say it again.";
 
 /// A decision as it is kept.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -388,6 +397,97 @@ fn lookup<'a>(agents: &'a [Member], key: &str) -> Option<&'a Member> {
     }
     let by_session = agents.iter().find(|agent| agent.session == key);
     by_session.or_else(|| agents.iter().find(|agent| agent.agent_id == key))
+}
+
+/// A spoken name as names are compared: its case folded as Python folds it, and its accents
+/// taken off (the signs that combine, after the compatibility decomposition).
+pub fn fold(name: &str) -> String {
+    let folded = python::casefold(name);
+    let bare: String = folded
+        .nfkd()
+        .filter(|sign| canonical_combining_class(*sign) == 0)
+        .collect();
+    python::strip(&bare).to_string()
+}
+
+/// The agents a spoken name stands for: the agent of that session or id where there is
+/// one, else every agent whose session or name it is, case and accents aside. Agents that
+/// were put away and janitors count, so that one out of reach is told apart from one that
+/// does not exist.
+fn agents_named<'a>(agents: &'a [Member], name: &str) -> Vec<&'a Member> {
+    if let Some(exact) = lookup(agents, name) {
+        return vec![exact];
+    }
+    let key = fold(name);
+    if key.is_empty() {
+        return Vec::new();
+    }
+    let named = |agent: &&Member| fold(&agent.session) == key || fold(&agent.persona) == key;
+    agents.iter().filter(named).collect()
+}
+
+/// Whether a command is carried out: the sentence it is refused with, or the session it acts
+/// on (`None`: it makes an agent, and acts on none there is). A name given anywhere, the
+/// decision's own or, of a command for an agent, the payload's, is the target; the agent the
+/// message was said to is the target only where none is given. It acts only on an agent of
+/// the packet: in a call, one of the call. `asked`: the command, as it is compared.
+fn command_check(
+    decision: &Decision,
+    asked: &str,
+    sure: bool,
+    shown: &[&str],
+    requested: &str,
+    agents: &[Member],
+) -> Result<Option<String>, &'static str> {
+    if !sure {
+        return Err(UNSURE_COMMAND);
+    }
+    let of_agents = decision.kind == AGENT_CONTROL;
+    if of_agents && asked == "fork" {
+        // No source of a fork is taken from the router.
+        return Err(FORK_IN_APP);
+    }
+    if of_agents && asked == "create" {
+        return Ok(None);
+    }
+    let mut names = vec![python::strip(&decision.target_session)];
+    if of_agents {
+        let payload = decision.control_payload.as_ref();
+        let given = payload.and_then(|payload| payload.get("name"));
+        names.push(given.and_then(Value::as_str).map_or("", python::strip));
+    }
+    names.retain(|name| !name.is_empty());
+    let agent = if names.is_empty() {
+        lookup(agents, requested)
+    } else {
+        let mut found: Vec<&Member> = Vec::new();
+        for name in names {
+            match agents_named(agents, name).as_slice() {
+                [] => return Err(NO_SUCH_AGENT),
+                [one] => found.push(one),
+                _ => return Err(WHICH_AGENT),
+            }
+        }
+        // The two names given disagree.
+        if found
+            .iter()
+            .any(|agent| agent.agent_id != found[0].agent_id)
+        {
+            return Err(WHICH_AGENT);
+        }
+        found.first().copied()
+    };
+    let Some(agent) = agent else {
+        return Err(NO_SUCH_AGENT);
+    };
+    if !agent.voice_target {
+        return Err(NO_VOICE_COMMANDS);
+    }
+    // No packet shows an agent that was put away: it is out of reach as one of another call is.
+    if !shown.contains(&agent.session.as_str()) {
+        return Err(CANNOT_COMMAND);
+    }
+    Ok(Some(agent.session.clone()))
 }
 
 /// The name of the agent of a session, or the session's own name where it has none.
@@ -994,7 +1094,10 @@ impl Book {
     }
 
     /// Holds a message while its user is asked whom it was for, and asks. A message that
-    /// is held already keeps its own words: only what is asked of it is new.
+    /// is held already in this session, and whose time is not up, keeps its own words, id,
+    /// trace and way in when it is asked about again: only the question is new (whom it may
+    /// be for, why it is asked, and until when). Any other message is held anew, under
+    /// `hold_as`: a hold made while speaking to another agent is not that agent's to renew.
     fn hold(
         &mut self,
         decision: &Decision,
@@ -1004,29 +1107,22 @@ impl Book {
         effects: &mut Vec<Effect>,
     ) {
         let now = around.now_ms;
-        let id = match decision.pending_id.as_str() {
-            "" => hold_as,
-            named => named,
-        };
         let candidate = decision.target_session.as_str();
+        let requested = routing.requested_session.as_str();
         let waiting = |held: &&mut Pending| {
-            held.pending_id == id && held.status == "pending" && held.expires_at > now
+            held.pending_id == decision.pending_id
+                && held.status == "pending"
+                && held.expires_at > now
+                && held.requested_session == requested
         };
         if let Some(held) = self.held.iter_mut().find(waiting) {
-            // Whom it may be for and why it is asked are new where the model says so.
-            if !candidate.is_empty() {
-                held.candidate_session = candidate.to_string();
-            }
-            if !decision.reason.is_empty() {
-                held.reason = decision.reason.clone();
-            }
-            held.created_at = now;
+            held.candidate_session = candidate.to_string();
+            held.reason.clone_from(&decision.reason);
             held.expires_at = now + HELD_FOR_MS;
         } else {
-            self.held.retain(|held| held.pending_id != id);
             let said = routing.packet["utterance"].as_str().unwrap_or_default();
             self.held.push(Pending {
-                pending_id: id.to_string(),
+                pending_id: hold_as.to_string(),
                 trace_id: routing.trace_id.clone(),
                 utterance: said.to_string(),
                 requested_session: routing.requested_session.clone(),
@@ -1072,10 +1168,14 @@ impl Book {
     }
 
     /// The held message a decision names, taken to be given: once, while it is held and
-    /// its time is not up.
-    fn claim(&mut self, pending_id: &str, now_ms: i64) -> Option<Pending> {
+    /// its time is not up, and only in the session it was held in (one held while speaking
+    /// to another agent is not released from here; its time runs out).
+    fn claim(&mut self, pending_id: &str, requested: &str, now_ms: i64) -> Option<Pending> {
         let waiting = |held: &&mut Pending| {
-            held.pending_id == pending_id && held.status == "pending" && held.expires_at > now_ms
+            held.pending_id == pending_id
+                && held.status == "pending"
+                && held.expires_at > now_ms
+                && held.requested_session == requested
         };
         let held = self.held.iter_mut().find(waiting)?;
         held.status = "sent".to_string();
@@ -1129,25 +1229,31 @@ impl Book {
         // What became of the message. Nothing yet: each rule below takes it only while
         // none before it has.
         let mut action: Option<&str> = None;
-        let command =
-            |decision: &Decision| [CONTROL, AGENT_CONTROL].contains(&decision.kind.as_str());
         let sure = |decision: &Decision| decision.confidence >= settings.confidence_threshold;
-        let named = lookup(agents, &decision.target_session);
-        if command(&decision) && named.is_some_and(|agent| !agent.voice_target) {
-            decision = as_question(decision, "That agent does not accept voice commands.");
-        }
         let asked = python::strip(&decision.control_action).to_lowercase();
-        let makes = decision.kind == AGENT_CONTROL && asked == "create";
-        // The agent a command acts on: the one the message was said to where the model
-        // names none; to make an agent acts on none there is.
-        let acted_on = if makes { None } else { lookup(agents, &target) };
-        let outside = acted_on.is_some_and(|agent| !shown.contains(&agent.session.as_str()));
-        if command(&decision) && (!sure(&decision) || outside) {
-            // A command has to be as sure as a message, and acts on the agents the model
-            // was shown only: those of a call, in a call.
-            decision = as_question(decision, "I am not sure what you wanted me to do.");
-        } else if decision.kind == AGENT_CONTROL && asked == "fork" {
-            decision = as_question(decision, "Please fork agents from the app.");
+        if [CONTROL, AGENT_CONTROL].contains(&decision.kind.as_str()) {
+            let checked = command_check(
+                &decision,
+                &asked,
+                sure(&decision),
+                &shown,
+                requested,
+                agents,
+            );
+            match checked {
+                // Refused in its sentence, and never held: a later "yes" must not give its
+                // words to an agent as a message.
+                Err(refusal) => {
+                    decision.kind = CLARIFY.to_string();
+                    action = Some(CLARIFY);
+                    if !routing.fallback_request {
+                        let said = self.as_agent(requested, refusal, "", around);
+                        effects.extend(said.map(Effect::Say));
+                    }
+                }
+                Ok(Some(session)) => decision.target_session = session,
+                Ok(None) => {}
+            }
         }
         let for_an_agent = [AGENT_MESSAGE, CORRECTION].contains(&decision.kind.as_str());
         if routing.fallback_request && !for_an_agent {
@@ -1175,24 +1281,34 @@ impl Book {
                     }
                 }
                 Some(agent) => {
-                    let held = self.claim(&decision.pending_id, now);
-                    let own = python::strip(&decision.text_to_send);
-                    let text = held.as_ref().map(|held| held.utterance.as_str());
-                    let text = text.filter(|text| !text.is_empty());
-                    let text = text.or(Some(own).filter(|own| !own.is_empty()));
-                    let said = routing.packet["utterance"].as_str().unwrap_or_default();
-                    effects.push(Effect::Give(Give {
-                        text: text.unwrap_or(said).to_string(),
-                        session: agent.clone(),
-                        requested_session: requested.to_string(),
-                        trace_id: routing.trace_id.clone(),
-                        came: match held {
-                            Some(held) => held.came,
-                            None => routing.came.clone(),
-                        },
-                    }));
+                    let held = self.claim(&decision.pending_id, requested, now);
+                    if held.is_none() && !decision.pending_id.is_empty() {
+                        // What the model confirms is no longer held here (its time is up,
+                        // it was given, or it was held while speaking to another agent):
+                        // the confirmation is not given in its place.
+                        action = Some(CLARIFY);
+                        decision.kind = CLARIFY.to_string();
+                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around);
+                        effects.extend(said.map(Effect::Say));
+                    } else {
+                        let own = python::strip(&decision.text_to_send);
+                        let text = held.as_ref().map(|held| held.utterance.as_str());
+                        let text = text.filter(|text| !text.is_empty());
+                        let text = text.or(Some(own).filter(|own| !own.is_empty()));
+                        let said = routing.packet["utterance"].as_str().unwrap_or_default();
+                        effects.push(Effect::Give(Give {
+                            text: text.unwrap_or(said).to_string(),
+                            session: agent.clone(),
+                            requested_session: requested.to_string(),
+                            trace_id: routing.trace_id.clone(),
+                            came: match held {
+                                Some(held) => held.came,
+                                None => routing.came.clone(),
+                            },
+                        }));
+                        action = Some(ROUTE);
+                    }
                     target = agent;
-                    action = Some(ROUTE);
                 }
             }
         }
@@ -1213,28 +1329,48 @@ impl Book {
         };
         if action.is_none() && kind == STATUS {
             action = Some(TOLD_STATUS);
-            let asked_of = decision.target_session.as_str();
-            let agent = valid(agents, &shown, asked_of);
-            target = agent.unwrap_or(requested).to_string();
-            let own = python::strip(&decision.status_text);
-            let text = match (own, agent, asked_of) {
-                ("", None, "") | ("", Some(_), _) => {
-                    lookup(agents, &target).map_or(NOT_SEEN.to_string(), status_of)
+            let named = python::strip(&decision.target_session);
+            let found = if named.is_empty() {
+                Vec::new()
+            } else {
+                agents_named(agents, named)
+            };
+            let agent = match found.as_slice() {
+                [one] => valid(agents, &shown, &one.session),
+                _ => None,
+            };
+            let text = if named.is_empty() || agent.is_some() {
+                target = agent.unwrap_or(requested).to_string();
+                // The model's words, as they were read (without the blanks at their ends).
+                match decision.status_text.as_str() {
+                    "" => lookup(agents, &target).map_or(NOT_SEEN.to_string(), status_of),
+                    own => own.to_string(),
                 }
-                // It names somebody who is no agent to ask about: said as that, and not
-                // answered with how another is doing.
-                ("", None, _) => NOT_SEEN.to_string(),
-                (own, _, _) => own.to_string(),
+            } else {
+                // Not another agent's status, nor one the model made up: no such agent,
+                // two of that name, or one this conversation cannot answer about (put
+                // away, outside the call, a janitor).
+                action = Some(CLARIFY);
+                target = requested.to_string();
+                let refusal = match found.len() {
+                    0 => NO_SUCH_AGENT,
+                    1 => CANNOT_CHECK,
+                    _ => WHICH_AGENT,
+                };
+                refusal.to_string()
             };
             effects.push(router_says(text));
         }
+        // The agent a command acts on: a command carried out names it by now, by the name it was
+        // given or as the agent the message was said to (`command_check`).
+        let on = decision.target_session.clone();
         if action.is_none() && kind == CONTROL {
             action = Some(CONTROL);
             match asked.as_str() {
                 "repeat" | "repeat_last" | "say_again" => {
                     let nothing = "I do not have anything recent to replay.";
                     effects.push(Effect::Repeat {
-                        session: target.clone(),
+                        session: on.clone(),
                         or: self.as_agent(requested, nothing, "repeat_missing", around),
                     });
                 }
@@ -1250,16 +1386,20 @@ impl Book {
         }
         if action.is_none() && kind == AGENT_CONTROL {
             action = Some(CONTROL);
-            let agent = lookup(agents, &target);
+            let agent = lookup(agents, &on);
             match asked.as_str() {
-                "switch" | "switch_focus" => effects.extend(agent.map(|agent| Effect::Focus {
-                    agent_id: agent.agent_id.clone(),
-                    session: target.clone(),
-                })),
+                "switch" | "switch_focus" => {
+                    effects.extend(agent.map(|agent| Effect::Focus {
+                        agent_id: agent.agent_id.clone(),
+                        session: on.clone(),
+                    }));
+                    target = on;
+                }
                 "stop" | "stop_agent" | "interrupt" => {
                     effects.extend(agent.map(|agent| Effect::Stop {
                         agent_id: agent.agent_id.clone(),
-                    }))
+                    }));
+                    target = on;
                 }
                 "create" => {
                     let payload = decision.control_payload.as_ref();
@@ -1270,17 +1410,20 @@ impl Book {
                         name: name.filter(|name| !name.is_empty()).map(str::to_string),
                     }));
                 }
-                "relaunch" | "restart" | "resume" => match agent {
-                    Some(agent) => effects.push(Effect::Start(Start {
-                        again: Some(agent.session.clone()),
-                        name: None,
-                    })),
-                    // Nobody to start again: no agent is made of a name alone.
-                    None => effects.push(router_says(NOT_SEEN.to_string())),
-                },
+                // Started again as the Host knows it. Its command named an agent there is, or
+                // was said to one: no agent is made of a name alone.
+                "relaunch" | "restart" | "resume" => {
+                    effects.extend(agent.map(|agent| {
+                        Effect::Start(Start {
+                            again: Some(agent.session.clone()),
+                            name: None,
+                        })
+                    }));
+                }
                 _ => {
                     let words = "I am not sure how to do that yet.";
                     effects.extend(self.as_agent(requested, words, "", around).map(Effect::Say));
+                    target = on;
                 }
             }
         }
