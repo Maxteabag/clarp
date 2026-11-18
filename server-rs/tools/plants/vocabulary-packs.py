@@ -4,6 +4,7 @@ import runner
 RUNS={
     'vectors':['test','--test','vocabulary_packs'],
     'admin':['test','--test','host','vocabulary_packs_are_managed_compiled_recorded_and_heard'],
+    'index':['test','-p','clarp-host','--lib','vocabulary::store::tests'],
     'audio':['test','-p','clarp-host','--lib','retained_audio_obeys_trace_age_and_count_limits'],
 }
 K='clarp-kernel/src/vocabulary.rs'
@@ -172,11 +173,30 @@ for why,old,new in [
 
 for why,old,new in [
         ('completed transcript is lost','r.transcript = transcript;','r.transcript.clear();'),
-        ('counter reservations are not persisted','book.last_run = id;','book.last_run = id - 1;'),
-        ('the run is written under the following id','save(fleet, RUNS, id.to_string(), r)','save(fleet, RUNS, (id+1).to_string(), r)'),
-        ('a restarted host forgets older runs','built.observe(key.parse()','built.observe(1 + key.parse::<i64>()'),
-        ('the run lookup drops the trace index','entry(r.trace.clone())','entry(String::new())')]:
-    change(T,'admin',why,old,new)
+        ('counter reservations are not persisted','COUNTER, "last".into(), &id','COUNTER, "last".into(), &(id - 1)'),
+        ('the run is written under the following id','id.to_string(), &record','(id+1).to_string(), &record'),
+        ('a restarted host reads another session index','load::<Session>(fleet, SESSIONS, s)','load::<Session>(fleet, SESSIONS, "other")'),
+        ('the run lookup drops the trace index','TRACES, record.trace.clone(), &id','TRACES, String::new(), &id'),
+        ('a clip reads and rewrites the whole administrative book while reserving its number',
+         'let id = last.checked_add', 'let book:Book=load(fleet,BOOK,"book").await?.unwrap_or_default(); save(fleet,BOOK,"book".into(),&book).await?; let id = last.checked_add'),
+        ('number reservation overwrites the book','COUNTER, "last".into(), &id','BOOK, "book".into(), &id'),
+        ('per-session lookup is never written','save(fleet, SESSIONS, record.session.clone(), &session).await?;', 'let _ = &session;'),
+        ('all-sessions lookup is never written','save(fleet, GLOBAL, "all".into(), &all).await?;', 'let _ = &all;'),
+        ('trace lookup is never written','save(fleet, TRACES, record.trace.clone(), &id).await?;', 'let _ = &record.trace;'),
+        ('session page grows with every run','remember(&mut session.newest, id, PAGE)','remember(&mut session.newest, id, usize::MAX)'),
+        ('global page grows with every run','remember(&mut all, id, PAGE)','remember(&mut all, id, usize::MAX)'),
+        ('session drops its 200th run','remember(&mut session.newest, id, PAGE)','remember(&mut session.newest, id, PAGE-1)'),
+        ('global page drops its 200th run','remember(&mut all, id, PAGE)','remember(&mut all, id, PAGE-1)'),
+        ('last spoken run is ordered by completion time','ids.partition_point(|previous| *previous > id)','0'),
+        ('one older spoken run is discarded','const RECENT: usize = 3','const RECENT: usize = 2'),
+        ('one extra spoken run is read','const RECENT: usize = 3','const RECENT: usize = 4'),
+        ('recent results include silent clips','if !record.transcript.is_empty()','if record.transcript.is_empty()'),
+        ('finish does not update the spoken index','save(fleet, SESSIONS, r.session.clone(), &session).await?;', 'let _ = &session;'),
+        ('the clip loads every audit to allocate a number','let id = last.checked_add','let _ = fleet.kept_all(RUNS).await; let id = last.checked_add'),
+        ('an interrupted run consumes a listing slot','for id in ids {','for id in ids.into_iter().take(limit) {'),
+        ('a dangling trace leaks a storage error','run(fleet, id).await?.ok_or_else(missing)?','run(fleet, id).await?.ok_or_else(unavailable)?'),
+        ('the audit becomes durable before its lookups','save(fleet, SESSIONS, record.session.clone(), &session).await?;', 'save(fleet,RUNS,id.to_string(),&record).await?; save(fleet, SESSIONS, record.session.clone(), &session).await?;')]:
+    change(T,'index',why,old,new)
 
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

@@ -1,17 +1,21 @@
 //! The book and run records use the same kept-store port as other fleet data.
-//! Indexes are disposable: after restart they are reconstructed from the runs.
+//! Audits have no expiry. Their keyed lookup records have bounded size.
 use crate::fleet::FleetHandle;
 use axum::http::StatusCode;
 use clarp_kernel::vocabulary::book::{self, Book};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeSet, HashMap},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 const BOOK: &str = "vocabulary-book";
 const RUNS: &str = "vocabulary-runs";
+const COUNTER: &str = "vocabulary-counter";
+const TRACES: &str = "vocabulary-traces";
+const SESSIONS: &str = "vocabulary-sessions";
+const GLOBAL: &str = "vocabulary-global";
+const PAGE: usize = 200;
+const RECENT: usize = 3;
+
 pub(super) type Failure = (StatusCode, String);
 pub(super) type Result<T> = std::result::Result<T, Failure>;
 fn unavailable() -> Failure {
@@ -35,13 +39,19 @@ fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     })
 }
 
-async fn load_book(fleet: &FleetHandle) -> Result<Book> {
-    let data = fleet
-        .kept(BOOK, "book".into())
+async fn load<T: DeserializeOwned>(
+    fleet: &FleetHandle,
+    kind: &'static str,
+    key: &str,
+) -> Result<Option<T>> {
+    fleet
+        .kept(kind, key.to_owned())
         .await
-        .map_err(|_| unavailable())?;
-    data.map_or_else(|| Ok(Book::default()), |bytes| decode(&bytes))
+        .map_err(|_| unavailable())?
+        .map(|bytes| decode(&bytes))
+        .transpose()
 }
+
 async fn save(
     fleet: &FleetHandle,
     kind: &'static str,
@@ -81,54 +91,28 @@ impl Run {
     }
 }
 
-#[derive(Default)]
-struct Index {
-    all: BTreeSet<i64>,
-    sessions: HashMap<String, BTreeSet<i64>>,
-    spoken: HashMap<String, BTreeSet<i64>>,
-    traces: HashMap<String, i64>,
+#[derive(Default, Serialize, Deserialize)]
+struct Session {
+    newest: Vec<i64>,
+    // Speech remains useful even after a full page of silent turns.
+    spoken: Vec<i64>,
 }
-impl Index {
-    fn observe(&mut self, id: i64, r: &Run) {
-        self.all.insert(id);
-        self.sessions
-            .entry(r.session.clone())
-            .or_default()
-            .insert(id);
-        let spoken = self.spoken.entry(r.session.clone()).or_default();
-        if r.transcript.is_empty() {
-            spoken.remove(&id);
-        } else {
-            spoken.insert(id);
-        }
-        self.traces
-            .entry(r.trace.clone())
-            .and_modify(|v| *v = (*v).max(id))
-            .or_insert(id);
+
+fn remember(ids: &mut Vec<i64>, id: i64, limit: usize) {
+    let at = ids.partition_point(|previous| *previous > id);
+    if at < limit && ids.get(at) != Some(&id) {
+        ids.insert(at, id);
+        ids.truncate(limit);
     }
 }
 
 #[derive(Default, Clone)]
 pub(crate) struct Desk {
-    guard: Arc<tokio::sync::Mutex<Option<Index>>>,
+    guard: Arc<tokio::sync::Mutex<()>>,
 }
-async fn index<'a>(held: &'a mut Option<Index>, fleet: &FleetHandle) -> Result<&'a Index> {
-    if held.is_none() {
-        let mut built = Index::default();
-        for (key, bytes) in fleet.kept_all(RUNS).await.map_err(|_| unavailable())? {
-            built.observe(key.parse().map_err(|_| unavailable())?, &decode(&bytes)?);
-        }
-        *held = Some(built);
-    }
-    held.as_ref().ok_or_else(unavailable)
-}
-async fn run(fleet: &FleetHandle, id: i64) -> Result<Run> {
-    let bytes = fleet
-        .kept(RUNS, id.to_string())
-        .await
-        .map_err(|_| unavailable())?
-        .ok_or_else(unavailable)?;
-    decode(&bytes)
+
+async fn run(fleet: &FleetHandle, id: i64) -> Result<Option<Run>> {
+    load(fleet, RUNS, &id.to_string()).await
 }
 
 impl Desk {
@@ -142,7 +126,7 @@ impl Desk {
         write: bool,
     ) -> Result<Value> {
         let _lock = self.guard.lock().await;
-        let book = load_book(fleet).await?;
+        let book: Book = load(fleet, BOOK, "book").await?.unwrap_or_default();
         if !write {
             return book.read(action, data).map_err(rejected);
         }
@@ -158,45 +142,49 @@ impl Desk {
         fleet: &FleetHandle,
         session: &str,
     ) -> Result<(Book, Vec<String>)> {
-        let mut held = self.guard.lock().await;
-        let book = load_book(fleet).await?;
+        let _lock = self.guard.lock().await;
+        let book = load(fleet, BOOK, "book").await?.unwrap_or_default();
         let mut recent = Vec::new();
         if !session.is_empty()
-            && let Some(ids) = index(&mut held, fleet).await?.spoken.get(session)
+            && let Some(index) = load::<Session>(fleet, SESSIONS, session).await?
         {
-            for id in ids.iter().rev().take(3) {
-                recent.push(run(fleet, *id).await?.transcript);
+            for id in index.spoken {
+                if let Some(r) = run(fleet, id).await?
+                    && !r.transcript.is_empty()
+                {
+                    recent.push(r.transcript);
+                }
             }
         }
         Ok((book, recent))
     }
 
-    async fn write_run(
-        held: &mut Option<Index>,
-        fleet: &FleetHandle,
-        id: i64,
-        r: &Run,
-    ) -> Result<()> {
-        // If this task is cancelled while the fleet is writing, a subsequent
-        // reader rebuilds its index from the authoritative records.
-        let mut cached = held.take();
-        save(fleet, RUNS, id.to_string(), r).await?;
-        if let Some(ix) = &mut cached {
-            ix.observe(id, r);
-        }
-        *held = cached;
-        Ok(())
-    }
-
     pub(super) async fn record(&self, fleet: &FleetHandle, record: Run) -> Result<i64> {
-        let mut held = self.guard.lock().await;
-        let mut book = load_book(fleet).await?;
-        let id = book.last_run.checked_add(1).ok_or_else(unavailable)?;
-        book.last_run = id;
-        // Reserve the id first. A failed record may leave a gap, never a
-        // reused id or a later run overwriting one already returned to a phone.
-        save(fleet, BOOK, "book".into(), &book).await?;
-        Self::write_run(&mut held, fleet, id, &record).await?;
+        let _lock = self.guard.lock().await;
+        let last = load::<i64>(fleet, COUNTER, "last")
+            .await?
+            .unwrap_or_default();
+        let id = last.checked_add(1).ok_or_else(unavailable)?;
+        save(fleet, COUNTER, "last".into(), &id).await?;
+        let mut session: Session = load(fleet, SESSIONS, &record.session)
+            .await?
+            .unwrap_or_default();
+        remember(&mut session.newest, id, PAGE);
+        if !record.transcript.is_empty() {
+            remember(&mut session.spoken, id, RECENT);
+        }
+        let mut all: Vec<i64> = load(fleet, GLOBAL, "all").await?.unwrap_or_default();
+        remember(&mut all, id, PAGE);
+
+        // The Python transaction publishes its row and indexes together. Here
+        // the row is the last write: after a stop every saved run has all its
+        // lookups. Readers skip a lookup whose reserved run never arrived.
+        save(fleet, SESSIONS, record.session.clone(), &session).await?;
+        save(fleet, GLOBAL, "all".into(), &all).await?;
+        if !record.trace.is_empty() {
+            save(fleet, TRACES, record.trace.clone(), &id).await?;
+        }
+        save(fleet, RUNS, id.to_string(), &record).await?;
         Ok(id)
     }
 
@@ -207,11 +195,18 @@ impl Desk {
         transcript: String,
         latency: i64,
     ) -> Result<()> {
-        let mut held = self.guard.lock().await;
-        let mut r = run(fleet, id).await?;
+        let _lock = self.guard.lock().await;
+        let mut r = run(fleet, id).await?.ok_or_else(unavailable)?;
+        // Clip rows start empty. Index a newly heard clip before publishing
+        // its words. An interrupted finish still reads as the original silence.
+        if !transcript.is_empty() && r.transcript.is_empty() {
+            let mut session: Session = load(fleet, SESSIONS, &r.session).await?.unwrap_or_default();
+            remember(&mut session.spoken, id, RECENT);
+            save(fleet, SESSIONS, r.session.clone(), &session).await?;
+        }
         r.transcript = transcript;
         r.latency = latency;
-        Self::write_run(&mut held, fleet, id, &r).await
+        save(fleet, RUNS, id.to_string(), &r).await
     }
 
     pub(super) async fn report(
@@ -220,19 +215,15 @@ impl Desk {
         action: &str,
         v: &Value,
     ) -> Result<Value> {
-        let mut held = self.guard.lock().await;
-        let ix = index(&mut held, fleet).await?;
+        let _lock = self.guard.lock().await;
         if action == "run" {
-            let id = ix
-                .traces
-                .get(
-                    v["trace_id"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(""),
-                )
-                .ok_or_else(|| (StatusCode::NOT_FOUND, "no run for that trace".into()))?;
-            let mut row = run(fleet, *id).await?.row(*id);
+            let missing = || (StatusCode::NOT_FOUND, "no run for that trace".into());
+            let trace = v["trace_id"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .ok_or_else(missing)?;
+            let id = load(fleet, TRACES, trace).await?.ok_or_else(missing)?;
+            let mut row = run(fleet, id).await?.ok_or_else(missing)?.row(id);
             row["audio_url"] = Value::Null;
             return Ok(row);
         }
@@ -240,17 +231,28 @@ impl Desk {
             .as_str()
             .and_then(clarp_kernel::python::int)
             .unwrap_or(20)
-            .clamp(1, 200) as usize;
+            .clamp(1, PAGE as i128) as usize;
         let ids = match v["session"].as_str().filter(|s| !s.is_empty()) {
-            Some(s) => ix.sessions.get(s),
-            None => Some(&ix.all),
+            Some(s) => {
+                load::<Session>(fleet, SESSIONS, s)
+                    .await?
+                    .unwrap_or_default()
+                    .newest
+            }
+            None => load(fleet, GLOBAL, "all").await?.unwrap_or_default(),
         };
         let mut rows = Vec::new();
-        if let Some(ids) = ids {
-            for id in ids.iter().rev().take(limit) {
-                rows.push(run(fleet, *id).await?.row(*id));
+        for id in ids {
+            if let Some(r) = run(fleet, id).await? {
+                rows.push(r.row(id));
+                if rows.len() == limit {
+                    break;
+                }
             }
         }
         Ok(json!({"runs":rows}))
     }
 }
+
+#[cfg(test)]
+mod tests;

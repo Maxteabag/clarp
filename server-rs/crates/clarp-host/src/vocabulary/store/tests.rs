@@ -1,0 +1,294 @@
+//! Count operations at the fleet's actual storage port, including on reopen.
+use super::*;
+use crate::{
+    config::Config, fleet, hub::Hub, launcher::Launcher, owner::OwnerFile, telling::Telling,
+};
+use clarp_ports::{
+    blobs::BlobEngine,
+    clock::SystemClock,
+    kv::{KeyValue, KeyValueEngine, StoreError},
+};
+use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
+use std::{path::Path, sync::Mutex};
+
+#[derive(Debug, PartialEq, Eq)]
+enum Op {
+    Read(String, String),
+    Write(String, String),
+    Scan(String),
+}
+#[derive(Default)]
+struct Counts {
+    ops: Vec<Op>,
+    fail_write: Option<String>,
+}
+struct Counted {
+    inner: Box<dyn KeyValue>,
+    counts: Arc<Mutex<Counts>>,
+}
+impl KeyValue for Counted {
+    fn get(&self, table: &str, key: &str) -> std::result::Result<Option<Vec<u8>>, StoreError> {
+        self.counts
+            .lock()
+            .unwrap()
+            .ops
+            .push(Op::Read(table.into(), key.into()));
+        self.inner.get(table, key)
+    }
+    fn put(&mut self, table: &str, key: &str, value: &[u8]) -> std::result::Result<(), StoreError> {
+        let mut counts = self.counts.lock().unwrap();
+        counts.ops.push(Op::Write(table.into(), key.into()));
+        if counts.fail_write.as_deref() == Some(table) {
+            return Err(StoreError("cut before write".into()));
+        }
+        self.inner.put(table, key, value)
+    }
+    fn list(&self, table: &str) -> std::result::Result<Vec<(String, Vec<u8>)>, StoreError> {
+        self.counts.lock().unwrap().ops.push(Op::Scan(table.into()));
+        self.inner.list(table)
+    }
+    fn delete(&mut self, table: &str, key: &str) -> std::result::Result<bool, StoreError> {
+        self.inner.delete(table, key)
+    }
+}
+
+struct Place {
+    engine: MemKeyValue,
+    counts: Arc<Mutex<Counts>>,
+}
+impl Place {
+    fn new() -> Self {
+        Self {
+            engine: MemKeyValue::new(),
+            counts: Arc::default(),
+        }
+    }
+    fn start(&self) -> FleetHandle {
+        let dir = std::env::temp_dir().join("clarp-vocabulary-counting-store");
+        let config = Config::from_args(
+            [
+                "--data",
+                dir.to_str().unwrap(),
+                "--run",
+                dir.to_str().unwrap(),
+                "--cwd",
+                dir.to_str().unwrap(),
+            ]
+            .into_iter()
+            .map(String::from),
+        )
+        .unwrap();
+        let works = fleet::Works {
+            config: Arc::new(config),
+            engine: Arc::new(MemEngine::new()),
+            codecs: clarp_codec::standard_set("zstd").unwrap(),
+            launcher: Arc::new(Launcher::by_name("direct", dir.join("unused-shim")).unwrap()),
+            clock: Arc::new(SystemClock),
+            hub: Arc::new(Hub::new(0)),
+            revisions: Arc::default(),
+            tool_env: Vec::new(),
+            pusher: crate::pusher::pusher().0,
+            blobs: MemBlobs::new().open(&dir).unwrap(),
+            speaks: crate::voice::mouth().0,
+            telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
+            tally: crate::usage::tally().0,
+            pools: Vec::new(),
+        };
+        let store = Counted {
+            inner: self.engine.open(Path::new("vocab-test")).unwrap(),
+            counts: self.counts.clone(),
+        };
+        fleet::start(works, Box::new(store)).unwrap()
+    }
+    fn take(&self) -> Vec<Op> {
+        std::mem::take(&mut self.counts.lock().unwrap().ops)
+    }
+    fn cut(&self, kind: Option<&str>) {
+        self.counts.lock().unwrap().fail_write = kind.map(|k| format!("kept.{k}"));
+    }
+}
+fn read(k: &str, key: &str) -> Op {
+    Op::Read(format!("kept.{k}"), key.into())
+}
+fn write(k: &str, key: &str) -> Op {
+    Op::Write(format!("kept.{k}"), key.into())
+}
+fn clip(session: &str, trace: &str, speech: &str) -> Run {
+    Run {
+        session: session.into(),
+        trace: trace.into(),
+        agent: String::new(),
+        profile: None,
+        provider: "local".into(),
+        model: String::new(),
+        audit: json!({}),
+        transcript: speech.into(),
+        latency: 0,
+        now: 0,
+    }
+}
+
+#[tokio::test]
+async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
+    let place = Place::new();
+    let fleet = place.start();
+    let desk = Desk::default();
+    desk.administration(&fleet, "packs", &json!({"name":"Test"}), 0, true, true)
+        .await
+        .unwrap();
+    place.take();
+
+    desk.inputs(&fleet, "A").await.unwrap();
+    assert_eq!(
+        desk.record(&fleet, clip("A", "voice", "")).await.unwrap(),
+        1
+    );
+    desk.finish(&fleet, 1, "one".into(), 7).await.unwrap();
+    assert_eq!(
+        place.take(),
+        vec![
+            read(BOOK, "book"),
+            read(SESSIONS, "A"),
+            read(COUNTER, "last"),
+            write(COUNTER, "last"),
+            read(SESSIONS, "A"),
+            read(GLOBAL, "all"),
+            write(SESSIONS, "A"),
+            write(GLOBAL, "all"),
+            write(TRACES, "voice"),
+            write(RUNS, "1"),
+            read(RUNS, "1"),
+            read(SESSIONS, "A"),
+            write(SESSIONS, "A"),
+            write(RUNS, "1"),
+        ]
+    );
+    let late = desk.record(&fleet, clip("A", "voice", "")).await.unwrap();
+    desk.record(&fleet, clip("A", "voice", "three"))
+        .await
+        .unwrap();
+    desk.record(&fleet, clip("A", "voice", "four"))
+        .await
+        .unwrap();
+    desk.finish(&fleet, late, "two".into(), 1).await.unwrap();
+    for _ in 0..201 {
+        desk.record(&fleet, clip("A", "", "")).await.unwrap();
+    }
+    let last = desk
+        .record(&fleet, clip("B", "other", "other words"))
+        .await
+        .unwrap();
+    drop(fleet);
+    drop(desk);
+    place.take();
+    let fleet = place.start();
+    let desk = Desk::default();
+    let opening = place.take();
+    assert!(
+        !opening
+            .iter()
+            .any(|op| matches!(op,Op::Scan(k) if k.starts_with("kept.vocabulary")))
+    );
+
+    let row = desk
+        .report(&fleet, "run", &json!({"trace_id":"voice"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        (row["run_id"].as_i64(), row["transcript"].as_str()),
+        (Some(4), Some("four"))
+    );
+    assert_eq!(place.take(), vec![read(TRACES, "voice"), read(RUNS, "4")]);
+    let rows = desk
+        .report(&fleet, "runs", &json!({"session":"A","limit":"2"}))
+        .await
+        .unwrap();
+    assert_eq!(rows["runs"][0]["run_id"], last - 1);
+    assert_eq!(rows["runs"][1]["run_id"], last - 2);
+    assert_eq!(
+        place.take(),
+        vec![
+            read(SESSIONS, "A"),
+            read(RUNS, &(last - 1).to_string()),
+            read(RUNS, &(last - 2).to_string())
+        ]
+    );
+    assert_eq!(
+        desk.inputs(&fleet, "A").await.unwrap().1,
+        ["four", "three", "two"]
+    );
+    assert_eq!(
+        place.take(),
+        vec![
+            read(BOOK, "book"),
+            read(SESSIONS, "A"),
+            read(RUNS, "4"),
+            read(RUNS, "3"),
+            read(RUNS, "2")
+        ]
+    );
+    let rows = desk
+        .report(&fleet, "runs", &json!({"limit":"999"}))
+        .await
+        .unwrap();
+    let ids: Vec<_> = rows["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["run_id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(ids, (last - 199..=last).rev().collect::<Vec<_>>());
+    // The page on disk is bounded too, even if the app always asks for two.
+    let session: Session = load(&fleet, SESSIONS, "A").await.unwrap().unwrap();
+    assert_eq!(session.newest, (last - 200..last).rev().collect::<Vec<_>>());
+    let all: Vec<i64> = load(&fleet, GLOBAL, "all").await.unwrap().unwrap();
+    assert_eq!(all, ids);
+    assert_eq!(
+        desk.record(&fleet, clip("B", "other", "last"))
+            .await
+            .unwrap(),
+        last + 1
+    );
+}
+
+#[tokio::test]
+async fn interrupted_publication_skips_the_missing_run_and_keeps_its_number_reserved() {
+    for kind in [COUNTER, SESSIONS, GLOBAL, TRACES, RUNS] {
+        let place = Place::new();
+        let fleet = place.start();
+        let desk = Desk::default();
+        desk.record(&fleet, clip("A", "first", "first"))
+            .await
+            .unwrap();
+        place.cut(Some(kind));
+        assert!(
+            desk.record(&fleet, clip("A", "cut", "missing"))
+                .await
+                .is_err()
+        );
+        drop(fleet);
+        drop(desk);
+        place.cut(None);
+        let fleet = place.start();
+        let desk = Desk::default();
+        assert_eq!(
+            desk.report(&fleet, "run", &json!({"trace_id":"cut"}))
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        for query in [json!({"limit":"1"}), json!({"session":"A","limit":"1"})] {
+            assert_eq!(
+                desk.report(&fleet, "runs", &query).await.unwrap()["runs"][0]["run_id"],
+                1
+            );
+        }
+        assert_eq!(desk.inputs(&fleet, "A").await.unwrap().1, ["first"]);
+        let next = desk
+            .record(&fleet, clip("A", "next", "next"))
+            .await
+            .unwrap();
+        assert_eq!(next, if kind == COUNTER { 2 } else { 3 });
+    }
+}
