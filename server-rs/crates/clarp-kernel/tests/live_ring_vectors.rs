@@ -296,6 +296,9 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
         .collect();
     let (mut steps, mut refusals, mut placed, mut joined) = (0, 0, 0, 0);
     let (mut closes_between, mut call_pushes_sent) = (0, 0);
+    // Closes and fallbacks the reference took, each tried again with a nonce that has a sign
+    // outside ASCII (R65: there that raises, behind `agent_ring_live._owned`).
+    let mut foreign_nonces = 0;
     for script in vectors["scripts"].as_array().unwrap() {
         let name = script["name"].as_str().unwrap();
         let shelf = Shelf {
@@ -520,21 +523,39 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                             joined += 1;
                             json!({ "joined": call.call_id, "ids": claimed(said) })
                         }
-                        // Where the Python Host fails on a nonce with a sign outside ASCII,
-                        // this Host refuses it as any nonce that is not the call's.
-                        Err(code) if row["result"].get("raised").is_some() => {
-                            assert_eq!(code, "live_owner_conflict", "{here}");
-                            row["result"].clone()
-                        }
                         Err(code) => json!({ "refused": code }),
                     })
                 }
                 "close" => {
+                    let foreign = with_foreign_nonce(&step["said"]);
+                    let probe = rings.clone().close(
+                        &principal,
+                        &foreign,
+                        &world,
+                        now,
+                        &mut Effects::default(),
+                    );
                     let closed = rings.close(&principal, &step["said"], &world, now, &mut out);
+                    if closed.is_ok() {
+                        assert_eq!(probe.unwrap_err().body, owner_conflict(), "{here}");
+                        foreign_nonces += 1;
+                    }
                     closed.map(|(answer, _call)| answer)
                 }
                 "fallback" => {
                     let said = &step["said"];
+                    let foreign = with_foreign_nonce(said);
+                    let probe = rings.clone().switch(
+                        &principal,
+                        &foreign,
+                        (&calls, &world),
+                        now,
+                        &mut Effects::default(),
+                    );
+                    if row["refused"].is_null() {
+                        assert_eq!(probe.unwrap_err().body, owner_conflict(), "{here}");
+                        foreign_nonces += 1;
+                    }
                     match rings.switch(&principal, said, (&calls, &world), now, &mut out) {
                         Err(why) => Err(why),
                         Ok(Claim::Before(answer)) => Ok(answer),
@@ -738,4 +759,18 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
     }
     assert_eq!((steps, refusals, placed, joined), (743, 196, 72, 20));
     assert_eq!((closes_between, call_pushes_sent), (3, 92));
+    assert_eq!(foreign_nonces, 48);
+}
+
+/// A control of a call as it was sent, with a nonce that has a sign outside ASCII.
+fn with_foreign_nonce(said: &Value) -> Value {
+    let mut foreign = said.clone();
+    if foreign.get("owner_nonce").is_some() {
+        foreign["owner_nonce"] = json!("n\u{f8}nce");
+    }
+    foreign
+}
+
+fn owner_conflict() -> Value {
+    json!({ "ok": false, "error": "live_owner_conflict" })
 }

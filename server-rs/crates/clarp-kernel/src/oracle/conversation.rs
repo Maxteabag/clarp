@@ -57,6 +57,10 @@ const FRAGMENT_SIGNS: usize = 32_000;
 /// How many fragments of the talk are kept, and of how many relays where they stopped.
 const FRAGMENTS_KEPT: usize = 30;
 const CURSORS_KEPT: usize = 50;
+/// How many of the contact's answers are kept as told under a delegation, the newest: so
+/// that the same answer under another delegation in a later call is not told twice, while
+/// what a thread keeps stays bounded.
+const FINDINGS_KEPT: usize = 500;
 /// How loud sound must be to count as somebody speaking: the mean of its samples' squares.
 const AUDIBLE: f64 = 10_000.0;
 /// Before anything happened.
@@ -258,11 +262,18 @@ pub struct Conversation {
     cues: Vec<(String, String)>,
     pub(super) owned: BTreeSet<String>,
     pub(super) background: BTreeSet<String>,
+    /// The answers that were told: their last part was handed over.
     results_sent: BTreeSet<String>,
     results_seen: BTreeSet<String>,
+    /// The answers a stop of their agent left untold: never told by themselves, in this call
+    /// or a later one of the thread.
+    silenced: BTreeSet<String>,
     pending: Vec<Delegation>,
     forwarded: Map<String, Value>,
     pub(super) relays: BTreeMap<String, Relay>,
+    /// The relays that are answers of delegations, each with what its answer is known by
+    /// where it is the contact's own.
+    findings: BTreeMap<String, Option<String>>,
     cursors: Map<String, Value>,
     active: Option<String>,
     wanted: Vec<String>,
@@ -341,9 +352,11 @@ impl Conversation {
             background: BTreeSet::new(),
             results_sent: BTreeSet::new(),
             results_seen: BTreeSet::new(),
+            silenced: BTreeSet::new(),
             pending: Vec::new(),
             forwarded: Map::new(),
             relays: BTreeMap::new(),
+            findings: BTreeMap::new(),
             cursors: Map::new(),
             active: None,
             wanted: Vec::new(),
@@ -388,7 +401,9 @@ impl Conversation {
         let routed = saved["routed_revision"].as_i64();
         call.routed_revision = routed.unwrap_or(call.resume_revision);
         call.results_sent = texts("results_sent");
-        call.results_seen = call.results_sent.clone();
+        // What a stop silenced, where a Host that keeps it kept it: none where one did not.
+        call.silenced = texts("silenced_results");
+        call.results_seen = call.results_sent.union(&call.silenced).cloned().collect();
         if let Some(forwarded) = saved["forwarded_findings"].as_object() {
             call.forwarded = forwarded.clone();
         }
@@ -512,12 +527,23 @@ impl Conversation {
     /// What is to be kept of the call, where anything changed since it was last asked for.
     pub fn to_keep(&mut self) -> Option<Value> {
         let wall_ms = self.dirty.take()?;
-        let work: Vec<&String> = self.owned.difference(&self.background).collect();
-        Some(json!({
+        // Only this call's work can be told by itself in a call that goes on in its place
+        // (what is older is handed on there), so only of that is kept what was told and what
+        // a stop silenced: the thread is every call's with the contact, and must not grow.
+        let work: BTreeSet<&String> = self.owned.difference(&self.background).collect();
+        let of_work = |ids: &BTreeSet<String>| -> Vec<String> {
+            let ids = ids.iter().filter(|id| work.contains(id));
+            ids.cloned().collect()
+        };
+        let older = self.forwarded.len().saturating_sub(FINDINGS_KEPT);
+        let forwarded: Map<String, Value> =
+            self.forwarded.clone().into_iter().skip(older).collect();
+        let silenced = of_work(&self.silenced);
+        let mut kept = json!({
             "revision": self.revision,
             "fragments": self.fragments,
-            "results_sent": self.results_sent,
-            "forwarded_findings": self.forwarded,
+            "results_sent": of_work(&self.results_sent),
+            "forwarded_findings": forwarded,
             "provider_session": self.provider_session,
             "relay_cursors": self.cursors,
             "narration": self.narration,
@@ -525,7 +551,11 @@ impl Conversation {
             "routed_revision": self.routed_revision,
             "call_active_ms": wall_ms,
             "call_work": work,
-        }))
+        });
+        if !silenced.is_empty() {
+            kept["silenced_results"] = json!(silenced);
+        }
+        Some(kept)
     }
 
     /// The actions that were begun since this was last asked: to be written.
@@ -737,9 +767,29 @@ impl Conversation {
         wire.phone(event.clone());
     }
 
-    /// What an agent was told to leave is not told as a result.
-    pub fn supersede(&mut self, session: &str) {
+    /// What an agent was told to leave is not told as a result, in this call or a later one of
+    /// the thread; it is still read when it is asked for. `rows`: the delegations of this call,
+    /// as the book had them just before: a result that is over only since is told as any other.
+    pub fn supersede(&mut self, session: &str, rows: &[Delegation], now: Now) {
+        let finished = rows.iter().filter(|row| !row.status.active());
+        let stopped: BTreeSet<String> = self
+            .pending
+            .iter()
+            .chain(finished)
+            .filter(|row| row.session == session && row.status != Status::Cancelled)
+            .map(|row| row.delegation_id.clone())
+            .filter(|id| !self.results_sent.contains(id) && !self.background.contains(id))
+            .collect();
+        self.silenced.extend(stopped.iter().cloned());
+        self.results_seen.extend(stopped.iter().cloned());
         self.pending.retain(|row| row.session != session);
+        let active = self.active.as_ref().filter(|key| stopped.contains(*key));
+        if let Some(relay) = active.and_then(|key| self.relays.get_mut(key)) {
+            relay.held = true;
+        }
+        if !stopped.is_empty() {
+            self.checkpoint(now);
+        }
     }
 
     /// The user has spoken in this call and the voice has answered: said once it is so.
@@ -830,24 +880,25 @@ impl Conversation {
             self.checkpoint(now);
             return claim;
         };
-        if row.status == Status::Completed && next == 0 {
-            self.cue("result", "", wire, now);
-        }
-        // An answer the contact gave once is told once, under whatever delegations it ended.
-        let finding = match self.strategy {
-            Strategy::DirectContact => finding_identity(&row),
-            Strategy::Operator => None,
-        };
-        let told_before = finding
-            .as_ref()
-            .is_some_and(|key| self.forwarded.contains_key(key));
-        if !told_before {
-            self.relay(&id, 0, (false, false), wire, now);
+        // Whether it is told is decided before its cue. An answer the contact gave once is
+        // told once, under whatever delegations it ended.
+        let finding = self.findings.get(&id).cloned().flatten();
+        let previous = finding.as_ref().and_then(|key| self.forwarded.get(key));
+        let told_before = previous.is_some_and(|told| python::truthy(told) && *told != json!(id));
+        let remaining = self.relays.get(&id).map_or(0, Relay::remaining);
+        if told_before || remaining == 0 {
+            // Told under another delegation, or read to its end on request.
+            self.results_sent.insert(id);
+        } else {
+            if row.status == Status::Completed {
+                self.cue("result", "", wire, now);
+            }
+            // An answer read part of the way is gone on with where the reading stopped.
+            self.relay(&id, next, (false, next > 0), wire, now);
             if let Some(key) = finding {
                 self.forwarded.insert(key, json!(id));
             }
         }
-        self.results_sent.insert(id);
         self.checkpoint(now);
         claim
     }
@@ -899,6 +950,11 @@ impl Conversation {
             return Some(relay.next);
         }
         let mut relay = relay::result_relay(row, None).ok()?;
+        let finding = match self.strategy {
+            Strategy::DirectContact => finding_identity(row),
+            Strategy::Operator => None,
+        };
+        self.findings.insert(row.delegation_id.clone(), finding);
         if let Some(cursor) = self.cursors.get(&row.delegation_id).and_then(Value::as_i64) {
             let stopped = usize::try_from(cursor).unwrap_or(0);
             relay.next = stopped.min(relay.total());
@@ -925,6 +981,10 @@ impl Conversation {
         relay.next = start;
         relay.auto = 0;
         relay.held = false;
+        // Read on request: no longer paused, nor silenced.
+        if handed.0 {
+            self.silenced.remove(key);
+        }
         self.active = Some(key.to_string());
         self.send_part(key, handed, wire, now);
     }
@@ -950,7 +1010,12 @@ impl Conversation {
             resumed,
             pause_after: relay.auto >= AUTO_PARTS,
         };
-        let (part, next) = (relay.part(index, handed), relay.next);
+        let paused = handed.pause_after && index + 1 < relay.total();
+        let (part, next, last) = (
+            relay.part(index, handed),
+            relay.next,
+            index + 1 == relay.total(),
+        );
         self.last_append = now.ms;
         // Where a conversation that was read out stopped is not kept: it is read anew.
         if !key.starts_with("transcript:") {
@@ -962,6 +1027,23 @@ impl Conversation {
             }
         }
         self.append("commentary", &part, wire);
+        // An answer paused at the most parts one request brings was paused on purpose: a
+        // later call does not go on past it by itself; it is still read when asked for.
+        if paused && self.findings.contains_key(key) {
+            self.silenced.insert(key.to_string());
+            // Nor this call: an answer that waits to be told, and was read on request, waits
+            // no more.
+            self.pending.retain(|row| row.delegation_id != key);
+        }
+        // An answer whose last part was handed over was told, however it was asked for.
+        if let Some(finding) = self.findings.get(key).filter(|_| last).cloned() {
+            self.results_sent.insert(key.to_string());
+            self.results_seen.insert(key.to_string());
+            self.pending.retain(|row| row.delegation_id != key);
+            if let Some(finding) = finding {
+                self.forwarded.entry(finding).or_insert_with(|| json!(key));
+            }
+        }
         self.checkpoint(now);
     }
 
@@ -1037,6 +1119,18 @@ impl Conversation {
         wire: &mut dyn Wire,
         now: Now,
     ) -> bool {
+        // Work that is named and not over has no answer yet, and says so.
+        let named = operation_id
+            .as_str()
+            .filter(|_| python::truthy(operation_id));
+        let unknown = named.filter(|id| !self.relays.contains_key(*id));
+        let row = unknown.and_then(|id| rows.iter().find(|row| row.delegation_id == id));
+        if let Some(row) = row.filter(|row| row.status.active()) {
+            let word = row.status.word();
+            let text = format!("The requested operation is {word}. Its result is not ready.");
+            self.append("thinking", &text, wire);
+            return true;
+        }
         let Some(key) = self.latest_relay(operation_id, rows) else {
             self.append("thinking", NOTHING_KEPT, wire);
             return false;

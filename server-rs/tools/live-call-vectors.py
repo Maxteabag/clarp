@@ -257,6 +257,7 @@ def tool_cases() -> list[tuple[str, object, str]]:
              ('stories that are no list', opted(stories='user_call'), story), ('no stories', opted(stories=[]), story)]
     cases += [(f'agents: {name}', opted(agents=value), story) for name, value in (
         ('none', []), ('left out', DROP), ('nothing', None), ('an object', {'session': 'a'}),
+        ('a number', 7), ('true', True),
         ('twelve', [{'session': f'm-{n}'} for n in range(12)]), ('thirteen', [{'session': f'm-{n}'} for n in range(13)]),
         ('one that is a text', ['drammen-jonas']), ('one without a session', [{'name': 'Jonas'}]),
         ('a session that is a number', [{'session': 5}]), ('a session with a blank', [{'session': 'a b'}]),

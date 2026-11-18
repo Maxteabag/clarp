@@ -689,9 +689,10 @@ impl Book {
         Ok(vec![Effect::Release { agent_id: id }])
     }
 
-    /// Puts a janitor's tuning back as its job has it: its triggers' settings, its options,
-    /// and the model its job recommends where it runs on the tool its job recommends. Who
-    /// it is, what it watches and what it did stay.
+    /// Puts a janitor's tuning back as its job has it: its triggers' settings (those its job
+    /// is installed with, else the trigger's own), how it is run (as its job is installed,
+    /// where its tool can run it so), its options, and the model its job recommends where it
+    /// runs on the tool its job recommends. Who it is, what it watches and what it did stay.
     pub fn reset_defaults(
         &mut self,
         key: &str,
@@ -702,18 +703,40 @@ impl Book {
         let agent = agent_of(key, world)?;
         let config = self.config(&agent.agent_id)?.clone();
         let job = template(&config.template_id)?;
+        let seeds = job["seed_attachments"]
+            .as_array()
+            .map_or(&[][..], Vec::as_slice);
         let mut attachments = Vec::new();
         for (id, kept) in self.triggers_of(&agent.agent_id) {
+            let seed = seeds
+                .iter()
+                .rev()
+                .find(|seed| seed["trigger_id"] == kept.trigger_id);
             let defaults = super::triggers().iter().find(|trigger| {
                 trigger["trigger_id"] == kept.trigger_id
                     && trigger["version"] == kept.trigger_version
             });
+            let config = match seed {
+                Some(seed) => seed["config"].clone(),
+                None => defaults.map_or(json!({}), |trigger| trigger["defaults"].clone()),
+            };
             attachments.push(json!({
                 "attachment_id": id, "trigger_id": kept.trigger_id,
                 "trigger_version": kept.trigger_version, "enabled": kept.enabled,
-                "config": defaults.map_or(json!({}), |trigger| trigger["defaults"].clone()),
+                "config": config,
             }));
         }
+        // A tool that cannot shut a run off keeps the plain way of running it.
+        let seeded = job["seed_execution"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        let shut_off = seeded.get("isolated").is_some_and(crate::python::truthy);
+        let execution = if shut_off && !super::isolates(&agent.backend) {
+            Map::new()
+        } else {
+            seeded
+        };
         let mut options = Map::new();
         for option in job["options"].as_array().map_or(&[][..], Vec::as_slice) {
             if let Some(key) = option["key"].as_str() {
@@ -726,7 +749,7 @@ impl Book {
             .filter(|model| model.as_str().is_some_and(|name| !name.is_empty()));
         let mut asked = Asked::new();
         asked.insert("attachments".to_string(), json!(attachments));
-        asked.insert("execution".to_string(), json!({}));
+        asked.insert("execution".to_string(), Value::Object(execution));
         asked.insert("options".to_string(), Value::Object(options));
         if let Some(model) = model {
             asked.insert("model".to_string(), model);

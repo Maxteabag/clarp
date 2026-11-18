@@ -223,9 +223,6 @@ def run() -> dict:
             return {'taken': named(call())}
         except janitors.JanitorError as refused:
             return {'refused': [refused.status, refused.code, named(str(refused))]}
-        except (AttributeError, TypeError, ValueError, KeyError) as broke:
-            # Not a refusal: the Python Host breaks on this input. Told as that, by its kind.
-            return {'broke': type(broke).__name__}
 
     first_day = named(janitors.list_janitors())
     builtin = {row['builtin_role']: row['agent_id'] for row in first_day}
@@ -393,6 +390,14 @@ def run() -> dict:
         step('give it fewer goals at once', 'configure', '{goal-keeper}', expected_revision=2,
              options={'max_goals_per_run': 2}),
         step('put it back as it came', 'reset', '{goal-keeper}', expected_revision=3),
+        # A reset never changes whether a trigger is on.
+        step('turn off its sweep', 'configure', '{goal-keeper}', expected_revision=4, attachments=[
+            {'attachment_id': 'builtin-goal-keeper-schedule-v1', 'trigger_id': 'schedule', 'enabled': False,
+             'config': {'cron': '17 * * * *', 'timezone': 'UTC'}},
+            {'attachment_id': 'builtin-goal-keeper-goal-activity-observed-v1', 'trigger_id': 'goal-activity-observed'},
+            {'attachment_id': 'builtin-goal-keeper-v1', 'trigger_id': 'agent-work-completed',
+             'config': {'coalesce_seconds': 300}}]),
+        step('put it back as it came, with its sweep off', 'reset', '{goal-keeper}', expected_revision=5),
         step("let one of the Host's own go", 'release', '{quota-monitor}', expected_revision=1),
         step('take over a choice where none was made', 'adopt', '{message-delegator}', expected_revision=1,
              options={'detail_level': 1}),

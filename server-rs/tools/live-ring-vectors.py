@@ -662,8 +662,6 @@ def run() -> dict:
                     joined = agent_ring_live_socket._join(step['principal'], said)
                 except agent_ring_live_socket.Refused as no:
                     return {'refused': no.code}
-                except TypeError:
-                    return {'raised': 'TypeError'}
                 return {'joined': joined['_live_call_id'], 'ids': agent_ring_live_socket._claimed_ids(said)}
             if do == 'close':
                 said = changed({'call_id': kept.get('_live_call_id', ''), 'owner_nonce': kept.get('_live_owner_nonce', ''),

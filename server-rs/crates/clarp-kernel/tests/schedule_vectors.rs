@@ -14,10 +14,6 @@ fn vectors() -> Value {
     serde_json::from_str(include_str!("fixtures/schedule-vectors.json")).unwrap()
 }
 
-/// The one input this Host reads otherwise, and says so (`docs/differences.md`): a number
-/// written in the digits of another script is no number here.
-const OTHER_DIGITS: &str = "\u{665} * * * *";
-
 #[test]
 fn an_expression_is_read_and_runs_next_when_the_python_scheduler_says() {
     let vectors = vectors();
@@ -31,14 +27,6 @@ fn an_expression_is_read_and_runs_next_when_the_python_scheduler_says() {
     let (mut taken, mut refused, mut never) = (0, 0, 0);
     for row in rows {
         let expression = row["expression"].as_str().unwrap();
-        if expression == OTHER_DIGITS {
-            assert_eq!(
-                schedules::parse(expression).unwrap_err(),
-                "invalid literal for int() with base 10: '\u{665}'"
-            );
-            assert!(row.get("fields").is_some(), "the Python Host takes it");
-            continue;
-        }
         match schedules::parse(expression) {
             Ok(cron) => {
                 taken += 1;
@@ -66,7 +54,7 @@ fn an_expression_is_read_and_runs_next_when_the_python_scheduler_says() {
         }
     }
     assert!(
-        rows.len() >= 87 && taken >= 48 && refused >= 38 && never >= 20,
+        rows.len() >= 87 && taken >= 46 && refused >= 41 && never >= 20,
         "{taken} taken, {refused} refused, {never} that never run"
     );
 }

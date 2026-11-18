@@ -36,6 +36,17 @@ T = 'vectors'
 #     Python Host compares fractions of seconds, and the generator refuses every story that is decided on such an
 #     edge; the thresholds themselves are planted shorter and longer.
 #   conversation.rs: what `to_keep` writes field by field: it is compared whole after every step.
+#   conversation.rs: that work named for reading which has a relay is not looked for in the book
+#     (`!self.relays.contains_key`): a relay is made only of work that is over, and work that is over stays so.
+#   conversation.rs: that a stop silences no work handed on before the call (`!self.background.contains(id)` in
+#     `supersede`; taken off when the Python Host's follow-up of 18 Nov 2026 made it MISSED): such work is seen
+#     already and never told by itself, and what is kept of what was silenced is this call's work only.
+#   conversation.rs: that only what is read on request lifts a pause (`if handed.0`): what is paused or silenced
+#     is seen already, so nothing else hands it over again but a reading on request.
+#   conversation.rs: that only an answer of a delegation is paused (`self.findings.contains_key`): what is
+#     silenced is kept of this call's work only, and a tool's answer or a conversation is none of it.
+#   conversation.rs: that a name that says nothing names no work (`filter(|_| python::truthy(..))`): an empty
+#     name finds no row in the book either way.
 PLANTS = [
     # ---- what a phone may send
     (P, T, 'a handoff is named by any 32 signs', '.is_some_and(|rest| rest.len() == 32 && rest.bytes().all(hex))', '.is_some_and(|rest| rest.len() == 32)'),
@@ -270,7 +281,10 @@ PLANTS = [
     (C, T, 'what was routed is forgotten where it is not said', '        call.routed_revision = routed.unwrap_or(call.resume_revision);', '        call.routed_revision = routed.unwrap_or(0);'),
     (C, T, 'the whole talk was routed whatever was kept', '        call.routed_revision = routed.unwrap_or(call.resume_revision);', '        call.routed_revision = call.resume_revision;'),
     (C, T, 'results that were told are told again', '        call.results_sent = texts("results_sent");', '        call.results_sent = BTreeSet::new();'),
-    (C, T, 'results that were told are not seen', '        call.results_seen = call.results_sent.clone();', '        call.results_seen = BTreeSet::new();'),
+    (C, T, 'results that were told are not seen', '        call.results_seen = call.results_sent.union(&call.silenced).cloned().collect();', '        call.results_seen = call.silenced.clone();'),
+    (C, T, 'what a stop silenced is told by itself in a later call', '        call.results_seen = call.results_sent.union(&call.silenced).cloned().collect();', '        call.results_seen = call.results_sent.clone();'),
+    (C, T, 'what a stop silenced is forgotten by a later call', '        call.silenced = texts("silenced_results");\n', ''),
+    (C, T, 'what a stop silenced is read as told', '        call.silenced = texts("silenced_results");', '        call.results_sent.extend(texts("silenced_results"));'),
     (C, T, 'answers that were told once are forgotten', '            call.forwarded = forwarded.clone();\n', ''),
     (C, T, 'where the relays stopped is forgotten', '            call.cursors = cursors.clone();\n', ''),
     (C, T, 'narration is on whatever was kept', '            call.narration = "off".to_string();\n', ''),
@@ -283,7 +297,7 @@ PLANTS = [
     (C, T, 'no work of the thread is of an earlier call', '        call.background = call.owned.difference(&resumed).cloned().collect();', '        call.background = BTreeSet::new();'),
     # ---- the conversation: what is kept, and what the voice is told
     (C, T, 'what is kept is kept again though nothing changed', '        let wall_ms = self.dirty.take()?;', '        let wall_ms = self.dirty?;'),
-    (C, T, "the work of an earlier call is kept as this call's", '        let work: Vec<&String> = self.owned.difference(&self.background).collect();', '        let work: Vec<&String> = self.owned.iter().collect();'),
+    (C, T, "the work of an earlier call is kept as this call's", '        let work: BTreeSet<&String> = self.owned.difference(&self.background).collect();', '        let work: BTreeSet<&String> = self.owned.iter().collect();'),
     (C, T, 'nothing is ever to be kept', '        self.dirty = Some(now.wall_ms);\n', ''),
     (C, T, 'the actions that were begun are told again', '        std::mem::take(&mut self.admissions)', '        self.admissions.clone()'),
     (C, T, 'a text of 1500 signs is cut', '        let content = if content.chars().count() > APPEND_CHARS {', '        let content = if content.chars().count() >= APPEND_CHARS {'),
@@ -403,15 +417,24 @@ PLANTS = [
     (C, T, 'a result is told right after the Host told the voice something', '        if self.pending.is_empty()\n            || !self.between_turns(false, now)\n            || now.ms - self.last_output < AFTER_OUTPUT_MS\n            || now.ms - self.last_append < AFTER_APPEND_MS\n        {', '        if self.pending.is_empty()\n            || !self.between_turns(false, now)\n            || now.ms - self.last_output < AFTER_OUTPUT_MS\n        {'),
     (C, T, 'the newest result is told first', '        let row = self.pending.remove(0);', '        let row = self.pending.remove(self.pending.len() - 1);'),
     (C, T, 'that a result was taken up is not timed', '        let row = self.pending.remove(0);\n        self.last_append = now.ms;\n', '        let row = self.pending.remove(0);\n'),
-    (C, T, 'a result has a cue though it failed', '        if row.status == Status::Completed && next == 0 {', '        if next == 0 {'),
-    (C, T, 'a result has a cue though it was begun to be read before', '        if row.status == Status::Completed && next == 0 {', '        if row.status == Status::Completed {'),
+    (C, T, 'a result has a cue though it failed', '            if row.status == Status::Completed {\n                self.cue("result"', '            if true {\n                self.cue("result"'),
+    (C, T, 'a result begun to be read before is gone on with without a cue', '            if row.status == Status::Completed {\n                self.cue("result"', '            if row.status == Status::Completed && next == 0 {\n                self.cue("result"'),
     (C, T, 'the cue of a result is the cue of a hand-on', '            self.cue("result", "", wire, now);\n', '            self.cue("handed_off", "", wire, now);\n'),
     (C, T, 'an answer is told once where a router decides as well', '            Strategy::Operator => None,', '            Strategy::Operator => finding_identity(&row),'),
-    (C, T, "the contact's answer is told under every delegation", '        if !told_before {\n', '        if true {\n'),
+    (C, T, "the contact's answer is told under every delegation", '        if told_before || remaining == 0 {', '        if remaining == 0 {'),
+    (C, T, 'an answer read to its end is told again', '        if told_before || remaining == 0 {', '        if told_before || remaining == usize::MAX {'),
+    (C, T, 'the cue of a result plays before it is decided whether it is told', '        if told_before || remaining == 0 {\n', '        if row.status == Status::Completed && next == 0 {\n            self.cue("result", "", wire, now);\n        }\n        if told_before || remaining == 0 {\n'),
+    (C, T, "the contact's answer is told again under the same delegation", '        let told_before = previous.is_some_and(|told| python::truthy(told) && *told != json!(id));', '        let told_before = previous.is_some_and(python::truthy);'),
+    (C, T, "an answer of the contact kept as nothing counts as told", '        let told_before = previous.is_some_and(|told| python::truthy(told) && *told != json!(id));', '        let told_before = previous.is_some_and(|told| *told != json!(id));'),
+    (C, T, "answers are not known by what the contact said", '        let finding = self.findings.get(&id).cloned().flatten();', '        let finding: Option<String> = None;'),
     (C, T, 'an answer that was told is not remembered', '                self.forwarded.insert(key, json!(id));\n', ''),
-    (C, T, 'a result is always begun at its first part without a word of where', '            self.relay(&id, 0, (false, false), wire, now);', '            self.relay(&id, 0, (true, false), wire, now);'),
-    (C, T, 'a result that was told is not remembered as told', '        self.results_sent.insert(id);\n        self.checkpoint(now);\n        claim\n', '        self.checkpoint(now);\n        claim\n'),
-    (C, T, 'a result that was told is not kept', '        self.results_sent.insert(id);\n        self.checkpoint(now);\n        claim\n', '        self.results_sent.insert(id);\n        claim\n'),
+    (C, T, 'a result is begun again at its first part', '            self.relay(&id, next, (false, next > 0), wire, now);', '            self.relay(&id, 0, (false, false), wire, now);'),
+    (C, T, 'a result gone on with says nothing of where it was', '            self.relay(&id, next, (false, next > 0), wire, now);', '            self.relay(&id, next, (false, false), wire, now);'),
+    (C, T, 'a result begun at its first part says it goes on', '            self.relay(&id, next, (false, next > 0), wire, now);', '            self.relay(&id, next, (false, true), wire, now);'),
+    (C, T, 'a result told by itself is said to be read on request', '            self.relay(&id, next, (false, next > 0), wire, now);', '            self.relay(&id, next, (true, next > 0), wire, now);'),
+    (C, T, 'a result that was told under another delegation is not remembered as told', '            // Told under another delegation, or read to its end on request.\n            self.results_sent.insert(id);\n', '            // Told under another delegation, or read to its end on request.\n'),
+    (C, T, 'a result is remembered as told when its telling begins', '            if let Some(key) = finding {\n                self.forwarded.insert(key, json!(id));\n            }\n        }\n', '            if let Some(key) = finding {\n                self.forwarded.insert(key, json!(id));\n            }\n            self.results_sent.insert(id);\n        }\n'),
+    (C, T, 'a result that was told is not kept', '        self.checkpoint(now);\n        claim\n    }', '        claim\n    }'),
     # ---- the conversation: what waits for the user
     (C, T, 'completions are told before decisions', '        for (kind, row) in decisions.chain(completions) {', '        for (kind, row) in completions.chain(decisions) {'),
     (C, T, 'a decision is known by its artifact', '                (said(&row["decision_id"]), &row["updated_at"])', '                (said(&row["artifact_id"]), &row["updated_at"])'),
@@ -448,8 +471,18 @@ PLANTS = [
     (C, T, 'where a relay stopped is not kept', '            self.cursors.insert(key.to_string(), json!(next));\n', ''),
     (C, T, 'where a relay stopped is kept as where it began', '            self.cursors.insert(key.to_string(), json!(next));', '            self.cursors.insert(key.to_string(), json!(index));'),
     (C, T, 'the newest place is forgotten for the oldest', '                self.cursors.shift_remove(&oldest);', '                self.cursors.shift_remove(key);'),
-    (C, T, 'a part is told as a thought', '        self.append("commentary", &part, wire);\n        self.checkpoint(now);\n    }', '        self.append("thinking", &part, wire);\n        self.checkpoint(now);\n    }'),
-    (C, T, 'a part that was handed over is not kept', '        self.append("commentary", &part, wire);\n        self.checkpoint(now);\n    }', '        self.append("commentary", &part, wire);\n    }'),
+    (C, T, 'a part is told as a thought', '        self.append("commentary", &part, wire);\n        // An answer paused', '        self.append("thinking", &part, wire);\n        // An answer paused'),
+    (C, T, 'a part that was handed over is not kept', '        self.checkpoint(now);\n    }\n\n    /// A text is still being read in parts', '    }\n\n    /// A text is still being read in parts'),
+    (C, T, 'an answer is told when its first part was handed over', '            index + 1 == relay.total(),', '            index == 0,'),
+    (C, T, 'an answer is told a part before its last', '            index + 1 == relay.total(),', '            index + 2 == relay.total(),'),
+    (C, T, 'any text read to its end is an answer that was told', '        if let Some(finding) = self.findings.get(key).filter(|_| last).cloned() {', '        if let Some(finding) = self.findings.get(key).cloned().or(Some(None)).filter(|_| last) {'),
+    (C, T, 'an answer read to its end is not remembered as told', '            self.results_sent.insert(key.to_string());\n            self.results_seen', '            self.results_seen'),
+    (C, T, 'an answer read to its end is taken up again', '            self.results_seen.insert(key.to_string());\n', ''),
+    (C, T, 'an answer read to its end still waits to be told', '            self.results_seen.insert(key.to_string());\n            self.pending.retain(|row| row.delegation_id != key);\n', '            self.results_seen.insert(key.to_string());\n'),
+    (C, T, 'an answer paused at its eighth part still waits to be told in this call', '            // no more.\n            self.pending.retain(|row| row.delegation_id != key);\n', '            // no more.\n'),
+    (C, T, "the contact's answer read to its end is not remembered", '                self.forwarded.entry(finding).or_insert_with(|| json!(key));', '                let _ = finding;'),
+    (C, T, "the contact's answer read again is remembered under the later delegation", '                self.forwarded.entry(finding).or_insert_with(|| json!(key));', '                self.forwarded.insert(finding, json!(key));'),
+    (C, T, 'the relay of an answer is not known as one', '        self.findings.insert(row.delegation_id.clone(), finding);', '        let _ = finding;'),
     (C, T, 'a relay at its end holds results back', '        if relay.remaining() == 0 || relay.held || relay.auto >= AUTO_PARTS {', '        if relay.held || relay.auto >= AUTO_PARTS {'),
     (C, T, 'a relay that is held holds results back', '        if relay.remaining() == 0 || relay.held || relay.auto >= AUTO_PARTS {', '        if relay.remaining() == 0 || relay.auto >= AUTO_PARTS {'),
     (C, T, 'a relay that paused holds results back', '        if relay.remaining() == 0 || relay.held || relay.auto >= AUTO_PARTS {', '        if relay.remaining() == 0 || relay.held {'),
@@ -463,7 +496,39 @@ PLANTS = [
     (C, T, 'a relay goes on though the user spoke', '        if relay.remaining() == 0\n            || relay.held\n            || self.routing > 0\n            || relay.auto >= AUTO_PARTS\n            || self.last_transcript > relay.sent_at_ms\n            || self.last_output <= relay.sent_at_ms\n            || self.speaking\n            || now.ms - self.last_output < QUIET_AFTER_MS\n        {', '        if relay.remaining() == 0\n            || relay.held\n            || self.routing > 0\n            || relay.auto >= AUTO_PARTS\n            || self.last_output <= relay.sent_at_ms\n            || self.speaking\n            || now.ms - self.last_output < QUIET_AFTER_MS\n        {'),
     (C, T, 'a relay goes on though the voice did not speak the part before', '        if relay.remaining() == 0\n            || relay.held\n            || self.routing > 0\n            || relay.auto >= AUTO_PARTS\n            || self.last_transcript > relay.sent_at_ms\n            || self.last_output <= relay.sent_at_ms\n            || self.speaking\n            || now.ms - self.last_output < QUIET_AFTER_MS\n        {', '        if relay.remaining() == 0\n            || relay.held\n            || self.routing > 0\n            || relay.auto >= AUTO_PARTS\n            || self.last_transcript > relay.sent_at_ms\n            || self.speaking\n            || now.ms - self.last_output < QUIET_AFTER_MS\n        {'),
     (C, 'vectors', 'the next part is said to be from what is kept', '        self.send_part(&key, (false, false), wire, now);\n    }', '        self.send_part(&key, (true, false), wire, now);\n    }'),
+    # ---- the conversation: what is kept of a call
+    (C, T, 'what was told of older work is kept as well', '            "results_sent": of_work(&self.results_sent),', '            "results_sent": self.results_sent,'),
+    (C, T, 'what was silenced of older work is kept as well', '        let silenced = of_work(&self.silenced);', '        let silenced: Vec<String> = self.silenced.iter().cloned().collect();'),
+    (C, T, 'every answer of the contact is kept', '        let older = self.forwarded.len().saturating_sub(FINDINGS_KEPT);', '        let older = 0;'),
+    (C, T, 'the oldest answers of the contact are kept', '.into_iter().skip(older).collect();', '.into_iter().take(FINDINGS_KEPT).collect();'),
+    (C, T, 'one answer of the contact fewer is kept', 'const FINDINGS_KEPT: usize = 500;', 'const FINDINGS_KEPT: usize = 499;'),
+    (C, T, 'a reading on request does not lift a pause or a stop', '            self.silenced.remove(key);\n', ''),
+    (C, T, 'an answer paused at its eighth part goes on in the next call', '        if paused && self.findings.contains_key(key) {', '        if false {'),
+    (C, T, 'an answer that ends at its eighth part is paused', '        let paused = handed.pause_after && index + 1 < relay.total();', '        let paused = handed.pause_after;'),
+    (C, T, 'an answer is paused a part early', '        let paused = handed.pause_after && index + 1 < relay.total();', '        let paused = relay.auto + 1 >= AUTO_PARTS && index + 1 < relay.total();'),
+    # ---- the conversation: what an agent was told to leave
+    (C, T, 'a stop silences only what waits', '            .chain(finished)', '            .chain(finished.take(0))'),
+    (C, T, 'a stop silences work that is not over', '        let finished = rows.iter().filter(|row| !row.status.active());', '        let finished = rows.iter();'),
+    (C, T, 'a stop silences the work of every agent', '            .filter(|row| row.session == session && row.status != Status::Cancelled)', '            .filter(|row| row.status != Status::Cancelled)'),
+    (C, T, 'a stop silences what was called off', '            .filter(|row| row.session == session && row.status != Status::Cancelled)', '            .filter(|row| row.session == session)'),
+    (C, T, 'a stop silences what was told', '            .filter(|id| !self.results_sent.contains(id) && !self.background.contains(id))', '            .filter(|id| !self.background.contains(id))'),
+    (C, T, 'what a stop silenced is not kept as silenced', '        self.silenced.extend(stopped.iter().cloned());\n', ''),
+    (C, T, 'what a stop silenced is taken up later', '        self.results_seen.extend(stopped.iter().cloned());\n', ''),
+    (C, T, 'what a stopped agent left waiting is still told', '        self.pending.retain(|row| row.session != session);\n', ''),
+    (C, T, 'what waits is all let go at a stop', '        self.pending.retain(|row| row.session != session);', '        self.pending.clear();'),
+    (C, T, 'the answer being told goes on after its agent was stopped', '            relay.held = true;\n        }\n        if !stopped.is_empty() {', '        }\n        if !stopped.is_empty() {'),
+    (C, T, 'a stop holds whatever is being told', '        let active = self.active.as_ref().filter(|key| stopped.contains(*key));', '        let active = self.active.as_ref();'),
+    (C, T, 'a stop is not kept', '        if !stopped.is_empty() {\n            self.checkpoint(now);', '        if false {\n            self.checkpoint(now);'),
+    (C, T, 'a stop that silenced nothing is kept', '        if !stopped.is_empty() {\n            self.checkpoint(now);', '        if true {\n            self.checkpoint(now);'),
+    (C, T, 'what a stop silenced is not kept with the thread', '        if !silenced.is_empty() {\n            kept["silenced_results"]', '        if false {\n            kept["silenced_results"]'),
+    (C, T, 'that nothing was silenced is kept as well', '        if !silenced.is_empty() {\n            kept["silenced_results"]', '        if true {\n            kept["silenced_results"]'),
     # ---- the conversation: an answer is read again
+    (C, T, 'work that is not over is read as an answer', '        if let Some(row) = row.filter(|row| row.status.active()) {', '        if let Some(row) = row.filter(|_| false) {'),
+    (C, T, 'any work that is named is said not to be over', '        if let Some(row) = row.filter(|row| row.status.active()) {', '        if let Some(row) = row.filter(|_| true) {'),
+    (C, T, 'work that is not over is said to be accepted, whatever it is', '            let word = row.status.word();', '            let word = "accepted";'),
+    (C, T, 'that work is not over is said as something the router said', '            let text = format!("The requested operation is {word}. Its result is not ready.");\n            self.append("thinking", &text, wire);', '            let text = format!("The requested operation is {word}. Its result is not ready.");\n            self.append("commentary", &text, wire);'),
+    (C, T, 'work that is not over is no answer to read', '            self.append("thinking", &text, wire);\n            return true;', '            self.append("thinking", &text, wire);\n            return false;'),
+    (C, T, 'that work is not over is not said', '            self.append("thinking", &text, wire);\n            return true;', '            return true;'),
     (C, T, 'a relay that is named is not looked for among those there are', '            if self.relays.contains_key(id) {\n                return Some(id.to_string());\n            }\n', ''),
     (C, T, 'the relay that is being told is not the one meant', '        if let Some(active) = &self.active {\n            return Some(active.clone());\n        }\n', ''),
     (C, T, 'work that is not over is an answer', '            !row.status.active()\n                && row.status != Status::Cancelled\n                && !(row.result_text.is_empty() && row.error.is_empty())', '            row.status != Status::Cancelled\n                && !(row.result_text.is_empty() && row.error.is_empty())'),

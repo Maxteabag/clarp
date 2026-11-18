@@ -148,6 +148,8 @@ struct Played<'a> {
     told: Told,
     /// The rows of the book of delegations, by their ids.
     rows: BTreeMap<String, Value>,
+    /// A result that lands in the book right after a stop has read it.
+    landing: Option<Value>,
     decisions: Vec<Value>,
     completions: Vec<Value>,
     /// The actions that were written down as begun, by the number of the talk and their place.
@@ -166,6 +168,7 @@ struct Counted {
     again: usize,
     failed: usize,
     claims: usize,
+    landed: usize,
 }
 
 impl<'a> Played<'a> {
@@ -218,6 +221,7 @@ impl<'a> Played<'a> {
             ms: 0,
             told: Told::default(),
             rows: BTreeMap::new(),
+            landing: None,
             decisions: Vec::new(),
             completions: Vec::new(),
             admissions: BTreeMap::new(),
@@ -317,6 +321,7 @@ impl<'a> Played<'a> {
                 let id = step["row"]["delegation_id"].as_str().unwrap().to_string();
                 self.rows.insert(id, whole(&step["row"]));
             }
+            "lands" => self.landing = Some(whole(&step["row"])),
             "owns" => {
                 let opened = self.opened;
                 let later = opened["owned_later"].as_array().into_iter().flatten();
@@ -378,7 +383,15 @@ impl<'a> Played<'a> {
                 delivered.unwrap();
             }
             "append" => self.call.append(text("kind"), text("content"), told),
-            "supersede" => self.call.supersede(text("session")),
+            "supersede" => {
+                // The stop reads the book; what lands after that read is not what it read.
+                self.call.supersede(text("session"), book, now);
+                if let Some(row) = self.landing.take() {
+                    let id = row["delegation_id"].as_str().unwrap().to_string();
+                    self.rows.insert(id, row);
+                    self.counted.landed += 1;
+                }
+            }
             other => panic!("no such thing to ask: {other}"),
         }
         assert_eq!(answered, step["answered"], "{name}");
@@ -599,13 +612,14 @@ fn a_call_goes_as_the_python_hosts_goes_story_by_story() {
             again: counted.again + of_story.again,
             failed: counted.failed + of_story.failed,
             claims: counted.claims + of_story.claims,
+            landed: counted.landed + of_story.landed,
         };
     }
-    assert_eq!(stories.len(), 70);
+    assert_eq!(stories.len(), 79);
     assert_eq!(
         counted,
         Counted {
-            steps: 1299,
+            steps: 1609,
             routings: 71,
             asked: 55,
             done: 33,
@@ -613,6 +627,7 @@ fn a_call_goes_as_the_python_hosts_goes_story_by_story() {
             again: 3,
             failed: 4,
             claims: 10,
+            landed: 1,
         }
     );
 }

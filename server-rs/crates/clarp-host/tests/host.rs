@@ -3808,6 +3808,13 @@ fn a_push_shows_the_face_of_the_agent_it_is_about() {
     // Another signature, a later day under the same signature, another picture, or nothing.
     let other = format!("{unsigned}&sig={}", "0".repeat(signature.len()));
     assert_eq!(refused(&other), forbidden);
+    // A signature with a sign outside ASCII is as wrong as any other (R65: the Python Host
+    // answered it with a crash until its PR 427).
+    let foreign = &signature[..signature.len() - 1];
+    assert_eq!(
+        refused(&format!("{unsigned}&sig={foreign}%C3%B8")),
+        forbidden
+    );
     let later = path.replace(
         &format!("&exp={expires_at}"),
         &format!("&exp={}", expires_at.parse::<i64>().unwrap() + 1),
@@ -31882,16 +31889,10 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
     ]);
     assert_eq!(sorted(texts(&kept["work"], "operation_id")), handed);
     assert_eq!(again.told_of("oracle_v2.context", 1), [context(&thread, 5)]);
-    // What the stop silenced in the call before is told in the call that goes on in its
-    // place, as on the Python Host: that it was silenced is not kept with the thread (R61
-    // in docs/reference-defects.md).
-    let silenced = second.told_of("session.commentary.append", 1)[0].clone();
-    assert!(
-        silenced["content"]
-            .as_str()
-            .is_some_and(|text| text.contains(&format!("operation {work_3}, status completed"))),
-        "{silenced}"
-    );
+    // What the stop silenced in the call before is not told in the call that goes on in its
+    // place either: that it was silenced is kept with the thread (R61, mended by the Python
+    // Host's PR 421). That nothing was told is looked at once this call has told the voice
+    // what waits for the user, which it does between two turns, as it would tell a result.
 
     // In the newer call the work of the thread is the call's own: the router is shown it.
     // And of what waits for the user the voice is told what it was not told of before in
@@ -31914,6 +31915,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
     );
     assert_eq!(shown["routing_boundary"], 5);
     second.told_with("session.thinking.append", "Which way?");
+    assert!(second.of_kind("session.commentary.append").is_empty());
     let again_told = second.of_kind("session.thinking.append");
     let approval = |said: &Value| {
         let text = said["content"].as_str().unwrap();
@@ -31937,7 +31939,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
     again.ends();
     second.ends();
     assert_eq!(second.of_kind("session.close").len(), 1);
-    assert_eq!(second.of_kind("session.commentary.append").len(), 1);
+    assert_eq!(second.of_kind("session.commentary.append").len(), 0);
     let third = voice.call(2);
     let other = history_of(&third.told_of("session.start", 1)[0]["session"]);
     assert_ne!(other["thread_id"], thread.as_str());
@@ -32913,6 +32915,17 @@ fn a_call_of_the_oracle_that_cannot_be_is_refused_and_one_that_fails_goes_on() {
     });
     assert_eq!(call.told_of("oracle_v2.cue", 1)[0]["name"], "handed_off");
     assert_eq!(call.of_kind("oracle_v2.notice").len(), 5);
+    // The user says more than the thread can keep (two megabytes): what is kept of the talk
+    // is not kept any more, and the call goes on all the same (the Python Host's PR 429): the
+    // phone still interrupts its voice.
+    let much = "\u{1f600}".repeat(32_000);
+    for piece in 0..18 {
+        let at = 40_000 + 1_500 * piece;
+        spoken.says(&heard_by_the_voice(&much, at, at + 100));
+    }
+    call.told_of("session.input_transcript.delta", 7 + 18);
+    call.says(&json!({ "type": "oracle_v2.interrupt" }));
+    spoken.told_with("session.instructions.append", "Stop speaking now");
     call.says(&json!({ "type": "session.close" }));
     call.ends();
 }

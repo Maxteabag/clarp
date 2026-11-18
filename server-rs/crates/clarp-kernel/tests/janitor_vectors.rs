@@ -39,24 +39,19 @@ fn told(refused: &Refused) -> Value {
     json!([refused.status, refused.code, refused.message])
 }
 
-/// What the Python Host made of it: taken, refused, or broken on (an error of its own, which
-/// this Host answers by refusing).
+/// What the Python Host made of it: taken, or refused.
 fn held(row: &Value, ours: Result<Value, Refused>, what: &str) -> (usize, usize) {
-    match (ours, row.get("taken"), row.get("refused"), row.get("broke")) {
-        (Ok(ours), Some(theirs), _, _) => {
+    match (ours, row.get("taken"), row.get("refused")) {
+        (Ok(ours), Some(theirs), _) => {
             assert_eq!(&ours, theirs, "{what}");
             (1, 0)
         }
-        (Err(ours), _, Some(theirs), _) => {
+        (Err(ours), _, Some(theirs)) => {
             assert_eq!(&told(&ours), theirs, "{what}");
             (0, 1)
         }
-        (Err(ours), _, _, Some(_)) => {
-            assert_eq!(ours.status, 400, "{what}");
-            (0, 1)
-        }
-        (ours, theirs, refused, broke) => {
-            panic!("{what}: here {ours:?}, there {theirs:?} {refused:?} {broke:?}")
+        (ours, theirs, refused) => {
+            panic!("{what}: here {ours:?}, there {theirs:?} {refused:?}")
         }
     }
 }
