@@ -339,9 +339,13 @@ pub(crate) async fn submit(
     // A submission id is used once on the whole Host: one under it in another agent's
     // book is the submission it comes again to.
     let sid = data.get("submission_id").and_then(J::str);
+    // The agent's own submissions are looked for on its own thread, where two under one id are
+    // taken one after the other.
     let elsewhere = sid.and_then(|sid| {
         let directory = app.fleet.directory();
-        directory.members.iter().find_map(|other| {
+        let others = directory.members.iter();
+        let mut others = others.filter(|other| other.record.agent_id != holder.record.agent_id);
+        others.find_map(|other| {
             let view = other.agent.view();
             let (artifact, submission) = view.books.artifacts.submission(sid)?;
             Some((artifact.artifact_id.clone(), submission.clone()))

@@ -168,7 +168,7 @@ fn a_body_is_read_and_written_canonically_as_the_python_host_does() {
             example["sha256"]
         );
     }
-    assert_eq!((read, written, refused, not_json), (51, 16, 35, 35));
+    assert_eq!((read, written, refused, not_json), (53, 16, 37, 37));
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn a_payload_is_a_render_spec_or_is_refused_as_the_python_host_does() {
             }
         }
     }
-    assert_eq!((valid, refused), (41, 219));
+    assert_eq!((valid, refused), (40, 220));
     let by_code: Vec<(&str, usize)> = codes.iter().map(|(code, n)| (code.as_str(), *n)).collect();
     assert_eq!(
         by_code,
@@ -212,16 +212,16 @@ fn a_payload_is_a_render_spec_or_is_refused_as_the_python_host_does() {
             ("invalid_json", 6),
             ("invalid_object", 16),
             ("invalid_version", 5),
-            ("missing_key", 20),
+            ("missing_key", 21),
             ("number_form", 14),
-            ("prop", 22),
+            ("prop", 23),
             ("schema_keyword", 3),
             ("schema_shape", 35),
             ("state_value", 8),
             ("submit_intent", 3),
             ("submit_label", 3),
             ("unknown_catalog", 3),
-            ("unknown_key", 22),
+            ("unknown_key", 21),
         ]
     );
 }
