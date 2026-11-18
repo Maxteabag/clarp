@@ -512,5 +512,1563 @@
    "size": null,
    "error": "server sent non-JSON frame: Expecting value: line 1 column 1 (char 0)"
   }
+ ],
+ "ink_queries": [
+  {
+   "words": [],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb"
+  },
+  {
+   "words": [
+    " one ",
+    "",
+    "two"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=one&keyterm=two"
+  },
+  {
+   "words": [
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x"
+  },
+  {
+   "words": [
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x"
+  },
+  {
+   "words": [
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x&keyterm=x"
+  },
+  {
+   "words": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "y"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&keyterm=y"
+  },
+  {
+   "words": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "z"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "words": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "after"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb"
+  },
+  {
+   "words": [
+    "a/b",
+    "two words",
+    "\u00df"
+   ],
+   "url": "wss://api.cartesia.ai/stt/websocket?model=ink-2&encoding=pcm_s16le&sample_rate=16000&cartesia_version=2026-08-14&language=nb&keyterm=a%2Fb&keyterm=two+words&keyterm=%C3%9F"
+  }
+ ],
+ "ink_streams": [
+  {
+   "events": [],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": "partial"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": "partial"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": "partial"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": "partial"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": "",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": " first",
+     "is_final": true
+    },
+    "bad json",
+    [],
+    {
+     "type": "transcript",
+     "text": " second ",
+     "is_final": true
+    },
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": "first second",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": " first",
+     "is_final": true
+    },
+    "bad json",
+    [],
+    {
+     "type": "transcript",
+     "text": " second ",
+     "is_final": true
+    },
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": "first second",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": " first",
+     "is_final": true
+    },
+    "bad json",
+    [],
+    {
+     "type": "transcript",
+     "text": " second ",
+     "is_final": true
+    },
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": "first second",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "transcript",
+     "text": " first",
+     "is_final": true
+    },
+    "bad json",
+    [],
+    {
+     "type": "transcript",
+     "text": " second ",
+     "is_final": true
+    },
+    {
+     "type": "done"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": "first second",
+   "error": null
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "message": "message",
+     "title": "title"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "message"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "message": "message",
+     "title": "title"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "message"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "message": "message",
+     "title": "title"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "message"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "message": "message",
+     "title": "title"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "message"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "title": "title"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "title"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "title": "title"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "title"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "title": "title"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "title"
+  },
+  {
+   "events": [
+    {
+     "type": "error",
+     "title": "title"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "title"
+  },
+  {
+   "events": [
+    {
+     "type": "error"
+    }
+   ],
+   "bytes": 0,
+   "sent": [
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "cartesia stt stream error"
+  },
+  {
+   "events": [
+    {
+     "type": "error"
+    }
+   ],
+   "bytes": 3199,
+   "sent": [
+    3199,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "cartesia stt stream error"
+  },
+  {
+   "events": [
+    {
+     "type": "error"
+    }
+   ],
+   "bytes": 3200,
+   "sent": [
+    3200,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "cartesia stt stream error"
+  },
+  {
+   "events": [
+    {
+     "type": "error"
+    }
+   ],
+   "bytes": 3201,
+   "sent": [
+    3200,
+    1,
+    "finalize",
+    "close"
+   ],
+   "result": null,
+   "error": "cartesia stt stream error"
+  }
+ ],
+ "ladders": [
+  {
+   "primary": "success",
+   "second": "success",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "success",
+   "second": "failed",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "failed",
+   "second": "success",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "failed",
+   "second": "failed",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "partial",
+   "second": "success",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "partial",
+   "second": "failed",
+   "fallback": "none",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "success",
+   "second": "success",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "success",
+   "second": "failed",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "failed",
+   "second": "success",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "failed",
+   "second": "failed",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "partial",
+   "second": "success",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "partial",
+   "second": "failed",
+   "fallback": "deepgram",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "success",
+   "second": "success",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "success",
+   "second": "failed",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "failed",
+   "second": "success",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ],
+    [
+     "gemini",
+     "[happy] sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": 1,
+   "error": null
+  },
+  {
+   "primary": "failed",
+   "second": "failed",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ],
+    [
+     "gemini",
+     "[happy] sound"
+    ]
+   ],
+   "chunks": [],
+   "size": null,
+   "error": "gemini refused"
+  },
+  {
+   "primary": "partial",
+   "second": "success",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  },
+  {
+   "primary": "partial",
+   "second": "failed",
+   "fallback": "gemini",
+   "calls": [
+    [
+     "deepgram",
+     "sound"
+    ]
+   ],
+   "chunks": [
+    "x"
+   ],
+   "size": null,
+   "error": "deepgram refused"
+  }
+ ],
+ "google_http": [
+  {
+   "status": 200,
+   "payload": {
+    "audioContent": "YWJj"
+   },
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [
+    "abc"
+   ],
+   "size": 3,
+   "error": null
+  },
+  {
+   "status": 200,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_bad_response"
+  },
+  {
+   "status": 200,
+   "payload": [],
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_bad_response"
+  },
+  {
+   "status": 200,
+   "payload": {
+    "audioContent": 17
+   },
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_bad_response"
+  },
+  {
+   "status": 200,
+   "payload": {
+    "audioContent": "!!!!"
+   },
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_bad_response"
+  },
+  {
+   "status": 200,
+   "payload": {
+    "audioContent": ""
+   },
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_empty_audio"
+  },
+  {
+   "status": 401,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_auth_failed"
+  },
+  {
+   "status": 403,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_auth_failed"
+  },
+  {
+   "status": 429,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_quota"
+  },
+  {
+   "status": 500,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_http_error"
+  },
+  {
+   "status": 201,
+   "payload": {},
+   "request": {
+    "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+    "body": {
+     "input": {
+      "ssml": "<speak>a<break time=\"1000ms\"/>b</speak>"
+     },
+     "voice": {
+      "languageCode": "nb-NO",
+      "name": "nb-NO-Chirp3-HD-Kore"
+     },
+     "audioConfig": {
+      "audioEncoding": "MP3"
+     }
+    },
+    "headers": {
+     "Authorization": "Bearer unit",
+     "x-goog-user-project": "test-project",
+     "Content-Type": "application/json"
+    },
+    "maximum": 11250346
+   },
+   "chunks": [],
+   "size": null,
+   "error": "google_http_error"
+  }
+ ],
+ "ink_batch": [
+  {
+   "ctype": "audio/mp4",
+   "duration": 1,
+   "heard": [
+    "heard",
+    1.0
+   ],
+   "request": {
+    "url": "https://api.cartesia.ai/stt",
+    "version": "2026-08-14",
+    "auth": "Bearer unit",
+    "fields": [
+     {
+      "name": "model",
+      "filename": null,
+      "body": "ink-whisper"
+     },
+     {
+      "name": "language",
+      "filename": null,
+      "body": "nb"
+     },
+     {
+      "name": "file",
+      "filename": "audio.m4a",
+      "body": "clip"
+     }
+    ]
+   }
+  },
+  {
+   "ctype": "audio/webm",
+   "duration": "1.25",
+   "heard": [
+    "heard",
+    1.25
+   ],
+   "request": {
+    "url": "https://api.cartesia.ai/stt",
+    "version": "2026-08-14",
+    "auth": "Bearer unit",
+    "fields": [
+     {
+      "name": "model",
+      "filename": null,
+      "body": "ink-whisper"
+     },
+     {
+      "name": "language",
+      "filename": null,
+      "body": "nb"
+     },
+     {
+      "name": "file",
+      "filename": "audio.webm",
+      "body": "clip"
+     }
+    ]
+   }
+  },
+  {
+   "ctype": "",
+   "duration": null,
+   "heard": [
+    "heard",
+    0.0
+   ],
+   "request": {
+    "url": "https://api.cartesia.ai/stt",
+    "version": "2026-08-14",
+    "auth": "Bearer unit",
+    "fields": [
+     {
+      "name": "model",
+      "filename": null,
+      "body": "ink-whisper"
+     },
+     {
+      "name": "language",
+      "filename": null,
+      "body": "nb"
+     },
+     {
+      "name": "file",
+      "filename": "audio.webm",
+      "body": "clip"
+     }
+    ]
+   }
+  },
+  {
+   "ctype": "audio/wav",
+   "duration": "bad",
+   "heard": [
+    "heard",
+    0.0
+   ],
+   "request": {
+    "url": "https://api.cartesia.ai/stt",
+    "version": "2026-08-14",
+    "auth": "Bearer unit",
+    "fields": [
+     {
+      "name": "model",
+      "filename": null,
+      "body": "ink-whisper"
+     },
+     {
+      "name": "language",
+      "filename": null,
+      "body": "nb"
+     },
+     {
+      "name": "file",
+      "filename": "audio.wav",
+      "body": "clip"
+     }
+    ]
+   }
+  }
  ]
 }
