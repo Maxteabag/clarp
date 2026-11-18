@@ -24,6 +24,10 @@ const SAID_MOST: usize = 5;
 const TEXT_MOST: usize = 240;
 const HELD_MOST: usize = 3;
 pub const RECENT_MS: i64 = 30 * 60 * 1000;
+/// Of how many agents, besides the one a message was said to and the one that is open, a
+/// packet with everyone in view shows what they were last told and said and what they are
+/// doing: the most recently active. Every other agent is listed by its name only.
+pub const BROAD_DETAIL_MOST: usize = 20;
 /// How many words of a message are held against the agents' names, and how alike a word
 /// and a name have to be.
 const WORDS_MOST: usize = 12;
@@ -218,22 +222,41 @@ pub fn packet(shown: &Shown<'_>) -> Value {
     let focus_session = focus.map_or(shown.requested_session, |focus| focus.session.as_str());
     let detailed = [shown.requested_session, focus_session];
     let recent_from = shown.now_ms - RECENT_MS;
-    let listed = shown.agents.iter().filter(|agent| {
-        let spoken_to = !agent.archived && agent.voice_target;
-        let in_call = shown
-            .only_sessions
-            .is_none_or(|only| only.contains(&agent.session));
-        // An app that could place the message by no name is shown the agents of the last
-        // half hour, and the two the message may have been meant for anyway.
+    let active = |agent: &Member| {
         let active = agent.created_at.max(agent.last_activity);
-        let active = active.max(agent.state.as_ref().map_or(0, |state| state.ts));
-        let recent = detailed.contains(&agent.session.as_str()) || active >= recent_from;
-        spoken_to && in_call && (!shown.fallback_request || recent)
-    });
+        active.max(agent.state.as_ref().map_or(0, |state| state.ts))
+    };
+    let listed: Vec<&Member> = shown
+        .agents
+        .iter()
+        .filter(|agent| {
+            let spoken_to = !agent.archived && agent.voice_target;
+            let in_call = shown
+                .only_sessions
+                .is_none_or(|only| only.contains(&agent.session));
+            // An app that could place the message by no name is shown the agents of the last
+            // half hour, and the two the message may have been meant for anyway.
+            let recent = detailed.contains(&agent.session.as_str()) || active(agent) >= recent_from;
+            spoken_to && in_call && (!shown.fallback_request || recent)
+        })
+        .collect();
+    // With everyone in view, the most recently active of the others are shown in detail too;
+    // of those equally recent, the first listed.
+    let mut others: Vec<&Member> = Vec::new();
+    if shown.scope_all {
+        others = listed
+            .iter()
+            .copied()
+            .filter(|agent| !detailed.contains(&agent.session.as_str()))
+            .collect();
+        others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));
+        others.truncate(BROAD_DETAIL_MOST);
+    }
     let mut message_count = 0;
     let mut agents: Vec<Value> = Vec::new();
     for agent in listed {
-        let detail = shown.scope_all || detailed.contains(&agent.session.as_str());
+        let detail = detailed.contains(&agent.session.as_str())
+            || others.iter().any(|other| other.agent_id == agent.agent_id);
         let (told, said) = match detail {
             true => (
                 last_said(agent, "user", SAID_MOST),

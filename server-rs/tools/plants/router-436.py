@@ -15,6 +15,11 @@ RUNS = {
 }
 K = 'clarp-kernel/src/router/flow.rs'
 P = 'clarp-kernel/src/router/packet.rs'
+DETAIL = '''        let detail = detailed.contains(&agent.session.as_str())
+            || others.iter().any(|other| other.agent_id == agent.agent_id);'''
+RANKED = '''            .filter(|agent| !detailed.contains(&agent.session.as_str()))
+            .collect();
+        others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));'''
 # NOT PLANTED, each with its reason:
 #   that of two names given the first is the agent (`found.first()`): where two are given and the command goes on,
 #     they are the same agent.
@@ -27,6 +32,14 @@ P = 'clarp-kernel/src/router/packet.rs'
 #   that the model's words of a status are said without the blanks at their ends, and that a command naming none
 #     acts on the agent spoken to: both are so as the decision is read and checked (`Decision::read` strips its
 #     texts; `command_check` names the agent of every command it lets through), and are not asked again after.
+#   the keys of a refusal of a status question and of a start the Host refused (`cannot_check`, `command_refused`):
+#     neither is kept with a decision, and no phrase is kept ready-spoken on this Host.
+#   that the Host hands the router a start it refused as refused, with its word for why (`router.rs`, `start`), and
+#     says what the router still has to say (`outcome.say`): no test of the Host makes a start it refuses through
+#     the router; the kernel's side is planted.
+#   that the Host reads the last words of as many agents as the packet shows in detail, ranked as the packet ranks
+#     them (`WHOLE_MOST`, `members` in `router.rs`): the stories give the kernel every agent's words, and the
+#     kernel chooses.
 #   that an agent that was put away takes no command: no packet shows one, and the command is refused as for an agent
 #     of no call (the reference also asks `archived_at`, which it never finds there).
 CHECKED = '''    if !sure {
@@ -38,6 +51,14 @@ CHECKED = '''    if !sure {
         return Err(FORK_IN_APP);
     }
     if of_agents && asked == "create" {
+        // A name the voice already gives an agent (one that was put away too) is taken: the
+        // Host compares names as they are written only. (A blank name names nobody.)
+        let payload = decision.control_payload.as_ref();
+        let given = payload.and_then(|payload| payload.get("name"));
+        let given = given.and_then(Value::as_str).unwrap_or_default();
+        if !agents_named(agents, given).is_empty() {
+            return Err(NAME_TAKEN);
+        }
         return Ok(None);
     }
     let mut names = vec![python::strip(&decision.target_session)];
@@ -76,6 +97,14 @@ LATE_BAR = '''    let of_agents = decision.kind == AGENT_CONTROL;
         return Err(FORK_IN_APP);
     }
     if of_agents && asked == "create" {
+        // A name the voice already gives an agent (one that was put away too) is taken: the
+        // Host compares names as they are written only. (A blank name names nobody.)
+        let payload = decision.control_payload.as_ref();
+        let given = payload.and_then(|payload| payload.get("name"));
+        let given = given.and_then(Value::as_str).unwrap_or_default();
+        if !agents_named(agents, given).is_empty() {
+            return Err(NAME_TAKEN);
+        }
         return Ok(None);
     }
     let mut names = vec![python::strip(&decision.target_session)];
@@ -115,12 +144,18 @@ NO_AGENT = '''    let Some(agent) = agent else {
         return Err(NO_SUCH_AGENT);
     };'''
 REFUSED = '''                    decision.kind = CLARIFY.to_string();
+                    decision.phrase_key = refusal.key.to_string();
                     action = Some(CLARIFY);
                     if !routing.fallback_request {
-                        let said = self.as_agent(requested, refusal, "", around);'''
+                        let said = self.as_agent(requested, refusal.text, refusal.key, around);'''
 GONE = '''                        action = Some(CLARIFY);
                         decision.kind = CLARIFY.to_string();
-                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around);'''
+                        decision.phrase_key = HELD_MESSAGE_GONE.key.to_string();'''
+SAID_GONE = '                        let said = self.as_agent(requested, gone.text, gone.key, around);'
+REFUSED_SAID = '''                    around,
+                );
+            }
+            Done::Broke'''
 HOLD_WAITING = '''            held.pending_id == decision.pending_id
                 && held.status == "pending"
                 && held.expires_at > now
@@ -174,12 +209,32 @@ PLANTS = [
     (K, 'vectors', 'a janitor is refused as one of no call', '    if !agent.voice_target {', '    if !agent.voice_target && agent.archived {'),
     (K, 'vectors', 'an agent the packet does not show takes commands', '    if !shown.contains(&agent.session.as_str()) {', '    if shown.is_empty() {'),
     (K, 'vectors', 'a command acts on the name as it was said', '    Ok(Some(agent.session.clone()))', '    Ok(Some(decision.target_session.clone()))'),
+    # A new agent under a name there is.
+    (K, 'vectors', 'a new agent takes a name there is', '        if !agents_named(agents, given).is_empty() {', '        if agents_named(agents, given).len() > 9 {'),
+    (K, 'vectors', 'a new agent takes a name there is in other letters', '        if !agents_named(agents, given).is_empty() {', '        if agents.iter().any(|agent| agent.persona == given) {'),
+    (K, 'vectors', 'a new agent takes the name of one put away', '        if !agents_named(agents, given).is_empty() {', '        if agents_named(agents, given).iter().any(|agent| !agent.archived) {'),
+    (K, 'vectors', 'a taken name is refused as one nobody has', '            return Err(NAME_TAKEN);', '            return Err(NO_SUCH_AGENT);'),
+    (K, 'vectors', 'a taken name is said in other words', 'const NAME_TAKEN: Fixed = fixed("name_taken", "I already have an agent by that name.");', 'const NAME_TAKEN: Fixed = fixed("name_taken", "I have an agent by that name.");'),
+    # The keys a refusal is kept with.
+    (K, 'vectors', 'the key of no such agent', 'const NO_SUCH_AGENT: Fixed = fixed("no_such_agent",', 'const NO_SUCH_AGENT: Fixed = fixed("no_agent",'),
+    (K, 'vectors', 'the key of which agent', 'const WHICH_AGENT: Fixed = fixed("which_agent",', 'const WHICH_AGENT: Fixed = fixed("which",'),
+    (K, 'vectors', 'the key of a command from here', '    "cannot_command",\n    "I cannot do', '    "cannot_check",\n    "I cannot do'),
+    (K, 'vectors', 'the key of an unsure command', 'const UNSURE_COMMAND: Fixed = fixed("unsure_command",', 'const UNSURE_COMMAND: Fixed = fixed("clarify_target",'),
+    (K, 'vectors', 'the key of no voice commands', '    "no_voice_commands",\n    "That agent', '    "no_voice",\n    "That agent'),
+    (K, 'vectors', 'the key of a fork in the app', 'const FORK_IN_APP: Fixed = fixed("fork_in_app",', 'const FORK_IN_APP: Fixed = fixed("fork",'),
+    (K, 'vectors', 'the key of a taken name', 'const NAME_TAKEN: Fixed = fixed("name_taken",', 'const NAME_TAKEN: Fixed = fixed("name_in_use",'),
+    (K, 'vectors', 'the key of a message no longer held', '    "held_message_gone",\n    "That message', '    "message_gone",\n    "That message'),
+    # A start the Host refused.
+    (K, 'vectors', 'a start the Host refused is an error', '                (error, action) = (code, CLARIFY.to_string());', '                (error, action) = (code, ERROR.to_string());'),
+    (K, 'vectors', 'a start the Host refused keeps no word of why', '                (error, action) = (code, CLARIFY.to_string());', '                (error, action) = (String::new() + &code[..0], CLARIFY.to_string());'),
+    (K, 'vectors', 'a start the Host refused is not said', REFUSED_SAID, REFUSED_SAID.replace('                );', '                )\n                .filter(|_| false);')),
+    (K, 'vectors', 'a start the Host refused is said in other words', 'const COMMAND_REFUSED: Fixed = fixed("command_refused", "I could not do that.");', 'const COMMAND_REFUSED: Fixed = fixed("command_refused", "I cannot do that.");'),
     # A refused command.
     (K, 'vectors', 'a refused command keeps its kind', REFUSED, REFUSED.replace('                    decision.kind = CLARIFY.to_string();\n', '')),
     (K, 'vectors', 'a refused command is held while its user is asked', REFUSED, REFUSED.replace('                    action = Some(CLARIFY);\n', '')),
     (K, 'vectors', 'a refusal is said where an app asked', REFUSED, REFUSED.replace('if !routing.fallback_request {', 'if routing.fallback_request || true {')),
-    (K, 'vectors', 'a refusal is said as the agent the command was for', '                        let said = self.as_agent(requested, refusal, "", around);', '                        let said = self.as_agent(&decision.target_session, refusal, "", around);'),
-    (K, 'vectors', 'a refused command is given a phrase key', REFUSED, REFUSED.replace('                    action = Some(CLARIFY);\n', '                    action = Some(CLARIFY);\n                    decision.phrase_key = "clarify_target".to_string();\n')),
+    (K, 'vectors', 'a refusal is said as the agent the command was for', '                        let said = self.as_agent(requested, refusal.text, refusal.key, around);', '                        let said = self.as_agent(&decision.target_session, refusal.text, refusal.key, around);'),
+    (K, 'vectors', 'a refused command keeps the phrase key of its model', REFUSED, REFUSED.replace('                    decision.phrase_key = refusal.key.to_string();\n', '')),
     (K, 'vectors', 'a command carried out keeps the name as the model said it', '                Ok(Some(session)) => decision.target_session = session,', '                Ok(Some(_)) => {}'),
     # A confirmation.
     (K, 'vectors', "a hold is claimed from another agent's conversation", CLAIM_WAITING, '                && held.expires_at > now_ms'),
@@ -187,8 +242,9 @@ PLANTS = [
     (K, 'vectors', 'a confirmation that names no hold is said to be too late', '                    if held.is_none() && !decision.pending_id.is_empty() {', '                    if held.is_none() {'),
     (K, 'vectors', 'a confirmation too late is held as a question', GONE, GONE.replace('                        action = Some(CLARIFY);\n', '')),
     (K, 'vectors', 'a confirmation too late keeps its kind', GONE, GONE.replace('                        decision.kind = CLARIFY.to_string();\n', '')),
-    (K, 'vectors', 'a confirmation too late is not said where an app asked', '                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around);', '                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around).filter(|_| !routing.fallback_request);'),
-    (K, 'vectors', 'a confirmation too late is said as the agent it was for', '                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around);', '                        let said = self.as_agent(&agent, HELD_MESSAGE_GONE, "", around);'),
+    (K, 'vectors', 'a confirmation too late keeps the phrase key of its model', GONE, GONE.replace('\n                        decision.phrase_key = HELD_MESSAGE_GONE.key.to_string();', '')),
+    (K, 'vectors', 'a confirmation too late is not said where an app asked', SAID_GONE, SAID_GONE.replace('around);', 'around).filter(|_| !routing.fallback_request);')),
+    (K, 'vectors', 'a confirmation too late is said as the agent it was for', SAID_GONE, SAID_GONE.replace('(requested,', '(&agent,')),
     # A hold, and a renewal.
     (K, 'vectors', "a hold is renewed from another agent's conversation", HOLD_WAITING, HOLD_WAITING.replace('\n                && held.requested_session == requested', '')),
     (K, 'vectors', 'a hold that was given is renewed', HOLD_WAITING, HOLD_WAITING.replace('\n                && held.status == "pending"', '')),
@@ -200,6 +256,14 @@ PLANTS = [
     (K, 'vectors', 'a renewal moves the time it was held', '            held.expires_at = now + HELD_FOR_MS;\n        } else {', '            held.expires_at = now + HELD_FOR_MS;\n            held.created_at = now;\n        } else {'),
     (K, 'vectors', 'a new hold takes the id the model named', '                pending_id: hold_as.to_string(),', '                pending_id: if decision.pending_id.is_empty() {\n                    hold_as.to_string()\n                } else {\n                    decision.pending_id.clone()\n                },'),
     (P, 'vectors', "the packet shows what was held in another agent's conversation", '            && held.requested_session == shown.requested_session', '            && !held.requested_session.is_empty()'),
+    # Everyone in view: the twenty most recently active in detail.
+    (P, 'vectors', 'everyone in view is shown in detail', DETAIL, DETAIL.replace('agent.agent_id);', 'agent.agent_id)\n            || shown.scope_all;')),
+    (P, 'vectors', 'twenty-one are shown in detail', '        others.truncate(BROAD_DETAIL_MOST);', '        others.truncate(BROAD_DETAIL_MOST + 1);'),
+    (P, 'vectors', 'nineteen are shown in detail', '        others.truncate(BROAD_DETAIL_MOST);', '        others.truncate(BROAD_DETAIL_MOST - 1);'),
+    (P, 'vectors', 'the least recently active are shown in detail', '        others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));', '        others.sort_by_key(|agent| active(agent));'),
+    (P, 'vectors', 'of the equally recent, the last listed', RANKED, RANKED.replace('            .collect();\n', '            .collect();\n        others.reverse();\n')),
+    (P, 'vectors', 'the agent spoken to and the one open count among the twenty', RANKED, RANKED.replace('            .filter(|agent| !detailed.contains(&agent.session.as_str()))\n', '')),
+    (P, 'vectors', 'the packet of the first asking shows the twenty too', '    if shown.scope_all {\n        others = listed', '    if true {\n        others = listed'),
     # How an agent is doing.
     (K, 'vectors', 'the name a status is asked of is looked up as it is', '                agents_named(agents, named)\n            };', '                Vec::from_iter(lookup(agents, named))\n            };'),
     (K, 'vectors', 'of two agents of a name, the first is told of', '                [one] => valid(agents, &shown, &one.session),', '                [one, ..] => valid(agents, &shown, &one.session),'),

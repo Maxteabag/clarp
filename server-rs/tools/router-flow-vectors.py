@@ -304,9 +304,29 @@ STORIES = [
                 {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'GAUSS', 'confidence': 0.9}, id='n-38'),
         message('a name that folds to nothing: no agent, not even one with no name', 'stop that',
                 {'kind': 'agent_control', 'control_action': 'stop', 'target_session': chr(0xa8), 'confidence': 0.9}, id='n-39'),
+        message('make an agent under the name of one there is, in other letters', 'make a new agent called Anna',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9,
+                 'control_payload': {'name': ' ANNA '}}, id='n-40'),
+        message('make an agent under a name two have, one of them put away', 'make a new agent called Kai',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9,
+                 'control_payload': {'name': 'K' + chr(0xc1) + 'I'}}, id='n-41'),
+        message('make an agent under the name of one that was put away', 'make a new agent called Gone',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9,
+                 'control_payload': {'name': 'gone'}}, id='n-42'),
+        message('make an agent under a session that is taken, by no name', 'make a new agent in Zoe\'s place',
+                {'kind': 'agent_control', 'control_action': 'create', 'target_session': 'zoe', 'confidence': 0.9,
+                 'control_payload': {'name': 7}}, id='n-43'),
+        message('the Host refuses to make the agent: said, and kept as a question', 'make a new agent called Refused',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.9,
+                 'control_payload': {'name': 'Refused'}}, id='n-44'),
     ], [('Ren' + chr(0xe9) + 'e', 'agent-7', 'codex', 'voice-renee', False), ('Kai', 'kai', 'claude', 'voice-kai', False),
         ('K' + chr(0xe1) + 'i', 'kai-old', 'codex', 'voice-kai-old', True),
         ('Gau' + chr(0xdf), 'agent-8', 'codex', 'voice-gauss', False), ('', 'nameless', 'codex', 'voice-nameless', False)]),
+    ('everyone in view, of more agents than are shown with their last words', [
+        message('asked again with everyone in view: the agent spoken to, the one that is open, and the twenty most '
+                'recently active are shown with what they were last told and said; of the equally recent, the first',
+                'uh, maybe', [{'kind': 'ignored', 'confidence': 0.5}] * 2, id='b-1'),
+    ], [(f'Extra {n:02d}', f'extra-{n:02d}', 'codex', f'voice-extra-{n:02d}', False) for n in range(1, 22)]),
 ]
 
 
@@ -322,6 +342,7 @@ def run() -> dict:
     sys.path.insert(0, str(REPO / 'server'))
     from lib import agents, db, janitor_builtins, janitors, orchestrator, prompt_admissions
     from lib.turn_command import DispatchError
+    from lib.agent_lifecycle import AgentLifecycleError
 
     clock = {'now': T0 - 5000 * S}
     db.now_ms = lambda: clock['now']
@@ -348,6 +369,8 @@ def run() -> dict:
             made.append(dict(payload))
             if payload.get('name') == 'Broken':
                 raise RuntimeError('no tool to run it with')
+            if payload.get('name') == 'Refused':
+                raise AgentLifecycleError(409, 'session in use')
             return types.SimpleNamespace(session=payload.get('session') or 'new-' + str(payload.get('name') or 'agent').lower())
 
     agent_lifecycle.AgentLifecycleService = Lifecycle

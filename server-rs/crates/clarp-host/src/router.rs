@@ -59,8 +59,9 @@ const KIND: &str = "router";
 const ALL: &str = "all";
 /// How much of an agent's conversation is read for what it was last told and said.
 const READ_BACK: usize = 60;
-/// Of how many agents the last words are shown when every agent is in view.
-const WHOLE_MOST: usize = 20;
+/// Of how many agents the last words are shown when every agent is in view: as many as the
+/// kernel's packet shows in detail.
+const WHOLE_MOST: usize = clarp_kernel::router::packet::BROAD_DETAIL_MOST;
 /// The setting an app keeps of how a message that names nobody finds its agent, and what
 /// it can be: the apps apply it; the Host keeps it.
 const ADDRESSING: &str = "orchestrator.addressing_mode";
@@ -222,7 +223,11 @@ async fn members(
     let mut recent: Vec<(i64, &str)> = all
         .iter()
         .filter(|(member, _)| member.voice_target && !member.archived)
-        .map(|(member, _)| (member.last_activity, member.agent_id.as_str()))
+        // Ranked as the packet ranks them: the latest of when each was made and last active.
+        .map(|(member, _)| {
+            let active = member.created_at.max(member.last_activity);
+            (active, member.agent_id.as_str())
+        })
         .collect();
     recent.sort_by_key(|(active, _)| std::cmp::Reverse(*active));
     let most = if whole { WHOLE_MOST } else { 0 };
@@ -382,9 +387,13 @@ async fn start(app: &App, start: &Start) -> Done {
         Ok(made) => Done::Started {
             session: made["session"].as_str().unwrap_or_default().to_string(),
         },
+        // Refused, in the Python Host's word for why (its lifecycle's `code`): the router says so
+        // and keeps it as a question.
         Err((_, told)) => {
-            let why = told["message"].as_str().or(told["error"].as_str());
-            Done::Broke(why.unwrap_or("the agent could not be made").to_string())
+            let why = told["error"].as_str().or(told["message"].as_str());
+            Done::Refused {
+                code: why.unwrap_or("the agent could not be made").to_string(),
+            }
         }
     }
 }
@@ -561,7 +570,13 @@ pub(crate) async fn route(
                     let finished = desk.step(app, &agents, |book, around| {
                         book.finish(&routing, plan, done, latency, around)
                     });
-                    finished.await?
+                    let outcome = finished.await?;
+                    // What is still to be said (a start the Host refused), before the apps
+                    // are told what was decided, as the Python Host says it.
+                    if let Some(words) = &outcome.say {
+                        say(app, words).await;
+                    }
+                    outcome
                 }
             }
         }
