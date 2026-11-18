@@ -14235,8 +14235,8 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         ),
         (
             "cartesia:ink-2",
-            400,
-            "transcription model not installed: cartesia:ink-2",
+            500,
+            "cartesia API key is not configured",
         ),
         ("deepgram:nova-3", 500, "deepgram API key is not configured"),
         (
@@ -26094,6 +26094,9 @@ fn the_other_speech_engines_answer_the_apps() {
     std::fs::write(&account,json!({"type":"authorized_user","refresh_token":"token","client_id":"id","client_secret":"secret"}).to_string()).unwrap();
     let owners = place.root.join("speech.toml");
     std::fs::write(&owners,format!("[tts]\nprovider='deepgram'\n[deepgram]\napi_key='dg-unit'\n[elevenlabs]\napi_key='el-unit'\n[google_tts]\nproject='unit'\ncredentials='{}'\n",account.display())).unwrap();
+    let (cartesia,cart_requests)=answers(vec![("/voices","200 OK",json!({"data":[{"id":"sample","name":"Sample","gender":"neutral","language":"en"}]}).to_string()),("/tts/bytes","503 Busy","".into())]);
+    let cart_url=format!("{cartesia}/tts/bytes");
+    let (ink,ink_requests)=answers(vec![("/stt","200 OK",json!({"text":"Ink heard.","duration":"1.25"}).to_string())]);
     let token = format!("{http}/token");
     let synth = format!("{http}/tts");
     let world = [
@@ -26101,7 +26104,11 @@ fn the_other_speech_engines_answer_the_apps() {
         ("CLARP_ELEVEN_VOICE_ENDPOINT", eleven.as_str()),
         ("CLARP_GOOGLE_TOKEN_ENDPOINT", token.as_str()),
         ("CLARP_GOOGLE_VOICE_ENDPOINT", synth.as_str()),
-        ("CARTESIA_API_KEY", ""),
+        ("CLARP_GOOGLE_SPEECH_ENDPOINT",http.as_str()),
+        ("CARTESIA_API_KEY", "cart-unit"),
+        ("CLARP_CARTESIA_ENDPOINT",cart_url.as_str()),
+        ("CLARP_INK_ENDPOINT",ink.as_str()),
+        ("CLARP_CHIRP_DECODER","cat"),
         ("GOOGLE_VERTEX_API_KEY", ""),
         ("GEMINI_API_KEY", ""),
     ];
@@ -26155,20 +26162,79 @@ fn the_other_speech_engines_answer_the_apps() {
     assert_eq!(said[0]["voice_settings"]["speed"], 1.0);
     assert!(said[1]["text"].as_str().unwrap().contains("Hello"));
     assert_eq!(said[2], json!({"text":""}));
-    let requests = requests.lock().unwrap();
-    assert_eq!(requests.len(), 4);
-    assert!(requests[0].contains("encoding=mp3&container=none"));
+    let reads = requests.lock().unwrap();
+    assert_eq!(reads.len(), 4);
+    assert!(reads[0].contains("encoding=mp3&container=none"));
     assert!(
-        requests[0]
+        reads[0]
             .to_lowercase()
             .contains("authorization: token dg-unit")
     );
-    assert!(requests[2].contains("grant_type=refresh_token"));
+    assert!(reads[2].contains("grant_type=refresh_token"));
     assert!(
-        requests[3]
+        reads[3]
             .to_lowercase()
             .contains("x-goog-user-project: unit")
     );
+    drop(reads);
+    let choose=|provider:&str,fallback:&str|host.post("/tts/providers",json!({"provider":provider,"fallback":fallback,"voice":"local fixture"}));
+    let chosen=choose("cartesia","deepgram");
+    assert_eq!(chosen["provider"],"cartesia");
+    assert_eq!(chosen["fallback"],"deepgram");
+    assert_eq!(chosen["voice"],"local fixture");
+    assert_eq!(chosen["restart_scheduled"],false);
+    assert_eq!(host.ask("POST","/tts/providers",Some(&json!({"provider":"unknown"}))).0,400);
+    let old=host.get("/cartesia-voices?force=true");
+    assert_eq!(old["available"],true);
+    let row=&old["voices"][0];
+    assert_eq!(row["name"],"Sample");
+    assert_eq!(row["selection_value"],r#"{"cartesia":"sample"}"#);
+    let old_url=row["preview_url"].as_str().unwrap();
+    assert_eq!(fetch(&host,"","GET",old_url,&[],b"").text(),"Flux sound");
+    assert_eq!(fetch(&host,"","GET",old_url,&[("Range","bytes=1-3")],b"").text(),"lux");
+    assert_eq!(cart_requests.lock().unwrap().iter().filter(|s|s.starts_with("POST /tts/bytes")).count(),2);
+    assert_eq!(fetch(&host,"","GET","/cartesia-voice-preview?id=missing",&[],b"").status,404);
+    assert_eq!(host.ask("POST","/preview",Some(&json!({"text":"test"}))).0,400);
+    let selected=choose("deepgram","none");
+    assert_eq!(selected["provider"],"deepgram");
+    let playback=host.post("/preview",json!({"voice_id":"flux-haley-en","text":"test playback","session":"echo"}));
+    assert_eq!(playback["ok"],true,"{playback}");
+    assert_eq!(fetch(&host,"","GET",playback["url"].as_str().unwrap(),&[],b"").text(),"Flux sound");
+    let reply=fetch(&host,"","POST","/transcribe",&[("Content-Type","audio/mp4"),("X-Transcription-Model","cartesia:ink-whisper")],b"fixture clip");
+    assert_eq!(reply.status,200,"{}",reply.text());
+    assert_eq!(serde_json::from_slice::<Value>(&reply.body).unwrap()["text"],"Ink heard.");
+    let sent=ink_requests.lock().unwrap()[0].clone();
+    assert!(sent.to_lowercase().contains("authorization: bearer cart-unit"));
+    assert!(sent.to_lowercase().contains("cartesia-version: 2026-08-14"));
+    assert!(sent.contains("ink-whisper") && sent.contains("fixture clip"));
+    assert!(!sent.contains("keyterm"));
+    host.kill();
+
+    // Ink-2 uses a socket, streams the decoded sound in 100 ms pieces, and joins
+    // only final transcripts. The same Host data retains the chosen speaker.
+    let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+    let address=format!("http://{}",listener.local_addr().unwrap());
+    let mut socket_world=world.to_vec();
+    socket_world.retain(|(key,_)| *key!="CLARP_INK_ENDPOINT");
+    socket_world.push(("CLARP_INK_ENDPOINT",address.as_str()));
+    let host=place.start_in("",&["--speech-keys",owners.to_str().unwrap()],&socket_world);
+    assert_eq!(host.get("/tts/providers")["provider"],"deepgram");
+    let served=std::thread::spawn(move ||{
+        let (stream,_)=listener.accept().unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
+        let mut ws=tungstenite::accept(stream).unwrap();
+        assert_eq!(ws.read().unwrap().into_data().len(),3200);
+        assert_eq!(ws.read().unwrap().into_data().len(),1);
+        for op in ["finalize","close"] {assert_eq!(ws.read().unwrap().into_text().unwrap().as_str(),op);}
+        for e in [json!({"type":"transcript","text":"discard","is_final":false}),json!({"type":"transcript","text":"first ","is_final":true}),json!({"type":"transcript","text":"second","is_final":true}),json!({"type":"done"})] {
+            ws.send(tungstenite::Message::Text(e.to_string().into())).unwrap();
+        }
+    });
+    let reply=fetch(&host,"","POST","/transcribe",&[("X-Transcription-Model","cartesia:ink-2")],&vec![1;3201]);
+    assert_eq!(reply.status,200,"{}",reply.text());
+    assert_eq!(serde_json::from_slice::<Value>(&reply.body).unwrap()["text"],"first second");
+    served.join().unwrap();
+
 }
 
 #[test]
