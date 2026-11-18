@@ -28720,6 +28720,7 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         "/vocab/profiles/workspace",
         json!({"profile_id":pf,"enabled":false}),
     );
+    assert_eq!(meter["session"], session);
     assert_eq!(meter["profile_id"], pf);
     assert!(meter["payload"].as_str().unwrap().contains("Nadia"));
     assert!(meter["payload"].as_str().unwrap().contains("Plover"));
