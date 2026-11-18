@@ -96,6 +96,7 @@ for before,after,reason in [
 Q = "clarp-kernel/src/quota.rs"
 S = "clarp-kernel/src/standing.rs"
 PLANTS.extend([
+    (Q, "vectors", "forget a recovered episode while its window is absent", ".or(episode.omitted_window_end_ms)", ".or(None)"),
     (S, "vectors", "a changed Claude account never makes a reading due", "other || crate::usage_ask::due", "false && other || crate::usage_ask::due"),
     (Q, "vectors", "treat equal account identifiers as rotated", "on.account != Some(account.as_str())", "on.account == Some(account.as_str())"),
     (Q, "vectors", "ignore the last authoritative refresh", "crate::usage_ask::due(self.authoritative_ms, now)", "self.authoritative_ms.is_none()"),

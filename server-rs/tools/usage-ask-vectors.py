@@ -154,12 +154,20 @@ def cases(place):
             ("failure", None),
             ("read", {"rate_limit": {**room, "limit_reached": True},
                       "rate_limit_reached_type": {"type": "member_credit"}}),
-            ("read", {"rate_limit": room})]:
-        now[0] += 900000 if action == "ask" and turns[-1]["action"] != "ask" else 1
+            ("read", {"rate_limit": room}),
+            ("stream", {"rate_limit": room}),
+            ("ask", None)]:
+        if action == "stream":
+            now[0] += 300001
+        elif action == "ask" and turns[-1]["action"] == "read":
+            now[0] += 900000
+        else:
+            now[0] += 1
         entry = {"action": action, "now": now[0]}
         events = []
-        if action == "read":
-            kept = codex.capture_codex_rate_limits(body, source_detail="/wham/usage", identity=identity)
+        if action in ("read", "stream"):
+            source = "/wham/usage" if action == "read" else "rollout/token_count"
+            kept = codex.capture_codex_rate_limits(body, source_detail=source, identity=identity)
             entry["snapshot"] = {"windows": kept["windows"]}
             block = codex._codex_block_from_payload(body)
             if block:
