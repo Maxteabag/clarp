@@ -237,14 +237,22 @@ fn grok_models(raw: &str, efforts: &Value, at: &str) -> Vec<Value> {
     let mut rows = Vec::new();
     for line in python::splitlines(raw) {
         let line = python::strip(line);
-        if line.starts_with("You are") || line.starts_with("Default ") || line.to_ascii_lowercase().starts_with("available models") {
+        if line.starts_with("You are")
+            || line.starts_with("Default ")
+            || line.to_ascii_lowercase().starts_with("available models")
+        {
             continue;
         }
         let line = python::strip(line.trim_start_matches(['*', '-', '\u{2022}', ' ']));
-        let line = if line.to_ascii_lowercase().ends_with("(default)") { &line[..line.len()-9] } else { line };
+        let line = if line.to_ascii_lowercase().ends_with("(default)") {
+            &line[..line.len() - 9]
+        } else {
+            line
+        };
         if let Some(id) = line.split_whitespace().next()
             && !matches!(id.to_ascii_lowercase().as_str(), "available" | "models:")
-            && seen.insert(id) {
+            && seen.insert(id)
+        {
             rows.push(model(id, id, Value::Null, efforts.clone(), &from));
         }
     }
@@ -258,13 +266,42 @@ fn muse_models(raw: &str, order: &Value, at: &str) -> Vec<Value> {
     let mut models = Vec::new();
     for row in payload["rows"].as_array().into_iter().flatten() {
         let id = row["model_id"].as_str().map(python::strip).unwrap_or("");
-        if row["visibility"] != "visible" || id.is_empty() || !seen.insert(id) { continue; }
+        if row["visibility"] != "visible" || id.is_empty() || !seen.insert(id) {
+            continue;
+        }
         let variants = &row["reasoning_effort_variants"];
-        let efforts: Vec<_> = order.as_array().into_iter().flatten().filter(|effort|
-            variants.as_array().into_iter().flatten().any(|v| &v["tier"] == *effort)).collect();
-        let default = if efforts.iter().any(|v| **v == "high") { json!("high") } else { Value::Null };
-        let efforts = if efforts.is_empty() { Value::Null } else { json!(efforts) };
-        models.push(model(id, row["display_label"].as_str().filter(|l| !l.is_empty()).unwrap_or(id), default, efforts, &from));
+        let efforts: Vec<_> = order
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|effort| {
+                variants
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(|v| &v["tier"] == *effort)
+            })
+            .collect();
+        let default = if efforts.iter().any(|v| **v == "high") {
+            json!("high")
+        } else {
+            Value::Null
+        };
+        let efforts = if efforts.is_empty() {
+            Value::Null
+        } else {
+            json!(efforts)
+        };
+        models.push(model(
+            id,
+            row["display_label"]
+                .as_str()
+                .filter(|l| !l.is_empty())
+                .unwrap_or(id),
+            default,
+            efforts,
+            &from,
+        ));
     }
     models
 }
@@ -423,17 +460,27 @@ pub fn whole(rows: Vec<(String, Value)>, observed_at: &str) -> Value {
     })
 }
 
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod grok_muse_vectors {
     use super::*;
     #[test]
     fn model_lists_match_the_reference_parsers() {
-        let fixture: Value = serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/backend-grok-vectors.json")).unwrap();
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/backend-grok-vectors.json"
+        ))
+        .unwrap();
         for row in fixture["catalogs"].as_array().unwrap() {
             let tool = row["tool"].as_str().unwrap();
-            assert_eq!(json!(seen_models(tool,&declared(tool),row["raw"].as_str(),"synthetic")),row["models"]);
+            assert_eq!(
+                json!(seen_models(
+                    tool,
+                    &declared(tool),
+                    row["raw"].as_str(),
+                    "synthetic"
+                )),
+                row["models"]
+            );
         }
     }
 }

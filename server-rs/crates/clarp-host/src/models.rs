@@ -173,9 +173,17 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
                     }
                     // Kept in a file of the tool's own.
                     Some("directory") if tool == "muse" => {
-                        let root = clarp_backend::past::native_home(clarp_kernel::grok_muse::Tool::Muse, home);
+                        let root = clarp_backend::past::native_home(
+                            clarp_kernel::grok_muse::Tool::Muse,
+                            home,
+                        );
                         tokio::task::spawn_blocking(move || {
-                            let mut paths: Vec<_> = std::fs::read_dir(root.join("model-catalog")).ok()?.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|e| e == "json")).collect();
+                            let mut paths: Vec<_> = std::fs::read_dir(root.join("model-catalog"))
+                                .ok()?
+                                .flatten()
+                                .map(|e| e.path())
+                                .filter(|p| p.extension().is_some_and(|e| e == "json"))
+                                .collect();
                             paths.sort();
                             let mut rows = Vec::new();
                             for path in paths {
@@ -184,7 +192,10 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
                                 rows.extend(data["rows"].as_array().into_iter().flatten().cloned());
                             }
                             Some(json!({"rows":rows}).to_string())
-                        }).await.ok().flatten()
+                        })
+                        .await
+                        .ok()
+                        .flatten()
                     }
                     Some("file") => {
                         let file = claude_file(home);

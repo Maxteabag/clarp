@@ -2632,7 +2632,15 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
-        let named_session = self.backend.binds_at_spawn().then(|| backend_session.clone().unwrap_or_else(|| self.profile.conversation_id.clone())).filter(|id| !id.is_empty());
+        let named_session = self
+            .backend
+            .binds_at_spawn()
+            .then(|| {
+                backend_session
+                    .clone()
+                    .unwrap_or_else(|| self.profile.conversation_id.clone())
+            })
+            .filter(|id| !id.is_empty());
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),

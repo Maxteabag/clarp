@@ -190,7 +190,9 @@ pub trait Backend: Send + Sync {
     fn launch(&self, spec: &TurnSpec) -> Launch;
 
     /// The named session is usable as soon as the tool starts, even if it prints nothing.
-    fn binds_at_spawn(&self) -> bool { false }
+    fn binds_at_spawn(&self) -> bool {
+        false
+    }
 
     /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
     /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
@@ -309,7 +311,11 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
             None => agy::Agy::new(),
         })),
         "grok" | "muse" => Some(Arc::new(grok_muse::Adapter {
-            tool: if id == "grok" { clarp_kernel::grok_muse::Tool::Grok } else { clarp_kernel::grok_muse::Tool::Muse },
+            tool: if id == "grok" {
+                clarp_kernel::grok_muse::Tool::Grok
+            } else {
+                clarp_kernel::grok_muse::Tool::Muse
+            },
             program: program(id)?,
         })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),

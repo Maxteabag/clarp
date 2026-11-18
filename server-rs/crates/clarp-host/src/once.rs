@@ -129,7 +129,9 @@ pub async fn read(
     let tool = clarp_backend::by_id(backend).ok_or_else(none)?;
     // These tools auto-approve actions for agent turns. A scratch cwd alone cannot
     // make a janitor's reading of somebody else's text read-only.
-    if matches!(backend,"grok" | "muse") { return Err(none()); }
+    if matches!(backend, "grok" | "muse") {
+        return Err(none());
+    }
     let place = a_place("reading")?;
     // A tool that answers in a home of its own has it here, and works beside it: what it
     // reads for is not where its login is linked.

@@ -778,21 +778,30 @@ pub fn agy_sessions(base: &Path, cwd: &str, limit: usize) -> Vec<Value> {
 /// Native session stores of Grok Build and Muse Code.
 pub fn native_home(tool: clarp_kernel::grok_muse::Tool, home: &Path) -> PathBuf {
     use clarp_kernel::grok_muse::Tool;
-    let (variable,default) = match tool {
-        Tool::Grok => ("CLAUDE_PWA_GROK_HOME",".grok"),
-        Tool::Muse => ("CLAUDE_PWA_MUSE_HOME",".local/share/muse"),
+    let (variable, default) = match tool {
+        Tool::Grok => ("CLAUDE_PWA_GROK_HOME", ".grok"),
+        Tool::Muse => ("CLAUDE_PWA_MUSE_HOME", ".local/share/muse"),
     };
-    std::env::var_os(variable).filter(|v| !v.is_empty()).map_or_else(||home.join(default),PathBuf::from)
+    std::env::var_os(variable)
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| home.join(default), PathBuf::from)
 }
 
-fn date_dirs(root: &Path, digits: usize) -> impl Iterator<Item=PathBuf> {
-    files_of(root).into_iter().filter(move |p| p.file_name().and_then(|v|v.to_str()).is_some_and(|v|v.len()==digits && v.bytes().all(|b|b.is_ascii_digit())))
+fn date_dirs(root: &Path, digits: usize) -> impl Iterator<Item = PathBuf> + use<> {
+    files_of(root).into_iter().filter(move |p| {
+        p.file_name()
+            .and_then(|v| v.to_str())
+            .is_some_and(|v| v.len() == digits && v.bytes().all(|b| b.is_ascii_digit()))
+    })
 }
 
 fn roots(tool: clarp_kernel::grok_muse::Tool, base: &Path) -> Vec<PathBuf> {
     match tool {
         clarp_kernel::grok_muse::Tool::Grok => files_of(base),
-        clarp_kernel::grok_muse::Tool::Muse => date_dirs(base,4).flat_map(|y| date_dirs(&y,2)).flat_map(|m| date_dirs(&m,2)).collect(),
+        clarp_kernel::grok_muse::Tool::Muse => date_dirs(base, 4)
+            .flat_map(|y| date_dirs(&y, 2))
+            .flat_map(|m| date_dirs(&m, 2))
+            .collect(),
     }
 }
 
@@ -803,65 +812,128 @@ fn native_file(tool: clarp_kernel::grok_muse::Tool) -> &'static str {
     }
 }
 
-fn confined(base:&Path,file:&Path) -> Option<PathBuf> {
+fn confined(base: &Path, file: &Path) -> Option<PathBuf> {
     let path = file.canonicalize().ok()?;
     (path.starts_with(base) && path.is_file()).then_some(path)
 }
 
-pub fn native_transcript(tool: clarp_kernel::grok_muse::Tool, home:&Path, id:&str) -> Option<String> {
+pub fn native_transcript(
+    tool: clarp_kernel::grok_muse::Tool,
+    home: &Path,
+    id: &str,
+) -> Option<String> {
     use clarp_kernel::grok_muse::Tool;
-    if id.is_empty() || Path::new(id).file_name()?.to_str()? != id { return None; }
-    if tool == Tool::Muse && (!(8..=64).contains(&id.len()) || !id.bytes().all(|b|b.is_ascii_hexdigit() || b==b'-')) {return None;}
-    let base = native_home(tool,home).join("sessions").canonicalize().ok()?;
-    let mut dirs = roots(tool,&base);
-    if tool == Tool::Muse { dirs.reverse(); } else { dirs.insert(0,base.clone()); }
-    let file = dirs.iter().find_map(|d|confined(&base,&d.join(id).join(native_file(tool))))?;
+    if id.is_empty() || Path::new(id).file_name()?.to_str()? != id {
+        return None;
+    }
+    if tool == Tool::Muse
+        && (!(8..=64).contains(&id.len())
+            || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'))
+    {
+        return None;
+    }
+    let base = native_home(tool, home)
+        .join("sessions")
+        .canonicalize()
+        .ok()?;
+    let mut dirs = roots(tool, &base);
+    if tool == Tool::Muse {
+        dirs.reverse();
+    } else {
+        dirs.insert(0, base.clone());
+    }
+    let file = dirs
+        .iter()
+        .find_map(|d| confined(&base, &d.join(id).join(native_file(tool))))?;
     Some(String::from_utf8_lossy(&std::fs::read(file).ok()?).into_owned())
 }
 
-pub fn native_sessions(tool: clarp_kernel::grok_muse::Tool,home:&Path,cwd:&str,limit:usize) -> Vec<Value> {
-    use clarp_kernel::{grok_muse::Tool,grok_muse_history,told};
-    let Ok(base) = native_home(tool,home).join("sessions").canonicalize() else {return Vec::new()};
+pub fn native_sessions(
+    tool: clarp_kernel::grok_muse::Tool,
+    home: &Path,
+    cwd: &str,
+    limit: usize,
+) -> Vec<Value> {
+    use clarp_kernel::{grok_muse::Tool, grok_muse_history, told};
+    let Ok(base) = native_home(tool, home).join("sessions").canonicalize() else {
+        return Vec::new();
+    };
     let mut sessions = Vec::new();
-    for parent in roots(tool,&base) {
+    for parent in roots(tool, &base) {
         let decoded = unquoted(&parent.file_name().unwrap_or_default().to_string_lossy());
-        if tool == Tool::Grok && !cwd.is_empty() && cwd != decoded {continue;}
+        if tool == Tool::Grok && !cwd.is_empty() && cwd != decoded {
+            continue;
+        }
         for dir in files_of(&parent) {
-            let Some(file) = confined(&base,&dir.join(native_file(tool))) else {continue};
-            let Ok(bytes) = std::fs::read(&file) else {continue};
+            let Some(file) = confined(&base, &dir.join(native_file(tool))) else {
+                continue;
+            };
+            let Ok(bytes) = std::fs::read(&file) else {
+                continue;
+            };
             let log = String::from_utf8_lossy(&bytes);
-            let (workspace,preview,title) = match tool {
+            let (workspace, preview, title) = match tool {
                 Tool::Grok => {
                     let turns = grok_muse_history::grok(&log);
-                    let preview = turns.iter().find(|r|r["role"]=="user").and_then(|r|r["text"].as_str()).unwrap_or("").to_string();
-                    let info: Value = confined(&base,&dir.join("summary.json")).and_then(|p|std::fs::read(p).ok()).and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or_default();
-                    let title = info["generated_title"].as_str().filter(|s|!s.is_empty()).or(info["session_summary"].as_str()).unwrap_or("").to_string();
-                    (decoded.clone(),preview,title)
+                    let preview = turns
+                        .iter()
+                        .find(|r| r["role"] == "user")
+                        .and_then(|r| r["text"].as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let info: Value = confined(&base, &dir.join("summary.json"))
+                        .and_then(|p| std::fs::read(p).ok())
+                        .and_then(|b| serde_json::from_slice(&b).ok())
+                        .unwrap_or_default();
+                    let title = info["generated_title"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .or(info["session_summary"].as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    (decoded.clone(), preview, title)
                 }
                 Tool::Muse => {
                     let mut workspace = String::new();
                     let mut preview = String::new();
-                    for r in log.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok()) {
+                    for r in log
+                        .lines()
+                        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                    {
                         let p = &r["payload"];
                         let location = match r["payload_type"].as_str() {
                             Some("runtime.session.route_facts") => p["record"]["cwd"].as_str(),
-                            Some("runtime.session.metadata") if workspace.is_empty() => p["record"]["workspace_root"].as_str(),
+                            Some("runtime.session.metadata") if workspace.is_empty() => {
+                                p["record"]["workspace_root"].as_str()
+                            }
                             _ => None,
                         };
-                        if let Some(s) = location.filter(|s| !s.is_empty()) {workspace=s.into();}
-                        if preview.is_empty() && r["payload_type"]=="runtime.session" && p["kind"]=="run" && p["event"]["kind"]=="started" {
-                            preview=told::unheaded(p["event"]["prompt"].as_str().unwrap_or("")).trim().into();
+                        if let Some(s) = location.filter(|s| !s.is_empty()) {
+                            workspace = s.into();
                         }
-                        if !workspace.is_empty() && !preview.is_empty() {break;}
+                        if preview.is_empty()
+                            && r["payload_type"] == "runtime.session"
+                            && p["kind"] == "run"
+                            && p["event"]["kind"] == "started"
+                        {
+                            preview = told::unheaded(p["event"]["prompt"].as_str().unwrap_or(""))
+                                .trim()
+                                .into();
+                        }
+                        if !workspace.is_empty() && !preview.is_empty() {
+                            break;
+                        }
                     }
-                    (workspace,preview,String::new())
+                    (workspace, preview, String::new())
                 }
             };
-            if !cwd.is_empty() && workspace!=cwd {continue;}
+            if !cwd.is_empty() && workspace != cwd {
+                continue;
+            }
             sessions.push(json!({"id":dir.file_name().unwrap_or_default().to_string_lossy(),"mtime":written(&file).1,"preview":python::first(&preview,240),"title":title,"cwd":workspace}));
         }
     }
-    sessions.sort_by_key(|s|std::cmp::Reverse(s["mtime"].as_i64().unwrap_or(0)));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s["mtime"].as_i64().unwrap_or(0)));
     sessions.truncate(limit);
     sessions
 }
