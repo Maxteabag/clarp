@@ -75,6 +75,26 @@ class _ActiveTurn:
     voice: bool = False
     produced_output: bool = False
     steer_ready: threading.Event = field(default_factory=threading.Event)
+    usage_entry: tuple[int, int] | None = None
+
+    def observe_usage(self, usage: dict) -> None:
+        """Measure each component from the opening balance to its highest observed total."""
+        total = usage.get("total") or {}
+        last = usage.get("last") or {}
+        if not isinstance(total, dict) or not isinstance(last, dict):
+            return
+        inputs, outputs = total.get("inputTokens"), total.get("outputTokens")
+        if type(inputs) is not int or type(outputs) is not int:
+            return
+        if self.usage_entry is None:
+            call_in, call_out = last.get("inputTokens"), last.get("outputTokens")
+            if (type(call_in) is not int or type(call_out) is not int
+                    or not 0 <= call_in <= inputs or not 0 <= call_out <= outputs):
+                return
+            self.usage_entry = (inputs - call_in, outputs - call_out)
+        begin_in, begin_out = self.usage_entry
+        self.state.tokens_in = max(self.state.tokens_in, inputs - begin_in)
+        self.state.tokens_out = max(self.state.tokens_out, outputs - begin_out)
 
 
 # A stopped Codex turn the app-server has not ended this long after its
@@ -451,9 +471,9 @@ class _Client:
                                   {"dispatch": "codex", "trace_id": active.trace_id})
             return
         if method == "thread/tokenUsage/updated":
-            usage = (params.get("tokenUsage") or {}).get("last") or {}
-            active.state.tokens_in = int(usage.get("inputTokens") or 0)
-            active.state.tokens_out = int(usage.get("outputTokens") or 0)
+            usage = params.get("tokenUsage")
+            if isinstance(usage, dict):
+                active.observe_usage(usage)
             return
         live_items = getattr(active.state, "live_items", None)
         if live_items is None:
