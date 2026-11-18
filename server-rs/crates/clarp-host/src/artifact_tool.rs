@@ -20,6 +20,7 @@ use crate::library;
 use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
 
 const USAGE: &str = "usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | \
+publish-render-spec REQUEST_FILE [--validate-only] | \
 create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | \
 create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | \
 form-events ARTIFACT_ID [--draft-key KEY] [--after N] [--limit N] [--output JSONL] [--overwrite] | \
@@ -551,6 +552,34 @@ async fn report_history(app: &App, rest: &[String]) -> Result<Value, String> {
     .map_err(|error| refusal(&error))
 }
 
+/// `publish-render-spec REQUEST_FILE [--validate-only]`: a whole request to publish a render
+/// spec, as the agent wrote it, is sent as its bytes, so that the Host's validator is the
+/// only one: a key written twice or a number's spelling is judged there. A refusal is
+/// printed as the Host gives it, on standard error.
+async fn publish_render_spec(app: &App, call: &ToolCall, rest: &[String]) -> ToolAnswer {
+    let failed = |why: String| ToolAnswer::said(1, format!("agent_artifacts: {why}"));
+    let parsed = match parse(rest, &[], &["--validate-only"], &["request_file"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return failed(why),
+    };
+    let file = &parsed.positional[0];
+    let bytes = match std::fs::read(std::path::Path::new(&call.cwd).join(file)) {
+        Ok(bytes) => bytes,
+        Err(error) => return failed(unread(&error, file)),
+    };
+    let validate_only = parsed.flags.contains("--validate-only");
+    match library::posted(app, &bytes, validate_only, false).await {
+        Ok((_, answer)) => ToolAnswer::printed(0, answer.to_string()),
+        Err(error) => {
+            let told = matches!(error.status().as_u16(), 400 | 403 | 409);
+            match error.detail().filter(|_| told) {
+                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),
+                None => failed(refusal(&error)),
+            }
+        }
+    }
+}
+
 /// Answers the tool.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     let failed = |why: String| ToolAnswer::said(1, format!("agent_artifacts: {why}"));
@@ -568,6 +597,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 ),
             );
         }
+        ("publish-render-spec", _) => return publish_render_spec(app, call, rest).await,
         ("create-form", _) => create_form(app, call, rest).await,
         ("create-report", _) => create_report(app, call, rest).await,
         ("report-history", _) => report_history(app, rest).await,

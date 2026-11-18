@@ -63,6 +63,7 @@ pub mod push;
 pub mod pusher;
 pub mod quota;
 pub mod relay;
+pub mod render_spec;
 pub mod request_tool;
 pub mod revisions;
 pub mod roster;
