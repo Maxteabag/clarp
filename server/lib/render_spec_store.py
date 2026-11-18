@@ -88,10 +88,10 @@ def publish(agent, ident, title, summary_text, status, reference, payload, expec
             result = {"valid": True}
         elif old:
             now = max(old["updated_at"] + 1, db.now_ms())
-            con.execute("UPDATE artifacts SET title=?,summary=?,status=?,reference_id=?,payload_json=?,"
-                        "updated_at=? WHERE artifact_id=?",
-                        (title[:300], strip_hidden_blocks(summary_text).strip()[:4000], status,
-                         strip_hidden_blocks(reference).strip()[:500], json.dumps(stored), now, ident))
+            artifacts.replace_render_spec_in(
+                con, ident, title=title[:300], summary=strip_hidden_blocks(summary_text).strip()[:4000],
+                status=status, reference=strip_hidden_blocks(reference).strip()[:500],
+                payload_json=json.dumps(stored), now=now)
             result = artifacts.get(ident)
         else:
             result = artifacts._insert_artifact(agent, ident or artifacts._new("artifact"), "render_spec",
@@ -104,7 +104,7 @@ def publish(agent, ident, title, summary_text, status, reference, payload, expec
 
 
 def submit(ident, data, *, capable, on_completed=None):
-    from . import html_forms
+    from . import artifacts, html_forms
     if not capable:
         raise contract.Refusal("client_contract", "")
     con = db.conn()
@@ -120,12 +120,12 @@ def submit(ident, data, *, capable, on_completed=None):
         result = contract.admit(ident, json.loads(row["payload_json"]), row["status"], data, previous)
         if not result["repeat"]:
             now = db.now_ms()
-            con.execute("INSERT INTO form_submissions(submission_id,artifact_id,version,session,"
-                        "answers_json,payload_hash,prompt,created_at,synthesize_audio) VALUES(?,?,?,?,?,?,?,?,?)",
-                        (sid, ident, data["version"], row["session"], result["answers_json"], result["payload_hash"],
-                         contract.message_text(row, data), now, int(data.get("synthesize_audio", True))))
-            con.execute("UPDATE artifacts SET status='completed',completed_at=?,updated_at=? WHERE artifact_id=?",
-                        (now, max(now, row["updated_at"] + 1), ident))
+            html_forms.record_submission_in(
+                con, submission_id=sid, artifact_id=ident, version=data["version"], session=row["session"],
+                answers_json=result["answers_json"], payload_hash=result["payload_hash"],
+                prompt=contract.message_text(row, data), created_at=now,
+                synthesize_audio=int(data.get("synthesize_audio", True)))
+            artifacts.complete_in(con, ident, now=now, updated_at=max(now, row["updated_at"] + 1))
             previous = con.execute("SELECT * FROM form_submissions WHERE submission_id=?", (sid,)).fetchone()
         receipt = html_forms.receipt(previous)
         con.execute("COMMIT")
