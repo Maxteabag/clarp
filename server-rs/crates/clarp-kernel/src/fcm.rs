@@ -273,3 +273,15 @@ impl ActivityBudget {
         Ok(())
     }
 }
+
+/// Under pressure, a reply yields before an older decision. When all tickets
+/// are decisions the newest remains, and the oldest waiting ticket yields.
+pub fn slow_queue_victim(
+    elapsed: std::time::Duration,
+    mut decisions: impl ExactSizeIterator<Item = bool>,
+) -> Option<usize> {
+    if elapsed <= std::time::Duration::from_secs(5) || decisions.len() <= 2 {
+        return None;
+    }
+    Some(decisions.position(|decision| !decision).unwrap_or(0))
+}
