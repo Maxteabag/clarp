@@ -1050,7 +1050,8 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             self._body_consumed = True
             raw = self.rfile.read(n) if n > 0 else b""
             if raw and json_depth.too_deep(raw):
-                # Nested deeper than MAX_DEPTH: the reader's 400, before json.loads recurses (R73).
+                # Nested deeper than 512 (MAX_DEPTH), on every route: the reader's 400, before
+                # json.loads recurses (R73). 512 is the Rust Host's render-spec bound.
                 log("requestJsonTooDeep", redact_query_secrets(self.path))
                 return None
             if n and self.path.partition("?")[0].split("/", 2)[1:2] == ["artifacts"]:
