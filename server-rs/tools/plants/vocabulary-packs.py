@@ -173,16 +173,16 @@ for why,old,new in [
 
 for why,old,new in [
         ('completed transcript is lost','r.transcript = transcript;','r.transcript.clear();'),
-        ('counter reservations are not persisted','COUNTER, "last".into(), &id','COUNTER, "last".into(), &(id - 1)'),
-        ('the run is written under the following id','id.to_string(), &record','(id+1).to_string(), &record'),
+        ('counter reservations are not persisted','COUNTER, "last".into(), encode(&id)?','COUNTER, "last".into(), encode(&(id - 1))?'),
+        ('the run is written under the following id','id.to_string(), encode(&record)?','(id+1).to_string(), encode(&record)?'),
         ('a restarted host reads another session index','load::<Session>(fleet, SESSIONS, s)','load::<Session>(fleet, SESSIONS, "other")'),
-        ('the run lookup drops the trace index','TRACES, record.trace.clone(), &id','TRACES, String::new(), &id'),
+        ('the run lookup drops the trace index','TRACES, record.trace.clone(), encode(&id)?','TRACES, String::new(), encode(&id)?'),
         ('a clip reads and rewrites the whole administrative book while reserving its number',
-         'let id = last.checked_add', 'let book:Book=load(fleet,BOOK,"book").await?.unwrap_or_default(); save(fleet,BOOK,"book".into(),&book).await?; let id = last.checked_add'),
-        ('number reservation overwrites the book','COUNTER, "last".into(), &id','BOOK, "book".into(), &id'),
-        ('per-session lookup is never written','save(fleet, SESSIONS, record.session.clone(), &session).await?;', 'let _ = &session;'),
-        ('all-sessions lookup is never written','save(fleet, GLOBAL, "all".into(), &all).await?;', 'let _ = &all;'),
-        ('trace lookup is never written','save(fleet, TRACES, record.trace.clone(), &id).await?;', 'let _ = &record.trace;'),
+         'let id = last.checked_add', 'let book:Book=load(fleet,BOOK,"book").await?.unwrap_or_default(); fleet.keep(BOOK,"book".into(),Some(encode(&book)?)).await.map_err(|_| unavailable())?; let id = last.checked_add'),
+        ('number reservation overwrites the book','COUNTER, "last".into(), encode(&id)?','BOOK, "book".into(), encode(&id)?'),
+        ('per-session lookup is never written','(SESSIONS, record.session.clone(), encode(&session)?),', ''),
+        ('all-sessions lookup is never written','(GLOBAL, "all".into(), encode(&all)?),', ''),
+        ('trace lookup is never written','writes.push((TRACES, record.trace.clone(), encode(&id)?));', 'let _ = &record.trace;'),
         ('session page grows with every run','remember(&mut session.newest, id, PAGE)','remember(&mut session.newest, id, usize::MAX)'),
         ('global page grows with every run','remember(&mut all, id, PAGE)','remember(&mut all, id, usize::MAX)'),
         ('session drops its 200th run','remember(&mut session.newest, id, PAGE)','remember(&mut session.newest, id, PAGE-1)'),
@@ -191,13 +191,16 @@ for why,old,new in [
         ('one older spoken run is discarded','const RECENT: usize = 3','const RECENT: usize = 2'),
         ('one extra spoken run is read','const RECENT: usize = 3','const RECENT: usize = 4'),
         ('recent results include silent clips','if !record.transcript.is_empty()','if record.transcript.is_empty()'),
-        ('finish does not update the spoken index','save(fleet, SESSIONS, r.session.clone(), &session).await?;', 'let _ = &session;'),
+        ('finish does not update the spoken index','writes.push((SESSIONS, r.session.clone(), encode(&session)?));', 'let _ = &session;'),
         ('the clip loads every audit to allocate a number','let id = last.checked_add','let _ = fleet.kept_all(RUNS).await; let id = last.checked_add'),
-        ('an interrupted run consumes a listing slot','for id in ids {','for id in ids.into_iter().take(limit) {'),
-        ('an interrupted finish contributes empty recent speech','&& !r.transcript.is_empty()', '&& r.latency >= 0'),
-        ('a dangling trace leaks a storage error','run(fleet, id).await?.ok_or_else(missing)?','run(fleet, id).await?.ok_or_else(unavailable)?'),
-        ('the audit becomes durable before its lookups','save(fleet, SESSIONS, record.session.clone(), &session).await?;', 'save(fleet,RUNS,id.to_string(),&record).await?; save(fleet, SESSIONS, record.session.clone(), &session).await?;')]:
+        ('trace lookup committed outside the run transaction','writes.push((TRACES, record.trace.clone(), encode(&id)?));','fleet.keep(TRACES,record.trace.clone(),Some(encode(&id)?)).await.map_err(|_| unavailable())?;'),
+        ('spoken lookup committed outside clip completion','writes.push((SESSIONS, r.session.clone(), encode(&session)?));','fleet.keep(SESSIONS,r.session.clone(),Some(encode(&session)?)).await.map_err(|_| unavailable())?;')]:
     change(T,'index',why,old,new)
+
+# NOT PLANTED: the former mutations for spending a listing slot on a missing
+# run, accepting an unfinished spoken entry, returning a store error for a
+# dangling trace, and publishing a run before its indexes all depended on
+# separate writes. The two split-transaction mutations exercise that risk now.
 
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

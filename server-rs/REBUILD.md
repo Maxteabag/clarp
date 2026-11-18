@@ -2141,8 +2141,8 @@ The fleet keeps packs, terms, profiles, memberships and assignments in one book.
 Each administrative change publishes one replacement document. A clip reserves its number in a
 separate counter. Trace keys point to the newest run. Session and global pages each hold up to
 200 run numbers, and a session also keeps its three most recent spoken run numbers. These lookups
-survive restart. The Host writes the audit last and skips references to a run interrupted before
-publication. As in the Python Host, runs have no count or age expiry. The runs endpoint
+survive restart. The fleet commits the counter, audit and lookups together. An interrupted transaction
+spends no run number. Finishing a clip commits its transcript and spoken index together. As in the Python Host, runs have no count or age expiry. The runs endpoint
 limits only the page it returns. The vocabulary, transcript and elapsed time share a run id. A completed
 stream turn records the keyterms actually supplied at connection time. Retried clip jobs return
 the saved result. Optional retained audio is readable by trace, with its original MIME type.
