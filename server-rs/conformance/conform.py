@@ -513,6 +513,8 @@ HEAD_KEYS = frozenset({'latest_revision', 'head_revision'})
 # one is compared; which moment it was is not.
 CLOCK_KEYS = frozenset({'pinned_at', 'archived_at', 'deleted_at', 'resolved_at', 'delivered_at',
                         'helper_completed_at', 'server_now',
+                        # A render spec's answers: when they were taken.
+                        'accepted_at',
                         # A call: when an agent joined it and when its state last changed.
                         'joined_at', 'changed_at',
                         # A schedule: when it runs next. Which minute that is, is held by vectors.
