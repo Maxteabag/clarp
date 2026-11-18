@@ -86,6 +86,7 @@ def vectors():
         names = ['read_file', 'write', 'search_replace', 'grep', 'list_dir', 'todo_write',
                  'web_search', 'web_fetch', 'other']
         logs.append(('grok', [
+            dict(type='user', content='ordinary-looking injected context', synthetic_reason='synthetic'),
             dict(role='user', content=dict(content=['a', {'text': 'b'}]), ts='then'),
             dict(type='tool_use', name='custom'),
             dict(type='assistant', content='', tool_calls=[
