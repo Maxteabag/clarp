@@ -47,7 +47,7 @@ def router(model, effects):
     service = orchestrator.OrchestratorService(context, model_call=lambda packet, *_: dict(model(packet)))
     count = [0]
 
-    def say(text, *, fallback_request=False, only_sessions=None):
+    def say(text, *, fallback_request=False, only_sessions=None, requested="mike"):
         count[0] += 1
         admission = prompt_admissions.create(
             authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
@@ -58,7 +58,7 @@ def router(model, effects):
             dispatched.append(kwargs)
             return SimpleNamespace(session=kwargs["forced_session"], backend="claude")
         return service.handle_send(
-            text=text, requested_session="mike", trace_id=f"route-{count[0]}",
+            text=text, requested_session=requested, trace_id=f"route-{count[0]}",
             prompt_admission=admission, hands_free=True, synthesize_audio=False, dispatch=dispatch,
             fallback_request=fallback_request, only_sessions=only_sessions)
     return say, dispatched
@@ -420,3 +420,48 @@ def test_a_status_question_name_resolves_as_a_voice_name(effects, spoken):
     db.conn().execute("UPDATE agents SET persona = 'Antoni Gaudí' WHERE session = 'antoni'")
     assert say(f"what is {spoken} doing?").action == "status", effects["spoken"]
     assert effects["spoken"] and effects["spoken"][0].startswith("Antoni")
+
+
+
+def test_a_hold_belongs_to_the_session_it_was_made_in(effects):
+    """Held while speaking to Antoni, a message is not shown, renewed or released while speaking to
+    Mike: a yes there sends nothing and a question there holds its own words apart. It expires."""
+    seen, remembered = [], []
+
+    def model(packet):
+        seen.append([row["utterance"] for row in packet["pending"]])
+        if packet["utterance"] == "send the report":
+            return {"kind": "agent_message", "target_session": "mike", "confidence": 0.4, "reason": "unsure"}
+        if packet["utterance"] == "which one?":
+            return {"kind": "clarify", "target_session": "mike", "pending_id": remembered[0],
+                    "confidence": 0.9, "reason": "again"}
+        return {"kind": "agent_message", "target_session": "mike", "pending_id": remembered[0],
+                "confidence": 0.95, "reason": "confirmed"}
+    say, dispatched = router(model, effects)
+    say("send the report", requested="antoni")
+    remembered.append(held()[0]["pending_id"])
+    before = held()[0]
+    say("which one?")
+    say("yes")
+    assert all("send the report" not in shown for shown in seen[1:])   # never shown while speaking to Mike
+    assert dispatched == []
+    assert effects["spoken"][-1] == orchestrator.HELD_MESSAGE_GONE
+    rows = {row["utterance"]: row for row in held()}
+    assert rows["send the report"] == before     # neither renewed nor claimed
+    assert rows["which one?"]["requested_session"] == "mike"
+    assert rows["which one?"]["pending_id"] != remembered[0]
+
+
+def test_a_hold_is_still_released_in_its_own_session(effects):
+    ident = []
+
+    def model(packet):
+        if packet["utterance"] == "send the report":
+            return {"kind": "agent_message", "target_session": "mike", "confidence": 0.4, "reason": "unsure"}
+        ident.append(packet["pending"][0]["pending_id"])
+        return {"kind": "agent_message", "target_session": "mike", "pending_id": ident[0],
+                "confidence": 0.95, "reason": "confirmed"}
+    say, dispatched = router(model, effects)
+    say("send the report", requested="antoni")
+    say("yes", requested="antoni")
+    assert [d["text"] for d in dispatched] == ["send the report"]
