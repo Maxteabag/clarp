@@ -277,3 +277,22 @@ def test_a_failed_status_update_leaves_no_submission(tmp_path, form):
     assert con.execute("SELECT count(*) FROM form_submissions WHERE artifact_id=?", (ident,)).fetchone()[0] == 0
     assert con.execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()[0] == "ready"
     assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True
+
+
+def test_a_failure_after_the_completion_leaves_no_submission_and_the_spec_open(tmp_path, form, monkeypatch):
+    """The second kill point: both writes done, the transaction not yet committed."""
+    from lib import agents, artifacts, db, html_forms, render_spec_store
+    agents.create_agent(persona="Synthetic", session="build", voice_id="v", cwd=str(tmp_path))
+    ident = artifacts.create(type="render_spec", session="build", title="Build", payload=form)["artifact_id"]
+
+    def killed(_row):
+        raise RuntimeError("killed after the status update")
+    monkeypatch.setattr(html_forms, "receipt", killed)
+    with pytest.raises(RuntimeError, match="killed after the status update"):
+        render_spec_store.submit(ident, _answer(), capable=True)
+    monkeypatch.undo()
+    con = db.conn()
+    assert con.execute("SELECT count(*) FROM form_submissions WHERE artifact_id=?", (ident,)).fetchone()[0] == 0
+    assert con.execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()[0] == "ready"
+    assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True
+    assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True   # the retry's receipt
