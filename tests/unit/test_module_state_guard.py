@@ -34,8 +34,6 @@ IMPORT = "table filled once at import time and read-only afterwards"
 RESET = "test-reset fence and drain bookkeeping of the process-wide import worker; rebound only by reset_for_tests, admission and the worker"
 
 ALLOWED: dict[tuple[str, str], str] = {
-    ("lib/apns.py", "_BG_LAST_BY_SESSION"): THROTTLE,
-    ("lib/apns.py", "_BG_SENT_AT"): THROTTLE,
     ("lib/apns.py", "_send_locks"): LOCKS,
     ("lib/apns.py", "_CLIENT"): CLIENT,
     ("lib/apns.py", "_CLIENT_CTOR"): CLIENT,

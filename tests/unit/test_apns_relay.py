@@ -21,7 +21,6 @@ def _clean(monkeypatch):
     monkeypatch.setattr(desktop_presence, "active", lambda: False)
     apns._reset_relay_state()
     apns._reset_pooled_client()
-    apns._reset_background_budget()
     apns.reset_jwt_cache()
     yield
     apns._reset_relay_state()
@@ -208,23 +207,6 @@ def test_each_token_is_registered_once_per_process(tmp_path, monkeypatch):
     registrations = [r for r in relay.requests if r["url"].endswith("/v1/push/devices")]
     assert len(registrations) == 1
     assert len(_sends(relay)) == 2
-
-
-def test_background_sync_relays_as_background_priority_5(tmp_path, monkeypatch):
-    _config(tmp_path, extra="[apns]\nbackground_sync = true\n")
-    relay = _FakeRelay()
-    _install(monkeypatch, relay)
-    apns.register_token("tok-a", session="mike")
-
-    summary = apns.send_background_sync("mike", "a1")
-
-    assert summary["sent"] == 1
-    item = _sends(relay)[0]["json"]["notifications"][0]
-    assert item["pushType"] == "background"
-    assert item["priority"] == "5"
-    assert item["collapseId"] == "sync-mike"
-    assert item["payload"] == {"aps": {"content-available": 1}, "kind": "sync",
-                               "session": "mike", "agent_id": "a1"}
 
 
 def test_decision_push_goes_through_the_relay(tmp_path, monkeypatch):
@@ -469,20 +451,6 @@ def test_grant_relay_outage_falls_back_to_a_local_key(tmp_path, monkeypatch):
     assert summary["sent"] == 2
     assert len(relay.requests) == 1  # one outage, then straight to the key
     assert sorted(c["url"].rsplit("/", 1)[-1] for c in relay.apple_direct) == ["tok-a", "tok-b"]
-
-
-def test_background_sync_uses_the_grant(tmp_path, monkeypatch):
-    _config(tmp_path, relay=False, extra="[apns]\nbackground_sync = true\n")
-    relay = _FakeRelay()
-    relay.grants[GRANT] = "live"
-    _install(monkeypatch, relay)
-    apns.register_token("tok-a", session="mike", push_grant=GRANT)
-
-    summary = apns.send_background_sync("mike", "a1")
-
-    assert summary["sent"] == 1
-    item = _sends(relay)[0]["json"]["notifications"][0]
-    assert item["pushType"] == "background" and item["priority"] == "5"
 
 
 def test_direct_mode_ignores_grants(tmp_path, monkeypatch):

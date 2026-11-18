@@ -1,8 +1,9 @@
 """APNs push notifications: device-token store + token-based HTTP/2 sender.
 
-When an agent's turn completes (state_log kind == 'done'), the state watcher
-calls `on_turn_done(session, persona)` which fans a "your turn" alert out to
-every live iOS device token registered via POST /devices.
+When an agent's turn completes, the state watcher and the transcript streamer
+classify it as a User notification and call `on_user_notification`, which fans
+an approved "your turn" alert out to every live device token registered via
+POST /devices.
 
 Two delivery paths, chosen by `Config.apns_transport()`:
 
@@ -1359,132 +1360,6 @@ def send_user_notification(notification: dict) -> dict:
     if suppressed:
         result.update(suppressed=True, reason="desktop-active")
     return result
-
-
-# Background ("silent") sync pushes are hints, never delivery: iOS holds only
-# the newest, discards them for force-quit apps, and throttles anything above
-# roughly 2-3 per hour. Budget globally and space per session; the app's
-# cursor resume on wake is what actually guarantees correctness.
-_BG_BUDGET_LOCK = threading.Lock()
-_BG_SENT_AT: collections.deque = collections.deque()      # monotonic seconds
-_BG_LAST_BY_SESSION: dict[str, float] = {}
-BG_MAX_PER_HOUR = 3
-BG_MIN_SESSION_SPACING_SEC = 10 * 60
-
-
-def _background_budget_allows(session: str, now: float | None = None) -> bool:
-    now = time.monotonic() if now is None else now
-    with _BG_BUDGET_LOCK:
-        while _BG_SENT_AT and now - _BG_SENT_AT[0] > 3600:
-            _BG_SENT_AT.popleft()
-        if len(_BG_SENT_AT) >= BG_MAX_PER_HOUR:
-            return False
-        last = _BG_LAST_BY_SESSION.get(session)
-        if last is not None and now - last < BG_MIN_SESSION_SPACING_SEC:
-            return False
-        _BG_SENT_AT.append(now)
-        _BG_LAST_BY_SESSION[session] = now
-        return True
-
-
-def _reset_background_budget() -> None:
-    with _BG_BUDGET_LOCK:
-        _BG_SENT_AT.clear()
-        _BG_LAST_BY_SESSION.clear()
-
-
-def background_sync_payload(session: str, agent_id: str) -> dict:
-    return {"aps": {"content-available": 1}, "kind": "sync",
-            "session": session, "agent_id": agent_id}
-
-
-def send_background_sync(session: str, agent_id: str = "") -> dict:
-    """Wake a suspended app to sync its cursors (no alert). Never raises."""
-    from . import config
-    cfg = config.load()
-    if not (push_enabled(cfg) and getattr(cfg, "apns_background_sync", False)):
-        return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
-    tokens = _deliverable(cfg, active_tokens())
-    if not tokens:
-        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
-    if not _background_budget_allows(session):
-        log("apnsBackgroundSkipped", f"session={session} reason=budget")
-        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,
-                "skipped": "budget"}
-    payload = background_sync_payload(session, agent_id)
-    sent = failed = disabled = 0
-    try:
-        transport = _transport(cfg)
-        for row in tokens:
-            tok = row["token"]
-            env = row.get("environment") or cfg.apns_environment
-            try:
-                status, reason, _apns_id = transport.send(
-                    tok, env, payload, grant=row.get("push_grant") or "",
-                    push_type="background", priority="5",
-                    collapse_id=f"sync-{session}"[:64], **_route(row))
-            except Exception as e:  # noqa: BLE001
-                log_exception("apnsBackgroundSendFail", e, detail=tok[:12])
-                transport.reset()
-                failed += 1
-                continue
-            if status == 200:
-                sent += 1
-            elif status == 410 or reason in _DEAD_REASONS:
-                disable_token(tok, reason or str(status))
-                disabled += 1
-            else:
-                failed += 1
-    except Exception as e:  # noqa: BLE001
-        log_exception("apnsBackgroundFail", e, detail=session)
-    log("apnsBackgroundSync", f"session={session} sent={sent} failed={failed}")
-    return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
-
-
-def send_turn_done(session: str | None, persona: str,
-                   agent_id: str | None = None, done_ts: int = 0) -> dict:
-    """Synchronously push a "your turn" alert to all live tokens. The body
-    previews the agent's latest reply when available.
-
-    Returns a summary dict {enabled, sent, failed, disabled}. Never raises —
-    a push must not break the turn lifecycle.
-    """
-    from . import config, user_notifications
-    cfg = config.load()
-    if not push_enabled(cfg):
-        return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
-
-    tokens = _deliverable(cfg, active_tokens())
-    if not tokens:
-        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
-
-    notification = user_notifications.classify_completed_turn(
-        agent_id=agent_id or "",
-        session=session or "",
-        persona=persona,
-        done_ts=done_ts,
-    )
-    if not notification.get("push") and getattr(cfg, "apns_background_sync", False):
-        # No alert is warranted (focused / muted), but the conversation head
-        # moved: nudge a suspended app to sync so it opens current.
-        return send_background_sync(session or "", agent_id or "")
-    return send_user_notification(notification)
-
-
-def on_turn_done(session: str | None, persona: str,
-                 agent_id: str | None = None, done_ts: int = 0) -> None:
-    """Fire-and-forget "your turn" push. Spawns a daemon thread so the state
-    watcher's poll loop is never blocked on a network round-trip. No-op (cheap)
-    when no push path is configured."""
-    from . import config
-    try:
-        if not push_enabled(config.load()):
-            return
-    except Exception:  # noqa: BLE001
-        return
-    threading.Thread(
-        target=send_turn_done, args=(session, persona, agent_id, done_ts), daemon=True
-    ).start()
 
 
 def on_user_notification(notification: dict) -> None:
