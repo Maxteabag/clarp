@@ -19,7 +19,7 @@ def record(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(ROOT / 'server'))
-    return android_cases()
+    return {**android_cases(), "deliveries": deliveries()}
 
 
 def android_cases():
@@ -68,6 +68,61 @@ def android_cases():
                 chips.append(dict(state=state, server=server, payload=payload))
                 take(payload, priority='5', collapse='agents-working')
     return dict(cases=cases, chips=chips)
+
+
+def deliveries():
+    from types import SimpleNamespace
+    from lib import fcm
+
+    # The production sender decides all retries. The stand-in records every send
+    # before returning its scripted result. Time and token minting are synthetic.
+    sa = SimpleNamespace(project_id='test', client_email='test@example.invalid')
+    cfg = SimpleNamespace(fcm_service_account_file=lambda: 'synthetic')
+    fcm.load_service_account = lambda _: sa
+    fcm.log = lambda *_: None
+    fcm.report_auth_problem = lambda *_: None
+    fcm._auth_recovered = lambda: None
+    fcm.time.time = lambda: 1795010000
+    responses = [(0, '', '', [], ''), (401, '', '', [], ''), (401, 'SENDER_ID_MISMATCH', '', [], ''),
+                 (403, '', 'PERMISSION_DENIED', [], ''), (403, 'SENDER_ID_MISMATCH', '', [], ''),
+                 (404, '', '', [], ''), (404, 'OTHER', '', [], ''), (400, 'UNREGISTERED', '', [], ''),
+                 (400, 'INVALID_ARGUMENT', '', [], ''), (400, '', 'INVALID_ARGUMENT', ['message.token'], ''),
+                 (400, 'INVALID_ARGUMENT', '', ['message.token', 'message.data'], ''),
+                 (400, '', '', ['message.token'], ''), (409, '', 'INVALID_ARGUMENT', [], ''),
+                 (499, '', '', [], ''), (500, '', '', [], '')]
+    responses += [(400, code, '', [], '') for code in ('QUOTA_EXCEEDED', 'INTERNAL', 'UNAVAILABLE')]
+    responses += [(429, '', '', [], wait) for wait in ('0', '1', '2', '9', '10', '11', '3.5', '-2', ' 6 ', chr(0x663))]
+    results = []
+    for response in responses:
+        status, code, rpc, fields, retry = response
+        for ends_well in (False, True):
+            sent = []
+            sleeps = []
+            minted = []
+            fcm._sleep = sleeps.append
+            fcm.access_token = lambda *_: 'synthetic'
+            fcm.reset_token_cache = lambda: minted.append(True)
+
+            def post(url, headers, json):
+                sent.append(url)
+                if ends_well and len(sent) > 1:
+                    return SimpleNamespace(status_code=200, json=lambda: {'name': 'taken'})
+                if status == 0:
+                    raise OSError('stand-in unavailable')
+                details = [{'errorCode': code}, {'@type': 'google.rpc.BadRequest',
+                            'fieldViolations': [{'field': field} for field in fields]}]
+                return SimpleNamespace(status_code=status, headers={'retry-after': retry},
+                                       json=lambda: {'error': {'status': rpc, 'details': details}})
+
+            transport = fcm.Transport(cfg, client=SimpleNamespace(post=post))
+            try:
+                result = transport.send('synthetic-device', {'kind': 'user-notification'})
+            except OSError:
+                result = [0, 'network', '']
+            results.append(dict(status=status, code=code, rpc=rpc, fields=fields, retry=retry,
+                                ends_well=ends_well, result=result, sends=len(sent), sleeps=sleeps,
+                                refreshed=len(minted)))
+    return results
 
 
 if __name__ == '__main__':

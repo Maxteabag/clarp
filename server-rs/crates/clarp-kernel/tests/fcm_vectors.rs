@@ -31,4 +31,33 @@ fn reference_android_data_and_activity_messages() {
         chips += 1;
     }
     assert_eq!((cases, chips), (176, 18));
+    let mut deliveries = 0;
+    for row in fixture["deliveries"].as_array().unwrap() {
+        let mut sending = fcm::Sending::default();
+        let mut sends = 0;
+        let mut refreshed = 0;
+        let mut waits = Vec::new();
+        let fields: Vec<Value> = row["fields"].as_array().unwrap().iter().map(|f| json!({"field":f})).collect();
+        let body = json!({"error":{"status":row["rpc"], "details":[{"errorCode":row["code"]},{"@type":"google.rpc.BadRequest","fieldViolations":fields}]}});
+        loop {
+            sends += 1;
+            assert!(sends < 5);
+            let next = if sends > 1 && row["ends_well"] == true {
+                sending.answered(200, &json!({"name":"taken"}), "")
+            } else {
+                sending.answered(row["status"].as_u64().unwrap() as u16, &body, row["retry"].as_str().unwrap())
+            };
+            match next {
+                fcm::Next::Retry(wait) => waits.push(wait as f64),
+                fcm::Next::Refresh => refreshed += 1,
+                fcm::Next::Finished(status, reason, name) => {
+                    assert_eq!(row["result"], json!([status,reason,name]), "{row}");
+                    break;
+                }
+            }
+        }
+        assert_eq!((row["sends"].clone(),row["refreshed"].clone(),row["sleeps"].clone()), (json!(sends),json!(refreshed),json!(waits)), "{row}");
+        deliveries += 1;
+    }
+    assert_eq!(deliveries, 56);
 }
