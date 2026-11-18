@@ -23238,14 +23238,164 @@ else:sys.exit(2)
             Some(&json!({"provider":provider,"alias":alias})),
         )
     };
-    for mode in ["none", "follow"] {
-        let h = start(mode);
-        assert_eq!(
-            switch(&h, "claude", "backup").1["error"],
-            "logins_kept_elsewhere"
+    // Persist an enabled, due switcher before restarting in each restricted setup.
+    // A paused or absent Janitor would never reach the guard under test.
+    for (mode, configured) in [("follow", true), ("none", true), ("select", false)] {
+        let isolated = Place::new(&format!("switch-negative-{mode}"));
+        let root = &isolated.root;
+        let hotseat = root.join("hotseat");
+        program(&hotseat, script);
+        let (negative_claude, out, attempts) = claude_that_is_out(&isolated);
+        let selector = root.join("selector");
+        program(
+            &selector,
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s' '{\"available\":false}'\n",
         );
+        let config = root.join("owner.toml");
+        std::fs::write(
+            &config,
+            format!(
+                "[agents]\nclaude_account_switch_command = [\"{}\"]\n",
+                selector.display()
+            ),
+        )
+        .unwrap();
+        let mut path = vec![root.clone()];
+        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let path = std::env::join_paths(path).unwrap();
+        let env = [
+            ("HOME", root.to_str().unwrap()),
+            ("PATH", path.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", negative_claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", "/bin/false"),
+        ];
+        let launch = |mode: &str, configured: bool, interval: &str| {
+            let mut flags = vec![
+                "--accounts",
+                mode,
+                "--speech-keys",
+                config.to_str().unwrap(),
+                "--janitors-checked-every-ms",
+                interval,
+                "--logins-checked-every-ms",
+                "600000",
+            ];
+            if configured {
+                flags.extend(["--seats-tool", hotseat.to_str().unwrap()]);
+            }
+            isolated.start_in("", &flags, &env)
+        };
+        let seed = launch("select", true, "600000");
+        let owner = seed.post("/agents", json!({"name":"Scanner","backend":"codex"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let job = seed.post(
+            "/janitors",
+            json!({"session":owner,"template_id":"account-hotseat"}),
+        );
+        let enable = format!("/janitors/{owner}/enabled");
+        let on = seed.post(
+            &enable,
+            json!({"enabled":true,"expected_revision":job["janitor"]["revision"]}),
+        );
+        let revision = &on["janitor"]["revision"];
+        assert_eq!(on["janitor"]["enabled"], true);
+        let runs = format!("/janitors/{owner}/runs?limit=5");
+        assert_eq!(seed.get(&runs), json!({"runs":[]}));
+        drop(seed);
+        let calls = || {
+            std::fs::read_to_string(root.join("seat-calls"))
+                .unwrap_or_default()
+                .lines()
+                .count()
+        };
+        for tool in ["claude", "codex"] {
+            std::fs::write(root.join(format!("{tool}.active")), "current").unwrap();
+        }
+        std::fs::write(out, "").unwrap();
+        let h = launch(mode, configured, "50");
+        let worker = h.post("/agents", json!({"name":"Worker","backend":"claude"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        h.send(&worker, "use the exhausted account", "quota-denied");
+        let state = || {
+            let snapshot = h.get("/agents/snapshot");
+            let row = snapshot["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["session"] == worker)
+                .unwrap();
+            (
+                row["latest_state"].clone(),
+                row["live_activity"]["state"].clone(),
+            )
+        };
+        wait_for(
+            "the provider rejection to settle according to the account mode",
+            || {
+                if mode == "none" {
+                    state().0 == "interrupted"
+                } else {
+                    state().1 == "limited"
+                }
+            },
+        );
+        let before = state();
+        assert_eq!(
+            std::fs::read_to_string(&attempts).unwrap().lines().count(),
+            1
+        );
+        // Several ordinary worker ticks have elapsed; the enabled Janitor could have
+        // selected the healthy backup from either provider if it had been allowed.
+        std::thread::sleep(Duration::from_millis(350));
+        assert_eq!(calls(), 0, "{mode}: a disabled switcher invoked the tool");
+        assert_eq!(
+            h.get(&runs),
+            json!({"runs":[]}),
+            "{mode}: a forbidden check began"
+        );
+        assert_eq!(h.get("/hotseat/status")["switcher"]["enabled"], false);
         assert!(h.get("/server-info")["contract"]["features"]["hotseat_desk_actions"].is_null());
-        assert!(!record.exists());
+        let (code, reply) = h.ask(
+            "POST",
+            &enable,
+            Some(&json!({"enabled":true,"expected_revision":revision})),
+        );
+        assert_eq!(
+            (code, &reply["code"]),
+            (503, &json!("janitor_runtime_unavailable"))
+        );
+        for provider in ["claude", "codex"] {
+            let (code, body) = switch(&h, provider, "backup");
+            let expected = if configured {
+                (
+                    409,
+                    json!({"ok":false,"error":"logins_kept_elsewhere","provider":provider,"alias":"backup",
+                    "message":"This Host reads the account seats and moves none. The account in use is changed where the logins of this machine are kept."}),
+                )
+            } else {
+                (
+                    503,
+                    json!({"ok":false,"error":"hotseat_unavailable","provider":provider,"alias":"backup",
+                    "message":"Hotseat could not say which account is in use. Nothing was switched."}),
+                )
+            };
+            assert_eq!((code, body), expected);
+            assert_eq!(
+                std::fs::read_to_string(root.join(format!("{provider}.active"))).unwrap(),
+                "current"
+            );
+        }
+        assert_eq!(h.get("/hotseat/desk")["switches"], json!([]));
+        assert_eq!(calls(), 0);
+        assert_eq!(state(), before);
+        assert_eq!(
+            std::fs::read_to_string(&attempts).unwrap().lines().count(),
+            1
+        );
     }
     let h = start("select");
     assert_eq!(

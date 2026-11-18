@@ -111,6 +111,32 @@ rules(M,"desk",[
     ('"pending":true','"pending":false',"claim an unfinished switch is over"),
     ('202,','200,',"return completed status to a request whose work is still running"),
 ])
+# Each check has three independent counterexamples. Admit one extra mode at a
+# time so a failure in follow cannot hide an untested path in none.
+for effect, result in [("report the automatic switcher enabled","return false;"),
+                       ("start automatic checks","return;")]:
+    mode = "app.config.accounts != Accounts::Select"
+    guard = f"if {mode} || !app.seats.told() {{\n        {result}"
+    for extra, other in [("follow","None"),("none","Follow")]:
+        PLANTS.append((A,"desk",f"{effect} under {extra}",guard,guard.replace(mode,f"app.config.accounts == Accounts::{other}")))
+    PLANTS.append((A,"desk",f"{effect} without a seats tool",guard,guard.replace(" || !app.seats.told()", "")))
+
+qual = "clarp_kernel::recovery::Accounts::"
+select = f"app.config.accounts == {qual}Select"
+for file, effect, test in [
+        ("clarp-host/src/edge.rs","advertise seat actions", select+" && app.seats.told()"),
+        ("clarp-host/src/janitors.rs","allow enabling a Hotseat Janitor",select+"\n                && app.seats.told()")]:
+    for extra, other in [("follow","None"),("none","Follow")]:
+        PLANTS.append((file,"desk",f"{effect} under {extra}",test,test.replace(select,f"app.config.accounts != {qual}{other}")))
+    PLANTS.append((file,"desk",f"{effect} without a seats tool",test,select))
+
+guard = "if app.config.accounts == Accounts::Select {\n        return switching::manual"
+for extra, other in [("follow","None"),("none","Follow")]:
+    PLANTS.append(("clarp-host/src/seats.rs","desk",f"admit a manual switch under {extra}",guard,
+                   guard.replace("== Accounts::Select",f"!= Accounts::{other}")))
+rules(M,"desk",[
+    ("if !app.seats.told() {","if app.seats.told() && tool.is_empty() {","enter a manual switch without a configured seats tool"),
+])
 # All mutation runs use synthetic programs and an isolated Host directory.
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
