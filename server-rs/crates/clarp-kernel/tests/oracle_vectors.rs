@@ -76,6 +76,7 @@ fn the_contact_is_kept_read_and_chosen_as_on_the_python_host() {
     let vectors = vectors();
     let contact = &vectors["contact"];
     let (mut stale, mut refused, mut chosen, mut calls) = (0, 0, 0, 0);
+    let mut direct_calls = 0;
     // What is kept is read: a contact that names no one agent any more is let go.
     for case in contact["read"].as_array().unwrap() {
         let agents = agents(&contact["rosters"][text(case, "roster")]);
@@ -126,8 +127,23 @@ fn the_contact_is_kept_read_and_chosen_as_on_the_python_host() {
         };
         assert_eq!(after, case["kept"], "{case}");
         calls += usize::from(!uses.is_empty());
+        // And of a call in which everything goes to the contact: one that is none is no call.
+        let direct = &case["direct"];
+        let (uses, let_go) = oracle::contact_of_a_direct_call(kept, &case["requested"], &agents);
+        match uses {
+            Ok(session) => assert_eq!(json!(session), direct["answer"], "{case}"),
+            Err(why) => assert_eq!(json!(why), direct["refused"], "{case}"),
+        }
+        let after = if let_go || kept.is_empty() {
+            Value::Null
+        } else {
+            json!(kept)
+        };
+        assert_eq!(after, direct["kept"], "{case}");
+        direct_calls += usize::from(direct.get("answer").is_some());
     }
     assert_eq!((stale, refused, chosen, calls), (121, 1016, 100, 61));
+    assert_eq!(direct_calls, 36);
 }
 
 #[test]

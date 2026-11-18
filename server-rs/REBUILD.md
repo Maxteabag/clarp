@@ -1135,8 +1135,9 @@ while the engine chosen is one that can, and both are changed together. Not with
 words to listen for, no runs written) and the keeping of sound, which this Host has not; both are
 registered. Of 144 wrong rules planted one at a time (80 into the kernel's rules, 64 into the route, the engine for clips and the setting) each is caught. Two were missed at first and got their case (a run written as nothing is no run; what a phone says in words that is not its leave-taking ends nothing), one planting of mine did not compile and was planted again in other words, and two let a Host start that was to refuse, where its test waited without end and held the build machine's one slot until the run was ended by hand: every command of the Host's own program in the tests has a limit now.
 
-On the line since: the socket of a live voice call ("A ring held as a live voice call" below). Not built on
-the line yet, and closed through the relay as sockets that failed: the Oracle's.
+On the line since: the socket of a live voice call ("A ring held as a live voice call" below). And the
+socket of a call of the Oracle ("The Oracle: a call on this Host" below). Not built, and closed through the
+relay as a socket that failed: the Oracle's call of the first kind.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
@@ -1625,8 +1626,7 @@ of `[gemini_tts]`), and one request at a time reads and writes what is kept, so 
 while a stale one is let go is not let go with it. With it, a rule of the Python Host's that this Host
 lacked: a Host without a token, which asks nobody who they are, answers nothing of the Oracle (401
 `Oracle requires authenticated full-device access`, for `/oracle` and everything under it). The Oracle's
-conversation is not built yet: `/oracle/status` still says that no call is held, an app that reads it
-offers none, and what is chosen here is kept for the day it is. Wrong rules were planted one at a time, 82
+calls came after ("The Oracle: a call on this Host" below), and use what is chosen here. Wrong rules were planted one at a time, 82
 of them (53 into the kernel's rules, 2 into the folding of case, 20 into the Host's part, 7 into the rule
 for a Host without a token), after the vectors had got the cases a rule had none for: all 82 were caught.
 Tested: the kernel by its vectors; and
@@ -1635,6 +1635,145 @@ refusals in their words, a janitor that is nobody's contact, a contact put away 
 once, and the voice with a file that names the second voice without a key, a phone's choice over the
 file, a key written into the file while the Host runs, the voice the owner names, and the choice kept
 over a restart; and a Host without a token refuses each of the Oracle's routes.
+
+**The Oracle: what it hands to agents** (18 Nov 2026). What the Oracle is asked to look into it hands to an
+agent as a turn of that agent's, and the Host keeps a record of each such delegation from the moment it is
+taken until its result was delivered (`POST /oracle/delegations`, `GET /oracle/delegations`, `POST
+/oracle/delegations/ack`, `/cancel`). The owner's main Host has several hundred of them. The record is the
+kernel's book (`oracle/delegations.rs`, by the Python Host's `oracle_delegations.py` itself, run as it is on
+a database of the generator's own with a stand-in for what admits a turn; `tools/oracle-delegation-vectors.py`:
+11 stories of 181 steps, and after every step the whole book must be what that Host's table was): a
+delegation is taken once however often it is asked, and refused where the same id comes with other work;
+it waits in the agent's queue or is under way; it ends with the turn's answer, with its failure, or with a
+stop of the agent, which also calls off one that failed while it was being stopped and leaves one that
+ended with an answer meanwhile; it is shown to the one who asked, and to nobody else, until they say they
+have it; and what an agent's live call asked is shown to no phone. The Host's part (`clarp-host`
+`oracle/delegations.rs`): the book is kept with the Host row by row and written before anybody is told; a
+delegation's turn is a message like any other, sent as the Oracle's under the delegation's own ids, without
+speech, waiting where the agent is busy; and what became of that turn is asked of the agent it was handed
+to, by the id of the message that began it, each time the book is read (`Actor::fate_of`: it waits, it
+runs, it ended and how, with what it left and when). An agent's conversation is the one record of its
+turns and is there after a restart, so no delegation is ended by a guess: a turn that ran when the Host
+was killed is the agent's to finish when the Host comes back, and its delegation ends with its answer,
+stamped with the moment the turn ended. A stop for the Oracle stops the agent first and calls off only
+then, so that a stop that fails leaves every delegation as it was; what waited is taken out of the queue.
+The session of the agent's tool is kept with a delegation as it is when the turn is admitted, and for an
+agent that had not run yet, from the moment its tool has one.
+Tested: the kernel by its vectors; and through a real Host process: every refusal in its words, work
+handed on and answered, asked again and told as it is, the same id with other work, the phone's word that
+it has a result, a turn that fails (in the tool's words) and one that ends with nothing said, the two
+listings and their order, work that waits behind a busy agent, a stop that calls off what waited and one
+that ends the delegated turn, a phone's own delegations that nobody else is shown, two results that came
+unread told in the order their turns ended, and a turn cut off by a kill of the Host whose delegation
+ends with its answer after the Host is back, with every other row as it was kept.
+
+**The Oracle: a long text relayed to its voice in parts** (18 Nov 2026; the kernel's rules, which nothing
+of the Host uses until the Oracle's conversation is built). A voice model takes a bounded piece of text at
+a time, and an agent's answer is often longer. The Python Host cuts such a text into numbered parts without
+losing a sign, hands the voice one part, waits until it was spoken, and hands it the next; each part says
+which it is, how much remains and how it is to be read, and only the last says that it is the end; a relay
+keeps where it is, so that a reply can be continued or read again from the text that is kept and the agent
+is not asked twice. The rules are ported as they are (`oracle/relay.rs`, by that Host's `oracle_relay.py`
+and `oracle_context.context_chunks` themselves; `tools/oracle-relay-vectors.py`: 174 cuttings of 19 texts,
+10 relays with 160 parts, 52 answers, 10 conversations): how a text is cut (after the last blank of a piece
+that leaves it at least half full, else where the bytes run out; a sign of several bytes is never cut),
+how a relay is sized (the longest head a part of it can have, and its text, fit into one piece for the
+voice), what the head of a part says for every way it can be handed over, what a relay says of how far it
+came, what of an answer is relayed (what the agent marked to be spoken, where it marked anything), what of
+a request is said with it, and the relay of an agent's recent conversation.
+
+**The Oracle: the cues of sound a call plays** (18 Nov 2026; the kernel's rules). A call tells its user what
+happens without a word: work was handed on, a result came, the call is put through to an agent, it is back,
+it could not be put through. Each cue is a few hundred milliseconds of 24 kHz sound that the Host makes
+itself and sends as sound of the voice, so that every phone plays it; the chime of a call put through is
+pitched by the agent's name, one of five notes. The rules are ported as they are (`oracle/earcons.rs`, by
+the Python Host's `oracle_earcons.py` itself; `tools/oracle-earcon-vectors.py`: 33 sounds held sample for
+sample, by their first, middle and last samples, their loudest and the digest of the whole; 24 names with
+their notes).
+
+**The Oracle: the conversation of a call** (18 Nov 2026; the kernel's rules). A call of the Oracle is a
+conversation between a phone, a voice model that holds no tools, and the Host between them. The kernel has
+it as one machine without a clock, a socket or a store (`oracle/conversation.rs`, `routing.rs`, `phone.rs`,
+`attention.rs`, `voice.rs`; by the Python Host's `oracle_live_stable.Conversation`, `oracle_strategy`,
+`oracle_attention` and `oracle_handoff` themselves, run as they are with a clock, a voice, a router and
+tools of the generator's; `tools/oracle-conversation-vectors.py`: 70 stories of 1299 steps, and after every
+step what the voice and the phone were told, what was kept, and what waits to be routed must be what that
+Host's were). What it holds: what a phone may send and what is none of it; sound both ways, and silence
+only for a moment after what was heard; what was said, a fragment at a time, with the number of the talk
+that every word of the user's moves on; the routing of what the user asked, once they have stopped talking
+for a second (the question a router is asked, with the talk, the agents, the work of the call and how far
+each answer was told; what it answers taken up thing by thing, the same thing once; an action written down
+as begun before anything is done for it, under a name that is the same whenever its place is asked for;
+where a request came from written for the agent that is handed it; the user's words that came meanwhile
+left for the next routing); a call in which everything goes to the contact, unread; results told between
+two turns of the talk, each with its cue, a long one in parts that follow what the voice spoke, pause after
+eight, and are read again or gone on with from the text that is kept; what waits for the user told one
+thing at a time and once in a thread; a call that goes on within half a minute of the one before as that
+call; and the call put through to an agent, as far as a conversation knows of it. Time passes in two
+halves (whether this is the moment to look for what waits for the user; then what was found), so that a
+Host reads what waits only then: the vectors hold at every tick whether the Python Host looks. The
+generator plays every story with its clock a ten-millionth faster and slower and refuses a story that is
+decided on the edge of a threshold. What the voice is told when a call begins and what a router is asked
+with (`voice.json`, `router.json`) are written from that Host's own modules by the same generator.
+
+**The Oracle: the memory of its threads** (18 Nov 2026; the kernel's rules). A call belongs to a thread:
+what one owner and the Oracle's contact said to each other, across calls. The kernel keeps of a thread
+which connection has it now, what was kept of the talk, the actions that were begun, the work that was
+handed on in it, and what its voice was told of (`oracle/threads.rs`, by the Python Host's
+`oracle_memory.py`, `oracle_attention.claim_context` and `oracle_result_context.result_payload` themselves
+on a database of the generator's; `tools/oracle-memory-vectors.py`: 18 stories of 262 steps, and after
+every step the tables must be what that Host's were; at every step it is also held which connection has
+its thread, and that the rows the memory says it changed make the whole memory again). The thread a call
+goes on in is the one a connection has, else the one last written; a thread asked for by its name must be
+its owner's and of the call's contact; what changes a thread is done by the connection that has it, and a
+connection that lost its thread can still read it; an action is begun once under the name of its place,
+and never as another action; an action whose receipt was lost is ended by the work it is known to have
+handed on; and the excerpt a call begins with is whole records within a bound, the newest result first,
+with times on the clocks of the Host's machine.
+
+**The Oracle: the tools of the fleet** (18 Nov 2026; the kernel's rules). What a router may want done: the
+agents listed, an agent looked at, what it said read for a sentence about it or for its own words, an agent
+stopped with or without other work in the place of what it was doing, and work handed to an agent or to the
+contact. The kernel says what each means for a Host and what it is answered (`oracle/tools.rs`, by the
+Python Host's `oracle_calls_stable.AgentTools` and its readers themselves; `tools/oracle-tools-vectors.py`:
+132 things wanted of which 59 are refused, 64 readings within their bounds, 88 conversations, 48 states).
+
+**The Oracle: a call on this Host** (18 Nov 2026; `GET /oracle/v2`, `GET /oracle/status`). The Host adds
+what a conversation cannot know (`clarp-host` `oracle/call.rs`, with `router.rs`, `memory.rs`, `tools.rs`):
+who may open the socket and how; one call a phone at a time, a later call of the same phone taking the
+older one's place, and a call asked for while the one before is ending waiting for it; the voice reached
+with the owner's key over a socket of its own, and the router asked with the same key over the web; and
+one task that owns the conversation of a call and stands between its phone and its voice, while the
+router's thinking, a tool at work and a file being written are done apart and come back to that task as
+something that happened, so that sound goes both ways all the while. The memory is kept with the Host row
+by row, read when it is first asked for and written before anybody is told, and is there after a restart.
+The tools are done with the fleet: an agent's state and what it said are read from the agent itself, work
+is handed on through the book of delegations as any delegation is, and a stop is the book's stop of an
+agent. An action is written down and its thread confirmed as this call's before its file is written or its
+tool runs; one that is not taken as begun fails its routing, and the call goes on. The socket refuses in
+the Python Host's words what is no call (no upgrade, a phone of limited rights, no key, a strategy, a
+contact, a thread or a handoff that is asked for wrongly, a phone that has a voice, a voice that cannot be
+reached). The status says what this Host holds: calls of this kind where the owner's key is there, in the
+thread of their owner and contact or anew, also to the contact alone; and nothing of what is not built.
+The features are listed (`oracle`, `oracle_contact`, `oracle_direct_contact`, `oracle_context_memory`,
+`oracle_earcons`). Not built yet, and said so: a call put through to an agent (`oracle_handoff`), the
+second voice, podcast detours, the words a contact's vocabulary was prepared in, what agents finished that
+the user has not read, the first kind of call and WebRTC.
+Tested through a real Host process, with a voice and a router that stand in on the test's own machine (no
+test reaches a provider): every refusal in its words; a whole call (how the voice is told the call begins,
+with the agents and what was kept; sound both ways; a wanting said twice routed once; the question the
+router is asked, in the letters of the talk; work handed on as a delegation of the phone's with the file of
+where it came from, which only the owner reads; what waits for the user told once; the result with its
+cue; a look at an agent and its conversation read to the voice; work that takes long stopped with other
+work in its place, and what the stop silenced not told; a later call of the phone taking the older one's
+place and going on in the thread with its work and what its voice was told of; the end by the phone, by
+the voice in both its ways and by a phone that went away; a call that begins anew; a thread by its name
+and by its contact; and the thread as it was left after the Host was started again); a call in which
+everything goes to the contact, with the languages its owner wrote and no cues where the owner wants none;
+a Host without a key, a voice that does not take the key, a router that does not answer as one, a file
+that cannot be written, work for an agent there is none of, a tool there is none of, and then the same
+call handing work on as any other; and a call carried through the relay as it is at the door (opened,
+sound both ways, ended by the phone, refused, and left by a phone that went away). Four defects of the reference were found on the way (R58 to R61).
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
@@ -2205,8 +2344,9 @@ connection relay under the name the phone is paired with. Each of these is true 
    built against one port that a socket at the door and the relay's tunnel both carry, and is shown
    through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a gate, not a
    note"). The port and its two carriers are built, and on them the Host's own terminal, an agent's, and
-   the stream of speech and the socket of a live voice call (18 Nov 2026, "Sockets" in section 6).
-   Still closed as sockets that failed: the Oracle's.
+   the stream of speech, the socket of a live voice call and that of a call of the Oracle (18 Nov 2026,
+   "Sockets" in section 6). Still closed as a socket that failed: the Oracle's call of the first kind,
+   which is not built.
 2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
    session for a name and closes the older one when another dials: a Python Host that came back would take
    the phones again, and neither Host would report an error, only lose its connection again and again. The

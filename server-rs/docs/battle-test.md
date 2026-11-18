@@ -1280,6 +1280,34 @@ voice from his phone; a ring that reaches his locked phone as an incoming call (
 word for the key); and a call with the tools his own profile opts into, which this Host refuses in words
 until they are built.
 
+## The Oracle's contact and voice, and a call push that is not armed, at the door of the installed Host (18 Nov 2026, L34)
+
+Installed at 09:25 from the landed commit (`442a131a`), the relay back after 70 ms, 23 agents, their rows
+as before.
+
+The pushing of a ring as an incoming call is in this build and is not armed here: the installed Host was
+given no word for a key (`--push-keys`; the installer keeps it off unless it is given), so it hands the push
+service nothing, whatever its owner's file of speech keys names. No ring was placed to show it on this
+Host; that a Host without the word hands the service nothing is shown by the test of the live call, whose
+Host reads such a file. A ring pushed to the owner's locked phone stays for his own test, with his word for
+the key.
+
+What the installed Host answers of the Oracle was asked at its door, as the administrator and as nobody.
+Nothing was chosen and nothing was changed:
+
+| Asked | Answered |
+|---|---|
+| `GET /oracle/contact` | no contact, and none that went stale |
+| `GET /oracle/voice-provider` | the first voice is chosen and speaks; no reason for a fallback |
+| `GET /oracle/contact` without the Host's token | 401 |
+| `POST /oracle/contact` with a name that is nobody's | 409, `'nobody-of-that-name' is not a live agent; choose a contact from the roster` |
+| `POST /oracle/voice-provider` with a voice there is not | 400, `voice provider must be one of: openai, gemini` |
+| `GET /oracle/contact` after the two | no contact, as before |
+| `GET /oracle/status` | no call of the Oracle is held here yet, in either of its two forms |
+
+What stands open of this, for the owner's own test once everything is built: a contact chosen from his
+phone, and the Oracle's conversation that uses it, which is not built yet.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

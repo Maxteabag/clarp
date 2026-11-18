@@ -2616,4 +2616,45 @@ SCENARIOS.append({
     ],
 })
 
+DELEGATIONS = '/oracle/delegations'
+
+
+def handed(delegation_id, request, name, session=AGENT):
+    return post(DELEGATIONS, {'delegation_id': delegation_id, 'session': session, 'request': request}, name)
+
+
+SCENARIOS.append({
+    'id': 'oracle-delegations',
+    'what': 'what the Oracle hands to an agent: refused where it cannot be handed on, taken once however often it '
+            "is asked, a turn of the agent's under the delegation's own ids, ended with the turn's answer, shown "
+            'until the phone says it has it, and told as it is when it is called off after its end',
+    'steps': [
+        get(DELEGATIONS, 'what was handed on, on a Host where nothing was'),
+        post(DELEGATIONS, {'session': AGENT, 'request': 'synthetic request'}, 'work without an id'),
+        handed('a b', 'synthetic request', 'work under an id that is none'),
+        post(DELEGATIONS, {'delegation_id': 'synthetic-d0', 'session': AGENT}, 'an id and no work'),
+        handed('synthetic-d0', 'synthetic request', 'work for an agent that is not there', session='nobody-there'),
+        {'op': 'post', 'path': DELEGATIONS, 'name': 'work said as a list',
+         'raw': {'bytes': '["synthetic-d0"]', 'content_type': 'application/json'}},
+        post(DELEGATIONS + '/ack', {'delegation_id': 'synthetic-d0'}, 'a result nobody has is said to be had'),
+        post(DELEGATIONS + '/ack', {'delegation_id': 'a b'}, 'a result under an id that is none'),
+        post(DELEGATIONS + '/cancel', {'delegation_id': 'synthetic-d0'}, 'work nobody handed on is called off'),
+        post(DELEGATIONS + '/cancel', {}, 'nothing is called off'),
+        get(DELEGATIONS + '?all=1', 'nothing was kept of any of it'),
+        handed('synthetic-d1', '  synthetic delegated request one  ', 'work is handed to the agent'),
+        {'op': 'wait_reply', 'after': 'u-oracle-synthetic-d1'},
+        {'op': 'quiesce'},
+        get(DELEGATIONS, 'what the phone is still to be told'),
+        handed('synthetic-d1', 'synthetic delegated request one', 'the same work again'),
+        handed('synthetic-d1', 'synthetic other request', 'the same id with other work'),
+        post(DELEGATIONS + '/cancel', {'delegation_id': 'synthetic-d1'}, 'work that is over is called off'),
+        LOG,
+        post(DELEGATIONS + '/ack', {'delegation_id': 'synthetic-d1'}, 'the phone has the result'),
+        get(DELEGATIONS, 'nothing is left to tell'),
+        get(DELEGATIONS + '?all=1', 'everything that was handed on'),
+        get(DELEGATIONS + '?all=true&limit=many', 'the same, asked for by a word'),
+        SNAPSHOT,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

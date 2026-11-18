@@ -16,6 +16,17 @@ use serde_json::{Value, json};
 
 use crate::python;
 
+pub mod attention;
+pub mod conversation;
+pub mod delegations;
+pub mod earcons;
+pub mod phone;
+pub mod relay;
+pub mod routing;
+pub mod threads;
+pub mod tools;
+pub mod voice;
+
 /// Under what the contact is kept, and how long a name of one may be.
 pub const CONTACT_KEY: &str = "oracle.contact_session";
 pub const CONTACT_LONGEST: usize = 160;
@@ -177,6 +188,28 @@ pub fn contact_of_a_call(kept: &str, requested: &Value, agents: &[Agent]) -> (St
         found.map_or_else(String::new, |agent| agent.session.to_string()),
         let_go,
     )
+}
+
+/// Why a call in which everything goes to the contact is no call.
+pub const NO_SUCH_CONTACT: &str = "Direct-to-primary mode requires a valid selected contact";
+pub const NO_CONTACT_CHOSEN: &str = "Select a primary contact before using direct-to-primary mode";
+
+/// The contact of a call in which everything goes to the contact: the agent the phone
+/// names, where it names one, else the Host's own. A contact that is none is no call:
+/// another is never taken in its place. Also whether what is kept is to be let go.
+pub fn contact_of_a_direct_call(
+    kept: &str,
+    requested: &Value,
+    agents: &[Agent],
+) -> (Result<String, &'static str>, bool) {
+    let asked = named(requested);
+    if !asked.is_empty() {
+        let found = resolve(&asked, agents).map(|agent| agent.session.to_string());
+        return (found.ok_or(NO_SUCH_CONTACT), false);
+    }
+    let (own, let_go) = contact(kept, agents);
+    let own = Some(own.session).filter(|session| !session.is_empty());
+    (own.ok_or(NO_CONTACT_CHOSEN), let_go)
 }
 
 /// What of the owner's settings the choice of a voice reads.

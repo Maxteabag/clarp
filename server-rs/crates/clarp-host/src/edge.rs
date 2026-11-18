@@ -112,6 +112,19 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The user calls an agent that takes calls live (`POST /calls/live`; `call_mode` of an
     // agent in the list).
     ("agent_call_live", 76),
+    // The Oracle: the voice a user speaks with hands-free. Its calls of the second kind
+    // (`GET /oracle/v2`, with what `GET /oracle/status` says of them) and the work it hands
+    // to agents (`/oracle/delegations`); who its contact is (`/oracle/contact`); a call in
+    // which everything goes to the contact; a call that goes on in the thread of its owner
+    // and contact, or begins anew; and the cues of sound a call plays. Its calls of the
+    // first kind are not built, and the status says so. Not listed, because not built: a
+    // call put through to an agent (`oracle_handoff`) and the second voice
+    // (`oracle_gemini_voice`).
+    ("oracle", 1),
+    ("oracle_contact", 7),
+    ("oracle_direct_contact", 8),
+    ("oracle_context_memory", 9),
+    ("oracle_earcons", 15),
     // The chip a phone shows of the fleet on its lock screen is kept current by pushes
     // (`POST /devices/live-activity`; `docs/live-items.md` §8). Listed only by a Host that
     // can reach an activity: one with a relay and an account of its own there.

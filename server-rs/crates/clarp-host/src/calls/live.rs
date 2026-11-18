@@ -340,7 +340,7 @@ impl Desk {
 
     /// A phone takes the socket of a live call: one phone holds one. `false`: it holds one
     /// already.
-    async fn claim_voice(&self, app: &App, principal: &str) -> bool {
+    pub(crate) async fn claim_voice(&self, app: &App, principal: &str) -> bool {
         let mut held = self.books.lock().await;
         match Self::read(&mut held, app).await {
             Ok(books) => books.voices.insert(principal.to_string()),
@@ -348,7 +348,7 @@ impl Desk {
         }
     }
 
-    async fn release_voice(&self, principal: &str) {
+    pub(crate) async fn release_voice(&self, principal: &str) {
         if let Some(books) = self.books.lock().await.as_mut() {
             books.voices.remove(principal);
         }
@@ -599,11 +599,11 @@ fn unbound_alerts(directory: &Directory) -> usize {
 // ---- the socket of a call --------------------------------------------------------------
 
 /// The voice's end of a call.
-type Voice =
+pub(crate) type Voice =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 /// Reaches the voice with the owner's key. `None`: it could not be reached.
-async fn dial(app: &App, key: &str) -> Option<Voice> {
+pub(crate) async fn dial(app: &App, key: &str) -> Option<Voice> {
     let address = match app.config.live_endpoint.as_str() {
         "" => VOICE_URL,
         stand_in => stand_in,
