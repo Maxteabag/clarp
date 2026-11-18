@@ -78,7 +78,7 @@ class _ActiveTurn:
     usage_entry: tuple[int, int] | None = None
 
     def observe_usage(self, usage: dict) -> None:
-        """The first call's opening balance to the latest thread total for this turn."""
+        """Measure each component from the opening balance to its highest observed total."""
         total = usage.get("total") or {}
         last = usage.get("last") or {}
         if not isinstance(total, dict) or not isinstance(last, dict):
@@ -93,9 +93,8 @@ class _ActiveTurn:
                 return
             self.usage_entry = (inputs - call_in, outputs - call_out)
         begin_in, begin_out = self.usage_entry
-        if inputs >= begin_in and outputs >= begin_out:
-            self.state.tokens_in = inputs - begin_in
-            self.state.tokens_out = outputs - begin_out
+        self.state.tokens_in = max(self.state.tokens_in, inputs - begin_in)
+        self.state.tokens_out = max(self.state.tokens_out, outputs - begin_out)
 
 
 # A stopped Codex turn the app-server has not ended this long after its
