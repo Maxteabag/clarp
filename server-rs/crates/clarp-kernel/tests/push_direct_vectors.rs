@@ -5,10 +5,16 @@ use serde_json::{Value, json};
 
 #[test]
 fn reference_alert_routes() {
-    let rows: Vec<Value> = serde_json::from_str(include_str!("fixtures/push-direct-vectors.json")).unwrap();
+    let rows: Vec<Value> =
+        serde_json::from_str(include_str!("fixtures/push-direct-vectors.json")).unwrap();
     let mut steps = 0;
     for row in rows {
-        let mut routes = Routes::new(row["mode"].as_str().unwrap(), row["relay"] == true, row["account"] == true, row["key"] == true);
+        let mut routes = Routes::new(
+            row["mode"].as_str().unwrap(),
+            row["relay"] == true,
+            row["account"] == true,
+            row["key"] == true,
+        );
         assert_eq!(row["enabled"], routes.enabled(), "{row}");
         for step in row["steps"].as_array().unwrap() {
             let mut paths = Vec::new();
@@ -23,7 +29,10 @@ fn reference_alert_routes() {
                     200 => Outcome::Sent,
                     401 => Outcome::GrantRevoked,
                     503 => Outcome::Down(String::new()),
-                    status => Outcome::Refused {status: status as u16, reason: format!("Relay{status}")},
+                    status => Outcome::Refused {
+                        status: status as u16,
+                        reason: format!("Relay{status}"),
+                    },
                 }
             });
             let (status, reason) = match delivery.outcome {
@@ -31,10 +40,14 @@ fn reference_alert_routes() {
                 Outcome::GrantRevoked => (410, "GrantRevoked"),
                 Outcome::NoPath => (0, "NoPushPath"),
                 Outcome::Down(_) => (0, "down"),
-                Outcome::Refused {status, ref reason} => (status, reason.as_str()),
+                Outcome::Refused { status, ref reason } => (status, reason.as_str()),
                 Outcome::Dead(_) => panic!("unexpected dead token"),
             };
-            assert_eq!(json!([step[0], paths, delivery.grant_revoked, status, reason]), *step, "{row}");
+            assert_eq!(
+                json!([step[0], paths, delivery.grant_revoked, status, reason]),
+                *step,
+                "{row}"
+            );
             steps += 1;
         }
     }

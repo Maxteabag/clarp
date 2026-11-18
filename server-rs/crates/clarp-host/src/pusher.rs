@@ -347,7 +347,12 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
 fn deliver(works: &Works, job: &Job) -> Counted {
     let (mode, key) = works.direct.alert_settings();
     let relay = works.relay.as_deref();
-    let mut routes = Routes::new(&mode, relay.is_some(), relay.is_some_and(Relay::has_credential), key.is_some());
+    let mut routes = Routes::new(
+        &mode,
+        relay.is_some(),
+        relay.is_some_and(Relay::has_credential),
+        key.is_some(),
+    );
     if !routes.enabled() {
         return Counted::default();
     }
@@ -424,8 +429,12 @@ fn deliver(works: &Works, job: &Job) -> Counted {
             priority: "10",
         };
         let delivery = routes.send(!row.push_grant.is_empty(), |path| match path {
-            Path::Grant => relay.map_or(Outcome::NoPath, |relay| relay.to_grant(&row.push_grant, &push)),
-            Path::Account => relay.map_or(Outcome::NoPath, |relay| relay.to_token(&row.token, &row.environment, &push)),
+            Path::Grant => relay.map_or(Outcome::NoPath, |relay| {
+                relay.to_grant(&row.push_grant, &push)
+            }),
+            Path::Account => relay.map_or(Outcome::NoPath, |relay| {
+                relay.to_token(&row.token, &row.environment, &push)
+            }),
             Path::Direct => key.as_ref().map_or(Outcome::NoPath, |key| {
                 let request = clarp_kernel::direct_push::Push {
                     push_type: push.push_type,
@@ -434,14 +443,23 @@ fn deliver(works: &Works, job: &Job) -> Counted {
                     collapse_id: push.collapse_id,
                     expiration: None,
                 };
-                match works.runtime.block_on(works.direct.push(key, (&row.token, &row.environment), &request)) {
+                match works.runtime.block_on(works.direct.push(
+                    key,
+                    (&row.token, &row.environment),
+                    &request,
+                )) {
                     Ok((200, _, _)) => Outcome::Sent,
                     Ok((status, reason, _)) => {
                         let reason = reason.as_str().unwrap_or("");
-                        if status == 410 || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason) {
+                        if status == 410
+                            || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason)
+                        {
                             Outcome::Dead(reason.to_string())
                         } else {
-                            Outcome::Refused { status, reason: reason.to_string() }
+                            Outcome::Refused {
+                                status,
+                                reason: reason.to_string(),
+                            }
                         }
                     }
                     Err(crate::direct::Unsent(why)) => Outcome::Down(why),

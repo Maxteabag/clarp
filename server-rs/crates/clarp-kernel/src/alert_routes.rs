@@ -72,11 +72,18 @@ impl Routes {
         let mut grant_revoked = false;
         let outcome = 'route: {
             if granted && self.grants {
-                let answer = self.grant_down.clone().map_or_else(|| send(Path::Grant), Outcome::Down);
+                let answer = self
+                    .grant_down
+                    .clone()
+                    .map_or_else(|| send(Path::Grant), Outcome::Down);
                 match answer {
                     Outcome::Down(why) => {
                         self.grant_down = Some(why.clone());
-                        break 'route if self.fallback { send(Path::Direct) } else { Outcome::Down(why) };
+                        break 'route if self.fallback {
+                            send(Path::Direct)
+                        } else {
+                            Outcome::Down(why)
+                        };
                     }
                     Outcome::GrantRevoked => {
                         grant_revoked = true;
@@ -89,7 +96,10 @@ impl Routes {
             }
             match self.base {
                 Some(Path::Account) => {
-                    let answer = self.account_down.clone().map_or_else(|| send(Path::Account), Outcome::Down);
+                    let answer = self
+                        .account_down
+                        .clone()
+                        .map_or_else(|| send(Path::Account), Outcome::Down);
                     if let Outcome::Down(why) = answer {
                         if self.fallback {
                             self.base = Some(Path::Direct);
@@ -106,6 +116,9 @@ impl Routes {
                 None => Outcome::NoPath,
             }
         };
-        Delivery { outcome, grant_revoked }
+        Delivery {
+            outcome,
+            grant_revoked,
+        }
     }
 }
