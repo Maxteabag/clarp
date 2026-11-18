@@ -1882,7 +1882,11 @@ and the 78 of what agents finished run again there. Its first runs missed ten: t
 Python Host's module that nothing can reach are not in the kernel, four cases got stories (a phone that
 rolls back while it prepares, one that says it is ready too early, two talks with agents at once, an older
 talk given up at its older number), and three got a place in the Host's test (a held call routes nothing,
-a plain failure tells the voice no word, the first frames of a call that goes to the contact alone).
+a plain failure tells the voice no word, the first frames of a call that goes to the contact alone). With
+the words an owner prepared came a list of 53 (40 for the kernel's rule, 13 for the Host's reading), every
+one caught. Writing it showed three things the vectors did not hold yet, and they do now: a version that
+is a no, a word counted in signs and not in bytes, and this Host's own words where the Python Host speaks
+its language's.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
