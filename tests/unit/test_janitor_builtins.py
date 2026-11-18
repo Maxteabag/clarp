@@ -414,3 +414,59 @@ def test_reenable_waits_for_cancelled_provider_invocation_before_new_claim():
     assert builtins().begin_run("message-delegator", "new-invocation") is None
     assert not builtins().complete_run(old["run_id"], outcome="cancelled")
     assert builtins().begin_run("message-delegator", "new-invocation")
+
+
+def _effective(janitor):
+    """What the Goal keeper and the runner act on: its triggers as the keeper reads
+    them, each attachment's fold, target cap and schedule as the runner reads them,
+    and the execution."""
+    from lib import goal_keeper
+    found = vars(goal_keeper.triggers(janitor))
+    runner = {a["trigger_id"]: (a["enabled"], max(0, min(float(a["config"].get("coalesce_seconds", 8)), 300)),
+                                max(1, min(int(a["config"].get("max_targets", 3)), 3)),
+                                a["config"].get("cron"), a["config"].get("timezone"))
+              for a in janitor["attachments"]}
+    return found, runner, janitor["execution"]
+
+
+def _drifted(keeper):
+    """The keeper with every trigger at its generic defaults and a plain execution."""
+    generic = {d["trigger_id"]: d["defaults"] for d in janitors.trigger_definitions()}
+    attachments = [{"attachment_id": a["attachment_id"], "trigger_id": a["trigger_id"],
+                    "trigger_version": a["trigger_version"], "enabled": a["enabled"],
+                    "config": generic[a["trigger_id"]]} for a in keeper["attachments"]]
+    return janitors.configure(keeper["session"], keeper["revision"], attachments=attachments, execution={})
+
+
+def test_reset_puts_the_goal_keeper_back_as_it_was_installed():
+    """R30: hourly sweep at :17 UTC, owner turns folded over 300 s, isolated runs."""
+    installed = builtins().ensure_builtins(cwd="/tmp")["goal-keeper"]
+    drifted = _drifted(installed)
+    assert _effective(drifted) != _effective(installed)
+    reset = janitors.reset_defaults(drifted["session"], drifted["revision"])
+    assert _effective(reset) == _effective(installed)
+    assert reset["execution"].get("isolated") is True
+    # The stored bytes differ in one key: configure merges the trigger's defaults under the seed.
+    before = {a["trigger_id"]: a["config"] for a in installed["attachments"]}
+    after = {a["trigger_id"]: a["config"] for a in reset["attachments"]}
+    added = {trigger: sorted(set(after[trigger]) - set(before[trigger])) for trigger in after}
+    assert set().union(*map(set, added.values())) <= {"max_targets"}
+    assert all(after[t][k] == v for t in before for k, v in before[t].items())
+
+
+def test_reset_on_a_backend_that_cannot_isolate_keeps_the_plain_execution(monkeypatch):
+    installed = builtins().ensure_builtins(cwd="/tmp")["goal-keeper"]
+    drifted = _drifted(installed)
+    real = backends.get
+
+    class CannotIsolate:
+        def __init__(self, inner):
+            self.inner = inner
+        isolated_oneshot = None
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+    monkeypatch.setattr(janitors.backends, "get", lambda name: real(name) and CannotIsolate(real(name)))
+    reset = janitors.reset_defaults(drifted["session"], drifted["revision"])
+    assert not reset["execution"].get("isolated")
+    assert {a["trigger_id"]: a["config"].get("coalesce_seconds") for a in reset["attachments"]}["agent-work-completed"] == 300

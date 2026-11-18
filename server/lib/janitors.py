@@ -531,15 +531,23 @@ def reset_defaults(session: str, expected_revision: int) -> dict:
     if not current:
         raise JanitorError("Janitor not found", 404, "janitor_not_found")
     definitions = {(d["trigger_id"], d["version"]): d for d in trigger_definitions()}
+    template = next(t for t in templates() if t["id"] == current["template_id"])
+    # A template's own seeds, as it was installed with them (R30); a trigger it
+    # seeds nothing for gets the trigger's defaults.
+    seeds = {seed["trigger_id"]: seed["config"] for seed in template.get("seed_attachments") or []}
     attachments = [{"attachment_id": a["attachment_id"], "trigger_id": a["trigger_id"],
                     "trigger_version": a["trigger_version"], "enabled": a["enabled"],
-                    "config": definitions[(a["trigger_id"], a["trigger_version"])]["defaults"]}
+                    "config": dict(seeds[a["trigger_id"]]) if a["trigger_id"] in seeds
+                    else definitions[(a["trigger_id"], a["trigger_version"])]["defaults"]}
                    for a in current["attachments"]]
-    template = next(t for t in templates() if t["id"] == current["template_id"])
+    execution = dict(template.get("seed_execution") or {})
+    isolating = backends.get(current["backend"])
+    if execution.get("isolated") and (isolating is None or isolating.isolated_oneshot is None):
+        execution = {}  # a backend that cannot isolate keeps the plain execution
     model = template["recommended_model"] if current["backend"] == template["recommended_backend"] else None
     effort = template["recommended_effort"] if model else None
     return configure(session, expected_revision, attachments=attachments, model=model, effort=effort,
-        execution={}, options={item["key"]: item["default"] for item in template["options"]})
+        execution=execution, options={item["key"]: item["default"] for item in template["options"]})
 
 
 def adopt_options(session: str, expected_revision: int, options: dict) -> dict:

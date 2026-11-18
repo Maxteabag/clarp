@@ -550,13 +550,21 @@ class JanitorRunner:
         activity = ("worked" if "worked" in activities else "failed" if "failed" in activities else "idle")
         summary = occurrence.get("summary") or ("" if activities else "Nothing to review")
         adaptive = state.setdefault("adaptive", {})
+        base = self._base_seconds(attachment, state, now)
         interval = janitor_adaptive.advance(adaptive, activity=activity, summary=summary,
-                                            base_seconds=self._base_seconds(attachment, state, now),
+                                            base_seconds=base,
                                             max_seconds=self._max_seconds(attachment), now=now)
         state.pop("occurrence", None)
         earliest = max(now, occurrence["at"] + interval * 1000 - 1)
         if attachment["trigger_id"] == "schedule":
             config = attachment["config"]
+            pace, _ = janitor_adaptive.bounds(base, self._max_seconds(attachment))
+            if interval <= pace:
+                # A task that keeps its pace runs at the next time its schedule
+                # names; only a wait stretched by idle runs counts from the time
+                # that ran. The measured base is one gap, and a schedule's gaps
+                # differ across weekends and clock changes (R31).
+                earliest = max(now, occurrence["at"])
             state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], earliest)
         elif state.get("next_run_at") is not None:
             state["next_run_at"] = earliest + 1
