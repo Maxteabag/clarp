@@ -26795,39 +26795,57 @@ fn stand_in_push_service() -> PushService {
                     let Ok(mut connection) = h2::server::handshake(stream).await else {
                         return;
                     };
-                    while let Some(Ok((request, mut respond))) = connection.accept().await {
-                        let (head, mut body) = request.into_parts();
-                        let mut said = Vec::new();
-                        while let Some(Ok(piece)) = body.data().await {
-                            let _ = body.flow_control().release_capacity(piece.len());
-                            said.extend_from_slice(&piece);
-                        }
-                        let headers = head.headers.iter().map(|(name, value)| {
-                            (name.to_string(), value.to_str().unwrap_or("").to_string())
-                        });
-                        let payload = serde_json::from_slice(&said).unwrap_or(Value::Null);
-                        let path = head.uri.path().to_string();
-                        kept.lock()
-                            .unwrap()
-                            .push((path, headers.collect(), payload));
-                        let next = told.lock().unwrap().pop_front();
-                        let (status, answer) = next.unwrap_or((200, String::new()));
-                        let response = http::Response::builder()
-                            .status(status)
-                            .header("apns-id", "id-of-the-stand-in")
-                            .body(())
-                            .unwrap();
-                        let Ok(mut sent) = respond.send_response(response, answer.is_empty())
-                        else {
-                            continue;
+                    let shutdown = Arc::new(tokio::sync::Notify::new());
+                    loop {
+                        let incoming = tokio::select! {
+                            next = connection.accept() => next,
+                            () = shutdown.notified() => {connection.graceful_shutdown();continue;}
                         };
-                        if !answer.is_empty() {
-                            let _ = sent.send_data(bytes::Bytes::from(answer), true);
-                        }
-                        // What it answered is sent, and then the connection is over.
-                        if lets_go.swap(false, Ordering::SeqCst) {
-                            connection.graceful_shutdown();
-                        }
+                        let Some(Ok((request, mut respond))) = incoming else {
+                            break;
+                        };
+                        // Receiving DATA and flushing replies both require the connection
+                        // to keep being polled while this stream is handled.
+                        let (kept, told, lets_go, shutdown) = (
+                            kept.clone(),
+                            told.clone(),
+                            lets_go.clone(),
+                            shutdown.clone(),
+                        );
+                        tokio::spawn(async move {
+                            let (head, mut body) = request.into_parts();
+                            let mut said = Vec::new();
+                            while let Some(Ok(piece)) = body.data().await {
+                                let _ = body.flow_control().release_capacity(piece.len());
+                                said.extend_from_slice(&piece);
+                            }
+                            let headers = head.headers.iter().map(|(name, value)| {
+                                (name.to_string(), value.to_str().unwrap_or("").to_string())
+                            });
+                            let payload = serde_json::from_slice(&said).unwrap_or(Value::Null);
+                            let path = head.uri.path().to_string();
+                            kept.lock()
+                                .unwrap()
+                                .push((path, headers.collect(), payload));
+                            let next = told.lock().unwrap().pop_front();
+                            let (status, answer) = next.unwrap_or((200, String::new()));
+                            let response = http::Response::builder()
+                                .status(status)
+                                .header("apns-id", "id-of-the-stand-in")
+                                .body(())
+                                .unwrap();
+                            let Ok(mut sent) = respond.send_response(response, answer.is_empty())
+                            else {
+                                return;
+                            };
+                            if !answer.is_empty() {
+                                let _ = sent.send_data(bytes::Bytes::from(answer), true);
+                            }
+                            // What it answered is sent, and then the connection is over.
+                            if lets_go.swap(false, Ordering::SeqCst) {
+                                shutdown.notify_one();
+                            }
+                        });
                     }
                 });
             }
