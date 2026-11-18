@@ -35,16 +35,13 @@ pub fn exists(root: &Path, trace: &str) -> bool {
             .is_ok_and(|m| m.is_file())
 }
 
-pub fn retain(
-    root: &Path,
-    trace: &str,
-    data: &[u8],
-    kind: &str,
-    session: &str,
-    run: i64,
-    model: &str,
-    now: i64,
-) -> io::Result<()> {
+pub struct Clip<'a> {
+    pub trace:&'a str, pub data:&'a [u8], pub kind:&'a str, pub session:&'a str,
+    pub run:i64, pub model:&'a str,
+}
+
+pub fn retain(root:&Path,clip:Clip<'_>,now:i64)->io::Result<()> {
+    let Clip{trace,data,kind,session,run,model}=clip;
     if !valid(trace) || data.is_empty() {
         return Ok(());
     }
@@ -175,4 +172,36 @@ pub async fn get(
                 "retained audio unavailable",
             )
         })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    #[test]
+    fn retained_audio_obeys_trace_age_and_count_limits(){
+        let fixture:Value=serde_json::from_str(include_str!("../../../clarp-kernel/tests/fixtures/vocabulary-packs-vectors.json")).unwrap();
+        for case in fixture["traces"].as_array().unwrap(){
+            assert_eq!(case["valid"],valid(case["trace"].as_str().unwrap()));
+        }
+        let root=std::env::temp_dir().join(format!("clarp-vocab-retention-{}",crate::ids::hex(8)));
+        fs::create_dir(&root).unwrap();
+        let now=SystemTime::UNIX_EPOCH+Duration::from_secs(2_000_000_000);
+        let make=|id:usize,moment:SystemTime| {
+            let path=root.join(format!("{id:08x}.clip"));
+            File::create(&path).unwrap().set_modified(moment).unwrap();path
+        };
+        let expiring=make(0,now-AGE);
+        let expired=make(1,now-AGE-Duration::from_secs(1));
+        let unrelated=root.join("unrelated");
+        fs::write(&unrelated,b"fixture").unwrap();
+        sweep(&root,now).unwrap();
+        assert!(expiring.exists());
+        assert!(!expired.exists());
+        for i in 1..=500 {make(i,now+Duration::from_secs(i as u64));}
+        sweep(&root,now).unwrap();
+        assert!(!expiring.exists());assert!(unrelated.exists());
+        assert_eq!(fs::read_dir(&root).unwrap().count(),501);
+        fs::remove_dir_all(root).unwrap();
+    }
 }
