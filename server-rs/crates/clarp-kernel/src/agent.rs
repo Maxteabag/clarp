@@ -223,6 +223,7 @@ pub struct Agent {
     /// Who asked the live turn to stop, while it has not gone yet.
     stopping: Option<String>,
     paused: bool,
+    stop_generation: u64,
     settled: u64,
     /// How often what waits, or whether it is held, has changed. A message that was said and
     /// starts at once never waited and does not count: this is the number a client orders
@@ -268,6 +269,7 @@ impl Default for Agent {
             paused: false,
             settled: 0,
             queue_revision: 0,
+            stop_generation: 0,
             waited: BTreeSet::new(),
             live_from_queue: false,
             unheld: BTreeSet::new(),
@@ -304,6 +306,10 @@ impl Agent {
 
     /// How often the queue has changed: a message had to wait, a waiting one started or was
     /// taken back, the mailbox was held or let go.
+    pub fn stop_generation(&self) -> u64 {
+        self.stop_generation
+    }
+
     pub fn queue_revision(&self) -> u64 {
         self.queue_revision
     }
@@ -441,9 +447,9 @@ impl Agent {
             Command::Stop { by } => {
                 work.stop_live(by.clone(), now_ms);
                 // A stop holds everything that waits, also what an earlier hold let through.
-                if !work.agent.paused || !work.agent.unheld.is_empty() {
-                    work.record(AgentEvent::Paused { by, at_ms: now_ms });
-                }
+                // Even an already held mailbox observes a newer Stop. Listen-first
+                // openings admitted under the previous Stop must lose authority.
+                work.record(AgentEvent::Paused { by, at_ms: now_ms });
             }
             Command::Resume { by } => {
                 if !work.agent.paused {
@@ -617,9 +623,12 @@ impl Agent {
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
             AgentEvent::Paused { .. } => {
+                self.stop_generation += 1;
+                if !self.paused || !self.unheld.is_empty() {
+                    self.queue_revision += 1;
+                }
                 self.paused = true;
                 self.unheld.clear();
-                self.queue_revision += 1;
             }
             AgentEvent::Resumed { .. } => {
                 self.paused = false;

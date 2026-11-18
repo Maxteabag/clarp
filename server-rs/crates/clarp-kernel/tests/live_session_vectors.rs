@@ -287,6 +287,7 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
             let world = World {
                 profiles: &NoProfiles,
                 android: &[],
+                opening: None,
                 can_push_android: false,
                 device_ok: &device_ok,
                 host_id,

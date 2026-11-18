@@ -1658,6 +1658,7 @@ mod tests {
             waiting: vec![TurnId(3)],
             paused: true,
             queue_revision: 7,
+            stop_generation: 0,
             head_revision: 42,
             backend_session: Some("sess-1".to_string()),
             label: String::new(),

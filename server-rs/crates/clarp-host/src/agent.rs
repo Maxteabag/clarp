@@ -779,6 +779,7 @@ pub(crate) fn never_ran() -> Status {
         waiting: Vec::new(),
         paused: false,
         queue_revision: 0,
+        stop_generation: 0,
         head_revision: 0,
         backend_session: None,
         label: String::new(),

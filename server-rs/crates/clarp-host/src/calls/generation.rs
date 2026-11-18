@@ -109,3 +109,27 @@ pub fn bootstrap(root: &Path) -> io::Result<()> {
     dir.sync_all()?;
     token(&dir).map(|_| ())
 }
+
+pub(super) struct Evidence<'a> {
+    pub root: &'a Path,
+    pub directory: &'a crate::fleet::Directory,
+}
+
+impl clarp_kernel::rings::opening::Proof for Evidence<'_> {
+    fn generation(&self) -> Value {
+        read(self.root)
+    }
+    fn stop(&self, id: &str) -> (u64, bool) {
+        self.directory.named(id).map_or((0, false), |member| {
+            let view = member.agent.view();
+            (view.status.stop_generation, view.status.paused)
+        })
+    }
+    fn auth(&self, principal: &str) -> Value {
+        self.directory
+            .devices
+            .values()
+            .find(|d| d.device_id == principal)
+            .map_or(Value::Null, |d| json!({"token_hash":d.token_hash}))
+    }
+}
