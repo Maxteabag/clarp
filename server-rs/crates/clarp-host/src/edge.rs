@@ -118,6 +118,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("agent_ring_live", 71),
     // A phone switches rings off for itself (`/calls/ring/device`).
     ("agent_ring_device_optout", 72),
+    ("agent_ring_listen_first", 74),
     // The user calls an agent that takes calls live (`POST /calls/live`; `call_mode` of an
     // agent in the list).
     ("agent_call_live", 76),

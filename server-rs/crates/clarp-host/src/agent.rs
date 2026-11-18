@@ -2050,16 +2050,54 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
-                        if let Some((id, trace)) = order.opening.as_deref()
-                            && !opening_gate.allowed(id, trace)
-                        {
-                            tell(
-                                &tx,
-                                turn,
-                                attempt,
-                                Told::Failed("call opening is no longer authorized".into()),
-                            );
-                            return;
+                        if let Some((id, trace)) = order.opening.as_deref() {
+                            use crate::launcher::Launched;
+                            use clarp_kernel::rings::opening::Gate as Phase;
+                            loop {
+                                if !opening_gate.ask(Phase::Claim, id, trace)
+                                    || !opening_gate.ask(Phase::Parked, id, trace)
+                                {
+                                    tell(
+                                        &tx,
+                                        turn,
+                                        attempt,
+                                        Told::Failed("call opening is no longer authorized".into()),
+                                    );
+                                    return;
+                                }
+                                match launcher.launch(&order) {
+                                    Launched::NoShim(reason) => {
+                                        if !opening_gate.ask(Phase::ReleaseUnsent, id, trace) {
+                                            tell(&tx, turn, attempt, Told::Failed(reason));
+                                            return;
+                                        }
+                                        std::thread::sleep(Duration::from_secs(1));
+                                    }
+                                    Launched::Failed(reason) => {
+                                        opening_gate.failed(id, trace);
+                                        tell(&tx, turn, attempt, Told::Failed(reason));
+                                        return;
+                                    }
+                                    Launched::SaidWhy => {
+                                        let _ = opening_gate.ask(Phase::ReleaseUnsent, id, trace);
+                                        tell(&tx, turn, attempt, Told::SpoolChanged);
+                                        return;
+                                    }
+                                    Launched::TurnTaken => {
+                                        crate::launcher::follow(&order.socket, &|told| {
+                                            tell(&tx, turn, attempt, told)
+                                        });
+                                        return;
+                                    }
+                                    Launched::Ready(mut child) => {
+                                        crate::launcher::follow(&order.socket, &|told| {
+                                            tell(&tx, turn, attempt, told)
+                                        });
+                                        let _ = child.wait();
+                                        return;
+                                    }
+                                }
+                            }
                         }
                         launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told))
                     })
@@ -2314,6 +2352,22 @@ impl Worker {
             .as_ref()
             .filter(|live| Some(live.turn) != was_live.map(|was| was.turn));
         let ended = status.last.as_ref().filter(|_| turn_ended);
+        if let Some(last) = ended
+            && matches!(
+                last.outcome,
+                Outcome::Interrupted { .. } | Outcome::Failed { .. }
+            )
+            && let Ok(message) = actor.message_of(last)
+            && message.unminted
+            && message.client_id().starts_with("call-open:")
+            && let Some(trace) = message
+                .trace_id
+                .as_deref()
+                .filter(|s| s.starts_with("callopen-"))
+        {
+            self.setup.opening_gate.failed(message.client_id(), trace);
+        }
+
         let theirs = |origin: &Origin| attention::for_the_user(origin.name());
         if began.is_some_and(|live| theirs(&live.origin))
             || ended.is_some_and(|last| theirs(&last.origin))

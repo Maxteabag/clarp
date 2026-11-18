@@ -123,5 +123,72 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
             row["canonical"]
         );
     }
-    assert_eq!(count, 418);
+    assert_eq!(count, 421);
+}
+
+#[test]
+fn opening_dispatch_requires_positive_evidence_for_a_release_or_a_launch() {
+    use rules::{Dispatch, Gate};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/listen-first-vectors.json")).unwrap();
+    let mut count = 0;
+    for case in fixture["gates"].as_array().unwrap() {
+        let mut op = case["before"].clone();
+        let status = &case["status"];
+        let row = if status.is_null() {
+            Value::Null
+        } else {
+            json!({"status":status,"trace_id":"trace","claimed_at":if status=="claimed"{json!(100)}else{Value::Null}})
+        };
+        let mut generation = op["fence"]["host_gen"].clone();
+        if case["breach"] == "reboot" {
+            generation["boot"] = json!("other");
+        }
+        let world = World {
+            now: 3000,
+            host: "test",
+            generation: &generation,
+            queue: &row,
+            trace: "unused",
+            nonce: "unused",
+            fence: if case["breach"] == "stopped_after_answer" {
+                Some("stopped_after_answer")
+            } else {
+                None
+            },
+        };
+        let mut fx = Dispatch::default();
+        let action = match case["action"].as_str().unwrap() {
+            "claim" => Gate::Claim,
+            "release" => Gate::ReleaseUnsent,
+            "parked" => Gate::Parked,
+            _ => Gate::FailedAfterLaunch,
+        };
+        let result = rules::dispatch(
+            action,
+            &mut op,
+            "call-open:ring:1",
+            "trace",
+            &world,
+            &mut fx,
+        );
+        assert_eq!(result, case["result"], "{case}");
+        assert_eq!(op, case["after"], "{case}");
+        for (flag, name) in [
+            (fx.opening.withdraw, "withdraw"),
+            (fx.opening.unknown, "unknown"),
+            (fx.release, "release"),
+            (fx.withdraw_claimed, "withdraw_claimed"),
+            (fx.claim, "claim"),
+            (fx.launched_unknown, "launched_unknown"),
+        ] {
+            assert_eq!(
+                flag,
+                case["effects"].as_array().unwrap().contains(&json!(name)),
+                "{name}: {case}"
+            );
+        }
+        count += 1;
+    }
+    assert_eq!(count, 360);
 }
