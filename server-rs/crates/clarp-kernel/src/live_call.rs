@@ -16,6 +16,7 @@
 //! folder, a clock or a key: a profile and its files are given as they were read. Held to
 //! those modules by `tests/fixtures/live-call-vectors.json`.
 
+pub mod callback;
 pub mod receipts;
 pub mod team;
 

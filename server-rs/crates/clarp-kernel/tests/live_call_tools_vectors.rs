@@ -87,3 +87,99 @@ fn tool_proposals_and_direct_prompts_follow_the_frozen_team() {
     }
     assert_eq!(steps, 140);
 }
+
+#[test]
+fn a_callback_belongs_to_its_phone_and_its_one_due_owner() {
+    use clarp_kernel::live_call::callback::{self, Binding, Director, Failure, Request};
+    struct Regi<'a> {
+        kind: &'a str,
+        sent: Vec<Value>,
+    }
+    impl Director for Regi<'_> {
+        fn save(&mut self, _: &Value) -> Result<(), Failure> {
+            Ok(())
+        }
+        fn time(&self, epoch: &Value) -> String {
+            if epoch == 3600 { "01:00" } else { "?" }.into()
+        }
+        fn post(&mut self, body: &Value) -> Result<Option<(u16, Value)>, Failure> {
+            self.sent.push(body.clone());
+            let first = self.sent.len() == 1;
+            let cancelled = body["action"] == "cancel";
+            let kind = self.kind;
+            let status = match kind {
+                "fired" => "fyrt",
+                "firing" => "fyrer",
+                "unclear-fired" => "fyrt_usikker",
+                "cancelled-before" => "avlyst",
+                "not-placed" => "ikke_plassert",
+                "failed" => "feil",
+                _ => "venter",
+            };
+            if kind == "uncertain" || kind == "uncertain-once" && first {
+                return Ok(None);
+            }
+            let (code, reply) = match kind {
+                "mismatch" if first => (
+                    409,
+                    json!({"error":"supersedes_mismatch","pending":"other-call"}),
+                ),
+                "refused" => (400, json!({"reason":"disabled"})),
+                "server-error" => (500, json!({"error":"other"})),
+                "invalid" => (200, json!({"ok":false,"result":"scheduled"})),
+                _ => {
+                    let result = match kind {
+                        "already_scheduled" | "nothing_pending" | "unexpected-status" => kind,
+                        "legacy-replace" if body["explicit"] == true => "already_scheduled",
+                        _ if cancelled => "cancelled",
+                        _ => "scheduled",
+                    };
+                    let mut reply = json!({"ok":true,"operation_id":body["operation_id"],"due":3600,"status":status,"result":result});
+                    if kind == "unknown" {
+                        reply["status"] = Value::Null;
+                    }
+                    if kind == "superseded" && body["explicit"] == true {
+                        reply["superseded"] = json!("earlier");
+                    }
+                    (200, reply)
+                }
+            };
+            Ok(Some((code, reply)))
+        }
+    }
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let binding = Binding {
+        host: "host-test",
+        principal: "phone-one",
+        agent: "guard",
+        call: "call-one",
+    };
+    let mut steps = 0;
+    for story in fixture["callbacks"].as_array().unwrap() {
+        let kind = story["kind"].as_str().unwrap();
+        let config = json!({"callback":{"kind":if kind=="off"{"none"}else{"http"}},"callback_minutes":{"default":5,"min":1,"max":30}});
+        let mut director = Regi {
+            kind,
+            sent: Vec::new(),
+        };
+        let mut ledger = Value::Null;
+        for step in story["steps"].as_array().unwrap() {
+            director.sent.clear();
+            let request = Request {
+                tool: step["tool"].as_str().unwrap(),
+                args: &step["args"],
+                config: &config,
+                explicit: true,
+                eligible: kind != "not-eligible",
+            };
+            let receipt = callback::execute(&binding, request, &mut ledger, &mut director)
+                .ok()
+                .unwrap();
+            assert_eq!(json!(director.sent), step["effects"], "{kind}");
+            assert_eq!(receipt, step["receipt"], "{kind}");
+            steps += 1;
+        }
+    }
+    assert_eq!(steps, 220);
+}
