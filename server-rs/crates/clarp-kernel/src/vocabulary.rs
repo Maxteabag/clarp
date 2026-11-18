@@ -228,12 +228,14 @@ pub fn compile(packs: &[Pack], budget: &Budget) -> Value {
 pub mod sources;
 
 #[allow(clippy::expect_used)]
-pub static JUNK_QUESTION: LazyLock<Value> = LazyLock::new(||serde_json::from_str(include_str!("vocabulary-judge.json")).expect("reference junk question"));
+pub static JUNK_QUESTION: LazyLock<Value> = LazyLock::new(|| {
+    serde_json::from_str(include_str!("vocabulary-judge.json")).expect("reference junk question")
+});
 
-pub fn judged_text(text:&str,probability:Option<f64>)->String{
-    match probability{
-        None=>crate::heard::kept(text),
-        Some(value) if value>=0.6=>String::new(),
-        Some(_)=>text.trim().into()
+pub fn judged_text(text: &str, probability: Option<f64>) -> String {
+    match probability {
+        None => crate::heard::kept(text),
+        Some(value) if value >= 0.6 => String::new(),
+        Some(_) => text.trim().into(),
     }
 }
