@@ -69,13 +69,7 @@ impl Keeps for Named {
         if crate::vocabulary::audio::enabled(&self.fleet.directory()) {
             let _ = crate::vocabulary::audio::retain(
                 &self.root,
-                trace_id,
-                &wav,
-                "audio/wav",
-                &self.session,
-                0,
-                &self.model,
-                self.clock.now_ms(),
+                crate::vocabulary::audio::Clip{trace:trace_id,data:&wav,kind:"audio/wav",session:&self.session,run:0,model:&self.model},self.clock.now_ms(),
             );
         }
     }
