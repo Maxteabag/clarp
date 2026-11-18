@@ -29635,7 +29635,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     drop(host);
 
     // A Host without a key for the voice holds no live call, and says so when one is asked
-    // for; one whose profile opts into tools it does not run says that.
+    // for. With a voice key the same phone may call a profile that opts into tools.
     let host = place.start_without(ADMIN, &args, &[], &["OPENAI_API_KEY"]);
     assert_eq!(
         host.ask_as(&phone, "POST", "/calls/live", Some(&later)),
@@ -29648,13 +29648,9 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     });
     live_profile(&place, "theo", &theo, tools);
     let host = place.start_in(ADMIN, &args, &world);
-    assert_eq!(
-        host.ask_as(&phone, "POST", "/calls/live", Some(&later)),
-        (
-            501,
-            json!({ "ok": false, "error": "this Host does not run the tools of a live call" })
-        )
-    );
+    let (status, called) = host.ask_as(&phone, "POST", "/calls/live", Some(&later));
+    assert_eq!(status, 200, "{called}");
+    assert_eq!(called["ring"]["origin"], "user_call");
 }
 
 #[test]
@@ -29722,6 +29718,286 @@ fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it
         told.last()
             .is_some_and(|said| said["type"] == "session.close")
     });
+}
+
+#[test]
+fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
+    let place = Place::new("live-tools");
+    let voice = stand_in_oracle_voice();
+    let router = stand_in_oracle_router();
+    let (director,requests)=answers(vec![
+        ("/delegate","200 OK",json!({"result":"queued","sent":false,"intent":"fixture-intent","sesjon":3,"intent_status":"venter"}).to_string()),
+        ("/intent","200 OK",json!({"sent":true,"intent_status":"sendt"}).to_string()),
+        ("/callback","200 OK",json!({"ok":true,"result":"scheduled","operation_id":"callback-one","due":3600,"status":"venter"}).to_string())
+    ]);
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("CLARP_ROUTER_ENDPOINT", router.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in("fixture-admin", &[], &world);
+    let guard = host.new_agent("Guard");
+    let member = host.new_agent("Theo");
+    let session = |name: &str| {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["session"] == name)
+            .unwrap()["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let make_profile = |http: bool| {
+        let delegate = if http {
+            json!({"kind":"http","url":format!("{director}/delegate"),"reconcile_url":format!("{director}/intent")})
+        } else {
+            json!({"kind":"prompt"})
+        };
+        live_profile(
+            &place,
+            "guard",
+            &guard,
+            json!({"user_call_default":"live","user_call_opening":"Hi.",
+              "live_tools":{"enabled":true,"stories":["user_call","pump"],"agents":[{"session":member,"name":"Theo","role":"engineer"}],
+              "save_transcript":true,"delegate":delegate,"callback":{"kind":"http","url":format!("{director}/callback")},"callback_on_delegation":{"minutes":5}}
+            }),
+        );
+    };
+    make_profile(false);
+    let (phone, principal) = pair(&host, "Phone", "full");
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/ring/voip-token",
+            Some(
+                &json!({"token":"ab".repeat(32),"supported_conversation_modes":["agent_live_v1"]})
+            )
+        )
+        .0,
+        200
+    );
+    let join = |grant: &Value, n| {
+        let mut door = live_socket(&host, &phone);
+        says(&mut door, &join_of(grant));
+        let upstream = voice.call(n);
+        let first = upstream.told_of("session.start", 1);
+        assert!(first[0].to_string().contains("real tools"));
+        let mut ready = named(grant, "agent_live.client_ready");
+        ready["audio"] = json!(true);
+        ready["capture"] = json!(true);
+        says(&mut door, &ready);
+        let opened = upstream.told_of("session.instructions.append", 1);
+        upstream.says(&json!({"type":"session.instructions.appended","client_event_id":opened[0]["event_id"]}));
+        loop {
+            if next_words(&mut door)["type"] == "agent_live.opening_admitted" {
+                break;
+            }
+        }
+        (door, upstream)
+    };
+    let closed = |grant: &Value, n| {
+        let body = json!({"call_id":grant["call_id"],"owner_nonce":grant["owner_nonce"],"attempt_id":grant["attempt_id"],"call_epoch":grant["call_epoch"],"reason":"user_hangup","request_id":format!("close-{n}")});
+        assert_eq!(
+            host.ask_as(&phone, "POST", "/calls/ring/live/close", Some(&body))
+                .0,
+            200
+        );
+    };
+    let action = |name: &str, args: Value| json!({"type":"function_call","name":name,"arguments":args.to_string()});
+    let ask = |upstream: &End, text: &str, output: Value| {
+        router.wants(output);
+        upstream.says(&json!({"type":"session.input_transcript.delta","delta":text}));
+        upstream.says(&json!({"type":"session.delegation.created"}));
+    };
+    // The user calls the profile. A later edit cannot replace the team or its
+    // transport once that call has been admitted.
+    let (status, opened) = host.ask_as(
+        &phone,
+        "POST",
+        "/calls/live",
+        Some(&json!({"agent":session(&guard),"request_id":"call-1","client_nonce":"nonce-1"})),
+    );
+    assert_eq!(status, 200, "{opened}");
+    let grant = opened["live"].clone();
+    make_profile(true);
+    let (door, upstream) = join(&grant, 0);
+    ask(
+        &upstream,
+        "Please give Theo work",
+        json!([
+            action(
+                "delegate_to_agent",
+                json!({"agent":member,"request":"Check the pump."})
+            ),
+            action("get_agent_status", json!({"agent":member})),
+            action("read_agent_transcript", json!({"agent":member,"limit":1})),
+            action(
+                "delegate_to_agent",
+                json!({"agent":"outsider","request":"No."})
+            ),
+            action("ask_my_agent", json!({"question":"What is ready?"}))
+        ]),
+    );
+    let (bearer, question) = router.question(0);
+    assert_eq!(bearer, "Bearer a-key-of-the-test");
+    let input: Value = serde_json::from_str(question["input"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        input["current_user_requests"],
+        json!(["Please give Theo work"])
+    );
+    let first_notes = upstream.told_of("session.commentary.append", 1);
+    assert!(
+        first_notes[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Theo: forwarded")
+    );
+    wait_for("the prompt is recorded on the scripted team member", || {
+        host.conversation(&member)
+            .iter()
+            .any(|(_, t)| t.contains("Check the pump."))
+    });
+    // The automatic callback belongs to the authenticated phone and frozen
+    // caller; its director, not the Host, owns the timer.
+    wait_for("the director receives the automatic callback", || {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.starts_with("POST /callback "))
+    });
+    let all = requests.lock().unwrap().clone();
+    assert!(!all.iter().any(|r| r.starts_with("POST /delegate ")));
+    let cb: Value = serde_json::from_str(
+        all.iter()
+            .find(|r| r.starts_with("POST /callback "))
+            .unwrap()
+            .split_once("\r\n\r\n")
+            .unwrap()
+            .1,
+    )
+    .unwrap();
+    assert_eq!(cb["action"], "schedule");
+    assert_eq!(cb["recipient_principal"], principal);
+    assert_eq!(cb["agent_session"], guard);
+    assert_eq!(cb["call_id"], grant["call_id"]);
+    assert_eq!(cb["minutes"], 5);
+    assert!(cb["operation_id"].as_str().unwrap().starts_with("cb-"));
+    // The contact's answer reaches the voice. Replaying stored text must
+    // neither hand a second question to the contact nor book another callback.
+    wait_for("the delegated answer reaches this call", || {
+        upstream
+            .of_kind("session.commentary.append")
+            .iter()
+            .any(|v| {
+                v["content"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("\nText:\n"))
+            })
+    });
+    ask(
+        &upstream,
+        "Read it again",
+        json!([
+            action("read_result", json!({"from_part":1,"verbatim":true})),
+            action("ask_my_agent", json!({"question":"What is ready?"}))
+        ]),
+    );
+    wait_for("read_result appends stored text", || {
+        upstream
+            .of_kind("session.commentary.append")
+            .iter()
+            .any(|v| {
+                v["content"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("Stored text.") && s.contains("word for word"))
+            })
+    });
+    closed(&grant, 1);
+    drop(door);
+    let files = place.root.join("data/agent-live/transcripts");
+    let id = grant["call_id"].as_str().unwrap();
+    let document = files.join(format!("{id}.json"));
+    wait_for("the closed call has its final transcript", || {
+        document.is_file() && !files.join(format!("{id}.jsonl")).exists()
+    });
+    let saved: Value = serde_json::from_slice(&std::fs::read(&document).unwrap()).unwrap();
+    assert_eq!(saved["principal"], principal);
+    assert_eq!(saved["agent_session"], guard);
+    assert!(
+        saved["fragments"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Please give Theo work")
+    );
+    let receipts = saved["receipts"].as_array().unwrap();
+    for (tool, status) in [
+        ("delegate_to_agent", "forwarded"),
+        ("delegate_to_agent", "refused"),
+        ("get_agent_status", "ok"),
+        ("read_agent_transcript", "ok"),
+        ("schedule_callback", "scheduled"),
+        ("ask_my_agent", "asked"),
+        ("read_result", "reading"),
+        ("ask_my_agent", "already_asked"),
+    ] {
+        assert!(
+            receipts
+                .iter()
+                .any(|r| r["tool"] == tool && r["status"] == status),
+            "{tool} {status} {receipts:?}"
+        );
+    }
+    // A ring from the agent uses the newly approved HTTP director. Its queued
+    // intent is reconciled once with a GET, without issuing a second delegation.
+    let line = "Water detected.";
+    let ringing=host.post("/calls/ring",json!({"agent":guard,"reason":"Water","opening_line":line,"conversation_mode":"agent_live_v1","event_context":live_event("guard","live-tools-1",line)}));
+    let answer = json!({"ring_id":ringing["ring"]["ring_id"],"conversation_mode":"agent_live_v1","request_id":"answer-2","client_nonce":"nonce-2"});
+    let (status, answered) = host.ask_as(&phone, "POST", "/calls/ring/answer", Some(&answer));
+    assert_eq!(status, 200, "{answered}");
+    let grant = answered["live"].clone();
+    let (_door, upstream) = join(&grant, 1);
+    ask(
+        &upstream,
+        "Check the new event",
+        json!([action(
+            "delegate_to_agent",
+            json!({"agent":member,"request":"Read the gauge"})
+        )]),
+    );
+    let notes = upstream.told_of("session.commentary.append", 1);
+    assert!(
+        notes[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("queued_at_regi")
+    );
+    wait_for("the director confirms the queued intent", || {
+        upstream.of_kind("session.thinking.append").iter().any(|r| {
+            r["content"]
+                .as_str()
+                .is_some_and(|s| s.contains("reconciled") && s.contains("forwarded"))
+        })
+    });
+    let held = requests.lock().unwrap().clone();
+    assert_eq!(
+        held.iter()
+            .filter(|r| r.starts_with("POST /delegate "))
+            .count(),
+        1
+    );
+    assert_eq!(
+        held.iter()
+            .filter(|r| r.starts_with("GET /intent?")
+                && r.contains("sesjon=3")
+                && r.contains("intent=fixture-intent"))
+            .count(),
+        1
+    );
+    closed(&grant, 2);
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its
