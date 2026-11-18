@@ -276,7 +276,7 @@ impl Mouth {
             return Ok(file);
         }
         let owners = self.owners();
-        let engine = self.engine(&owners, provider);
+        let engine = self.engine(&owners, provider, true);
         let engine = engine.ok_or_else(|| format!("no engine named {provider} is built"))?;
         // A voice of Gemini's is asked for as the door the request goes through knows it.
         let voice = match provider {
@@ -520,7 +520,7 @@ impl Mouth {
 
     /// An engine of this Host, with its key read where the owner keeps it at the moment it
     /// is needed.
-    fn engine(&self, file: &Table, provider: &str) -> Option<Box<dyn Speaker>> {
+    fn engine(&self, file: &Table, provider: &str, preview:bool) -> Option<Box<dyn Speaker>> {
         let keys = self.owner.clone();
         let key = key_of(provider, file);
         let read = Box::new(move || keys.key(key));
@@ -535,8 +535,8 @@ impl Mouth {
                 }))
             },
             said::ELEVENLABS=>Some(Box::new(clarp_speech::eleven_voice::ElevenVoice{
-                key:read,model:owner::text_at(file,&["elevenlabs","model"]).unwrap_or_else(||"eleven_flash_v2_5".into()),
-                speed:file.get("elevenlabs").and_then(|v|v.get("speed")).and_then(|v|v.as_float().or_else(||v.as_integer().map(|n|n as f64))).unwrap_or(1.2),
+                key:read,model:if preview {"eleven_multilingual_v2".into()} else {owner::text_at(file,&["elevenlabs","model"]).unwrap_or_else(||"eleven_flash_v2_5".into())},
+                speed:if preview {1.0} else {file.get("elevenlabs").and_then(|v|v.get("speed")).and_then(|v|v.as_float().or_else(||v.as_integer().map(|n|n as f64))).unwrap_or(1.2)},
                 base:self.eleven_at.clone(),
             })),
             "deepgram" => Some(Box::new(clarp_speech::deepgram_voice::DeepgramVoice { key:read, base:self.deepgram_at.clone() })),
@@ -641,7 +641,7 @@ impl Mouth {
             .iter()
             .filter_map(|(provider, voice)| {
                 Some((
-                    self.engine(&owners, provider)?,
+                    self.engine(&owners, provider, false)?,
                     voice.clone(),
                     provider.clone(),
                 ))
@@ -933,7 +933,7 @@ impl Mouth {
         };
         let engines: Vec<(Box<dyn Speaker>, String)> = by
             .iter()
-            .filter_map(|(provider, voice)| Some((self.engine(&owners, provider)?, voice.clone())))
+            .filter_map(|(provider, voice)| Some((self.engine(&owners, provider, false)?, voice.clone())))
             .collect();
         let (audio, session, now) = (self.audio.clone(), record.session.clone(), self.now_ms());
         let made = tokio::task::spawn_blocking(move || -> Option<(String, PathBuf)> {
