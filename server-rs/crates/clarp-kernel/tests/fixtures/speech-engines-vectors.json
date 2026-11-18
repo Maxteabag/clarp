@@ -183,6 +183,18 @@
    }
   },
   {
+   "text": "<break time=\"2.5ms\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"2ms\"/></speak>"
+   }
+  },
+  {
+   "text": "<break time=\"3.5ms\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"4ms\"/></speak>"
+   }
+  },
+  {
    "text": "<break time=\"2999ms\"/>",
    "spoken": {
     "ssml": "<speak><break time=\"2999ms\"/></speak>"
