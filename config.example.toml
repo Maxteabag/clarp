@@ -332,3 +332,7 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #                                   # imported keeps its frontier for the bytes it parsed, and
 #                                   # the next import is a tail. false: the next is full. Off
 #                                   # by default.
+
+# Optional per-thread read attribution, aggregated every 20 autonomy passes.
+[diagnostics]
+janitor_autonomy_reads = false

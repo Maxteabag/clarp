@@ -70,7 +70,7 @@ def _head_token(con, agent):
 
 
 class KeeperMemo:
-    """One keeper configuration's decisions, with a fresh read transaction per pass."""
+    """One keeper configuration's inputs, with a fresh read transaction per pass."""
 
     def __init__(self):
         self.plans = {}
@@ -78,6 +78,7 @@ class KeeperMemo:
         self.messages = {}
         self.members = {}
         self.binding = None
+        self.meter = None
 
     def clear(self):
         self.plans.clear()
@@ -98,19 +99,21 @@ class KeeperMemo:
         self.passes += 1
         self.check = self.passes % 20 == 0
         self.differences = {}
+        self.reader = con
+        if self.meter is not None:
+            from .janitor_read_diagnostic import ReadConnection
+            self.reader = ReadConnection(con, self.meter)
+            self.meter.self_check |= self.check
         attempt = copy.deepcopy(progress)
-        owned = not con.in_transaction
         try:
-            if owned:
-                con.execute("BEGIN")
+            con.execute("BEGIN")
             ready = decide(config, attempt, now, self)
-            if owned:
-                con.execute("COMMIT")
+            con.execute("COMMIT")
             agents = {agent for members in self.live_members.values() for agent in members}
             self.messages = {a: entry for a, entry in self.messages.items() if a in agents}
             self.members = self.live_members
         except Exception as exc:  # noqa: BLE001 - discard the partial pass and use the original reader
-            if owned and con.in_transaction:
+            if con.in_transaction:
                 con.execute("ROLLBACK")
             self.clear()
             log("goalKeeperMemoFallback", f"error_type={type(exc).__name__}")
@@ -158,7 +161,9 @@ class KeeperMemo:
         return predicted, rows
 
     def rows(self, config, sweeping, plain):
-        con = db.conn()
+        con = self.reader
+        if self.meter is not None:
+            self.meter.sweep |= sweeping
         headers = con.execute(
             """SELECT p.plan_id,p.agent_id,p.status,p.created_at,p.revision,p.updated_at,
                       (SELECT MAX(event_id) FROM goal_events e WHERE e.plan_id=p.plan_id) AS event_id,
