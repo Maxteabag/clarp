@@ -16,6 +16,7 @@ enum Op {
     Read(String, String),
     Write(String, String),
     Scan(String),
+    Delete(String, String),
 }
 #[derive(Default)]
 struct Counts {
@@ -48,6 +49,11 @@ impl KeyValue for Counted {
         self.inner.list(table)
     }
     fn delete(&mut self, table: &str, key: &str) -> std::result::Result<bool, StoreError> {
+        self.counts
+            .lock()
+            .unwrap()
+            .ops
+            .push(Op::Delete(table.into(), key.into()));
         self.inner.delete(table, key)
     }
 }
@@ -291,4 +297,36 @@ async fn interrupted_publication_skips_the_missing_run_and_keeps_its_number_rese
             .unwrap();
         assert_eq!(next, if kind == COUNTER { 2 } else { 3 });
     }
+}
+
+#[tokio::test]
+async fn interrupted_finish_keeps_the_unanswered_clip_out_of_recent_speech() {
+    let place = Place::new();
+    let fleet = place.start();
+    let desk = Desk::default();
+    desk.record(&fleet, clip("A", "prior", "prior"))
+        .await
+        .unwrap();
+    let id = desk.record(&fleet, clip("A", "clip", "")).await.unwrap();
+    place.cut(Some(RUNS));
+    assert!(desk.finish(&fleet, id, "partial".into(), 5).await.is_err());
+    drop(fleet);
+    drop(desk);
+    let fleet = place.start();
+    let desk = Desk::default();
+    assert_eq!(desk.inputs(&fleet, "A").await.unwrap().1, ["prior"]);
+    let row = desk
+        .report(&fleet, "run", &json!({"trace_id":"clip"}))
+        .await
+        .unwrap();
+    assert_eq!(row["run_id"], id);
+    assert_eq!(row["transcript"], "");
+    place.cut(None);
+    desk.finish(&fleet, id, "completed".into(), 8)
+        .await
+        .unwrap();
+    assert_eq!(
+        desk.inputs(&fleet, "A").await.unwrap().1,
+        ["completed", "prior"]
+    );
 }
