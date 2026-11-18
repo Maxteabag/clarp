@@ -70,7 +70,22 @@ def capture(place):
             for req in [(),("opus",)]:
                 add([seat("current",have,scoped_remaining={"opus":0}),seat("z",other)],
                     required=req,last={"from":"z","to":"current","at":at})
-    return {"reads":reads, "decisions":decisions}
+    from lib import hotseat_desk
+    hotseat_desk.log = lambda *args, **kw: None
+    hotseat_desk.now_ms = lambda: 1000000
+    hotseat_desk._mark_active = lambda *args: None
+    manual = []
+    for provider in ("claude","codex"):
+        for before, outcome in itertools.product(["unreadable", None, "current", "backup"], [False, True]):
+            machine = hotseat_desk.HotseatDesk()
+            def current(*_):
+                if before == "unreadable":
+                    raise OSError("stand-in unavailable")
+                return before
+            status, body = machine._switch(provider,"backup","stand-in",lambda *_:outcome,current,lambda *_:None)
+            manual.append(dict(provider=provider,before=before,confirmed=outcome,status=status,body=body,
+                               record=hotseat_desk._stored_switch(provider)))
+    return {"reads":reads, "decisions":decisions, "manual":manual}
 
 
 if __name__ == "__main__":
