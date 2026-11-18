@@ -165,6 +165,7 @@ impl Backend for Codex {
             None => spec.prompt.clone(),
         };
         Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
@@ -211,6 +212,7 @@ impl Backend for Codex {
         }
         args.push("-".to_string());
         Some(Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: Vec::new(),
@@ -268,6 +270,7 @@ impl Backend for Codex {
         }
         Some(Apart {
             launch: Launch {
+                prompt_as_file: false,
                 program: self.program.clone(),
                 args,
                 env: Vec::new(),

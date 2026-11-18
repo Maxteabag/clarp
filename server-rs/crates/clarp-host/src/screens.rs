@@ -302,12 +302,19 @@ async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
         told
     };
     let told = tokio::task::spawn_blocking(read).await;
-    told.map(Json).map_err(|_| {
+    let mut told = told.map_err(|_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "the logins could not be read",
         )
-    })
+    })?;
+    if let Some(row) = told["backends"].as_array_mut().and_then(|rows| {
+        rows.iter_mut()
+            .find(|row| row["id"] == "grok" && row["installed"] == true)
+    }) {
+        crate::logins::probe_grok(row).await;
+    }
+    Ok(Json(told))
 }
 
 async fn no_logins() -> ApiError {

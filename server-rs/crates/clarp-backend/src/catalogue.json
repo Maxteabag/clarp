@@ -606,5 +606,120 @@
    "known_too": false,
    "within_s": 5.0
   }
+ },
+ "grok": {
+  "shown": {
+   "label": "Grok",
+   "detail": "Runs on Grok Build.",
+   "badge": "BackendGrok",
+   "symbol": "x.circle",
+   "brand": {
+    "field_top": "#1a1a1a",
+    "field_bottom": "#0a0a0a",
+    "tint_dark": "#e8e8e8",
+    "tint_light": "#222222"
+   },
+   "sort_index": 3,
+   "hidden": false,
+   "supports_fork": false,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": true,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": true,
+   "supports_usage": false,
+   "login_kind": "device_code",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "grok",
+  "efforts": [
+   "low",
+   "medium",
+   "high"
+  ],
+  "effort_scope": "provider",
+  "models": [
+   {
+    "id": "grok-4.6",
+    "label": "Grok 4.6",
+    "default_effort": null,
+    "supported_efforts": null
+   },
+   {
+    "id": "grok-4.5",
+    "label": "Grok 4.5",
+    "default_effort": null,
+    "supported_efforts": null
+   }
+  ],
+  "asked": {
+   "how": "command",
+   "with": [
+    "models"
+   ],
+   "detail": "grok models",
+   "source_kind": "cli_probe",
+   "known_too": false,
+   "within_s": 5.0
+  }
+ },
+ "muse": {
+  "shown": {
+   "label": "Muse Code",
+   "detail": "Runs on Meta Muse Code.",
+   "badge": "BackendMuse",
+   "symbol": "sparkles",
+   "brand": {
+    "field_top": "#1c2b4a",
+    "field_bottom": "#0d1526",
+    "tint_dark": "#8fb4ff",
+    "tint_light": "#2b4a8a"
+   },
+   "sort_index": 6,
+   "hidden": false,
+   "supports_fork": false,
+   "resumable": true,
+   "supports_resume": true,
+   "supports_steer": false,
+   "supports_compact": false,
+   "supports_mcp": false,
+   "supports_routing": true,
+   "supports_auth": false,
+   "supports_usage": false,
+   "login_kind": "none",
+   "effort_ui": "picker",
+   "effort_help": ""
+  },
+  "program": "muse",
+  "efforts": [
+   "none",
+   "minimal",
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max",
+   "ultra"
+  ],
+  "effort_scope": "model",
+  "models": [
+   {
+    "id": "muse-wonder-1.0",
+    "label": "Muse Wonder 1.0",
+    "default_effort": null,
+    "supported_efforts": null
+   }
+  ],
+  "asked": {
+   "how": "directory",
+   "with": [],
+   "detail": "muse model catalogue cache",
+   "source_kind": "cli_cache",
+   "known_too": false,
+   "within_s": null
+  }
  }
 }

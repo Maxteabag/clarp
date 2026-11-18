@@ -1322,6 +1322,21 @@ by two clips of a stand-in engine: nothing is written while it is paused, what w
 turned on (the six stages of a clip that was played, each once), a second playing adds nothing, a play that
 failed is told as that, and after the Host was killed the books are as they were.
 
+**Grok and Muse** (18 Nov 2026). One CLI process serves each agent turn. Grok gets
+`--session-id` on its first turn and `--resume` thereafter. Muse takes `--session-id`
+for both. Under decision D26 the shim syncs the assigned session id to the turn spool
+before either child can read its prompt. The actor binds that id when it sees the child start, including after a Host
+restart. The shim hands a composed prompt above 64 KiB to the CLI in the turn's input
+file. Stop uses the same shim control socket as the other backends.
+
+Grok's streaming JSON and Muse's run events supply live assistant text, tool cards,
+errors and token counts. Grok's tool updates settle a pending call. Muse reports the
+call and its result together. The native session importer also reads the arguments
+Muse committed to disk. Past sessions can be listed by directory and resumed by id.
+The picker takes Grok's models from its CLI and Muse's visible models and effort tiers
+from its local catalogue. The orchestrator can ask either CLI one question. Muse
+suppresses its session log for that question.
+
 **Antigravity** (17 Nov 2026). The third tool of the owner's agents (35 of his 191 ran on it when this was
 counted), and the one the Goal keeper's job recommends. `clarp-backend` `agy.rs`, by the Python Host's
 `backend/agy.py`:

@@ -1,0 +1,4008 @@
+{
+ "bounds": [
+  {
+   "pairs": 0,
+   "tail": "",
+   "inline": true
+  },
+  {
+   "pairs": 32767,
+   "tail": "a",
+   "inline": true
+  },
+  {
+   "pairs": 32768,
+   "tail": "",
+   "inline": true
+  },
+  {
+   "pairs": 32768,
+   "tail": "a",
+   "inline": false
+  }
+ ],
+ "commands": [
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  }
+ ],
+ "answers": [
+  {
+   "tool": "grok",
+   "printed": "bad-json\n[]\n{\"type\": \"thought\", \"data\": \"private\"}\n{\"type\": \"text\", \"data\": \"A\"}\n{\"event\": \"assistant\", \"role\": \"user\", \"content\": \"skip\"}\n{\"method\": \"session/update\", \"params\": {\"update\": {\"sessionUpdate\": \"agent_message_chunk\", \"content\": [{\"text\": \"B\"}, {\"text\": \"C\"}]}}}",
+   "answer": "AB\nC"
+  },
+  {
+   "tool": "muse",
+   "printed": "bad-json\n[]\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"A\"}}\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"B\"}}",
+   "answer": "AB"
+  },
+  {
+   "tool": "muse",
+   "printed": "bad-json\n[]\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"A\"}}\n{\"payload_type\": \"run.terminal.completed\", \"payload\": {\"text\": \"terminal\"}}",
+   "answer": "terminal"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"model\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"assistant\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"user\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"model\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"assistant\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"user\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"model\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"assistant\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"user\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"model\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"assistant\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"user\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"assistant\", \"role\": \"\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"model\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"assistant\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"user\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"model\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"assistant\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"user\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"model\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"assistant\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"user\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"model\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"assistant\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"user\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"agent_message\", \"role\": \"\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"model\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"assistant\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"user\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"model\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"assistant\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"user\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"model\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"assistant\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"user\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"model\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"assistant\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"user\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"message\", \"role\": \"\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"model\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"assistant\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"user\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"model\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"assistant\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"user\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"model\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"assistant\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"user\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"model\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"assistant\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"user\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"text\", \"role\": \"\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"model\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"assistant\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"user\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"\", \"content\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"model\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"assistant\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"user\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"\", \"text\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"model\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"assistant\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"user\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"\", \"message\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"model\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"assistant\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"user\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"event\": \"output_text\", \"role\": \"\", \"delta\": {\"content\": [\"\", {\"text\": \"word\"}, {\"content\": \"after\"}]}}",
+   "answer": "word\nafter"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"method\": \"session/update\", \"params\": {\"update\": {\"sessionUpdate\": \"agent_message\", \"content\": \"a\"}}}",
+   "answer": "a"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"method\": \"session/update\", \"params\": {\"update\": {\"sessionUpdate\": \"tool\", \"content\": \"private\"}}}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"type\": \"assistant\", \"content\": {\"text\": \"preferred\", \"content\": \"other\"}, \"delta\": \"later\"}",
+   "answer": "preferred"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"type\": \"assistant\", \"content\": {\"content\": 7}, \"delta\": \"later\"}",
+   "answer": "later"
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"type\": \"text\", \"data\": \"\", \"content\": \"unused\"}",
+   "answer": ""
+  },
+  {
+   "tool": "grok",
+   "printed": "{\"type\": \"assistant\", \"content\": false, \"text\": {}, \"message\": [], \"delta\": \"last\"}",
+   "answer": "last"
+  }
+ ],
+ "histories": [
+  {
+   "tool": "grok",
+   "log": "{\"type\": \"system\", \"content\": \"You are Grok 4.6 released by xAI.\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<user_info>\\nOS Version: linux\\n</user_info>\"}]}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>\\nskills\\u2026\\n</system-reminder>\"}], \"synthetic_reason\": \"system_reminder\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<user_query>\\nplease fix it\\n</user_query>\"}], \"prompt_index\": 0}\n{\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"thinking\"}], \"status\": \"completed\"}\n{\"type\": \"assistant\", \"content\": \"I'll look at the file.\", \"tool_calls\": [{\"id\": \"synthetic-call\", \"name\": \"run_terminal_command\", \"arguments\": \"{\\\"command\\\": \\\"cat a.txt\\\", \\\"description\\\": \\\"Read a.txt\\\"}\"}], \"model_id\": \"grok-4.6-build\"}\n{\"type\": \"tool_result\", \"tool_call_id\": \"synthetic-call\", \"content\": \"exit: 0\\nhello\\n\"}\n{\"type\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"id\": \"call-2\", \"name\": \"search_replace\", \"arguments\": \"{\\\"file_path\\\": \\\"a.txt\\\", \\\"old_string\\\": \\\"hello\\\", \\\"new_string\\\": \\\"bye\\\", \\\"replace_all\\\": false}\"}]}\n{\"type\": \"tool_result\", \"tool_call_id\": \"call-2\", \"content\": \"exit: 1\\nno match\"}\n{\"type\": \"assistant\", \"content\": \"done\", \"model_id\": \"grok-4.6-build\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>\\nBackground task finished\\n</system-reminder>\"}], \"synthetic_reason\": \"system_reminder\"}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "please fix it",
+     "tools": [],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "I'll look at the file.",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "Read a.txt",
+       "action": "running command",
+       "file_path": "",
+       "status": "ok",
+       "id": "synthetic-call",
+       "command": "cat a.txt",
+       "description": "Read a.txt",
+       "result": "hello\n"
+      }
+     ],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Edit",
+       "summary": "a.txt",
+       "action": "editing file",
+       "file_path": "a.txt",
+       "status": "error",
+       "id": "call-2",
+       "old": "hello",
+       "new": "bye",
+       "replace_all": false,
+       "result": "no match"
+      }
+     ],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "done",
+     "tools": [],
+     "timestamp": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"recorded_at\": 1700000000000000, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"Read notes.txt with a tool, then reply with exactly the number of lines it has.\"}}}\n{\"recorded_at\": 1700000000000001, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"args\": \"{\\\"path\\\":\\\"notes.txt\\\"}\", \"call_id\": \"call_01a171c262dc7685a33aad20ae6b2733\", \"id\": \"fc_01a171c262dc7685a33aad20ae6b2733\", \"name\": \"read_file\"}]}}}\n{\"recorded_at\": 1700000000000002, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"estimated_prompt_tokens\": 34700, \"text\": \"Read text file `notes.txt`.\\n1|alpha\\n2|beta\", \"tool_call_id\": \"call_01a171c262dc7685a33aad20ae6b2733\", \"tool_call_index\": 0}]}}}\n{\"recorded_at\": 1700000000000003, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"2\"}}}\n{\"recorded_at\": 1700000000000004, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "Read notes.txt with a tool, then reply with exactly the number of lines it has.",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "2",
+     "tools": [
+      {
+       "name": "Read",
+       "summary": "notes.txt",
+       "action": "reading file",
+       "file_path": "notes.txt",
+       "status": "ok",
+       "id": "call_01a171c262dc7685a33aad20ae6b2733",
+       "offset": null,
+       "limit": null,
+       "result": "Read text file `notes.txt`.\n1|alpha\n2|beta"
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:20.000003Z",
+     "kind": "final_answer"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"recorded_at\": 1700000000000000, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"first turn\"}}}\n{\"recorded_at\": 1700000000000001, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"echo: first turn\"}}}\n{\"recorded_at\": 1700000000000002, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}\n{\"recorded_at\": 1700000000000003, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"second turn\"}}}\n{\"recorded_at\": 1700000000000004, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"echo: second turn\"}}}\n{\"recorded_at\": 1700000000000005, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "first turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "echo: first turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000001Z",
+     "kind": "final_answer"
+    },
+    {
+     "role": "user",
+     "text": "second turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000003Z"
+    },
+    {
+     "role": "assistant",
+     "text": "echo: second turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000004Z",
+     "kind": "final_answer"
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "log": "{\"type\": \"user\", \"content\": \"ordinary-looking injected context\", \"synthetic_reason\": \"synthetic\"}\n{\"role\": \"user\", \"content\": {\"content\": [\"a\", {\"text\": \"b\"}]}, \"ts\": \"then\"}\n{\"type\": \"tool_use\", \"name\": \"custom\"}\n{\"type\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"name\": \"read_file\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"0\"}, {\"name\": \"write\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"1\"}, {\"name\": \"search_replace\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"2\"}, {\"name\": \"grep\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"3\"}, {\"name\": \"list_dir\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"4\"}, {\"name\": \"todo_write\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"5\"}, {\"name\": \"web_search\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"6\"}, {\"name\": \"web_fetch\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"7\"}, {\"name\": \"other\", \"arguments\": \"{\\\"target_file\\\":\\\"f\\\",\\\"target_directory\\\":\\\"d\\\"}\", \"id\": \"8\"}, {\"name\": \"other\", \"arguments\": \"not-json\"}, {\"arguments\": 42}]}\n{\"type\": \"tool_result\", \"content\": \"exit: -3\\nfailed\", \"tool_use_id\": \"1\"}\n{\"type\": \"tool_result\", \"content\": [\"a\", {\"text\": \"b\"}, 2], \"tool_call_id\": \"0\"}\n{\"type\": \"tool_result\", \"content\": \"orphan\", \"tool_call_id\": \"missing\"}\n{\"type\": \"backend_tool_call\", \"kind\": {\"tool_type\": \"last\"}}\n{\"type\": \"user\", \"content\": \"  \"}\n{\"role\": \"assistant\", \"content\": \"Done\"}\n{\"type\": \"tool_use\", \"name\": \"tail\"}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "a\nb",
+     "tools": [],
+     "timestamp": "then"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "custom",
+       "status": "ok",
+       "input": {}
+      },
+      {
+       "name": "Read",
+       "summary": "f",
+       "action": "reading file",
+       "file_path": "f",
+       "status": "ok",
+       "id": "0",
+       "offset": null,
+       "limit": null,
+       "result": "a\nb"
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "error",
+       "id": "1",
+       "content": "",
+       "result": "failed"
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Grep",
+       "summary": "code in d",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "pattern": null,
+       "path": "d",
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in d",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "pattern": null,
+       "path": "d",
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "TodoWrite",
+       "summary": "0 items",
+       "action": "updating plan",
+       "file_path": "",
+       "status": "pending",
+       "id": "5",
+       "todos": []
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "6",
+       "input": {
+        "file_path": "f",
+        "path": "d"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "7",
+       "input": {
+        "file_path": "f",
+        "path": "d"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "f",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "file_path": "f",
+        "path": "d"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "not-json",
+       "action": "other",
+       "file_path": "",
+       "status": "pending",
+       "input": {
+        "arguments": "not-json"
+       }
+      },
+      {
+       "name": "tool",
+       "summary": "Using tool",
+       "action": "tool",
+       "file_path": "",
+       "status": "pending",
+       "input": {}
+      },
+      {
+       "name": "last",
+       "status": "ok",
+       "input": {}
+      }
+     ],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "Done",
+     "tools": [
+      {
+       "name": "tail",
+       "status": "ok",
+       "input": {}
+      }
+     ],
+     "timestamp": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"failed\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "Muse Code failed: reason",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z",
+     "failed": true
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"aborted\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "Muse Code aborted: reason",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z",
+     "failed": true
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"cancelled\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"interrupted\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"shell\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"0\"}, {\"name\": \"exec_command\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"1\"}, {\"name\": \"edit_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"2\"}, {\"name\": \"apply_patch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"3\"}, {\"name\": \"write_file\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"4\"}, {\"name\": \"grep\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"5\"}, {\"name\": \"glob\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"6\"}, {\"name\": \"list_dir\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"7\"}, {\"name\": \"web_search\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"8\"}, {\"name\": \"web_fetch\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"9\"}, {\"name\": \"other\", \"args\": \"{\\\"cmd\\\":\\\"c\\\",\\\"path\\\":\\\"f\\\"}\", \"id\": \"10\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"tool_call_id\": \"0\", \"is_error\": true, \"text\": \"failed\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"\", \"reason\": \" reason \"}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "error",
+       "id": "0",
+       "command": "c",
+       "description": "",
+       "result": "failed"
+      },
+      {
+       "name": "Bash",
+       "summary": "c",
+       "action": "running command",
+       "file_path": "",
+       "status": "pending",
+       "id": "1",
+       "command": "c",
+       "description": ""
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "2",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Edit",
+       "summary": "f",
+       "action": "editing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "3",
+       "old": "",
+       "new": "",
+       "replace_all": false
+      },
+      {
+       "name": "Write",
+       "summary": "f",
+       "action": "writing file",
+       "file_path": "f",
+       "status": "pending",
+       "id": "4",
+       "content": ""
+      },
+      {
+       "name": "Grep",
+       "summary": "code in .",
+       "action": "searching code",
+       "file_path": "f",
+       "status": "pending",
+       "id": "5",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "6",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "Glob",
+       "summary": "files in .",
+       "action": "finding files",
+       "file_path": "f",
+       "status": "pending",
+       "id": "7",
+       "pattern": null,
+       "path": null,
+       "glob": null,
+       "output_mode": null
+      },
+      {
+       "name": "WebSearch",
+       "summary": "the web",
+       "action": "searching web",
+       "file_path": "",
+       "status": "pending",
+       "id": "8",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "WebFetch",
+       "summary": "web page",
+       "action": "reading web page",
+       "file_path": "",
+       "status": "pending",
+       "id": "9",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      },
+      {
+       "name": "other",
+       "summary": "c",
+       "action": "other",
+       "file_path": "f",
+       "status": "pending",
+       "id": "10",
+       "input": {
+        "command": "c",
+        "file_path": "f"
+       }
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"ask\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"one\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"two\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"read_file\", \"call_id\": \"later\", \"args\": \"{\"}]}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\"}}}\n{\"payload_type\": \"runtime.session\", \"recorded_at\": \"1700000001000000\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"name\": \"other\", \"id\": \"orphan\", \"args\": 7}]}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "ask",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "one",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:21.000000Z",
+     "kind": "commentary"
+    },
+    {
+     "role": "assistant",
+     "text": "two",
+     "tools": [
+      {
+       "name": "Read",
+       "summary": "Reading file",
+       "action": "reading file",
+       "file_path": "",
+       "status": "pending",
+       "id": "later",
+       "offset": null,
+       "limit": null
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z",
+     "kind": "final_answer"
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "other",
+       "summary": "Using other",
+       "action": "other",
+       "file_path": "",
+       "status": "pending",
+       "id": "orphan",
+       "input": {}
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:21.000000Z"
+    }
+   ]
+  }
+ ],
+ "catalogs": [
+  {
+   "tool": "grok",
+   "raw": "You are signed in\nAvailable models:\n * synthetic-a (default)\n- synthetic-b\nDefault model: synthetic-a\nsynthetic-a\n",
+   "models": [
+    {
+     "id": "synthetic-a",
+     "label": "synthetic-a",
+     "default_effort": null,
+     "supported_efforts": [
+      "low",
+      "medium",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_probe",
+      "detail": "grok models",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    },
+    {
+     "id": "synthetic-b",
+     "label": "synthetic-b",
+     "default_effort": null,
+     "supported_efforts": [
+      "low",
+      "medium",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_probe",
+      "detail": "grok models",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "raw": "   \nmodels:\nAvailable\n",
+   "models": []
+  },
+  {
+   "tool": "muse",
+   "raw": "{\"rows\": [{\"model_id\": \"test\", \"display_label\": \"Test\", \"visibility\": \"visible\", \"reasoning_effort_variants\": [{\"tier\": \"high\"}, {\"tier\": \"low\"}, {\"tier\": \"high\"}]}, {\"model_id\": \"test\", \"visibility\": \"visible\"}, {\"model_id\": \"private\", \"visibility\": \"hidden\"}, {\"model_id\": \"plain\", \"visibility\": \"visible\"}]}",
+   "models": [
+    {
+     "id": "test",
+     "label": "Test",
+     "default_effort": "high",
+     "supported_efforts": [
+      "low",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_cache",
+      "detail": "muse model catalogue cache",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    },
+    {
+     "id": "plain",
+     "label": "plain",
+     "default_effort": null,
+     "supported_efforts": null,
+     "source": {
+      "kind": "cli_cache",
+      "detail": "muse model catalogue cache",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "raw": "[]",
+   "models": []
+  }
+ ],
+ "streams": [
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "available_commands",
+      "tools": [
+       "run_terminal_command"
+      ],
+      "commands": [
+       "compact"
+      ]
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "thought",
+      "data": "The user"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "thought",
+      "data": " wants a listing."
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "text",
+      "data": "<speak>Hi from Grok.</speak> I'll"
+     },
+     "text": "<speak>Hi from Grok.</speak> I'll",
+     "all_text": "<speak>Hi from Grok.</speak> I'll",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "text",
+      "data": " run it now."
+     },
+     "text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 100,
+       "output_tokens": 5
+      }
+     },
+     "text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "speaking",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "tool_call",
+      "toolCallId": "synthetic-call",
+      "title": "run_terminal_command",
+      "kind": "execute",
+      "status": "pending",
+      "toolName": "run_terminal_command",
+      "rawInput": {
+       "command": "ls -la",
+       "description": "List files"
+      },
+      "content": [],
+      "locations": []
+     },
+     "text": "",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "tool",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "tool_call_update",
+      "toolCallId": "synthetic-call",
+      "status": null,
+      "content": [
+       {
+        "type": "content",
+        "content": {
+         "type": "text",
+         "text": "List files"
+        }
+       }
+      ],
+      "rawOutput": null,
+      "locations": []
+     },
+     "text": "",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "tool",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "tool_call_update",
+      "toolCallId": "synthetic-call",
+      "status": "in_progress",
+      "content": [],
+      "rawOutput": {
+       "type": "Bash",
+       "output": []
+      },
+      "locations": []
+     },
+     "text": "",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "tool",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "tool_call_update",
+      "toolCallId": "synthetic-call",
+      "status": "completed",
+      "content": [
+       {
+        "type": "content",
+        "content": {
+         "type": "text",
+         "text": "a.txt\n"
+        }
+       }
+      ],
+      "rawOutput": {
+       "type": "Bash",
+       "exit_code": 0
+      },
+      "locations": []
+     },
+     "text": "",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.",
+     "phase": "thinking",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "text",
+      "data": "The directory holds"
+     },
+     "text": "The directory holds",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.The directory holds",
+     "phase": "speaking",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "text",
+      "data": " one file."
+     },
+     "text": "The directory holds one file.",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.The directory holds one file.",
+     "phase": "speaking",
+     "usage": [
+      100,
+      5
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "end",
+      "stopReason": "end_turn",
+      "sessionId": "synthetic-session",
+      "requestId": "req-1",
+      "usage": {
+       "input_tokens": 240,
+       "output_tokens": 30
+      },
+      "num_turns": 2
+     },
+     "text": "The directory holds one file.",
+     "all_text": "<speak>Hi from Grok.</speak> I'll run it now.The directory holds one file.",
+     "phase": "speaking",
+     "usage": [
+      240,
+      30
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.model.configured",
+      "payload": {
+       "model_id": "muse-wonder-1.0"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    },
+    {
+     "event": {
+      "payload_type": "run.lifecycle.started",
+      "payload": {}
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    },
+    {
+     "event": {
+      "payload_type": "tool.result",
+      "payload": {
+       "text": "Read text file `notes.txt`.\n1|alpha\n2|beta",
+       "call_id": "call_01a171c262dc7685a33aad20ae6b2733",
+       "correlation_facts": {
+        "outcome": "success",
+        "tool_name": "read_file"
+       }
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    },
+    {
+     "event": {
+      "payload_type": "run.output.delta",
+      "payload": {
+       "text": "2"
+      }
+     },
+     "text": "2",
+     "all_text": "2",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    },
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "cached_tokens": 0,
+         "calls": 2,
+         "input_tokens": 68449,
+         "model": "muse-wonder-1.0",
+         "output_tokens": 154,
+         "reasoning_tokens": 75
+        }
+       ],
+       "allowance": {
+        "as_of_ms": 1792909937555,
+        "source": "stream",
+        "tier": null,
+        "weekly": {
+         "resets_at_ms": 1792972800000,
+         "used_percent": 0
+        },
+        "window": {
+         "resets_at_ms": 1792927534000,
+         "used_percent": 0
+        }
+       }
+      }
+     },
+     "text": "2",
+     "all_text": "2",
+     "phase": "speaking",
+     "usage": [
+      68449,
+      154
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    },
+    {
+     "event": {
+      "payload_type": "run.terminal.completed",
+      "payload": {
+       "text": "2",
+       "terminal": "completed",
+       "reason": null
+      }
+     },
+     "text": "2",
+     "all_text": "2",
+     "phase": "speaking",
+     "usage": [
+      68449,
+      154
+     ],
+     "error": "",
+     "stopped": false,
+     "model": "muse-wonder-1.0"
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "error",
+      "error": {
+       "message": "failed"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "failed",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "turn.failed",
+      "error": {
+       "message": "failed"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "failed",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "turn_failed",
+      "error": {
+       "message": "failed"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "failed",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.terminal.aborted",
+      "payload": {
+       "reason": "refused"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "Muse Code aborted: refused",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.terminal.failed",
+      "payload": {
+       "reason": "refused"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "Muse Code failed: refused",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.terminal.cancelled",
+      "payload": {
+       "reason": "refused"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": true,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.terminal.interrupted",
+      "payload": {
+       "reason": "refused"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": true,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call",
+      "toolCallId": "call",
+      "toolName": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "completed"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_started",
+      "toolCallId": "call",
+      "title": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "failed"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_start",
+      "toolCallId": "call",
+      "name": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "error"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_use",
+      "toolCallId": "call",
+      "tool": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "cancelled"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "item.started",
+      "toolCallId": "call",
+      "ignored": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "in_progress"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "turn_started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 7,
+       "output_tokens": "2"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      7,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": "bad",
+       "output_tokens": 5
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": false,
+       "output_tokens": true
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      1
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 3.5,
+       "output_tokens": 4
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      3,
+      4
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": null
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "end",
+      "usage": {}
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 7,
+       "output_tokens": "2"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      7,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": "bad",
+       "output_tokens": 5
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": false,
+       "output_tokens": true
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      1
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 3.5,
+       "output_tokens": 4
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      3,
+      4
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": null
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "end",
+      "usage": {}
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": "5",
+         "output_tokens": 2
+        },
+        3,
+        {
+         "input_tokens": 9,
+         "output_tokens": "bad"
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      14,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": "bad",
+         "output_tokens": 6
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      14,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": 1,
+         "output_tokens": true
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      1,
+      1
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  }
+ ]
+}

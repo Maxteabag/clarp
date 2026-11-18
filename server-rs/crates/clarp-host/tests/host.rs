@@ -290,6 +290,9 @@ impl Drop for Host {
     }
 }
 
+/// The tools a Host runs, in the order it lists them: the order of the Python Host's registry.
+const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
+
 fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
     while !ready() {
@@ -2378,7 +2381,7 @@ fn a_message_dictated_hands_free_goes_to_the_agent_it_names_at_its_beginning() {
         .iter()
         .map(|tool| tool["id"].as_str().unwrap())
         .collect();
-    assert_eq!(tools, ["claude", "codex", "agy"]);
+    assert_eq!(tools, TOOLS);
     assert_eq!(settings["recent_decisions"], json!([]));
     assert_eq!(
         host.get("/orchestrator/decisions"),
@@ -10107,11 +10110,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
         "{told}"
     );
     let tools: Vec<&String> = told["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(
-        tools,
-        ["claude", "codex", "agy"],
-        "the tools this Host runs, and no other"
-    );
+    assert_eq!(tools, TOOLS, "the tools this Host runs, and no other");
     let ids = |row: &Value| -> Vec<String> {
         let models = row["models"].as_array().unwrap().iter();
         models
@@ -13543,7 +13542,7 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     let models = host.get("/agent-model-options");
     assert_eq!(models["schema_version"], 2);
     let tools: Vec<&String> = models["providers"].as_object().unwrap().keys().collect();
-    assert_eq!(tools, ["claude", "codex", "agy"]);
+    assert_eq!(tools, TOOLS);
     assert!(models["observed_at"].is_string() && models["freshness"].is_string());
 
     // On a Host that asks for no token, nobody is known to be a person.
@@ -17212,7 +17211,12 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             .iter()
             .map(|row| row["id"].as_str().unwrap())
             .collect();
-        assert_eq!(tools, ["claude", "codex"], "{path}");
+        let wanted = if path.ends_with("all") {
+            &["claude", "codex", "grok", "muse"][..]
+        } else {
+            &["claude", "codex"][..]
+        };
+        assert_eq!(tools, wanted, "{path}");
         assert_eq!(logins["tasks"]["claude"]["status"], "idle");
         let every = path.ends_with("all");
         assert_eq!(
@@ -21532,6 +21536,310 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     host.send(&agent, "Once more.", "u-5");
     wait_for("the fifth turn to be over", || over(&host, "u-5"));
     assert_eq!(starts()[4]["given"], "conv-2");
+}
+
+#[test]
+fn grok_and_muse_run_stop_and_resume_the_same_session() {
+    for tool in ["grok", "muse"] {
+        let place = Place::new(tool);
+        let binary = place.root.join(tool);
+        program(
+            &binary,
+            r#"#!/usr/bin/env python3
+import json, os, signal, sys
+tool = os.path.basename(sys.argv[0])
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("stand-in 1")
+    sys.exit(0)
+if args == ["models"]:
+    if os.path.exists(os.path.join(os.environ["HOME"],"probe-failed")):
+        print("private-example",file=sys.stderr)
+        sys.exit(2)
+    print("You are not authenticated." if os.path.exists(os.path.join(os.environ["HOME"],"signed-out")) else "synthetic")
+    sys.exit(0)
+if "--session-id" not in args and "--resume" not in args:
+    with open(os.path.join(os.environ["HOME"], "one-question"), "w") as out:
+        json.dump(args,out)
+    decision=json.dumps({"kind":"status_query","target_session":"recorder","confidence":0.99})
+    if tool=="muse":
+        print(json.dumps({"payload_type":"run.terminal.completed","payload":{"text":decision}}))
+    else:
+        print(json.dumps({"type":"text","data":decision}))
+    sys.exit(0)
+flag = "--resume" if "--resume" in args else "--session-id"
+sid = args[args.index(flag)+1]
+prompt = open(args[args.index("--prompt-file")+1]).read() if "--prompt-file" in args else args[-1]
+with open(os.path.join(os.environ["HOME"], "calls"), "a") as calls:
+    calls.write(json.dumps([flag, sid, prompt[-20:]])+"\n")
+if prompt.endswith("locked"):
+    print("session %s is already in use" % sid, file=sys.stderr)
+    sys.exit(1)
+def emit(**event):
+    print(json.dumps(event),flush=True)
+if tool == "grok":
+    emit(type="turn_started",sessionId=sid)
+else:
+    emit(stream={"kind":"session","id":sid},payload_type="run.lifecycle.started",payload={})
+if prompt.endswith("hold"):
+    signal.pause()
+elif prompt.endswith("refuse"):
+    if tool == "grok":
+        emit(type="error",error={"message":"recorded failure"})
+    else:
+        emit(payload_type="run.terminal.failed",payload={"reason":"recorded failure"})
+elif tool == "grok":
+    emit(type="text",data="Checking.")
+    emit(type="tool_call",toolCallId="c1",toolName="read_file",rawInput={"target_file":"a.txt"})
+    emit(type="tool_call_update",toolCallId="c1",status="completed",content=[{"content":{"text":"read it"}}])
+    emit(type="text",data="Answer.")
+    emit(type="end",sessionId=sid,usage={"input_tokens":10,"output_tokens":2})
+else:
+    emit(payload_type="run.model.configured",payload={"model_id":"synthetic"})
+    emit(payload_type="run.output.delta",payload={"text":"Checking."})
+    emit(payload_type="tool.result",payload={"call_id":"c1","correlation_facts":{"tool_name":"read_file","outcome":"success"},"text":"read it"})
+    emit(payload_type="run.output.delta",payload={"text":"Answer."})
+    emit(payload_type="run.usage",payload={"models":[{"input_tokens":10,"output_tokens":2}]})
+    emit(payload_type="run.terminal.completed",payload={"text":"Answer."})
+"#,
+        );
+        let absent = place.root.join("missing-program");
+        let absent = absent.to_str().unwrap();
+        let binary = binary.to_str().unwrap();
+        let world = [
+            ("HOME", place.root.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", absent),
+            ("CLARP_CODEX_PROGRAM", absent),
+            ("CLARP_AGY_PROGRAM", absent),
+            (
+                "CLARP_GROK_PROGRAM",
+                if tool == "grok" { binary } else { absent },
+            ),
+            (
+                "CLARP_MUSE_PROGRAM",
+                if tool == "muse" { binary } else { absent },
+            ),
+        ];
+        let native = place.root.join(if tool == "muse" {
+            ".local/share/muse"
+        } else {
+            ".grok"
+        });
+        if tool == "muse" {
+            let catalog = native.join("model-catalog");
+            std::fs::create_dir_all(&catalog).unwrap();
+            std::fs::write(
+                catalog.join("one.json"),
+                json!({"rows":[{"visibility":"visible","model_id":"synthetic",
+                "reasoning_effort_variants":[{"tier":"high"},{"tier":"low"}]}]})
+                .to_string(),
+            )
+            .unwrap();
+        }
+        let host = place.start_in("", &[], &world);
+        let picker = host.get("/agent-model-options");
+        let chosen = &picker["providers"][tool];
+        assert_eq!(chosen["installed"], true);
+        assert_eq!(chosen["models"][0]["id"], "synthetic");
+        assert_eq!(
+            chosen["models"][0]["supported_efforts"],
+            if tool == "muse" {
+                json!(["low", "high"])
+            } else {
+                json!(["low", "medium", "high"])
+            }
+        );
+        let auth = || {
+            host.get("/backend-auth?harnesses=all")["backends"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == tool)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            auth()["state"],
+            if tool == "muse" {
+                "host_managed"
+            } else {
+                "valid"
+            }
+        );
+        if tool == "grok" {
+            assert_eq!(auth()["credential_present"], true);
+            std::fs::write(place.root.join("signed-out"), "").unwrap();
+            assert_eq!(auth()["state"], "signed_out");
+            std::fs::remove_file(place.root.join("signed-out")).unwrap();
+        }
+        if tool == "grok" {
+            std::fs::write(place.root.join("probe-failed"), "").unwrap();
+            let failed = auth();
+            assert_eq!(failed["state"], "error");
+            assert_eq!(failed["credential_present"], false);
+            assert!(!failed.to_string().contains("private-example"));
+            std::fs::remove_file(place.root.join("probe-failed")).unwrap();
+        }
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/backend-grok-vectors.json"
+        ))
+        .unwrap();
+        let saved = fixture["histories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["tool"] == tool)
+            .unwrap();
+        let id = "00000000-1234-4321-abcd-000000000001";
+        let dir = native
+            .join("sessions")
+            .join(if tool == "muse" {
+                "2026/01/23"
+            } else {
+                "%2Fwork"
+            })
+            .join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = saved["log"].as_str().unwrap();
+        let meta = json!({"payload_type":"runtime.session.route_facts","payload":{"record":{"cwd":"/work"}}});
+        std::fs::write(
+            dir.join(if tool == "muse" {
+                "session.jsonl"
+            } else {
+                "chat_history.jsonl"
+            }),
+            format!("{meta}\n{log}"),
+        )
+        .unwrap();
+        let listed = host.get(&format!("/past-sessions?backend={tool}&cwd=/work"));
+        assert_eq!(listed["sessions"][0]["id"], id);
+        assert_eq!(listed["sessions"][0]["preview"], saved["turns"][0]["text"]);
+        assert_eq!(
+            host.get(&format!("/past-sessions?backend={tool}&cwd=/elsewhere"))["sessions"],
+            json!([])
+        );
+        let restored = host.post(
+            "/agents",
+            json!({"name":"Restored","backend":tool,"resume_session_id":id}),
+        );
+        let imported = host.turns(restored["session"].as_str().unwrap());
+        assert_eq!(imported[0]["text"], saved["turns"][0]["text"]);
+        assert_eq!(
+            imported[1]["tools"][0]["name"],
+            saved["turns"][1]["tools"][0]["name"]
+        );
+        assert_eq!(
+            imported[1]["tools"][0]["result"],
+            saved["turns"][1]["tools"][0]["result"]
+        );
+        for (key, value, status) in [
+            ("resume_session_id", id, 409),
+            ("fork_session_id", id, 400),
+            ("resume_session_id", "../outside", 404),
+        ] {
+            let body = json!({"name":"Duplicate","backend":tool,key:value});
+            assert_eq!(host.ask("POST", "/agents", Some(&body)).0, status);
+        }
+        let agent = host.post("/agents", json!({"name":"Recorder","backend":tool}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let calls = || -> Vec<Value> {
+            std::fs::read_to_string(place.root.join("calls"))
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect()
+        };
+        let over = |host: &Host, id: &str| {
+            let rows = host.turns(&agent);
+            rows.iter()
+                .position(|r| r["id"] == id)
+                .is_some_and(|at| rows[at..].iter().any(|r| r["turn"].is_object()))
+        };
+        host.send(&agent, "begin", "u-1");
+        wait_for("first answer", || over(&host, "u-1"));
+        assert!(host.turns(&agent).iter().any(|r| r["text"] == "Answer."));
+        let turns = host.turns(&agent);
+        let card = turns
+            .iter()
+            .flat_map(|r| r["tools"].as_array().into_iter().flatten())
+            .find(|c| c["name"] == "Read")
+            .unwrap();
+        assert_eq!(card["status"], "ok");
+        assert_eq!(card["result"], "read it");
+        if tool == "grok" {
+            assert_eq!(card["file_path"], "a.txt");
+        }
+        wait_for("token totals", || {
+            let usage = host.get("/backend-usage");
+            usage["backends"].as_array().unwrap().iter().any(|r| {
+                r["backend"] == tool
+                    && r["totals"]["five_hour"]["tokens_in"] == 10
+                    && r["totals"]["five_hour"]["tokens_out"] == 2
+            })
+        });
+        host.send(&agent, "hold", "u-2");
+        wait_for("second launch", || calls().len() == 2);
+        host.kill();
+        let host = place.start_in("", &[], &world);
+        let snapshot = host.get("/agents/snapshot");
+        let row = snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == agent)
+            .unwrap();
+        assert_eq!(row["backend_session_id"], calls()[0][1]);
+        host.post("/stop", json!({"session":agent}));
+        wait_for("stop", || over(&host, "u-2"));
+        host.send(&agent, &format!("{}refuse", "x".repeat(66 * 1024)), "u-3");
+        wait_for("failure", || over(&host, "u-3"));
+        assert!(
+            host.turns(&agent)
+                .iter()
+                .any(|r| r.to_string().contains("recorded failure"))
+        );
+        if tool == "muse" {
+            host.send(&agent, "locked", "u-4");
+            wait_for("session lock refusal", || over(&host, "u-4"));
+            assert!(
+                host.turns(&agent)
+                    .iter()
+                    .any(|r| r.to_string().contains("muse_session_locked"))
+            );
+        }
+        let seen = calls();
+        assert_eq!(seen.len(), if tool == "muse" { 4 } else { 3 });
+        assert_eq!(seen[0][0], "--session-id");
+        assert!(seen[0][1].as_str().is_some_and(|s| !s.is_empty()));
+        for call in &seen[1..] {
+            assert_eq!(
+                call[0],
+                if tool == "grok" {
+                    "--resume"
+                } else {
+                    "--session-id"
+                }
+            );
+            assert_eq!(call[1], seen[0][1]);
+        }
+        assert!(seen[2][2].as_str().unwrap().ends_with("refuse"));
+        let settings=host.post("/orchestrator/settings",json!({"provider":tool,"enabled":true,"fallback_only":false,"model":"synthetic","effort":"high"}));
+        assert_eq!(settings["ok"], true, "{settings}");
+        let route=host.post("/send",json!({"session":agent,"text":"How is Recorder doing?","client_msg_id":"ask-status","hands_free":true}));
+        assert_eq!(route["orchestrator"]["action"], "status", "{route}");
+        let argv: Vec<String> =
+            serde_json::from_slice(&std::fs::read(place.root.join("one-question")).unwrap())
+                .unwrap();
+        assert!(argv.last().unwrap().contains("How is Recorder doing?"));
+        assert_eq!(argv.contains(&"--no-session-log".into()), tool == "muse");
+        assert!(argv.windows(2).any(|pair| pair == ["--model", "synthetic"]));
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--reasoning-effort", "high"])
+        );
+    }
 }
 
 #[test]
