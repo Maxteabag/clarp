@@ -83,6 +83,14 @@ CHANGES = [
         'replace': '    TurnEvent.STOP_REQUESTED: (AgentState.STOPPED, STARTED),\n',
         'expect': {'channel': None, 'locator': r'latest_state|\.kind$|agent-state', 'kinds': None},
     },
+    {
+        'id': 'render-spec-row',
+        'what': "a render spec's row carries its spec, in every list and in what a client that cannot see is read",
+        'file': 'server/lib/render_spec_store.py',
+        'find': '    return PublicRow(item, meta)\n',
+        'replace': '    item["spec"] = stored["spec"]\n    return PublicRow(item, meta)\n',
+        'expect': {'channel': 'http', 'locator': r'\.spec$', 'kinds': {'field-added'}},
+    },
     # ---- changes planted by the reviewer go below this line ----
 ]
 

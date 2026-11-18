@@ -898,6 +898,259 @@ SCENARIOS.append({
     ],
 })
 
+# ---- render specs (Host contract 102): a small form the app draws itself, answered once ----
+# The threshold is the owner's: both Hosts read `[artifacts] render_spec_min_client`.
+RENDER_CONFIG = ('[tts]\nprovider = "none"\n[network]\nadvertise_lan = false\n'
+                 '[artifacts]\nrender_spec_min_client = 74\n')
+# Who a client says it is: at the threshold, below it, said wrong, and nothing said.
+AT = {'X-Clarp-Client': 'ios/12 contract=74'}
+BELOW = {'X-Clarp-Client': 'ios/12 contract=73'}
+MALFORMED = {'X-Clarp-Client': 'ios/ contract=99'}
+CLIENTS = (('no client', None), ('a client below', BELOW), ('a client at the threshold', AT),
+           ('a client said wrong', MALFORMED))
+# The reference's own form (tests/fixtures/render_spec/build-decision.json).
+DECISION = {
+    'version': 'build-1', 'catalog': 'clarp.form', 'catalog_version': 1,
+    'spec': {'root': 'root', 'elements': {
+        'root': {'type': 'stack', 'props': {},
+                 'children': ['topic', 'instructions', 'selection', 'comment', 'notify']},
+        'topic': {'type': 'heading', 'props': {'text': 'Synthetic decision', 'level': 1}, 'children': []},
+        'selection': {'type': 'choice', 'props': {
+            'value': {'$bindState': '/choice'}, 'label': 'Next step',
+            'options': [{'value': 'send', 'label': 'Send it'}, {'value': 'review', 'label': 'Review first'}]},
+            'children': []},
+        'comment': {'type': 'text_field', 'props': {'label': 'Comment', 'value': {'$bindState': '/answer'}},
+                    'children': []},
+        'notify': {'type': 'toggle', 'props': {'label': 'Notify', 'value': {'$bindState': '/notify'}},
+                   'children': []},
+        'instructions': {'type': 'text', 'props': {'text': 'Synthetic: choose what happens next.'}}},
+        'state': {}},
+    'submit': {'label': 'Submit', 'intent': 'submit_decision'},
+    'answer_schema': {'type': 'object', 'properties': {
+        'choice': {'type': 'string', 'enum': ['send', 'review']},
+        'answer': {'type': 'string', 'maxLength': 2000},
+        'notify': {'type': 'boolean'}}, 'required': ['choice']},
+}
+SPEC_ANSWER_ONE = 'synthetic-answer-0001'
+SPEC_ANSWER_TWO = 'synthetic-answer-0002'
+
+
+def as_client(step, headers):
+    return {**step, 'headers': headers} if headers else step
+
+
+def spec_payload(**changed):
+    payload = json.loads(json.dumps(DECISION))
+    payload.update(changed)
+    return payload
+
+
+def spec(artifact_id, name, headers=AT, payload=None, query='', **more):
+    """An agent publishes a render spec (or only checks it)."""
+    body = {'session': AGENT, 'type': 'render_spec', 'title': 'Synthetic decision', 'artifact_id': artifact_id,
+            'summary': 'What it asks', 'payload': spec_payload() if payload is None else payload, **more}
+    return as_client(post('/artifacts' + query, body, name), headers)
+
+
+def spec_answers(artifact_id, submission_id, name, headers=AT, state=None, **more):
+    """A user's answers to a render spec, under an id the app chose."""
+    body = {'submission_id': submission_id, 'version': 'build-1',
+            'answers': {'intent': 'submit_decision', 'state': {'choice': 'send'} if state is None else state},
+            **more}
+    return as_client(post(f'/artifacts/{artifact_id}/submit', body, name), headers)
+
+
+def raw_json(path, text, name, headers=AT):
+    """A body as it is written: what a reader of JSON makes of it is what is compared."""
+    return as_client({'op': 'post', 'path': path, 'name': name,
+                      'raw': {'bytes': text, 'content_type': 'application/json'}}, headers)
+
+
+def every_door(artifact_id, when):
+    """What each client is shown of a spec: in the lists, the spec itself, the pins and Updates."""
+    steps = []
+    for who, headers in CLIENTS:
+        for path, what in ((f'/artifacts?session={AGENT}', 'the library'),
+                           (f'/artifacts?session={AGENT}&representation=flat-v1', 'the library, flat'),
+                           (f'/artifacts?session={AGENT}&representation=summary-v1', 'the library, summed up'),
+                           ('/artifacts?search=Synthetic%20decision', 'a search'),
+                           (f'/artifacts/{artifact_id}', 'the spec'),
+                           (f'/artifacts/{artifact_id}?representation=flat-v1', 'the spec, flat'),
+                           ('/pinned-artifacts', 'the pins'),
+                           ('/attention/inbox', 'Updates'),
+                           ('/attention/inbox?representation=summary-v1', 'Updates, summed up')):
+            steps.append(as_client(get(path, f'{what} {when}, to {who}'), headers))
+    return steps
+
+
+def spec_doors():
+    steps = [
+        get('/artifact-catalogs/clarp.form/1', 'the catalog'),
+        spec('spec-1', 'check a spec', query='?validate_only=1'),
+        spec('spec-1', 'check a spec of another catalog', query='?validate_only=1',
+             payload=spec_payload(catalog='synthetic-other')),
+        spec('spec-1', 'check a spec, said twice', query='?validate_only=1&validate_only=1', headers=None),
+        post('/artifacts?validate_only=1', {'session': AGENT, 'type': 'document', 'title': 'Synthetic note',
+                                            'payload': {'content': 'x'}}, 'check something that is no spec'),
+        spec('spec-0', 'publish a spec for a client that cannot see it', headers=None),
+        spec('spec-1', 'publish a spec for a client that can'),
+        spec('spec-x', 'a spec of nobody', session='synthetic-nobody'),
+        spec('spec-x', 'a spec without a title', title=''),
+        spec('spec-x', 'a spec in a state that is none', status='unknown'),
+        spec('spec x', 'a spec whose id is none'),
+        post('/artifacts', {'session': AGENT, 'type': 'document', 'title': 'Synthetic note', 'artifact_id': 'note-1',
+                            'payload': {'content': 'x'}}, 'a note'),
+        spec('note-1', 'a spec under the id of a note'),
+        {'op': 'post', 'path': '/artifacts/spec-1/pin', 'body': {'pinned': True}, 'headers': AT,
+         'name': 'pin the spec'},
+    ]
+    steps += every_door('spec-1', 'before it is answered')
+    steps += [
+        # A whole new revision that names the version it follows; nothing else.
+        as_client(post('/artifacts/spec-1', {'payload_patch': {'version': 'build-2'}}, 'a patch of a spec'), AT),
+        as_client(post('/artifacts/spec-1', {'expected_version': 'build-1'}, 'a revision without a payload'), AT),
+        as_client(post('/artifacts/spec-1', {'payload': spec_payload(version='build-2')},
+                       'a revision that follows nothing'), AT),
+        as_client(post('/artifacts/spec-1', {'payload': spec_payload(version='build-2'), 'expected_version': 'old'},
+                       'a revision that follows another version'), AT),
+        as_client(post('/artifacts/spec-1', {'payload': spec_payload(), 'expected_version': 'build-1'},
+                       'a revision of the same version'), AT),
+        as_client(post('/artifacts/spec-2', {'payload': spec_payload(version='build-2'), 'expected_version': 'build-1'},
+                       'a revision of nothing'), AT),
+        spec('spec-2', 'a spec to revise'),
+        as_client(post('/artifacts/spec-2', {'payload': spec_payload(version='build-2'), 'expected_version': 'build-1',
+                                             'title': 'Synthetic decision, again', 'summary': 'Asked again'},
+                       'revise it'), AT),
+        as_client(get('/artifacts/spec-2', 'the revised spec'), AT),
+        spec('spec-2', 'publish it again under its id', payload=spec_payload(version='build-3'),
+             expected_version='build-2'),
+        spec('spec-3', 'a draft', status='draft'),
+        spec_answers('spec-3', SPEC_ANSWER_ONE, 'answers to a draft'),
+    ]
+    # What a submission may not be, in the order it is refused.
+    for who, headers in (('a client below', BELOW), ('a client said wrong', MALFORMED), ('no client', None)):
+        steps.append(spec_answers('spec-1', SPEC_ANSWER_ONE, f'answers from {who}', headers=headers))
+    steps += [
+        as_client(post('/artifacts/spec-1/submit', {'submission_id': 'short', 'version': 'build-1',
+                                                    'answers': {'intent': 'submit_decision', 'state': {}}},
+                       'answers under an id that is none'), AT),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers to a version that is no text', version=1),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers with more', extra=True),
+        as_client(post('/artifacts/spec-1/submit', {'submission_id': SPEC_ANSWER_ONE, 'version': 'build-1',
+                                                    'answers': {'intent': 'submit_decision', 'state': {'choice': 'send'},
+                                                                'extra': True}},
+                       'answers with more inside'), AT),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers with a key nobody asked for',
+                     state={'choice': 'send', 'colour': 'red'}),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers without what is required', state={}),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'an answer that is no choice', state={'choice': 'later'}),
+        as_client(post('/artifacts/spec-1/submit', {'submission_id': SPEC_ANSWER_ONE, 'version': 'build-1',
+                                                    'answers': {'intent': 'other', 'state': {'choice': 'send'}}},
+                       'answers of another intent'), AT),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers to another version', version='build-0'),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers with a wish that is no yes or no', synthesize_audio='yes'),
+        spec_answers('no-such-spec', SPEC_ANSWER_ONE, 'answers to nothing'),
+        LOG,
+        # The first answers that fit: a receipt, and the agent is told them as what its user said.
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'answers that fit',
+                     state={'choice': 'send', 'notify': True, 'answer': 'synthetic, "quoted" æøå'},
+                     synthesize_audio=False),
+        {'op': 'wait_reply', 'after': f'u-html-form-{SPEC_ANSWER_ONE}'},
+        {'op': 'quiesce'},
+        LOG,
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'the same answers again',
+                     state={'answer': 'synthetic, "quoted" æøå', 'notify': True, 'choice': 'send'},
+                     synthesize_audio=False),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'other answers under the same id', state={'choice': 'review'}),
+        spec_answers('spec-1', SPEC_ANSWER_ONE, 'the same answers with another wish',
+                     state={'choice': 'send', 'notify': True, 'answer': 'synthetic, "quoted" æøå'},
+                     synthesize_audio=True),
+        spec_answers('spec-1', SPEC_ANSWER_TWO, 'answers to a spec that was answered'),
+        spec('spec-1', 'publish an answered spec again', payload=spec_payload(version='build-2'),
+             expected_version='build-1'),
+    ]
+    steps += every_door('spec-1', 'after it was answered')
+    steps += [
+        # Archive files a spec away and it can still be answered; discard withdraws it.
+        spec('spec-4', 'a spec to put away'),
+        {**as_client(post('/artifacts/spec-4/archive', {'archived': True}, 'put it away'), AT),
+         'body_from_last': {'expected_updated_at': 'artifact.updated_at'}},
+        spec_answers('spec-4', 'synthetic-answer-0004', 'answers to a spec put away'),
+        {'op': 'wait_reply', 'after': 'u-html-form-synthetic-answer-0004'},
+        {'op': 'quiesce'},
+        spec('spec-5', 'a spec to withdraw'),
+        {**as_client(post('/artifacts/spec-5/discard', {}, 'withdraw it'), AT),
+         'body_from_last': {'expected_updated_at': 'artifact.updated_at'}},
+        spec_answers('spec-5', 'synthetic-answer-0005', 'answers to a spec withdrawn'),
+        spec_answers('spec-5', 'synthetic-answer-0005', 'answers to a spec withdrawn, from a client below',
+                     headers=BELOW),
+        LOG,
+    ]
+    return steps
+
+
+SCENARIOS.append({
+    'id': 'render-specs',
+    'what': 'a render spec: checked, published, revised and answered once; what each client is shown of it at '
+            'every door (none, below the threshold, at it, said wrong); every refusal of a submission in its '
+            'order, and the agent told the first answers once',
+    'config': RENDER_CONFIG,
+    'steps': spec_doors(),
+})
+
+# A body as a client may write it: a key twice, numbers as JSON writes and does not write them, two bytes
+# a sign. What a Host's reader makes of it is part of the contract of render specs.
+SPEC_TEXT = json.dumps({'session': AGENT, 'type': 'render_spec', 'title': 'Synthetic decision',
+                        'artifact_id': 'spec-raw', 'payload': DECISION})
+SCENARIOS.append({
+    'id': 'render-spec-bodies',
+    'what': 'render specs written as a client may write them: a key twice, at the top and inside; numbers '
+            'with a fraction, an exponent, beyond what a client holds, minus zero, NaN; a body in UTF-16; a '
+            'pointer that names a key only when it is an identifier',
+    'config': RENDER_CONFIG,
+    'steps': [
+        raw_json('/artifacts?validate_only=1', SPEC_TEXT.replace('"title": ', '"title": "x", "title": ', 1),
+                 'a key twice at the top'),
+        raw_json('/artifacts?validate_only=1',
+                 SPEC_TEXT.replace('"catalog_version": 1', '"catalog_version": 1, "catalog_version": 1', 1),
+                 'a key twice in the payload'),
+        raw_json('/artifacts?validate_only=1', SPEC_TEXT.replace('"level": 1', '"level": 1, "level": 1', 1),
+                 'a key twice deep in the spec'),
+        *[raw_json('/artifacts?validate_only=1',
+                   SPEC_TEXT.replace('"catalog": "clarp.form"', '"catalog": "unsupported"', 1)
+                   .replace('"catalog_version": 1', f'"catalog_version": {token}', 1), f'a version written {token}')
+          for token in ('1.0', '1e0', '-0.0', '9007199254740992', 'NaN')],
+        raw_json('/artifacts?validate_only=1', SPEC_TEXT.encode('utf-16-le').decode('latin-1'),
+                 'a spec in two bytes a sign'),
+        raw_json('/artifacts?validate_only=1', ' ' * 4096 + SPEC_TEXT, 'a spec after many blanks'),
+        raw_json('/artifacts', '[1]', 'a body that is no object'),
+        raw_json('/artifacts', SPEC_TEXT.replace('"state": {}', '"state": {"count": -0}', 1)
+                 .replace('"notify": {"type": "boolean"}', '"notify": {"type": "boolean"}, '
+                          '"count": {"type": "integer"}', 1), 'publish a spec with minus zero'),
+        as_client(get('/artifacts/spec-raw', 'the spec with minus zero'), AT),
+        *[as_client(post('/artifacts', {'session': AGENT, 'type': 'render_spec', 'title': 'Synthetic canary',
+                                        'artifact_id': 'canary', 'payload': payload}, name), AT)
+          for name, payload in (
+              ('an element whose id is none', {**DECISION, 'spec': {**DECISION['spec'], 'elements': {
+                  **DECISION['spec']['elements'], 'aQzxCanary-x': {'type': 'divider', 'props': {}},
+                  'root': {**DECISION['spec']['elements']['root'],
+                           'children': DECISION['spec']['elements']['root']['children'] + ['aQzxCanary-x']}}}}),
+              ('a property whose name is none', {**DECISION, 'answer_schema': {
+                  **DECISION['answer_schema'], 'properties': {**DECISION['answer_schema']['properties'],
+                                                              'QzxCanary': {'type': 'string'}}}}),
+              ('a payload key whose name is none', {**DECISION, 'QzxCanary': 1}))],
+        raw_json('/artifacts/spec-raw/submit', '', 'answers that are nothing'),
+        raw_json('/artifacts/spec-raw/submit', '[1]', 'answers that are no object'),
+        raw_json('/artifacts/spec-raw/submit',
+                 json.dumps({'submission_id': SPEC_ANSWER_ONE, 'version': 'build-1',
+                             'answers': {'intent': 'submit_decision', 'state': {'choice': 'send'}}})
+                 .replace('"choice": "send"', '"choice": "send", "choice": "send"', 1),
+                 'answers with a key twice'),
+        LOG,
+    ],
+})
+
+
 def made(kind, title, status, name, **payload):
     """An agent makes something for its user."""
     return post('/artifacts', {'session': AGENT, 'type': kind, 'title': title, 'status': status, 'payload': payload}, name)
