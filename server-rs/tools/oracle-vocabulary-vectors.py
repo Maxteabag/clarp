@@ -9,7 +9,9 @@ The rule is `server/lib/oracle_voice_context.load`, run here as it is on files o
 For every case it is written down what the small file holds, what stands at the path it names (a text, or nothing
 that can be read as one), and what came of it: what the voice is to be told from, or the words of the refusal, and
 whether those words are the rule's own or the language's (for a file that is no JSON, a path that is no text, a text
-that is not UTF-8), which another Host cannot say.
+that is not UTF-8), which another Host cannot say. A case marked `only_the_python_host` is a small file that is JSON
+to Python's reader alone (signs of two bytes each, half a pair of signs written out, a number that is none): what
+the Python Host takes there, a Host that reads JSON as it is defined does not.
 
     <the Python Host's interpreter> server-rs/tools/oracle-vocabulary-vectors.py
 
@@ -42,13 +44,27 @@ def digest(text) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def case(name, change=None, *, primary='theo', text=TEXT, at='text.txt', raw=None, pad=None, **said):
+def case(name, change=None, *, primary='theo', text=TEXT, at='text.txt', raw=None, pad=None, written=None, **said):
     """A case: the small file as it is to be, changed by what the case says, and the text it names.
     `said` replaces fields of the small file; `change` does the same for its binding. `text`: what stands at the
     path (`None`: nothing; `bytes`: bytes that are no text; `...`: a directory). `raw`: the small file is these
-    bytes, whatever else is said. `pad`: blanks are added to the small file up to so many bytes."""
+    bytes, whatever else is said. `pad`: blanks are added to the small file up to so many bytes. `written`: how
+    the small file is written where not as JSON is (see WRITTEN)."""
     return {'name': name, 'primary': primary, 'text': text, 'at': at, 'raw': raw, 'pad': pad, 'said': said,
-            'binding': change or {}}
+            'binding': change or {}, 'written': written}
+
+
+# How a small file is written where not plainly: the bytes of what it holds, and whether what comes of it is JSON
+# to Python's reader alone.
+WRITTEN = {
+    'mark': (lambda held: b'\xef\xbb\xbf' + json.dumps(held).encode('utf-8'), False),
+    'two marks': (lambda held: b'\xef\xbb\xbf' * 2 + json.dumps(held).encode('utf-8'), False),
+    'two bytes a sign': (lambda held: json.dumps(held).encode('utf-16'), True),
+    'two bytes a sign, unmarked': (lambda held: json.dumps(held).encode('utf-16-be'), True),
+    'four bytes a sign': (lambda held: json.dumps(held).encode('utf-32'), True),
+    'half a pair': (lambda held: json.dumps(dict(held, more=chr(0xd800))).encode('ascii'), True),
+    'no number': (lambda held: json.dumps(dict(held, more=float('nan'))).encode('ascii'), True),
+}
 
 
 LONG = 'a' * 160
@@ -106,8 +122,15 @@ CASES = [
     case('a word the text has in other letters', terms=['DRAMMEN', 'stra' + chr(0xdf) + 'e', 'Strasse']),
     case('words of as many signs as there may be together', terms=['a' * 150] * 20),
     case('words of a sign too many together', terms=['a' * 150] * 19 + ['a' * 151]),
-    case('a text with a mark of its order before it', text='﻿Drammen', terms=['Drammen']),
+    case('a text with a mark of its order before it', text=chr(0xfeff) + 'Drammen', terms=['Drammen']),
     case('an empty text', text='', terms=['Drammen']),
+    case('a small file with a mark of its order before it', written='mark'),
+    case('a small file with two such marks', written='two marks'),
+    case('a small file of two bytes a sign', written='two bytes a sign'),
+    case('a small file of two bytes a sign and no mark', written='two bytes a sign, unmarked'),
+    case('a small file of four bytes a sign', written='four bytes a sign'),
+    case('a small file with half a pair of signs written out', written='half a pair'),
+    case('a small file with a number that is none', written='no number'),
 ]
 
 
@@ -147,6 +170,10 @@ def run() -> dict:
                 for name in [name for name, value in part.items() if value == '~drop' and isinstance(value, str)]:
                     del part[name]
             small = one['raw'] if one['raw'] is not None else json.dumps(held).encode('utf-8')
+            alone = False
+            if one['written']:
+                write, alone = WRITTEN[one['written']]
+                small = write(held)
             if one['pad']:
                 small += b' ' * (one['pad'] - len(small))
             sidecar = folder / 'vocabulary.json'
@@ -162,6 +189,8 @@ def run() -> dict:
                     'bytes': len(small), 'asks_for': path if isinstance(path, str) else None, 'text': found}
             try:
                 done['taken'] = rule.load(one['primary'], str(sidecar))
+                if alone:
+                    done['only_the_python_host'] = True
             except (ValueError, OSError, TypeError) as refused:
                 own = type(refused) is ValueError
                 done['refused'] = str(refused) if own else type(refused).__name__
@@ -194,7 +223,8 @@ def main() -> int:
     lines.append('}')
     OUT.write_text('\n'.join(lines) + '\n', encoding='ascii')
     cases = said['cases']
-    print(f'{OUT.relative_to(REPO)}: {len(cases)} cases, {sum(1 for one in cases if "taken" in one)} taken, '
+    print(f'{OUT.relative_to(REPO)}: {len(cases)} cases, {sum(1 for one in cases if "taken" in one)} taken '
+          f'({sum(1 for one in cases if one.get("only_the_python_host"))} by the Python Host alone), '
           f'{sum(1 for one in cases if one.get("in_its_own_words"))} refused in the rule\'s words, '
           f'{sum(1 for one in cases if "refused" in one and not one["in_its_own_words"])} in the language\'s, '
           f'{OUT.stat().st_size} bytes')

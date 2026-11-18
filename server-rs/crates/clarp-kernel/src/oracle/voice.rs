@@ -132,7 +132,7 @@ const WORD_SIGNS_MOST: usize = 160;
 const WORDS_SIGNS_MOST: usize = 3_000;
 /// What a file that cannot be read as one is refused with here. (The Python Host says what
 /// its language says of such a file, which no other Host can say.)
-const NO_VOCABULARY: &str = "Prepared voice context cannot be read";
+pub const NO_VOCABULARY: &str = "Prepared voice context cannot be read";
 const NO_TEXT: &str = "Prepared voice context source is missing or invalid";
 
 /// The vocabulary an owner prepared for the Oracle's contact, as a call with that contact
@@ -145,7 +145,10 @@ const NO_TEXT: &str = "Prepared voice context source is missing or invalid";
 /// is told.
 ///
 /// The Python Host's `oracle_voice_context.load`, held to it by
-/// `tests/fixtures/oracle-vocabulary-vectors.json`.
+/// `tests/fixtures/oracle-vocabulary-vectors.json`. The small file is JSON as it is defined,
+/// in UTF-8, with or without the mark of its order before it. (Python's reader also takes
+/// signs of two and of four bytes each, half a pair of signs written out, and a number that
+/// is none: such a file is refused here.)
 pub fn prepared(
     contact: &str,
     file: &[u8],
@@ -155,7 +158,8 @@ pub fn prepared(
     if file.len() > VOCABULARY_FILE_MOST {
         return refused("Prepared voice context is too large");
     }
-    let Ok(held) = serde_json::from_slice::<Value>(file) else {
+    let written = file.strip_prefix(b"\xef\xbb\xbf").unwrap_or(file);
+    let Ok(held) = serde_json::from_slice::<Value>(written) else {
         return refused(NO_VOCABULARY);
     };
     let Some(held) = held.as_object() else {
@@ -172,7 +176,10 @@ pub fn prepared(
         return refused("Prepared voice context does not match selected primary");
     }
     let nothing = serde_json::Map::new();
-    let binding = match held.get("prepared_context").filter(|said| python::truthy(said)) {
+    let binding = match held
+        .get("prepared_context")
+        .filter(|said| python::truthy(said))
+    {
         None => &nothing,
         Some(Value::Object(binding)) => binding,
         Some(_) => return refused("Invalid prepared context binding"),
