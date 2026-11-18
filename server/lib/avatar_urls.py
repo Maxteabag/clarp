@@ -136,4 +136,5 @@ def notification_avatar_authorized(
         return False
     expected = notification_avatar_signature(
         secret, agent_id, content_version, expires_at)
-    return hmac.compare_digest(expected, signature)
+    # compare_digest raises on a str outside ASCII: such a signature is simply wrong.
+    return signature.isascii() and hmac.compare_digest(expected, signature)

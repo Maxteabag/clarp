@@ -169,3 +169,12 @@ def test_a_nonce_or_ticket_outside_ascii_is_refused_with_an_error_frame(call, fi
     error = _join_error(_join(call.grant, **{field: value}))
     assert error["code"] == "live_owner_conflict"
     assert call.connects == [] and not _ring_of(call.grant).get("_live_join_consumed")
+
+
+@pytest.mark.parametrize("field", ["owner_nonce", "join_ticket"])
+@pytest.mark.parametrize("value", [5, None, ["nonce"], {"nonce": 1}])
+def test_a_nonce_or_ticket_that_is_not_text_is_refused_with_an_error_frame(call, field, value):
+    """The type is checked before isascii: a number or a list is a wrong nonce, not a crash."""
+    error = _join_error(_join(call.grant, **{field: value}))
+    assert error["code"] == "live_owner_conflict"
+    assert call.connects == [] and not _ring_of(call.grant).get("_live_join_consumed")

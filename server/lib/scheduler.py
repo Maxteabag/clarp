@@ -25,6 +25,14 @@ CRON_SHORTCUTS = {
 }
 
 
+def _number(text: str) -> int:
+    """A cron number: ASCII digits only. int() also reads other scripts' digits,
+    a sign, underscores and spaces, none of which a cron field means (R66)."""
+    if not (text.isascii() and text.isdigit()):
+        raise ValueError(f"Not a cron number: {text!r}")
+    return int(text)
+
+
 def _parse_cron_field(field_str: str, min_val: int, max_val: int) -> set[int]:
     """Parse a single cron field into a set of matching integers."""
     result: set[int] = set()
@@ -35,16 +43,16 @@ def _parse_cron_field(field_str: str, min_val: int, max_val: int) -> set[int]:
             continue
         if "/" in part:
             subparts = part.split("/", 1)
-            step = int(subparts[1])
+            step = _number(subparts[1])
             if step <= 0:
                 raise ValueError(f"Step must be > 0 in {part}")
             if subparts[0] == "*":
                 start_val, end_val = min_val, max_val
             elif "-" in subparts[0]:
                 r_start, r_end = subparts[0].split("-", 1)
-                start_val, end_val = int(r_start), int(r_end)
+                start_val, end_val = _number(r_start), _number(r_end)
             else:
-                start_val = int(subparts[0])
+                start_val = _number(subparts[0])
                 end_val = max_val
             # Only the values inside the field are counted: "0-999999999999/7"
             # used to be walked value by value, holding its thread (and the
@@ -56,13 +64,13 @@ def _parse_cron_field(field_str: str, min_val: int, max_val: int) -> set[int]:
             result.update(range(first, min(end_val, max_val) + 1, step))
         elif "-" in part:
             r_start, r_end = part.split("-", 1)
-            s_val, e_val = int(r_start), int(r_end)
+            s_val, e_val = _number(r_start), _number(r_end)
             # The range is cut to the field before it is counted (see above).
             result.update(range(max(s_val, min_val), min(e_val, max_val) + 1))
         elif part == "*":
             result.update(range(min_val, max_val + 1))
         else:
-            val = int(part)
+            val = _number(part)
             if min_val <= val <= max_val:
                 result.add(val)
             else:
