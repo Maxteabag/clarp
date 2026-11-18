@@ -747,7 +747,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let call_id = joined.call_id.clone();
     let call = (call_id.as_str(), joined.call_epoch);
     let principal = joined.principal.clone();
-    let transcript = super::transcript::Transcript::start(app,&joined);
+    let transcript = super::transcript::Transcript::start(app, &joined);
     let mut machine = Session::new(joined, &ids::hex(16), seconds(began));
     let (stops, mut stopped) = mpsc::unbounded_channel::<String>();
     let (is_over, over) = watch::channel(false);
@@ -881,7 +881,9 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         }
     }
     drop(voice);
-    if let Some(transcript)=transcript {transcript.finish().await;}
+    if let Some(transcript) = transcript {
+        transcript.finish().await;
+    }
     desk.ended(&call_id).await;
     let _ = is_over.send(true);
 }

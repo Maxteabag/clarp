@@ -60,7 +60,7 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools)}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools),'routes':[routing(root,tools)]}
 
 
 def calls(root, tools):
@@ -132,6 +132,57 @@ def transcripts(root,tools):
             t.finish()
             rows.append(dict(id=ident,name=t.final.stem,entries=events,document=json.loads(t.final.read_bytes())))
     return rows
+
+
+def routing(root, tools):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from concurrent.futures import Future
+    bodies,spoken,steps=[],[],[]
+    class Inline:
+        def submit(self, fn):
+            fn()
+            return Future()
+        def shutdown(self, **_): pass
+    def route(body):
+        bodies.append(body)
+        return {'output':[]}
+    cfg=tools.frozen_config({'agent_session':'guard','live_tools':{'enabled':True,'agents':[{'session':'member','name':'Theo','role':'engineer'}]}},'user_call')
+    snapshot={'live_tools':cfg,'agent':{'session':'guard'},'profile':{'display_name':'Guard'},'host_id':'host-test'}
+    now=[0.0]
+    with patch.object(tools,'log'),patch.object(tools,'log_exception'),patch.object(tools.time,'strftime',return_value='12:13'):
+        call=tools.CallTools(snapshot,'call-one',lambda kind,text:spoken.append([kind,text]),
+                            effects=SimpleNamespace(route=route),clock=lambda:now[0],executor=Inline(),
+                            principal='phone-one',ledger=tools.Ledger(root/'routing'/'ledger.json'))
+        def step(at,kind,delta=''):
+            now[0]=at
+            event={'type':kind,'delta':delta}
+            bodies.clear();spoken.clear()
+            if kind=='tick': call.tick()
+            else: call.observe(event)
+            steps.append(dict(at=at,event=event,bodies=bodies.copy(),spoken=spoken.copy()))
+        step(0,'session.output_transcript.delta','hello')
+        step(1,'session.input_transcript.delta','Check ')
+        step(2,'session.input_transcript.delta','this')
+        step(2.2,'session.output_transcript.delta','yes')
+        step(2.3,'session.input_transcript.delta',' ')
+        step(2+tools.SETTLE_S-0.001,'tick')
+        step(2+tools.SETTLE_S,'tick')
+        step(7,'session.delegation.created')
+        for i in range(44):
+            step(10+i,'session.'+('input' if i%2 else 'output')+'_transcript.delta','x'+str(i))
+        step(58,'session.delegation.created')
+        step(60,'session.input_transcript.delta','a'*4001)
+        for i in range(31): step(61+i,'session.delegation.created')
+        call.close()
+    recorded=[]
+    for step in steps:
+        ids=[]
+        for body in step.pop('bodies'):
+            if body not in recorded: recorded.append(body)
+            ids.append(recorded.index(body))
+        step['body_ids']=ids
+    return dict(config=cfg,steps=steps,bodies=recorded)
 
 
 def callbacks(root, tools):

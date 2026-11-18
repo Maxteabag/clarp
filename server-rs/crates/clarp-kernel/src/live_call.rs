@@ -18,6 +18,7 @@
 
 pub mod callback;
 pub mod receipts;
+pub mod routing;
 pub mod team;
 pub mod transcript;
 
