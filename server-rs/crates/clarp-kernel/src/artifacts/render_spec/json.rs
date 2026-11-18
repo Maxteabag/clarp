@@ -668,6 +668,28 @@ impl Reader<'_> {
     }
 }
 
+/// Whether any text of a value, a key among them, holds half of a UTF-16 pair: what no store
+/// and no client can hold (`request_texts.lone_surrogate`, the Python Host's R79).
+pub fn holds_lone(value: &J) -> bool {
+    let mut pending = vec![value];
+    while let Some(item) = pending.pop() {
+        match item {
+            J::Text(Text::Lone(_)) => return true,
+            J::Array(items) => pending.extend(items),
+            J::Object(fields) => {
+                for (key, value) in fields.iter() {
+                    if matches!(key, Text::Lone(_)) {
+                        return true;
+                    }
+                    pending.push(value);
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// A pointer one step further (`render_spec._path`): an index, a key the contract names, or
 /// a key that passes the identifier rule. Any other key is never named: the pointer stays
 /// where it was.

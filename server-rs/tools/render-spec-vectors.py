@@ -852,6 +852,24 @@ def envelope_cases():
     return out
 
 
+def text_cases():
+    """(name, JSON text): bodies with and without a text no store can hold (tests/unit/test_request_texts.py and
+    more)."""
+    return [
+        ('ordinary texts, signs beyond ASCII among them', json.dumps({'a': ['Caf' + chr(0xe9), {chr(0x6771) + chr(0x4eac): 1}],
+                                                                     'b': None, 'c': 2.5})),
+        ('a high half in a value', json.dumps({'a': 'x' + chr(0xd800)})),
+        ('a low half in a key', json.dumps({'x' + chr(0xdc80): 1})),
+        ('the last half deep in lists and objects', json.dumps({'a': [{'b': [chr(0xdfff)]}]})),
+        ('a half in a key deep down', json.dumps({'a': {'b': [{chr(0xd800): 1}]}})),
+        ('a pair joined is no half', json.dumps({'a': chr(0x1f600)})),
+        ('a pair written as two escapes is no half', '{"a": "\\ud83d\\ude00"}'),
+        ('nothing', '{}'),
+        ('a half among other texts', json.dumps({'title': 'Notes', 'payload': {'content': 'hi', 'x': ['a', 'b' + chr(0xd800)]}})),
+        ('numbers, truths and nothing', json.dumps({'a': [1, True, None, 1.5]})),
+    ]
+
+
 # ---- running the rules ---------------------------------------------------------------------------------------------
 
 def run() -> dict:
@@ -864,7 +882,7 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import json_depth, render_spec as rs, server_identity
+    from lib import json_depth, render_spec as rs, request_texts, server_identity
     scen_spec = importlib.util.spec_from_file_location('render_spec_scenarios', FIXTURES / 'scenarios.py')
     scenarios = importlib.util.module_from_spec(scen_spec)
     scen_spec.loader.exec_module(scenarios)
@@ -953,6 +971,12 @@ def run() -> dict:
             except rs.Refusal as error:
                 one['refused'] = refusal(error)
             envelopes.append(one)
+
+        # A text no store can hold, anywhere in a body (request_texts.lone_surrogate, R79).
+        unstorable = []
+        for name, body in text_cases():
+            unstorable.append({'name': name, 'text': body,
+                          'holds_lone': request_texts.lone_surrogate(read(body.encode()))})
 
         # The reference's own vectors, played through the rules as its store plays them.
         flows = []
@@ -1102,7 +1126,7 @@ def run() -> dict:
             'probes': [dumps(probe) for probe in probes()],
             'without_a_catalog': without, 'canonical': canonical, 'reads': reads, 'payloads': payloads,
             'answers': answers, 'flows': flows, 'messages': told, 'clients': seen, 'catalogs': loaded,
-            'envelopes': envelopes}
+            'envelopes': envelopes, 'texts': unstorable, 'sentence': request_texts.SENTENCE}
 
 
 def main() -> int:
@@ -1116,9 +1140,9 @@ def main() -> int:
         return 1
     said = json.loads(ran.stdout.splitlines()[-1])
     lines = ['{']
-    for name in ('what', 'catalog_sha256', 'identifiers', 'probes', 'without_a_catalog', 'canonical'):
+    for name in ('what', 'catalog_sha256', 'identifiers', 'probes', 'without_a_catalog', 'canonical', 'sentence'):
         lines.append(f' {json.dumps(name)}: {json.dumps(said[name], ensure_ascii=True)},')
-    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs', 'envelopes')
+    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs', 'envelopes', 'texts')
     for number, name in enumerate(sections):
         lines.append(f' {json.dumps(name)}: [')
         items = said[name]

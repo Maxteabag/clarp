@@ -421,6 +421,25 @@ fn the_texts_besides_a_payload_are_checked_as_the_python_host_checks_them() {
 }
 
 #[test]
+fn a_text_no_store_can_hold_is_found_as_the_python_host_finds_it() {
+    let vectors = vectors();
+    assert_eq!(spec::UNSTORABLE, vectors["sentence"]);
+    let (mut holds, mut not) = (0, 0);
+    for case in vectors["texts"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let body = json::read(case["text"].as_str().unwrap().as_bytes()).unwrap();
+        let found = json::holds_lone(&body);
+        assert_eq!(json!(found), case["holds_lone"], "{name}");
+        if found {
+            holds += 1;
+        } else {
+            not += 1;
+        }
+    }
+    assert_eq!((holds, not), (5, 5));
+}
+
+#[test]
 fn the_agent_is_told_the_answers_as_the_python_host_tells_them() {
     let vectors = vectors();
     let mut told = 0;

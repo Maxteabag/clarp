@@ -111,6 +111,10 @@ pub const STRUCTURAL_KEYS: [&str; 26] = [
     "$bindState",
 ];
 
+/// What a request to `/artifacts` or `/decisions` is answered when a text of its body is one
+/// no store can hold (`request_texts.SENTENCE`, R79).
+pub const UNSTORABLE: &str = "A text in this request holds a character that cannot be stored.";
+
 /// The texts of a publication or a revision besides its payload, in the order they are
 /// checked, by the request's own keys.
 pub const ENVELOPE_TEXTS: [&str; 6] = [
