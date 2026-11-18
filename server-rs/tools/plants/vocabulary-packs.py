@@ -113,5 +113,47 @@ for why,old,new in [
         ('stream reports another engine','run.model,','"wrong-model",')]:
     change(C,'admin',why,old,new)
 
+J='clarp-host/src/vocabulary/judge.rs'
+for why,old,new in [
+        ('judge uses wrong model','"model":"jev-latest"','"model":"jev-other"'),
+        ('judge receives text under another key','"state":{"transcript":text}','"state":{"speech":text}'),
+        ('wrong judgment question id','"questions":{"junk":','"questions":{"other":'),
+        ('billing refusal has the wrong hold','if billing { 3600 } else { 120 }','if billing { 120 } else { 120 }'),
+        ('billing error does not open the breaker','if billing || b.failures >= 3','if !billing && b.failures >= 3'),
+        ('lowest timeout refused','(100..=30000)','(101..=30000)'),
+        ('highest timeout refused','(100..=30000)','(100..=29999)'),
+        ('timeout is not saved','"judgments.timeout_ms".into(), n.to_string()','"judgments.other".into(), n.to_string()'),
+        ('enabling the judge is not saved','"judgments.enabled".into(),','"judgments.other_enabled".into(),'),
+        ('wrong settings refusal','"timeout_ms must be an integer"','"expected integer"'),
+        ('wrong site refusal','"sites must be an object"','"expected an object"'),
+        ('an unanswered call never falls back','let fallback = || clarp_kernel::heard::kept(&text);','let fallback = || text.clone();')]:
+    change(J,'admin',why,old,new)
+
+for why,old,new in [
+        ('wrong kind refusal','"kind must be static or dynamic"','"unknown kind"'),
+        ('pack response loses its id','"pack_id":id}))','"pack":id}))'),
+        ('wrong profile duplication refusal','"a profile with that name exists"','"duplicate profile"'),
+        ('term text limit bypasses update clamp','n.clamp(0.0, 1.0)','n.clamp(0.0, 2.0)'),
+        ('wrong assignment owner refusal','"assign to exactly one of agent_id or team_id"','"assign to an owner"'),
+        ('workspace flag accepts only false','let enabled = v["enabled"]\n                .as_bool()','let enabled = v["enabled"]\n                .as_bool().filter(|b| !*b)'),
+        ('unassign refusal changes','"agent_id or team_id is required"','"an owner is required"'),
+        ('term deletion leaves the term','DELETE FROM term WHERE term_id=?','DELETE FROM term WHERE term_id=-?'),
+        ('pack membership positions move','integer(&v["position"], 0)?','integer(&v["position"], 0)? + 1'),
+        ('workspace flag is not persisted','UPDATE profile SET harvests=? WHERE profile_id=?','UPDATE profile SET harvests=NOT ? WHERE profile_id=?'),
+        ('pack deletion leaves an empty pack','DELETE FROM pack WHERE pack_id=?','DELETE FROM pack WHERE pack_id=? AND 0'),
+        ('profile deletion leaves an empty profile','DELETE FROM profile WHERE profile_id=?','DELETE FROM profile WHERE profile_id=? AND 0')]:
+    change(S,'admin',why,old,new)
+for why,old,new in [
+        ('agent has no static terms','if kind == "static"','if kind == "other"'),
+        ('terms ordered by lowest rarity first','ORDER BY rarity DESC,term_id','ORDER BY rarity ASC,term_id'),
+        ('workspace never contributes names','if profile.as_ref().is_some_and(|(_, yes)| *yes)','if profile.as_ref().is_some_and(|(_, yes)| !yes)'),
+        ('preview reports another session','audit["session"] = json!(self.session)','audit["session"] = Value::Null')]:
+    if why!='terms ordered by lowest rarity first':change(C,'admin',why,old,new)
+for why,old,new in [
+        ('audio result has another MIME type','header("content-type", kind)','header("content-type", "application/octet-stream")'),
+        ('range responses return a full-response status','status(StatusCode::PARTIAL_CONTENT)','status(StatusCode::OK)'),
+        ('invalid trace has the wrong refusal','"no retained audio for that trace"','"no clip"')]:
+    if why not in ('invalid trace has the wrong refusal',):change(A,'admin',why,old,new)
+
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

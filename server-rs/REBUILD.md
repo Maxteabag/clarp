@@ -2129,6 +2129,22 @@ Cartesia Ink-Whisper receives the uploaded clip as a multipart file. Ink-2 recei
 over a socket, with vocabulary in its URL. Partial transcripts are replaced as the provider speaks,
 and only the final parts are joined for the answer.
 
+
+**The vocabulary** (18 Nov 2026). A transcription request compiles the selected profile against the
+engine’s budget. Guaranteed terms enter first, then remaining terms compete by priority, rarity,
+recency and observed mishearings. Local Whisper prompts put the strongest terms last. The preview
+shows the payload, included and dropped terms, and per-pack counts without creating a run.
+Workspace names are harvested only for an opted-in profile. The Host caches that harvest for five
+minutes under the directory and Git revision.
+
+The requested vocabulary, returned transcript and elapsed time are linked by run id. A completed
+stream turn records the keyterms actually supplied at connection time. Retried clip jobs return
+the saved result. Optional retained audio is readable by trace, with its original MIME type.
+The Host keeps at most 500 clips for up to fourteen days, sweeping when it saves a clip.
+An enabled junk-transcript judge can preserve speech that the phrase filter would discard. It
+falls back to the phrase filter when the provider is unavailable. A billing refusal holds further
+asks for an hour; three ordinary failures hold them for two minutes.
+
 **The heartbeat** (16 Nov 2026). An agent that asked for it is given a turn when it has been idle for the
 owner's interval, so that it looks at what it has standing: the prompt, the plan it has (its title and at
 most twelve things that are open, each followed by its parts), and before them a word about a turn that was

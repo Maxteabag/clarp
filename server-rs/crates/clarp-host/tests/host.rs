@@ -28599,7 +28599,7 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         ("CLARP_JUDGE_ENDPOINT", endpoint.as_str()),
         ("CLARP_FLUX_ENDPOINT", flux.address.as_str()),
         ("ELEVEN_API_KEY", "unit"),
-        ("DEEPGRAM_API_KEY", "unit"),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
         ("TYPESAFE_API_KEY", "unit"),
     ];
     let host = place.start_in(TOKEN, &[], &world);
@@ -28685,20 +28685,41 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         true
     );
     host.post("/select", json!({"session":session}));
-    let workspace=place.root.join("work");
-    std::fs::write(workspace.join("PloverChecklist.rs"),"unused contents").unwrap();
+    let workspace = place.root.join("work");
+    std::fs::write(workspace.join("PloverChecklist.rs"), "unused contents").unwrap();
     let meter = host.get(&format!(
         "/vocab/preview?session={session}&model=elevenlabs:scribe_v2&delegated=true"
     ));
-    assert!(!meter["payload"].as_str().unwrap().contains("PloverChecklist"));
-    let changed=host.post("/vocab/profiles/workspace",json!({"profile_id":pf,"enabled":true}));
-    assert_eq!(changed["harvests_workspace"],true);
-    let where_from=host.get(&format!("/vocab/preview?session={session}&model=deepgram:nova-3"));
-    assert!(where_from["payload"].as_str().unwrap().contains("PloverChecklist"),"{where_from}");
-    std::fs::write(workspace.join("OrioleChecklist.rs"),"unused contents").unwrap();
-    let cached=host.get(&format!("/vocab/preview?session={session}&model=deepgram:nova-3"));
-    assert_eq!(cached,where_from);
-    host.post("/vocab/profiles/workspace",json!({"profile_id":pf,"enabled":false}));
+    assert!(
+        !meter["payload"]
+            .as_str()
+            .unwrap()
+            .contains("PloverChecklist")
+    );
+    let changed = host.post(
+        "/vocab/profiles/workspace",
+        json!({"profile_id":pf,"enabled":true}),
+    );
+    assert_eq!(changed["harvests_workspace"], true);
+    let where_from = host.get(&format!(
+        "/vocab/preview?session={session}&model=deepgram:nova-3"
+    ));
+    assert!(
+        where_from["payload"]
+            .as_str()
+            .unwrap()
+            .contains("PloverChecklist"),
+        "{where_from}"
+    );
+    std::fs::write(workspace.join("OrioleChecklist.rs"), "unused contents").unwrap();
+    let cached = host.get(&format!(
+        "/vocab/preview?session={session}&model=deepgram:nova-3"
+    ));
+    assert_eq!(cached, where_from);
+    host.post(
+        "/vocab/profiles/workspace",
+        json!({"profile_id":pf,"enabled":false}),
+    );
     assert_eq!(meter["profile_id"], pf);
     assert!(meter["payload"].as_str().unwrap().contains("Nadia"));
     assert!(meter["payload"].as_str().unwrap().contains("Plover"));
@@ -28803,6 +28824,42 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
     let host = place.start_in(TOKEN, &[], &world);
     assert_eq!(host.get(&path), audit);
     assert_eq!(host.get("/vocab/profiles")["profiles"][0]["profile_id"], pf);
+    for (body,why) in [
+        (json!({"enabled":"true"}),"enabled must be a boolean"),
+        (json!({"timeout_ms":"100"}),"timeout_ms must be an integer"),
+        (json!({"timeout_ms":99}),"timeout_ms must be between 100 and 30000"),
+        (json!({"timeout_ms":30001}),"timeout_ms must be between 100 and 30000"),
+        (json!({"sites":[]}),"sites must be an object"),
+        (json!({"sites":{"missing":true}}),"unknown judgment site: missing"),
+        (json!({"sites":{"junk":"yes"}}),"sites.junk must be a boolean"),
+    ] {
+        let (status,response)=host.ask("POST","/judgments/settings",Some(&body));
+        assert_eq!((status,response["error"].as_str()),(400,Some(why)));
+    }
+    for limit in [100,30000] {
+        assert_eq!(host.post("/judgments/settings",json!({"timeout_ms":limit}))["settings"]["timeout_ms"],limit);
+    }
+    assert_eq!(host.post("/transcription-providers",json!({"retain_audio":false}))["retain_audio"],false);
+    let unretained=hear(&host,"unretained");
+    let unretained=host.get(&format!("/vocab/run?trace_id={}",unretained["trace_id"].as_str().unwrap()));
+    assert_eq!(unretained["audio_url"],Value::Null);
+    let partial=fetch(&host,TOKEN,"GET",audit["audio_url"].as_str().unwrap(),&[("Range","bytes=1-3")],b"");
+    assert_eq!((partial.status,partial.text().as_str()),(206,"ynt"));
+    assert_eq!(host.get(&format!("/vocab/runs?session={session}&limit=1"))["runs"].as_array().unwrap().len(),1);
+    assert_eq!(host.get("/vocab/runs?session=nobody")["runs"],json!([]));
+    host.kill();
+    let (billing,asked)=answers(vec![("/judge","402 Payment Required","fixture".into())]);
+    let url=format!("{billing}/judge");let mut switches=world.to_vec();
+    switches.retain(|(k,_)|*k!="CLARP_JUDGE_ENDPOINT");switches.push(("CLARP_JUDGE_ENDPOINT",url.as_str()));
+    let host=place.start_in(TOKEN,&[],&switches);
+    assert_eq!(hear(&host,"billing")["text"],"");
+    let open=host.get("/judgments/settings")["settings"]["breaker_open_seconds"].as_f64().unwrap();
+    assert!((3590.0..=3600.0).contains(&open));
+    assert_eq!(hear(&host,"breaker")["text"],"");
+    assert_eq!(asked.lock().unwrap().len(),1);
+    host.post("/judgments/settings",json!({"enabled":false}));
+    assert_eq!(host.get("/judgments/settings")["settings"]["breaker_open_seconds"],0.0);
+
 }
 
 /// A stand-in for the voice of a live call, on this machine: it takes the key of the tests

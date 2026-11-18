@@ -46,8 +46,7 @@ const SAY_THE_REST: &str = r#"{"type": "CloseStream"}"#;
 /// How long the engine is given to take its own socket's end.
 const ENDS_WITHIN: Duration = Duration::from_secs(2);
 
-/// What this Host keeps of a stream's turns: a name for each. It writes no runs down and
-/// keeps no sound: it has no vocabulary to write runs of yet, and keeps no clips.
+/// Records completed turns and retains their WAV only while the setting is enabled.
 struct Named {
     session: String,
     model: String,
