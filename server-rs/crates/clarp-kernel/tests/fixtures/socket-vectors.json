@@ -1,0 +1,312 @@
+{
+ "what": "Whether a request asks for a socket, by server/lib/ws.py is_websocket_upgrade. `table` has one sign for every combination of what the three headers say, in the order itertools.product goes through them as they are listed (the last changes fastest); null: the header is not there.",
+ "upgrade": [
+  null,
+  "websocket",
+  "WebSocket",
+  " websocket ",
+  "WEBSOCKET\t",
+  "\u001fwebsocket\u00a0",
+  "websocket, h2c",
+  "h2c",
+  "",
+  "web socket",
+  "websockets"
+ ],
+ "connection": [
+  null,
+  "Upgrade",
+  "upgrade",
+  " UPGRADE ",
+  "keep-alive, Upgrade",
+  "keep-alive,upgrade",
+  "upgrade , keep-alive",
+  ",upgrade,",
+  "upgrade\u00a0,close",
+  "keep-alive,\u001fupgrade\u001f",
+  "keep-alive",
+  "close",
+  "",
+  "Upgrade;x",
+  "upgraded",
+  "up grade",
+  "keep-alive Upgrade"
+ ],
+ "key": [
+  null,
+  "dGhlIHNhbXBsZSBub25jZQ==",
+  " k ",
+  "",
+  "   ",
+  "\u00a0",
+  "\u001f"
+ ],
+ "table": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000110000011000001100000110000011000001100000110000011000001100000000000000000000000000000000000000000000000000000000000001100000110000011000001100000110000011000001100000110000011000000000000000000000000000000000000000000000000000000000000011000001100000110000011000001100000110000011000001100000110000000000000000000000000000000000000000000000000000000000000110000011000001100000110000011000001100000110000011000001100000000000000000000000000000000000000000000000000000000000001100000110000011000001100000110000011000001100000110000011000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+ "odd": [
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "h2c"
+    ],
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Upgrade",
+     "h2c"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": false
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "keep-alive"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Connection",
+     "keep-alive"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": false
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ],
+    [
+     "Sec-WebSocket-Key",
+     ""
+    ]
+   ],
+   "asks": false
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     ""
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "UPGRADE",
+     "websocket"
+    ],
+    [
+     "CONNECTION",
+     "Upgrade"
+    ],
+    [
+     "SEC-WEBSOCKET-KEY",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "upgrade",
+     "websocket"
+    ],
+    [
+     "connection",
+     "Upgrade"
+    ],
+    [
+     "sec-websocket-key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "uPgRaDe",
+     "websocket"
+    ],
+    [
+     "cOnNeCtIoN",
+     "Upgrade"
+    ],
+    [
+     "sEc-wEbSoCkEt-kEy",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "upgrade",
+     "h2c"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": false
+  },
+  {
+   "headers": [
+    [
+     "Host",
+     "a-host"
+    ],
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ],
+    [
+     "Sec-WebSocket-Version",
+     "13"
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Key",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ],
+    [
+     "Sec-WebSocket-Version",
+     "8"
+    ]
+   ],
+   "asks": true
+  },
+  {
+   "headers": [
+    [
+     "Upgrade",
+     "websocket"
+    ],
+    [
+     "Connection",
+     "Upgrade"
+    ],
+    [
+     "Sec-WebSocket-Accept",
+     "dGhlIHNhbXBsZSBub25jZQ=="
+    ]
+   ],
+   "asks": false
+  },
+  {
+   "headers": [],
+   "asks": false
+  }
+ ]
+}

@@ -48,7 +48,22 @@ impl Place {
 
     /// Starts the Host with more on its command line and more in its environment.
     fn start_in(&self, token: &str, more: &[&str], world: &[(&str, &str)]) -> Host {
-        let mut process = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        self.start_without(token, more, world, &[])
+    }
+
+    /// The same, in an environment that lacks what is named last.
+    fn start_without(
+        &self,
+        token: &str,
+        more: &[&str],
+        world: &[(&str, &str)],
+        without: &[&str],
+    ) -> Host {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        for name in without {
+            command.env_remove(name);
+        }
+        let mut process = command
             .args(["--data", self.root.join("data").to_str().unwrap()])
             .args(["--run", self.root.join("run").to_str().unwrap()])
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
@@ -22947,4 +22962,713 @@ fn a_host_that_puts_the_logins_in_place_itself_leaves_a_waiting_turn_to_its_sele
         switch(json!({ "provider": "claude", "alias": "a b" })).1["error"],
         "invalid_alias"
     );
+}
+
+// ---- sockets: a terminal ----------------------------------------------------------------------
+
+/// A stand-in for a shell: it says how it was started, and does what it is typed.
+const STAND_IN_SHELL: &str = r#"#!/usr/bin/env python3
+import os, signal, subprocess, sys, time, tty
+
+def size():
+    now = os.get_terminal_size(0)
+    return f'{now.columns}x{now.lines}'
+
+def say(text):
+    sys.stdout.write(text + '\n')
+    sys.stdout.flush()
+
+signal.signal(signal.SIGWINCH, lambda *_: say('winch: ' + size()))
+try:
+    os.close(os.open('/dev/tty', os.O_RDWR))
+    own = True
+except OSError:
+    own = False
+secrets = sorted(name for name in os.environ if name in (
+    'CLARP_HOST_TOKEN', 'CLARP_PUSH_CREDENTIAL', 'CLARP_SOURCE_TOKEN', 'CLARP_PEER_TOKEN'))
+say(f'started: pid={os.getpid()} args={sys.argv[1:]} cwd={os.getcwd()} term={os.environ.get("TERM")} '
+    f'lang={os.environ.get("LANG")} kept={os.environ.get("KEPT")} secrets={secrets} size={size()} '
+    f'leads={os.getsid(0) == os.getpid()} own={own} .')
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    line = line.rstrip('\n')
+    if line == 'bye':
+        say('leaving')
+        sys.exit(0)
+    elif line == 'deaf':
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        say('deaf to asking')
+    elif line == 'child':
+        # A child in the shell's own group that does not go when the terminal does.
+        child = subprocess.Popen(['sleep', '600'],
+                                 preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_IGN))
+        say(f'child: pid={child.pid} ;')
+    elif line == 'much':
+        sys.stdout.write('x' * 300000 + '\n')
+        sys.stdout.flush()
+        say('that was much')
+    elif line == 'raw':
+        tty.setraw(0)
+        say('hears no more')
+        time.sleep(600)
+    else:
+        say(f'typed: {line}')
+"#;
+
+/// A Host whose shell is the stand-in, in a home of its own, with the Host's secrets in
+/// its environment; and that home.
+fn host_with_a_shell(
+    place: &Place,
+    token: &str,
+    more: &[&str],
+    world: &[(&str, &str)],
+) -> (Host, PathBuf) {
+    let home = place.root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let shell = place.root.join("stand-in-shell");
+    program(&shell, STAND_IN_SHELL);
+    let mut whole = vec![
+        ("SHELL", shell.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
+        ("LANG", "xx_YY.UTF-8"),
+        ("KEPT", "yes"),
+        ("CLARP_PUSH_CREDENTIAL", "a-secret-of-the-host"),
+        ("CLARP_SOURCE_TOKEN", "a-secret-of-the-host"),
+        ("CLARP_PEER_TOKEN", "a-secret-of-the-host"),
+    ];
+    whole.extend_from_slice(world);
+    let host = place.start_in(token, more, &whole);
+    (host, std::fs::canonicalize(home).unwrap())
+}
+
+/// What stands after a name in what a stand-in said of itself: `name=value `.
+fn said_of(printed: &str, name: &str) -> String {
+    let from = printed
+        .find(&format!(" {name}="))
+        .unwrap_or_else(|| panic!("no {name} in {printed:?}"));
+    let rest = &printed[from + name.len() + 2..];
+    // A list is said with spaces in it.
+    let end = match rest.strip_prefix('[') {
+        Some(list) => list.find(']').unwrap() + 2,
+        None => rest.find(' ').unwrap(),
+    };
+    rest[..end].to_string()
+}
+
+/// Whether a process is gone: there is none of this number, or what is left of it waits
+/// to be collected.
+fn is_gone(pid: &str) -> bool {
+    match std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        Ok(stat) => stat
+            .rsplit_once(") ")
+            .is_some_and(|(_, rest)| rest.starts_with('Z')),
+        Err(_) => true,
+    }
+}
+
+type Door = tungstenite::WebSocket<TcpStream>;
+
+/// Asks for a socket at the Host's door. `Err`: the status it was refused with.
+fn socket_at(host: &Host, token: &str, path: &str) -> Result<Door, u16> {
+    use tungstenite::client::IntoClientRequest;
+    let stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let mut request = format!("ws://{}{path}", host.address)
+        .into_client_request()
+        .unwrap();
+    if !token.is_empty() {
+        let bearer = format!("Bearer {token}").parse().unwrap();
+        request.headers_mut().insert("Authorization", bearer);
+    }
+    match tungstenite::client(request, stream) {
+        Ok((socket, _)) => Ok(socket),
+        Err(tungstenite::HandshakeError::Failure(tungstenite::Error::Http(refused))) => {
+            Err(refused.status().as_u16())
+        }
+        Err(other) => panic!("{other}"),
+    }
+}
+
+/// A request for a socket written out by hand, and the whole of what came back.
+fn asked_for_a_socket(host: &Host, token: &str, path: &str) -> Fetched {
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(20)))
+        .unwrap();
+    let authorization = if token.is_empty() {
+        String::new()
+    } else {
+        format!("Authorization: Bearer {token}\r\n")
+    };
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: test\r\n{authorization}Upgrade: websocket\r\nConnection: Upgrade\r\n\
+         Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+    // The answer is read by its length: a connection that is not closed has no end.
+    let mut answer = Vec::new();
+    let mut more = |answer: &mut Vec<u8>| {
+        let mut piece = [0u8; 4096];
+        let count = stream.read(&mut piece).unwrap();
+        assert!(count > 0, "the answer broke off: {answer:?}");
+        answer.extend_from_slice(&piece[..count]);
+    };
+    let end = loop {
+        let end = answer.windows(4).position(|window| window == b"\r\n\r\n");
+        match end {
+            Some(end) => break end,
+            None => more(&mut answer),
+        }
+    };
+    let head = String::from_utf8_lossy(&answer[..end]).into_owned();
+    let mut lines = head.lines();
+    let status = lines
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no status in: {head}"));
+    let headers: Vec<(String, String)> = lines
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.trim().to_lowercase(), value.trim().to_string()))
+        .collect();
+    let length = headers.iter().find(|(name, _)| name == "content-length");
+    let length: usize = length.map_or(0, |(_, length)| length.parse().unwrap());
+    while answer.len() < end + 4 + length {
+        more(&mut answer);
+    }
+    Fetched {
+        status,
+        headers,
+        body: answer[end + 4..].to_vec(),
+    }
+}
+
+/// What a terminal at the door printed so far, and the largest piece it came in.
+struct Screen {
+    socket: Door,
+    printed: String,
+    largest: usize,
+}
+
+impl Screen {
+    fn open(host: &Host, token: &str) -> Self {
+        let socket = socket_at(host, token, "/server-terminal").expect("a terminal is opened");
+        let mut screen = Self {
+            socket,
+            printed: String::new(),
+            largest: 0,
+        };
+        screen.until(" own=");
+        screen.until(" .");
+        screen
+    }
+
+    /// Reads on until the terminal has printed this.
+    fn until(&mut self, what: &str) {
+        self.until_times(what, 1);
+    }
+
+    /// Reads on until the terminal has printed this so many times.
+    fn until_times(&mut self, what: &str, times: usize) {
+        while self.printed.matches(what).count() < times {
+            let seen = self.printed.len();
+            self.until_more(what, seen);
+        }
+    }
+
+    /// Reads one more piece.
+    fn until_more(&mut self, what: &str, seen: usize) {
+        match self.socket.read() {
+            Ok(tungstenite::Message::Binary(bytes)) => {
+                self.largest = self.largest.max(bytes.len());
+                self.printed.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            other => panic!(
+                "waiting for more of {what:?} the terminal said {other:?}, after {:?}",
+                &self.printed[seen.saturating_sub(200)..]
+            ),
+        }
+    }
+
+    fn types(&mut self, keys: &str) {
+        let keys = tungstenite::Message::Binary(keys.as_bytes().to_vec().into());
+        self.socket.send(keys).unwrap();
+    }
+
+    fn says(&mut self, text: &str) {
+        self.socket
+            .send(tungstenite::Message::Text(text.into()))
+            .unwrap();
+    }
+
+    /// Reads to the socket's end: the code it was closed with, when it was closed with one.
+    fn closed(mut self) -> Option<u16> {
+        let mut code = None;
+        loop {
+            match self.socket.read() {
+                Ok(tungstenite::Message::Close(frame)) => {
+                    code = frame.map(|frame| u16::from(frame.code));
+                }
+                Ok(_) => {}
+                Err(_) => return code,
+            }
+        }
+    }
+}
+
+#[test]
+fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("terminal");
+    let (host, home) = host_with_a_shell(&place, ADMIN, &[], &[]);
+    let features = host.get("/server-info")["contract"]["features"].clone();
+    assert_eq!(features["server_home_terminal"], 48, "{features}");
+
+    // What asks for no socket is told so in plain words, on a connection that is closed.
+    let plain = fetch(&host, ADMIN, "GET", "/server-terminal", &[], b"");
+    assert_eq!(
+        (plain.status, plain.text().as_str()),
+        (426, "upgrade required (websocket)")
+    );
+    assert_eq!(
+        (plain.header("content-type"), plain.header("connection")),
+        ("text/plain", "close")
+    );
+    // Nobody without a name is opened one, and no device of limited scope: not the
+    // Host's own, and not an agent's.
+    assert_eq!(
+        asked_for_a_socket(&host, "", "/server-terminal").status,
+        401
+    );
+    assert_eq!(
+        socket_at(&host, "guessed", "/server-terminal").err(),
+        Some(401)
+    );
+    let (limited, _) = pair(&host, "A limited phone", "limited");
+    let (full, _) = pair(&host, "A full phone", "full");
+    let kept_out = asked_for_a_socket(&host, &limited, "/server-terminal");
+    assert_eq!(
+        (kept_out.status, kept_out.text().as_str()),
+        (403, r#"{"error":"this device may not do that"}"#)
+    );
+    assert_eq!(
+        asked_for_a_socket(&host, &limited, "/terminal/echo").status,
+        403
+    );
+    assert_eq!(
+        asked_for_a_socket(&host, &full, "/terminal/echo").status,
+        404
+    );
+
+    // The administrator's shell: started as a login shell in the home, on a terminal of
+    // its own that it leads, of the usual size, told what kind of terminal it is, with
+    // the Host's environment but for the Host's own secrets.
+    let mut screen = Screen::open(&host, ADMIN);
+    let started = screen.printed.clone();
+    let of = |name: &str| said_of(&started, name);
+    assert_eq!(of("args"), "['-l']", "{started}");
+    assert_eq!(of("cwd"), home.to_str().unwrap(), "{started}");
+    assert_eq!(
+        (
+            of("term").as_str(),
+            of("lang").as_str(),
+            of("kept").as_str()
+        ),
+        ("xterm-256color", "xx_YY.UTF-8", "yes"),
+        "{started}"
+    );
+    assert_eq!(of("secrets"), "[]", "{started}");
+    assert_eq!(of("size"), "80x24", "{started}");
+    assert_eq!((of("leads").as_str(), of("own").as_str()), ("True", "True"));
+    let shell = of("pid");
+    assert!(!is_gone(&shell));
+
+    // What is typed reaches it, and what it prints comes back.
+    screen.types("hello\n");
+    screen.until("typed: hello");
+    screen.types("one ");
+    screen.types("after another\n");
+    screen.until("typed: one after another");
+
+    // A size is set, and the program is told that its terminal changed: also when the
+    // size is the one it had. A side that is not named is the side a terminal starts with.
+    screen.says(r#"{"resize":{"cols":132,"rows":43}}"#);
+    screen.until("winch: 132x43");
+    screen.says(r#"{"resize":{"cols":100}}"#);
+    screen.until("winch: 100x24");
+    // (What is typed next is read when the program has been told all of that.)
+    screen.types("mark\n");
+    screen.until("typed: mark");
+    let told = screen.printed.matches("winch: 100x24").count();
+    screen.says(r#"{"resize":{"cols":100}}"#);
+    screen.until_times("winch: 100x24", told + 1);
+    // A text that asks for no size, or for one no terminal has, changes nothing, and the
+    // terminal goes on.
+    let winches = screen.printed.matches("winch").count();
+    for nothing in [
+        "not json",
+        "",
+        r#"{"size":{"cols":1,"rows":1}}"#,
+        r#"{"resize":{"cols":"wide","rows":10}}"#,
+        r#"{"resize":{"cols":70000,"rows":10}}"#,
+    ] {
+        screen.says(nothing);
+    }
+    screen.types("still here\n");
+    screen.until("typed: still here");
+    assert_eq!(screen.printed.matches("winch").count(), winches);
+
+    // Much that is printed comes whole, in pieces of no more than a terminal reads at once.
+    let before = screen.printed.len();
+    screen.types("much\n");
+    screen.until("that was much");
+    assert_eq!(screen.printed[before..].matches('x').count(), 300_000);
+    assert!(
+        screen.largest <= 64 * 1024 && screen.largest > 1024,
+        "{}",
+        screen.largest
+    );
+
+    // The program ends: the socket is closed as one that ended well, and nothing is left.
+    screen.types("bye\n");
+    screen.until("leaving");
+    assert_eq!(screen.closed(), Some(1000));
+    wait_for("the shell to be gone", || is_gone(&shell));
+
+    // The client goes: the program and what it started in its group are asked to end.
+    let mut screen = Screen::open(&host, &full);
+    let shell = said_of(&screen.printed, "pid");
+    screen.types("child\n");
+    screen.until(" ;");
+    let child = said_of(
+        &screen.printed[screen.printed.find("child:").unwrap()..],
+        "pid",
+    );
+    assert!(!is_gone(&shell) && !is_gone(&child));
+    screen.socket.close(None).unwrap();
+    assert_eq!(screen.closed(), None);
+    wait_for("the shell and its child to be gone", || {
+        is_gone(&shell) && is_gone(&child)
+    });
+
+    // A program that does not end for the asking is given a second, and then killed with
+    // its group.
+    let mut screen = Screen::open(&host, ADMIN);
+    let shell = said_of(&screen.printed, "pid");
+    screen.types("child\n");
+    screen.until(" ;");
+    let child = said_of(
+        &screen.printed[screen.printed.find("child:").unwrap()..],
+        "pid",
+    );
+    screen.types("deaf\n");
+    screen.until("deaf to asking");
+    let left_at = Instant::now();
+    drop(screen);
+    wait_for("the child to be gone", || is_gone(&child));
+    std::thread::sleep(Duration::from_millis(600).saturating_sub(left_at.elapsed()));
+    assert!(!is_gone(&shell), "killed before it was given its time");
+    wait_for("the shell to be gone", || is_gone(&shell));
+    let took = left_at.elapsed();
+    assert!(took >= Duration::from_millis(900), "{took:?}");
+
+    // A machine that names no shell has the usual one, and one that names a shell it has
+    // not has none; a Host without a token opens no shell for anybody, since nobody says
+    // there who they are; a machine that names no language is given one.
+    let other = Place::new("terminal-plain");
+    let home = other.root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let world = [("SHELL", ""), ("HOME", home.to_str().unwrap())];
+    let plain = other.start_without(ADMIN, &[], &world, &["ENV"]);
+    let mut socket = socket_at(&plain, ADMIN, "/server-terminal").unwrap();
+    let exit = tungstenite::Message::Binary(b"exit 0\n".to_vec().into());
+    socket.send(exit).unwrap();
+    let mut closed = None;
+    while let Ok(said) = socket.read() {
+        if let tungstenite::Message::Close(frame) = said {
+            closed = frame.map(|frame| u16::from(frame.code));
+        }
+    }
+    assert_eq!(closed, Some(1000));
+    drop(plain);
+    let nowhere = other.start_in(ADMIN, &[], &[("SHELL", "/nowhere/is/a/shell")]);
+    let none = asked_for_a_socket(&nowhere, ADMIN, "/server-terminal");
+    assert_eq!(
+        (
+            none.status,
+            none.text().as_str(),
+            none.header("content-type")
+        ),
+        (500, "server shell unavailable", "text/plain")
+    );
+    // (What asks for no socket is told that first, whatever the machine has.)
+    let plain = fetch(&nowhere, ADMIN, "GET", "/server-terminal", &[], b"");
+    assert_eq!(
+        (plain.status, plain.text().as_str()),
+        (426, "upgrade required (websocket)")
+    );
+    drop(nowhere);
+    // And a shell that nobody may run is none.
+    let written = other.root.join("a-shell-nobody-runs");
+    std::fs::write(&written, STAND_IN_SHELL).unwrap();
+    let unrunnable = other.start_in(ADMIN, &[], &[("SHELL", written.to_str().unwrap())]);
+    let none = asked_for_a_socket(&unrunnable, ADMIN, "/server-terminal");
+    assert_eq!(
+        (none.status, none.text().as_str()),
+        (500, "server shell unavailable")
+    );
+    drop(unrunnable);
+    // A shell that cannot be started where it should be (the home is not there) is no
+    // terminal: the socket is opened and closed as one that ended well, with nothing said.
+    let shell = other.root.join("stand-in-shell");
+    program(&shell, STAND_IN_SHELL);
+    let world = [
+        ("SHELL", shell.to_str().unwrap()),
+        ("HOME", "/nowhere/is/a/home"),
+    ];
+    let homeless = other.start_in(ADMIN, &[], &world);
+    let mut socket = socket_at(&homeless, ADMIN, "/server-terminal").unwrap();
+    let mut said = Vec::new();
+    while let Ok(next) = socket.read() {
+        said.push(next);
+    }
+    let ended_well = tungstenite::protocol::CloseFrame {
+        code: tungstenite::protocol::frame::coding::CloseCode::Normal,
+        reason: "".into(),
+    };
+    assert_eq!(said, [tungstenite::Message::Close(Some(ended_well))]);
+    drop(homeless);
+    let open = other.start();
+    let nobody = asked_for_a_socket(&open, "", "/server-terminal");
+    assert_eq!(
+        (nobody.status, nobody.text().as_str()),
+        (
+            401,
+            r#"{"error":"Server terminal requires authenticated full-device access"}"#
+        )
+    );
+    drop(open);
+    let third = Place::new("terminal-language");
+    let home = third.root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let shell = third.root.join("stand-in-shell");
+    program(&shell, STAND_IN_SHELL);
+    let world = [
+        ("SHELL", shell.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
+    ];
+    let speechless = third.start_without(ADMIN, &[], &world, &["LANG"]);
+    let screen = Screen::open(&speechless, ADMIN);
+    assert_eq!(said_of(&screen.printed, "lang"), "en_US.UTF-8");
+    assert_eq!(said_of(&screen.printed, "kept"), "None");
+}
+
+/// One terminal through the stand-in relay: the number of its stream, and what it printed.
+struct RelayedTerminal {
+    sid: u32,
+    printed: String,
+    largest: usize,
+}
+
+impl RelayedTerminal {
+    /// A phone asks for the Host's terminal with its token, and is opened one.
+    fn open(session: &mut Session, sid: u32, token: &str) -> Self {
+        let bearer = format!("Bearer {token}");
+        let asked = json!({ "path": "/server-terminal", "headers": { "authorization": bearer } });
+        session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, sid, &asked));
+        let (kind, of, payload) = session.frame();
+        assert_eq!((kind, of), (relay_rules::WS_ACCEPT, sid));
+        assert_eq!(payload, br#"{"ok":true}"#);
+        let mut terminal = Self {
+            sid,
+            printed: String::new(),
+            largest: 0,
+        };
+        terminal.until(session, " own=");
+        terminal.until(session, " .");
+        terminal
+    }
+
+    fn until(&mut self, session: &mut Session, what: &str) {
+        while !self.printed.contains(what) {
+            let (kind, of, payload) = session.frame();
+            assert_eq!(
+                (kind, of, payload.first()),
+                (relay_rules::WS_MSG, self.sid, Some(&0)),
+                "waiting for {what:?} after {:?}",
+                self.printed
+            );
+            self.largest = self.largest.max(payload.len() - 1);
+            self.printed
+                .push_str(&String::from_utf8_lossy(&payload[1..]));
+        }
+    }
+
+    fn types(&self, session: &mut Session, keys: &[u8]) {
+        let mut said = vec![0u8];
+        said.extend_from_slice(keys);
+        session.tell(relay_rules::frame(relay_rules::WS_MSG, self.sid, &said));
+    }
+
+    fn says(&self, session: &mut Session, text: &str) {
+        let mut said = vec![1u8];
+        said.extend_from_slice(text.as_bytes());
+        session.tell(relay_rules::frame(relay_rules::WS_MSG, self.sid, &said));
+    }
+}
+
+/// How the Host closes a socket it does not open, through the relay.
+fn refused_through_the_relay(session: &mut Session, sid: u32, path: &str, token: &str) -> Value {
+    let bearer = format!("Bearer {token}");
+    let asked = json!({ "path": path, "headers": { "authorization": bearer } });
+    session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, sid, &asked));
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_CLOSE, sid));
+    serde_json::from_slice(&payload).unwrap()
+}
+
+#[test]
+fn a_terminal_is_carried_through_the_relay_as_it_is_at_the_door() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("terminal-relayed");
+    let settings = relay_settings(&place, 0o600);
+    let worker = StandInWorker::new();
+    let (host, home) = host_with_a_shell(
+        &place,
+        ADMIN,
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &worker.address)],
+    );
+    let mut session = worker.session();
+    let (full, _) = pair(&host, "A full phone", "full");
+    let (limited, _) = pair(&host, "A limited phone", "limited");
+
+    // A phone of full scope is opened the Host's terminal: the relay is told that the
+    // socket is open, and then what the shell prints, as bytes.
+    let mut terminal = RelayedTerminal::open(&mut session, 7, &full);
+    let started = terminal.printed.clone();
+    assert_eq!(said_of(&started, "cwd"), home.to_str().unwrap());
+    assert_eq!(said_of(&started, "size"), "80x24");
+    assert_eq!(said_of(&started, "secrets"), "[]");
+    let shell = said_of(&started, "pid");
+    terminal.types(&mut session, b"hello\n");
+    terminal.until(&mut session, "typed: hello");
+    terminal.says(&mut session, r#"{"resize":{"cols":132,"rows":43}}"#);
+    terminal.until(&mut session, "winch: 132x43");
+    let before = terminal.printed.len();
+    terminal.types(&mut session, b"much\n");
+    terminal.until(&mut session, "that was much");
+    assert_eq!(terminal.printed[before..].matches('x').count(), 300_000);
+    assert!(terminal.largest <= 64 * 1024, "{}", terminal.largest);
+    // Other requests are answered while it is open.
+    assert_eq!(session.get_as(&full, "/server-info").status, 200);
+    // The shell ends: the socket is closed with the route's code and the connector's
+    // word, and is no stream of the session any more.
+    terminal.types(&mut session, b"bye\n");
+    terminal.until(&mut session, "leaving");
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_CLOSE, 7));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).unwrap(),
+        json!({ "code": 1000, "reason": "Host connection closed" })
+    );
+    wait_for("the shell to be gone", || is_gone(&shell));
+    terminal.types(&mut session, b"anybody?\n");
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_CLOSE, 7));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).unwrap(),
+        json!({ "code": 1012, "reason": "Host stream gone" })
+    );
+
+    // What the Host does not open is closed in the words for a socket that failed,
+    // whatever the Host answered instead: a device of limited scope, the administrator's
+    // token from elsewhere, a route that is no socket, a path that is no route.
+    let failed = json!({ "code": 1011, "reason": "Host WebSocket failed" });
+    let refused = [
+        ("/server-terminal", limited.as_str()),
+        ("/server-terminal", ADMIN),
+        ("/server-info", full.as_str()),
+        ("/terminal/echo", full.as_str()),
+        ("/nothing-here", full.as_str()),
+    ];
+    for (number, (path, token)) in (20u32..).zip(refused) {
+        let closed = refused_through_the_relay(&mut session, number, path, token);
+        assert_eq!(closed, failed, "{path}");
+    }
+
+    // The phone goes: the shell and what it started end.
+    let mut terminal = RelayedTerminal::open(&mut session, 8, &full);
+    let shell = said_of(&terminal.printed, "pid");
+    terminal.types(&mut session, b"child\n");
+    terminal.until(&mut session, " ;");
+    let child = said_of(
+        &terminal.printed[terminal.printed.find("child:").unwrap()..],
+        "pid",
+    );
+    assert!(!is_gone(&shell) && !is_gone(&child));
+    let gone = json!({ "code": 1001, "reason": "the phone left" });
+    session.tell(relay_rules::json_frame(relay_rules::WS_CLOSE, 8, &gone));
+    wait_for("the shell and its child to be gone", || {
+        is_gone(&shell) && is_gone(&child)
+    });
+
+    // A phone that says more than its route takes is let go, and the route ends: the
+    // relay's one socket waits for no stream. Here the shell stops reading its keys.
+    let mut terminal = RelayedTerminal::open(&mut session, 9, &full);
+    let shell = said_of(&terminal.printed, "pid");
+    terminal.types(&mut session, b"raw\n");
+    terminal.until(&mut session, "hears no more");
+    // Each thing typed is more than a terminal holds for a program that does not read, so
+    // the first is stuck half typed. Behind it wait as many as a line holds by their
+    // weight (31 of this size): 32 are taken, one at a time as a phone types, and nothing
+    // is said of it.
+    let keys = vec![b'k'; 64 * 1024];
+    for _ in 0..32 {
+        terminal.types(&mut session, &keys);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let quiet = Duration::from_millis(500);
+    session
+        .socket
+        .get_ref()
+        .set_read_timeout(Some(quiet))
+        .unwrap();
+    loop {
+        match session.socket.read() {
+            Ok(tungstenite::Message::Binary(data)) => {
+                let said = relay_rules::parsed(&data).map(|(kind, of, _)| (kind, of));
+                panic!("the Host said something of 32 things typed: {said:?}");
+            }
+            // The Host asking whether the relay is there.
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(_)) => break,
+            Err(other) => panic!("{other}"),
+        }
+    }
+    let patient = Duration::from_secs(20);
+    session
+        .socket
+        .get_ref()
+        .set_read_timeout(Some(patient))
+        .unwrap();
+    // The next is one too many.
+    terminal.types(&mut session, &keys);
+    let (kind, of, _) = session.frame();
+    assert_eq!((kind, of), (relay_rules::ABORT, 9));
+    wait_for("the shell that stopped reading to be gone", || {
+        is_gone(&shell)
+    });
+    assert_eq!(session.get_as(&full, "/server-info").status, 200);
+
+    // The session is lost: every terminal of it ends.
+    let terminal = RelayedTerminal::open(&mut session, 10, &full);
+    let shell = said_of(&terminal.printed, "pid");
+    assert!(!is_gone(&shell));
+    drop(session);
+    wait_for("the shell of a lost session to be gone", || is_gone(&shell));
 }

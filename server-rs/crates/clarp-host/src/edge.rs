@@ -160,6 +160,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
     // Reading only: switching and continuing (`hotseat_desk_actions`) are not built.
     (SEATS, 84),
+    // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
+    // home of whoever the Host runs as, for the administrator and a device of full scope.
+    ("server_home_terminal", 48),
 ];
 
 /// The most a conversation that arrives from another Host may weigh, as JSON.
@@ -422,6 +425,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::usage::routes())
         .merge(crate::files::routes())
         .merge(crate::screens::routes())
+        .merge(crate::terminal::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::faces::routes())
@@ -652,6 +656,10 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     if matches!(path, "/dirs" | "/past-sessions") {
         return true;
     }
+    // And an agent's own tool in a terminal: whatever its user types there, it does.
+    if path.starts_with("/terminal/") && method == Method::GET {
+        return true;
+    }
     if method == Method::GET || method == Method::HEAD {
         return false;
     }
@@ -660,7 +668,7 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
 
 /// A request's headers as the rules of trust read them: each as it was sent, a value byte
 /// for byte.
-fn headers_of(headers: &HeaderMap) -> Vec<(String, String)> {
+pub(crate) fn headers_of(headers: &HeaderMap) -> Vec<(String, String)> {
     let headers = headers.iter().map(|(name, value)| {
         let value = value.as_bytes().iter().map(|byte| char::from(*byte));
         (name.as_str().to_string(), value.collect())
@@ -2811,6 +2819,10 @@ mod tests {
             (Method::POST, "/pairing/issue", true),
             (Method::GET, "/dirs", true),
             (Method::GET, "/past-sessions", true),
+            (Method::GET, "/terminal/echo", true),
+            (Method::GET, "/terminal/", true),
+            (Method::GET, "/terminal", false),
+            (Method::GET, "/server-terminal", true),
             (Method::GET, "/personalities/settings", true),
             (Method::GET, "/automation-settings", true),
             (Method::GET, "/agent-files", true),

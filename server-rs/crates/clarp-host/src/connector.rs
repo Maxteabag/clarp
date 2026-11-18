@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderName, HeaderValue, Method, Request, Uri};
+use axum::http::{HeaderName, HeaderValue, Method, Request, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -42,6 +42,7 @@ use tower::ServiceExt;
 
 use crate::config::Config;
 use crate::edge::App;
+use crate::line::{Carried, Carrier, Heard, Hearer, Line, NotTaken, Told};
 
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -439,6 +440,8 @@ struct Serving {
     work: tokio::task::AbortHandle,
     /// Where a request's body goes once it is whole.
     body: Option<oneshot::Sender<Vec<u8>>>,
+    /// Where what a phone says on a socket goes.
+    heard: Option<Hearer>,
 }
 
 /// Hands the relay a message. `false`: the socket did not take it, and is lost.
@@ -504,7 +507,26 @@ async fn serve(router: &Router, socket: Socket, local: &str) -> (Lost, (usize, u
                     }
                 };
                 let told = match step {
-                    Step::Nothing | Step::Body { .. } | Step::Heard { .. } => true,
+                    Step::Nothing | Step::Body { .. } => true,
+                    Step::Heard { sid, said } => {
+                        let said = match said {
+                            rules::Said::Text(text) => Heard::Text(text.to_string()),
+                            rules::Said::Bytes(bytes) => Heard::Bytes(bytes.to_vec()),
+                        };
+                        let line = serving.get(&sid).and_then(|stream| stream.heard.as_ref());
+                        match line.map(|line| line.said(said)) {
+                            // A phone that says more than its route takes is let go: the
+                            // relay's one socket waits for no stream.
+                            Some(Err(NotTaken::TooMuch)) => {
+                                if let Some(stream) = serving.remove(&sid) {
+                                    stream.work.abort();
+                                }
+                                tell(&mut sink, table.heard_too_much(sid)).await
+                            }
+                            // Said to a route that is done: its close is on its way.
+                            _ => true,
+                        }
+                    }
                     Step::Request { sid, meta } => {
                         serial += 1;
                         let (body, whole) = oneshot::channel();
@@ -517,7 +539,13 @@ async fn serve(router: &Router, socket: Socket, local: &str) -> (Lost, (usize, u
                             local.to_string(),
                         );
                         let work = tokio::spawn(work).abort_handle();
-                        serving.insert(sid, Serving { serial, work, body: Some(body) });
+                        let stream = Serving {
+                            serial,
+                            work,
+                            body: Some(body),
+                            heard: None,
+                        };
+                        serving.insert(sid, stream);
                         true
                     }
                     Step::Whole { sid } => {
@@ -528,11 +556,29 @@ async fn serve(router: &Router, socket: Socket, local: &str) -> (Lost, (usize, u
                         }
                         true
                     }
-                    // No route of this Host is a WebSocket yet. A phone that asks for one is
-                    // told so in the words for a Host that could not open it.
-                    Step::Socket { sid, .. } => {
-                        table.forget(sid);
-                        tell(&mut sink, rules::closing(sid, rules::SOCKET_FAILED)).await
+                    // A phone asks for a socket: the Host's own router is asked for it, with
+                    // the line its route will speak on, and the line is carried from then on.
+                    Step::Socket { sid, meta } => {
+                        serial += 1;
+                        let (line, carrier) = Line::new();
+                        let heard = carrier.heard.clone();
+                        let work = conversation(
+                            router.clone(),
+                            say.clone(),
+                            (sid, serial),
+                            meta,
+                            (line, carrier),
+                            local.to_string(),
+                        );
+                        let work = tokio::spawn(work).abort_handle();
+                        let stream = Serving {
+                            serial,
+                            work,
+                            body: None,
+                            heard: Some(heard),
+                        };
+                        serving.insert(sid, stream);
+                        true
                     }
                     Step::Over { sid, tell: last } => {
                         if let Some(stream) = serving.remove(&sid) {
@@ -607,10 +653,24 @@ fn text_of(value: &HeaderValue) -> String {
 /// The answer of the Host's own router to what a frame asked. `None`: it is no request the
 /// Host can be asked.
 async fn answer(router: Router, meta: &Meta, local: &str, body: Vec<u8>) -> Option<Response> {
+    asked(router, meta, local, body, None).await
+}
+
+/// The same, for a request that may come with the line of a socket.
+async fn asked(
+    router: Router,
+    meta: &Meta,
+    local: &str,
+    body: Vec<u8>,
+    line: Option<Carried>,
+) -> Option<Response> {
     let method = Method::from_bytes(meta.method.as_str()?.as_bytes()).ok()?;
     let uri: Uri = meta.path.parse().ok()?;
     let handed = rules::handed_on(&meta.headers, local, body.len(), meta.passthrough)?;
     let mut request = Request::new(Body::from(body));
+    if let Some(line) = line {
+        request.extensions_mut().insert(line);
+    }
     *request.method_mut() = method;
     *request.uri_mut() = uri;
     for (name, value) in handed {
@@ -692,6 +752,68 @@ async fn request(
     let _ = say.send(Said::Done { sid, serial }).await;
 }
 
+// ---- a socket, served by the Host's own router -----------------------------------------------
+
+/// The work of one socket: asks the Host for it, and, where the Host opened it, carries
+/// what its route tells to the relay until the route is done. A socket the Host does not
+/// open is closed in the words for one that failed, whatever the Host answered instead.
+/// What the phone says is handed to the line by the session itself, and a phone that goes
+/// ends this work: the line's other end then hears that nobody is there.
+async fn conversation(
+    router: Router,
+    say: mpsc::Sender<Said>,
+    (sid, serial): (u32, u64),
+    meta: Meta,
+    (line, mut carrier): (Line, Carrier),
+    local: String,
+) {
+    let frame = |frame: Vec<u8>| Said::Frame { sid, serial, frame };
+    let work = async {
+        let line = Some(Carried::new(line));
+        let answered = asked(router, &meta, &local, Vec::new(), line).await;
+        let opened =
+            answered.is_some_and(|answer| answer.status() == StatusCode::SWITCHING_PROTOCOLS);
+        if !opened {
+            let failed = rules::closing(sid, rules::SOCKET_FAILED);
+            let _ = say.send(frame(failed)).await;
+            return;
+        }
+        let accepted = rules::json_frame(rules::WS_ACCEPT, sid, &json!({ "ok": true }));
+        if say.send(frame(accepted)).await.is_err() {
+            return;
+        }
+        // What the route tells, each thing with its kind before it: one for a text, nought
+        // for bytes. The route's close, or its end, closes the phone's socket with the
+        // route's code and the connector's own word.
+        let mut code = crate::line::ENDED_WELL;
+        while let Some(told) = carrier.told.recv().await {
+            let (kind, said) = match told {
+                Told::Text(text) => (1u8, text.into_bytes()),
+                Told::Bytes(bytes) => (0u8, bytes),
+                Told::Close(with, _) => {
+                    code = with;
+                    break;
+                }
+            };
+            let mut message = Vec::with_capacity(1 + said.len());
+            message.push(kind);
+            message.extend_from_slice(&said);
+            let message = rules::frame(rules::WS_MSG, sid, &message);
+            if say.send(frame(message)).await.is_err() {
+                return;
+            }
+        }
+        let closed = rules::closing(sid, (code, rules::SOCKET_CLOSED));
+        let _ = say.send(frame(closed)).await;
+    };
+    // A route that fails altogether fails its own stream, and no other.
+    if AssertUnwindSafe(work).catch_unwind().await.is_err() {
+        let failed = rules::closing(sid, rules::SOCKET_FAILED);
+        let _ = say.send(frame(failed)).await;
+    }
+    let _ = say.send(Said::Done { sid, serial }).await;
+}
+
 // ---- what the apps ask of the relay ----------------------------------------------------------
 
 /// `GET /network/relay`: whether the relay is used, how the connection stands, and the
@@ -707,7 +829,147 @@ pub fn routes() -> Router<App> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
+    use crate::line::testing;
+
+    /// The work of one socket of the relay's, asked of the route of the tests: what it
+    /// says to the session, where the phone's words go in, and the work itself.
+    fn a_conversation(
+        served: &Arc<AtomicUsize>,
+        path: &str,
+    ) -> (mpsc::Receiver<Said>, Hearer, tokio::task::JoinHandle<()>) {
+        async fn broken() -> Response {
+            panic!("a route that fails altogether")
+        }
+        let router = Router::new()
+            .route("/echo", testing::echo(served.clone()))
+            .route("/broken", get(broken));
+        let (say, said) = mpsc::channel::<Said>(WAITING_MOST);
+        let meta = Meta {
+            path: path.to_string(),
+            headers: Map::new(),
+            method: json!("GET"),
+            passthrough: false,
+        };
+        let (line, carrier) = Line::new();
+        let heard = carrier.heard.clone();
+        let local = "127.0.0.1:7690".to_string();
+        let work = conversation(router, say, (5, 9), meta, (line, carrier), local);
+        (said, heard, tokio::spawn(work))
+    }
+
+    /// The next frame a socket's work says: its kind and what it carries.
+    async fn frame(said: &mut mpsc::Receiver<Said>) -> (u8, Vec<u8>) {
+        match next(said).await {
+            Some(Said::Frame { sid, serial, frame }) => {
+                assert_eq!((sid, serial), (5, 9));
+                let (kind, of, payload) = rules::parsed(&frame).unwrap();
+                assert_eq!(of, 5);
+                (kind, payload.to_vec())
+            }
+            Some(Said::Done { .. }) => panic!("the work is done"),
+            None => panic!("the work is gone"),
+        }
+    }
+
+    /// The next thing a socket's work says, when it says anything in time: a wrong rule
+    /// fails a test, and does not keep it waiting.
+    async fn next(said: &mut mpsc::Receiver<Said>) -> Option<Said> {
+        let said = tokio::time::timeout(Duration::from_secs(10), said.recv()).await;
+        said.expect("the work of a socket says something in time")
+    }
+
+    /// The work says that it is done, and nothing after.
+    async fn done(said: &mut mpsc::Receiver<Said>) {
+        assert!(matches!(
+            next(said).await,
+            Some(Said::Done { sid: 5, serial: 9 })
+        ));
+        assert!(next(said).await.is_none());
+    }
+
+    fn closed(code: u16, reason: &str) -> (u8, Vec<u8>) {
+        let said = json!({ "code": code, "reason": reason });
+        (
+            rules::WS_CLOSE,
+            rules::json_frame(rules::WS_CLOSE, 5, &said)[5..].to_vec(),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_socket_of_the_relays_is_told_open_carried_and_closed_with_its_routes_code() {
+        let served = Arc::new(AtomicUsize::new(0));
+        let (mut said, heard, _work) = a_conversation(&served, "/echo");
+        // The relay is told that the socket is open, and then what the route tells: each
+        // thing with its kind before it, one for a text and nought for bytes.
+        assert_eq!(
+            frame(&mut said).await,
+            (rules::WS_ACCEPT, br#"{"ok":true}"#.to_vec())
+        );
+        assert_eq!(
+            frame(&mut said).await,
+            (rules::WS_MSG, b"\x01ready".to_vec())
+        );
+        heard.said(Heard::Text("hello".into())).unwrap();
+        assert_eq!(
+            frame(&mut said).await,
+            (rules::WS_MSG, b"\x01text: hello".to_vec())
+        );
+        heard.said(Heard::Bytes(vec![1, 2, 3])).unwrap();
+        assert_eq!(frame(&mut said).await, (rules::WS_MSG, vec![0, 3, 2, 1]));
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+        // The route closes: the phone's socket is closed with the route's code and the
+        // connector's own word, and the work is done.
+        heard.said(Heard::Text("bye".into())).unwrap();
+        assert_eq!(
+            frame(&mut said).await,
+            closed(4001, "Host connection closed")
+        );
+        done(&mut said).await;
+        testing::nobody_is_served(&served).await;
+
+        // A route that is done without a word is closed as one that ended well.
+        let (mut said, heard, _work) = a_conversation(&served, "/echo");
+        assert_eq!(frame(&mut said).await.0, rules::WS_ACCEPT);
+        assert_eq!(
+            frame(&mut said).await,
+            (rules::WS_MSG, b"\x01ready".to_vec())
+        );
+        heard.said(Heard::Text("end".into())).unwrap();
+        assert_eq!(
+            frame(&mut said).await,
+            closed(1000, "Host connection closed")
+        );
+        done(&mut said).await;
+
+        // What the Host does not open is closed as a socket that failed: a path that is
+        // no route, and a route that fails altogether, which fails no other stream.
+        for path in ["/nothing-here", "/broken"] {
+            let (mut said, _heard, _work) = a_conversation(&served, path);
+            assert_eq!(
+                frame(&mut said).await,
+                closed(1011, "Host WebSocket failed"),
+                "{path}"
+            );
+            done(&mut said).await;
+        }
+
+        // The phone goes: the work is ended, and the route hears that nobody is there,
+        // also when it listens to nothing.
+        for word in ["hello", "deaf"] {
+            let (mut said, heard, work) = a_conversation(&served, "/echo");
+            assert_eq!(frame(&mut said).await.0, rules::WS_ACCEPT);
+            assert_eq!(frame(&mut said).await.0, rules::WS_MSG);
+            heard.said(Heard::Text(word.into())).unwrap();
+            assert_eq!(frame(&mut said).await.0, rules::WS_MSG);
+            assert_eq!(served.load(Ordering::SeqCst), 1);
+            work.abort();
+            drop(heard);
+            testing::nobody_is_served(&served).await;
+        }
+    }
 
     #[test]
     fn the_owners_file_turns_the_relay_on_with_one_word() {
