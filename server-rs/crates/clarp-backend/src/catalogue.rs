@@ -422,3 +422,18 @@ pub fn whole(rows: Vec<(String, Value)>, observed_at: &str) -> Value {
         "freshness_note": FRESHNESS_NOTE,
     })
 }
+
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod grok_muse_vectors {
+    use super::*;
+    #[test]
+    fn model_lists_match_the_reference_parsers() {
+        let fixture: Value = serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/backend-grok-vectors.json")).unwrap();
+        for row in fixture["catalogs"].as_array().unwrap() {
+            let tool = row["tool"].as_str().unwrap();
+            assert_eq!(json!(seen_models(tool,&declared(tool),row["raw"].as_str(),"synthetic")),row["models"]);
+        }
+    }
+}

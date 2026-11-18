@@ -833,5 +833,208 @@
    "printed": "bad-json\n[]\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"A\"}}\n{\"payload_type\": \"run.terminal.completed\", \"payload\": {\"text\": \"terminal\"}}",
    "answer": "terminal"
   }
+ ],
+ "histories": [
+  {
+   "tool": "grok",
+   "log": "{\"type\": \"system\", \"content\": \"You are Grok 4.6 released by xAI.\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<user_info>\\nOS Version: linux\\n</user_info>\"}]}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>\\nskills\\u2026\\n</system-reminder>\"}], \"synthetic_reason\": \"system_reminder\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<user_query>\\nplease fix it\\n</user_query>\"}], \"prompt_index\": 0}\n{\"type\": \"reasoning\", \"id\": \"rs_1\", \"summary\": [{\"type\": \"summary_text\", \"text\": \"thinking\"}], \"status\": \"completed\"}\n{\"type\": \"assistant\", \"content\": \"I'll look at the file.\", \"tool_calls\": [{\"id\": \"synthetic-call\", \"name\": \"run_terminal_command\", \"arguments\": \"{\\\"command\\\": \\\"cat a.txt\\\", \\\"description\\\": \\\"Read a.txt\\\"}\"}], \"model_id\": \"grok-4.6-build\"}\n{\"type\": \"tool_result\", \"tool_call_id\": \"synthetic-call\", \"content\": \"exit: 0\\nhello\\n\"}\n{\"type\": \"assistant\", \"content\": \"\", \"tool_calls\": [{\"id\": \"call-2\", \"name\": \"search_replace\", \"arguments\": \"{\\\"file_path\\\": \\\"a.txt\\\", \\\"old_string\\\": \\\"hello\\\", \\\"new_string\\\": \\\"bye\\\", \\\"replace_all\\\": false}\"}]}\n{\"type\": \"tool_result\", \"tool_call_id\": \"call-2\", \"content\": \"exit: 1\\nno match\"}\n{\"type\": \"assistant\", \"content\": \"done\", \"model_id\": \"grok-4.6-build\"}\n{\"type\": \"user\", \"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>\\nBackground task finished\\n</system-reminder>\"}], \"synthetic_reason\": \"system_reminder\"}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "please fix it",
+     "tools": [],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "I'll look at the file.",
+     "tools": [
+      {
+       "name": "Bash",
+       "summary": "Read a.txt",
+       "action": "running command",
+       "file_path": "",
+       "status": "ok",
+       "id": "synthetic-call",
+       "command": "cat a.txt",
+       "description": "Read a.txt",
+       "result": "hello\n"
+      }
+     ],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "",
+     "tools": [
+      {
+       "name": "Edit",
+       "summary": "a.txt",
+       "action": "editing file",
+       "file_path": "a.txt",
+       "status": "error",
+       "id": "call-2",
+       "old": "hello",
+       "new": "bye",
+       "replace_all": false,
+       "result": "no match"
+      }
+     ],
+     "timestamp": ""
+    },
+    {
+     "role": "assistant",
+     "text": "done",
+     "tools": [],
+     "timestamp": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"recorded_at\": 1700000000000000, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"Read notes.txt with a tool, then reply with exactly the number of lines it has.\"}}}\n{\"recorded_at\": 1700000000000001, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_tool_calls_committed\", \"tool_calls\": [{\"args\": \"{\\\"path\\\":\\\"notes.txt\\\"}\", \"call_id\": \"call_01a171c262dc7685a33aad20ae6b2733\", \"id\": \"fc_01a171c262dc7685a33aad20ae6b2733\", \"name\": \"read_file\"}]}}}\n{\"recorded_at\": 1700000000000002, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"tool_result_batch_committed\", \"results\": [{\"estimated_prompt_tokens\": 34700, \"text\": \"Read text file `notes.txt`.\\n1|alpha\\n2|beta\", \"tool_call_id\": \"call_01a171c262dc7685a33aad20ae6b2733\", \"tool_call_index\": 0}]}}}\n{\"recorded_at\": 1700000000000003, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"2\"}}}\n{\"recorded_at\": 1700000000000004, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "Read notes.txt with a tool, then reply with exactly the number of lines it has.",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "2",
+     "tools": [
+      {
+       "name": "Read",
+       "summary": "notes.txt",
+       "action": "reading file",
+       "file_path": "notes.txt",
+       "status": "ok",
+       "id": "call_01a171c262dc7685a33aad20ae6b2733",
+       "offset": null,
+       "limit": null,
+       "result": "Read text file `notes.txt`.\n1|alpha\n2|beta"
+      }
+     ],
+     "timestamp": "2023-11-14T22:13:20.000003Z",
+     "kind": "final_answer"
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "log": "{\"recorded_at\": 1700000000000000, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"first turn\"}}}\n{\"recorded_at\": 1700000000000001, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"echo: first turn\"}}}\n{\"recorded_at\": 1700000000000002, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}\n{\"recorded_at\": 1700000000000003, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"started\", \"prompt\": \"second turn\"}}}\n{\"recorded_at\": 1700000000000004, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"assistant_message_committed\", \"text\": \"echo: second turn\"}}}\n{\"recorded_at\": 1700000000000005, \"payload_type\": \"runtime.session\", \"payload\": {\"kind\": \"run\", \"event\": {\"kind\": \"terminal\", \"terminal\": \"completed\", \"reason\": null}}}",
+   "turns": [
+    {
+     "role": "user",
+     "text": "first turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000000Z"
+    },
+    {
+     "role": "assistant",
+     "text": "echo: first turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000001Z",
+     "kind": "final_answer"
+    },
+    {
+     "role": "user",
+     "text": "second turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000003Z"
+    },
+    {
+     "role": "assistant",
+     "text": "echo: second turn",
+     "tools": [],
+     "timestamp": "2023-11-14T22:13:20.000004Z",
+     "kind": "final_answer"
+    }
+   ]
+  }
+ ],
+ "catalogs": [
+  {
+   "tool": "grok",
+   "raw": "You are signed in\nAvailable models:\n * synthetic-a (default)\n- synthetic-b\nDefault model: synthetic-a\nsynthetic-a\n",
+   "models": [
+    {
+     "id": "synthetic-a",
+     "label": "synthetic-a",
+     "default_effort": null,
+     "supported_efforts": [
+      "low",
+      "medium",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_probe",
+      "detail": "grok models",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    },
+    {
+     "id": "synthetic-b",
+     "label": "synthetic-b",
+     "default_effort": null,
+     "supported_efforts": [
+      "low",
+      "medium",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_probe",
+      "detail": "grok models",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "raw": "   \nmodels:\nAvailable\n",
+   "models": []
+  },
+  {
+   "tool": "muse",
+   "raw": "{\"rows\": [{\"model_id\": \"test\", \"display_label\": \"Test\", \"visibility\": \"visible\", \"reasoning_effort_variants\": [{\"tier\": \"high\"}, {\"tier\": \"low\"}, {\"tier\": \"high\"}]}, {\"model_id\": \"test\", \"visibility\": \"visible\"}, {\"model_id\": \"private\", \"visibility\": \"hidden\"}, {\"model_id\": \"plain\", \"visibility\": \"visible\"}]}",
+   "models": [
+    {
+     "id": "test",
+     "label": "Test",
+     "default_effort": "high",
+     "supported_efforts": [
+      "low",
+      "high"
+     ],
+     "source": {
+      "kind": "cli_cache",
+      "detail": "muse model catalogue cache",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    },
+    {
+     "id": "plain",
+     "label": "plain",
+     "default_effort": null,
+     "supported_efforts": null,
+     "source": {
+      "kind": "cli_cache",
+      "detail": "muse model catalogue cache",
+      "observed_at": "synthetic",
+      "freshness": "fresh"
+     }
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "raw": "[]",
+   "models": []
+  }
  ]
 }

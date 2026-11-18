@@ -3119,7 +3119,10 @@ impl Actor {
                 // command the agent refuses is about a turn that is no longer live: late news.
                 match &record.entry {
                     Line::Shim(ShimEvent::Spawned { .. }) => {
-                        let _ = batch.command(Command::TurnStarted { turn }, t);
+                        let started = batch.command(Command::TurnStarted { turn }, t).is_ok();
+                        if started && self.backend.binds_at_spawn() && batch.agent().backend_session().is_none() && !self.profile.conversation_id.is_empty() {
+                            let _ = batch.command(Command::TurnBound { turn, backend_session: self.profile.conversation_id.clone() }, t);
+                        }
                     }
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();

@@ -27,5 +27,13 @@ fn commands_and_answers_follow_the_python_backends() {
         assert_eq!(tool(row).answer(row["printed"].as_str().unwrap()), row["answer"].as_str().unwrap());
         answers += 1;
     }
+    for row in fixture["histories"].as_array().unwrap() {
+        let log = row["log"].as_str().unwrap();
+        let turns = match tool(row) {
+            Tool::Grok => clarp_kernel::grok_muse_history::grok(log),
+            Tool::Muse => clarp_kernel::grok_muse_history::muse(log),
+        };
+        assert_eq!(json!(turns), row["turns"]);
+    }
     assert_eq!((commands, answers), (32, 3));
 }

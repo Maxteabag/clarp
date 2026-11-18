@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use clarp_kernel::conversation::{Reply, ToolCall, ToolStatus};
 use clarp_kernel::grok_muse::{Tool, content, event_kind};
+use clarp_kernel::live::Glimpse;
 use clarp_kernel::told;
 use clarp_kernel::turn::{Activity, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
@@ -17,6 +18,8 @@ pub(crate) struct Adapter {
 
 impl Backend for Adapter {
     fn id(&self) -> &'static str { self.tool.id() }
+
+    fn binds_at_spawn(&self) -> bool { true }
 
     fn efforts(&self) -> &'static [&'static str] {
         match self.tool {
@@ -51,11 +54,14 @@ impl Backend for Adapter {
         Some(Launch { program: self.program.clone(), args, stdin: Vec::new(), env: Vec::new() })
     }
 
-    fn answered(&self, printed: &str) -> Result<String,String> { Ok(self.tool.answer(printed)) }
+    fn answered(&self, printed: &str) -> Result<String,String> {
+        let answer = self.tool.answer(printed);
+        if answer.trim().is_empty() { Err(format!("{} returned no answer",self.tool.id())) } else { Ok(answer) }
+    }
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(Stream { tool: self.tool, turn, name: name.into(), part: 0, text: String::new(),
-            calls: BTreeMap::new(), bound: false, outcome: None, stderr: ErrorTail::default() })
+            calls: BTreeMap::new(), outcome: None, stderr: ErrorTail::default() })
     }
 }
 
@@ -66,7 +72,6 @@ struct Stream {
     part: usize,
     text: String,
     calls: BTreeMap<String,ToolCall>,
-    bound: bool,
     outcome: Option<RunOutcome>,
     stderr: ErrorTail,
 }
@@ -78,15 +83,19 @@ impl Stream {
 
     fn flush(&mut self, tools: Vec<String>, out: &mut Vec<Signal>) {
         if self.text.is_empty() && tools.is_empty() { return; }
+        if !self.text.is_empty() { out.push(Signal::Glimpse(Glimpse::Done { id:self.id() })); }
         out.push(Signal::Reply(Reply { id: self.id(), turn: self.turn, text: std::mem::take(&mut self.text), tools, ..Reply::default() }));
         self.part += 1;
     }
 
     fn call(&mut self, raw: &str, name: &str, input: Value, t: i64, out: &mut Vec<Signal>) {
         let id = format!("{}-tool-{raw}", self.name);
+        let name = clarp_kernel::grok_muse_history::tool_name(self.tool,name);
+        let input = clarp_kernel::grok_muse_history::arguments(self.tool,&input);
         let call = ToolCall { id: id.clone(), turn: self.turn, name: name.into(), input, reply: Some(self.id()), started_at_ms: t, ..ToolCall::default() };
         self.calls.insert(raw.into(), call.clone());
         out.push(Signal::Moved(Activity::Tool { name: name.into() }));
+        out.push(Signal::Glimpse(Glimpse::Tool { id:id.clone(),call_id:id.clone(), name:name.to_string(), input:call.input.clone(), whole:true }));
         out.push(Signal::Tool(call));
         self.flush(vec![id],out);
     }
@@ -96,6 +105,7 @@ impl Stream {
             call.status = if ok { ToolStatus::Ok } else { ToolStatus::Error };
             call.output = Some(shorten(&text, 4000));
             call.ended_at_ms = Some(t);
+            out.push(Signal::Glimpse(Glimpse::Returned { id:call.id.clone(),content:Value::String(text),failed:!ok,exit_code:None }));
             out.push(Signal::Tool(call));
             out.push(Signal::Moved(Activity::Thinking));
         }
@@ -168,16 +178,6 @@ impl Interpreter for Stream {
         match &record.entry {
             Entry::Out(line) if self.outcome.is_none() => {
                 let Ok(e) = serde_json::from_str::<Value>(line) else { return };
-                if !self.bound {
-                    let sid = match self.tool {
-                        Tool::Muse => e["stream"]["id"].as_str().filter(|_| e["stream"]["kind"] == "session"),
-                        Tool::Grok => [&e,&e["params"],&e["params"]["update"],&e["result"]].into_iter().find_map(|src| ["session_id","sessionId","id"].into_iter().find_map(|k| src[k].as_str().map(str::trim).filter(|s| !s.is_empty()))),
-                    };
-                    if let Some(sid) = sid {
-                        out.push(Signal::Bound { backend_session: sid.into() });
-                        self.bound = true;
-                    }
-                }
                 match self.tool {
                     Tool::Grok => self.grok(&e,record.t,out),
                     Tool::Muse => self.muse(&e,record.t,out),
@@ -186,6 +186,7 @@ impl Interpreter for Stream {
                 if !delta.is_empty() {
                     self.text.push_str(&delta);
                     out.push(Signal::Moved(Activity::Responding));
+                    out.push(Signal::Glimpse(Glimpse::Message { id:self.id(),row:Some(self.id()),text:self.text.clone() }));
                     out.push(Signal::Live(LiveReply { id: self.id(), text: self.text.clone() }));
                 }
             }

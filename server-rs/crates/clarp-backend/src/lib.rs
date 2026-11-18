@@ -189,6 +189,9 @@ pub trait Backend: Send + Sync {
 
     fn launch(&self, spec: &TurnSpec) -> Launch;
 
+    /// The named session is usable as soon as the tool starts, even if it prints nothing.
+    fn binds_at_spawn(&self) -> bool { false }
+
     /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
     /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
     /// when the tool gives it none. (A turn's number is not such a name: an agent that moves

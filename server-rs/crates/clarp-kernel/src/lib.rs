@@ -65,3 +65,4 @@ pub mod turn;
 pub mod usage;
 pub mod voices;
 pub mod grok_muse;
+pub mod grok_muse_history;

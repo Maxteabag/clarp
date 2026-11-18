@@ -16935,7 +16935,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             .iter()
             .map(|row| row["id"].as_str().unwrap())
             .collect();
-        let wanted = if path.ends_with("all") { &["claude", "codex", "grok", "muse"][..] } else { &["claude", "codex", "grok"][..] };
+        let wanted = if path.ends_with("all") { &["claude", "codex", "grok", "muse"][..] } else { &["claude", "codex"][..] };
         assert_eq!(tools, wanted, "{path}");
         assert_eq!(logins["tasks"]["claude"]["status"], "idle");
         let every = path.ends_with("all");

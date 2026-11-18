@@ -365,14 +365,8 @@ mod tests {
 
     #[test]
     fn a_tool_this_host_does_not_run_has_no_terminal_here() {
-        // The kernel knows what the Python Host starts it with; this Host has no program
-        // for it, and says what that Host says of a tool without a terminal.
-        assert!(clarp_kernel::socket::terminal_of("muse", "").is_ok());
-        let none = (
-            StatusCode::NOT_IMPLEMENTED,
-            "no interactive terminal for the muse backend".to_string(),
-        );
-        assert_eq!(command_of("muse", ""), Err(none));
+        assert!(clarp_backend::program("muse").is_some());
+        assert_eq!(clarp_kernel::socket::terminal_of("muse", "abc").unwrap(), ["--yolo", "resume", "abc"]);
         let none = (
             StatusCode::NOT_IMPLEMENTED,
             "no interactive terminal for the scripted backend".to_string(),
