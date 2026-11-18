@@ -458,10 +458,10 @@ def decide(plan: dict, answer: dict) -> tuple[dict, str, str]:
 # ---- when to update ----------------------------------------------------------
 
 
-def open_goals(config: dict) -> list:
+def open_goals(config: dict, *, con=None) -> list:
     """Open durable goals of agents in this Goal keeper's scope."""
     from . import janitors
-    rows = db.conn().execute(
+    rows = (con if con is not None else db.conn()).execute(
         "SELECT p.*, a.is_janitor, a.deleted_at, a.archived_at FROM task_plans p "
         "JOIN agents a ON a.agent_id=p.agent_id WHERE p.status IN ('active','paused') "
         "AND p.goal_json != '{}' AND a.deleted_at IS NULL AND a.archived_at IS NULL "
@@ -507,10 +507,10 @@ def _due(config: dict, progress: dict, now: int, memo: KeeperMemo | None) -> lis
         elif now >= next_sweep:
             sweeping = True
             progress["next_sweep_at"] = compute_next_run(watch.sweep["cron"], watch.sweep["timezone"], now)
-    con = db.conn()
+    con = db.conn() if memo is None else memo.reader
     caught = progress.setdefault("caught_up", {})
     ready, live = [], set()
-    rows = open_goals(config) if memo is None else memo.rows(config, sweeping, open_goals)
+    rows = open_goals(config) if memo is None else memo.rows(config, sweeping, lambda cfg: open_goals(cfg, con=con))
     for row in rows:
         plan_id = row["plan_id"]
         live.add(plan_id)

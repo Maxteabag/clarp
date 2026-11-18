@@ -279,6 +279,7 @@ SEAT_RETELL_MS=15*60*1000
 class AutonomyJanitors:
     def __init__(self,dispatch,notify,model_call=decision_model,usage_read=None,recover=None,hotseat_read=None,hotseat_switch=janitor_hotseat.switch_account,label_judge=None,hotseat_switch_lock=None,hotseat_observe=None,hotseat_switched=None,goal_ask=None,notice_stream=None,seat_serves=None):
         self._keeper_memos = {}
+        self._read_meter = None
         self.recover=recover;self.dispatch=dispatch;self.notify=notify;self.model_call=model_call;self.usage_read=usage_read;self.stop_event=threading.Event();self.thread=None
         # goal_ask(run, prompt, plan_id) -> (answer, usage, model): the Goal keeper's model call.
         self.goal_ask=goal_ask or (lambda run,prompt,plan_id:model_json(run,prompt,plan_id));self.goal_batch=None
@@ -316,7 +317,26 @@ class AutonomyJanitors:
             try:self.run_once()
             except Exception as exc:log_exception('janitorAutonomyFail',exc)
     def run_once(self):
-        setup();self.heartbeat_once();self.quota_once();self.hotseat_once();self.label_audit_once();self.goal_keeper_once()
+        from . import config
+        if not config.load().janitor_read_diagnostics:
+            self._read_meter = None
+            setup();self.heartbeat_once();self.quota_once();self.hotseat_once();self.label_audit_once();self.goal_keeper_once()
+            return
+        from .janitor_read_diagnostic import ReadMeter
+        if self._read_meter is None:
+            self._read_meter = ReadMeter()
+        meter = self._read_meter
+        setup_needed = _SCHEMA_READY_FOR != db.DB_PATH
+        try:
+            for name, fn in (("setup", setup), ("heartbeat", self.heartbeat_once), ("quota", self.quota_once),
+                             ("hotseat", self.hotseat_once), ("labels", self.label_audit_once),
+                             ("keeper", self.goal_keeper_once)):
+                meter.lane(name, fn)
+                if name == "setup" and setup_needed:
+                    meter.worked.add("setup")
+        finally:
+            meter.finish_pass()
+
     def heartbeat_once(self):
         if not any(c['template_id']=='heartbeat-decider' and c['enabled'] for c in janitors.list_janitors(include_runtime=False)):return
         now=db.now_ms()
@@ -331,6 +351,7 @@ class AutonomyJanitors:
             request_id=digest([agent['agent_id'],fingerprint,prior['run_id'] if prior else '',owner['generation']])
             run=janitor_builtins.begin_run('heartbeat-decider',request_id,context={'input_hash':fingerprint,'target_count':1},target_agent_id=agent['agent_id'])
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
+            if self._read_meter is not None: self._read_meter.work()
             try:
                 if len(json.dumps(snap,default=str).encode())>65536:raise ValueError('Current evidence exceeds decision input budget')
                 decision=validate_decision(self.model_call(snap,run))
@@ -371,6 +392,7 @@ class AutonomyJanitors:
         self.deliver_notifications(owner)
         now=db.now_ms();key='quota-keeper.last-check';base=owner['options']['interval_seconds']
         if not lane_due('quota-keeper',owner,base,key,now):return
+        if self._read_meter is not None: self._read_meter.work()
         settings_store.set_int(key,now);lane_start('quota-keeper',owner,base,now)
         if self.usage_read is None:
             from .backend_usage import get_backend_usage, _structured_provider
@@ -454,6 +476,7 @@ class AutonomyJanitors:
             reset_completion=self.reset_worker.peek(provider,owner)
             reset_reconciliation=self.reset_worker.reconciliation_due(provider,owner,reset_field)
             if not lane_due(lane,owner,base,key,now) and reset_completion is None and reset_reconciliation is None:continue
+            if self._read_meter is not None: self._read_meter.work()
             settings_store.set_int(key,now);lane_start(lane,owner,base,now)
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
             if not run or not janitor_builtins.claim_run(run['run_id']):
@@ -644,6 +667,7 @@ class AutonomyJanitors:
         now=db.now_ms();key='label-auditor.last-check';lane='label-auditor';base=owner['options']['interval_seconds']
         if not lane_due(lane,owner,base,key,now):return
         if not judgments.site_enabled('labels') or outside_active_hours(now/1000):return
+        if self._read_meter is not None: self._read_meter.work()
         settings_store.set_int(key,now);lane_start(lane,owner,base,now)
         evidence=label_audit.candidates(now)
         if not evidence:
@@ -691,12 +715,14 @@ class AutonomyJanitors:
             key = (config["agent_id"], config["generation"])
             if key not in self._keeper_memos:
                 self._keeper_memos[key] = goal_keeper.KeeperMemo()
+            self._keeper_memos[key].meter = self._read_meter
             ready=goal_keeper.due(config,progress,now,memo=self._keeper_memos[key])
             janitors.save_progress(watch.progress_attachment,config['generation'],progress)
             if not ready:continue
             width=max(1,min(int(config['options'].get('max_goals_per_run',5)),6));ready=ready[:width]
             run=janitor_builtins.begin_run(goal_keeper.ROLE,goal_keeper.request_id(config,ready,now),context={'input_hash':digest(ready),'target_count':len(ready)})
             if not run or not janitor_builtins.claim_run(run['run_id']):continue
+            if self._read_meter is not None: self._read_meter.work()
             full=frozenset(p for p in ready if (progress.get('goals') or {}).get(p,{}).get('catch_up'))
             self.goal_batch=threading.Thread(target=self._goal_keeper_batch,args=(config,run,ready,now,watch.progress_attachment,full),name='goal-keeper-run',daemon=True)
             self.goal_batch.start()
@@ -741,6 +767,7 @@ class AutonomyJanitors:
                 janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'cancelled':'Janitor configuration changed'}));continue
             current=janitors.get(owner['session'])
             if not current or not current['enabled'] or current['generation']!=owner['generation']:continue
+            if self._read_meter is not None: self._read_meter.work()
             delivery=self.notify(payload)
             janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps(delivery or {}))
 
