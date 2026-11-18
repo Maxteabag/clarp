@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import sqlite3
+import sys
 import threading
 
 import pytest
@@ -1158,3 +1159,52 @@ def test_a_directory_that_already_answers_differently_is_never_certified(tmp_pat
     carry = inc.parser_carry("claude", prefix, {}, parent)
     assert carry["subagent_children"] is None
     assert inc.reference_outside_tail("claude", parent, 0, 0, carry) == "claude_subagent_children_changed"
+
+
+def test_the_writer_refuses_a_tail_over_moved_rows_when_the_frontier_cannot_see_it(tmp_path, clock, monkeypatch):
+    """The second of the two refusals on its own: the frontier's check is blinded, so only the tail's
+    writer, comparing the carried inputs as it writes, can see that rows moved past the checkpoint. It
+    refuses the tail (logging what stood in the way); the import is full and ends exact."""
+    from lib import log as log_module
+    from tests.readmodel.rm_n14_harness import HOSTS_SWITCHES
+    conf = dict(inc._DEFAULTS, **HOSTS_SWITCHES)
+    monkeypatch.setattr(inc, "settings", lambda: dict(conf))
+    lines = claude_lines(5)
+    _prepare(tmp_path / "a.sqlite", "claude")
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_bytes(b"".join(lines[:9]))
+    _one_batch(monkeypatch)
+    inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    before = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    _append(transcript, lines[9:])
+    parsed = len(inc.parse_range("claude", transcript, 0, transcript.stat().st_size))
+    _row_per_batch(monkeypatch)
+    Crash, real = _crash_at_the_checkpoint(monkeypatch)
+    with pytest.raises(Crash):
+        inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    db.conn().rollback()
+    inc._TAIL_STATES.reset()
+    inc._READ_PREFIXES.reset()
+    assert inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript)) == before
+    monkeypatch.setattr(inc, "write_checkpoint", real)
+    from lib import message_carry
+    changed = message_carry.changed
+
+    def blind_frontier(*args, **kwargs):
+        # The frontier's question (asked from lib.transcript_incremental) is told nothing moved;
+        # the writer's (lib.message_writes) gets the real answer.
+        if sys._getframe(1).f_globals.get("__name__") == inc.__name__:
+            return ""
+        return changed(*args, **kwargs)
+    monkeypatch.setattr(message_carry, "changed", blind_frontier)
+    logged, reasons = [], []
+    monkeypatch.setattr(log_module, "log", lambda event, detail="", **_: logged.append((event, detail)))
+    tail_log = inc._tail_log
+    monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (reasons.append(code), tail_log(code, **kw))[1])
+    result = inc.import_transcript(backend="claude", path=transcript, agent_id=AGENT, backend_session_id=SESSION)
+    carried = [detail for event, detail in logged if event == "transcriptCarryInputsChanged"]
+    assert len(carried) == 1 and carried[0].startswith("what=") and carried[0] != "what=unknown"
+    assert result["apply_mode"] == "full" and "full_carry_inputs_changed" in reasons
+    rows, checkpoints, head_covers = _stored(transcript)
+    cp = inc.load_checkpoint(db.conn(), AGENT, SESSION, str(transcript))
+    assert checkpoints == 1 and cp.turn_count == parsed == len(rows) and head_covers
