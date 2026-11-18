@@ -159,7 +159,33 @@ def record(root):
     
     add('replay or conflicting reuse',{'body':{'request_id':'s'}},{'body':{'request_id':'s'}},
         {'body':{'request_id':'s','reason':'different'}})
-    return scripts
+    return {"stories":scripts,**extras(root,op)}
+
+def extras(root, op):
+    from lib import group_calls, host_generation as identity
+    headers=[]
+    clips=[]
+    for cause in ('silence','no_mic','not_ready','speech_abandoned'):
+        for ms in (1000,1250,2000):
+            headers.append(dict(reason='Pump offline',cause=cause,ms=ms,text=group_calls.opening_header('Pump offline',cause,ms)))
+    for state in ('intended','admitted','started','cancelled','unknown'):
+        for ended in (True,False):
+            for late in (True,False):
+                opening=dict(ring_id='ring',call_id='call',token='opn_test',epoch=2,retired={'reason':'ended'} if ended else None,
+                             late_greeting={'client_msg_id':'late'} if late else None,
+                             intent={'state':state,'trace_id':'intent-trace','admission_id':'call-open:ring:1'},
+                             greeting={'client_msg_id':'greet','trace_id':'greet-trace'})
+                op._openings=lambda:[opening]
+                for trace in ('','other','intent-trace','greet-trace'):
+                    clips.append(dict(op=opening,trace=trace,tag=op.opening_audio(trace),skip=op.skip_opening_synthesis(trace)))
+    uuids=[]
+    value='f46bf8e2-4219-4ee5-8d9c-874d36c116ef'
+    for raw in (value,value+'\n',value.upper(),value+'\n\n',' '+value,value+' ',value.replace('-',''),'.'*36,'x'*65,'',value+'x'):
+        try: canonical=identity._canonical_uuid(raw.encode())
+        except ValueError: canonical=None
+        except identity._Invalid: canonical=None
+        uuids.append(dict(raw=raw,canonical=canonical))
+    return dict(headers=headers,clips=clips,uuids=uuids)
 
 if __name__=='__main__':
     if '--record' in sys.argv:
@@ -168,4 +194,6 @@ if __name__=='__main__':
     else:
         env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}
         output=subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=env)
-        OUT.write_text('[\n'+',\n'.join(json.dumps(row,ensure_ascii=True) for row in json.loads(output))+'\n]\n',encoding='ascii')
+        data=json.loads(output)
+        fields=[json.dumps(k)+':['+',\n'.join(json.dumps(row,ensure_ascii=True) for row in rows)+']' for k,rows in data.items()]
+        OUT.write_text('{\n'+',\n'.join(fields)+'\n}\n',encoding='ascii')

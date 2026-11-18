@@ -16,20 +16,9 @@ fn invalid() -> io::Error {
 fn uuid(file: File) -> io::Result<String> {
     let mut bytes = Vec::new();
     file.take(65).read_to_end(&mut bytes)?;
-    let text = std::str::from_utf8(&bytes).map_err(|_| invalid())?;
-    let text = text.strip_suffix('\n').unwrap_or(text);
-    if text.len() != 36
-        || !text.bytes().enumerate().all(|(i, c)| {
-            if matches!(i, 8 | 13 | 18 | 23) {
-                c == b'-'
-            } else {
-                c.is_ascii_digit() || (b'a'..=b'f').contains(&c)
-            }
-        })
-    {
-        return Err(invalid());
-    }
-    Ok(text.into())
+    clarp_kernel::rings::opening::uuid(&bytes)
+        .map(str::to_owned)
+        .ok_or_else(invalid)
 }
 
 fn dir(root: &Path) -> io::Result<File> {
