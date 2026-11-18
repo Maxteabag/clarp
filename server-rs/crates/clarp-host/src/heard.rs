@@ -54,6 +54,7 @@ const WAITS: Duration = Duration::from_secs(10);
 
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
+    pub(crate) workspace:Arc<crate::vocabulary::workspace::Cache>,
     pub(crate) judge: crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
@@ -160,6 +161,7 @@ impl Ears {
         Self {
             own,
             judge: Default::default(),
+            workspace:Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
             ink: ink("ink-2"),
