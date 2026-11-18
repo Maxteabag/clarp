@@ -204,8 +204,16 @@ async fn hotseat_switch(
     if !asked.is_object() {
         return bad("bad json").into_response();
     }
-    let (status,said)=crate::seats::switch(&app,&asked).await;
-    (StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),Json(said)).into_response()
+    let (status, said) = crate::seats::switch(&app, &asked).await;
+    (
+        StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+        Json(said),
+    )
+        .into_response()
+}
+
+async fn no_hotseat() -> ApiError {
+    not_built("Changing the account seats is")
 }
 
 /// `GET /cartesia-voices`: the old picker of Cartesia's voices. The catalogue of voices

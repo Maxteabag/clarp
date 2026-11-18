@@ -768,7 +768,7 @@ async fn keep(
         model: word(&run.model),
         effort: word(&run.effort),
     };
-    let answer = match once::read_on(app,&run.tool, &reading, WITHIN).await {
+    let answer = match once::read_on(app, &run.tool, &reading, WITHIN).await {
         Ok(answer) => answer,
         Err(Unanswered::TimedOut) => return Ended::Failed("timeout"),
         Err(Unanswered::NoSuchTool(_) | Unanswered::NotStarted(_)) => {

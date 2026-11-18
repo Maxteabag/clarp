@@ -421,7 +421,7 @@ async fn ask(app: &App, batch: &Batch) -> Option<Said> {
         effort: word("effort"),
     };
     let tool = word("backend").unwrap_or_else(|| "codex".to_string());
-    let said = match once::read_on(app,&tool, &reading, WITHIN).await {
+    let said = match once::read_on(app, &tool, &reading, WITHIN).await {
         Ok(answer) => {
             let read = clarp_kernel::router::extract_json(&answer).ok();
             let table = read.and_then(|read| rules::tabled(&Value::Object(read)));

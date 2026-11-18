@@ -69,7 +69,8 @@ const SEATS: &str = "hotseat_desk";
 /// The features this Host has now: all of [`FEATURES`], without what it cannot do as it is
 /// set up.
 fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
-    let actions=app.config.accounts==clarp_kernel::recovery::Accounts::Select && app.seats.told();
+    let actions =
+        app.config.accounts == clarp_kernel::recovery::Accounts::Select && app.seats.told();
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
     let seats = app.seats.told();
@@ -190,7 +191,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // the agents' tools with its windows, its state and its clocks, read with the owner's
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
     (SEATS, 84),
-    ("hotseat_desk_actions",86),
+    ("hotseat_desk_actions", 86),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
