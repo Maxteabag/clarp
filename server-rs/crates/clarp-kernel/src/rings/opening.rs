@@ -716,36 +716,6 @@ pub fn retire_current(op: &mut Value, reason: &str, w: &World<'_>, effects: &mut
     retire(op, reason, w, effects)
 }
 
-pub fn clip(op: &Value, trace: &str) -> Option<(Value, bool)> {
-    if trace.is_empty() {
-        return None;
-    }
-    let initiative = op["intent"]["trace_id"] == trace;
-    if !initiative && op["greeting"]["trace_id"] != trace {
-        return None;
-    }
-    let kind = if initiative {
-        "initiative"
-    } else {
-        "greeting_reply"
-    };
-    let admission = if initiative {
-        &op["intent"]["admission_id"]
-    } else {
-        &op["greeting"]["client_msg_id"]
-    };
-    let skip = !op["retired"].is_null()
-        || initiative
-            && (matches!(
-                op["intent"]["state"].as_str(),
-                Some("unknown" | "cancelled")
-            ) || python::truthy(&op["late_greeting"]));
-    Some((
-        json!({"call_id":op["call_id"],"opening":{"ring_id":op["ring_id"],"token":op["token"],"epoch":op["epoch"],"kind":kind,"admission_id":admission}}),
-        skip,
-    ))
-}
-
 #[derive(Default)]
 pub struct Dispatch {
     pub opening: Effects,

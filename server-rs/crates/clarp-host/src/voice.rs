@@ -167,6 +167,7 @@ const HERALD_FILE: &str = "herald-internal-";
 
 /// The one that speaks, and where its clips are.
 pub struct Mouth {
+    pub bindings_ready: tokio::sync::Notify,
     pub(crate) binding_admission: tokio::sync::RwLock<()>,
     /// Where the owner's choices and keys are read.
     owner: OwnerFile,
@@ -547,6 +548,7 @@ impl Waiting {
     pub fn run(mut self, works: Works) -> Arc<Mouth> {
         let audio = works.config.data_dir.join("audio");
         let mouth = Arc::new(Mouth {
+            bindings_ready:Default::default(),
             binding_admission: Default::default(),
             owner: OwnerFile::new(works.config.speech_keys.clone()),
             newest: Mutex::new(newest_clip(&audio)),
@@ -570,6 +572,7 @@ impl Waiting {
         });
         let speaking = mouth.clone();
         tokio::spawn(async move {
+            speaking.bindings_ready.notified().await;
             while let Some(agent_id) = self.rx.recv().await {
                 tokio::spawn(speaking.clone().speak_for(agent_id));
             }
@@ -896,12 +899,9 @@ impl Mouth {
         agent: &str,
         turn: u64,
     ) -> Result<Option<Value>, crate::agent::Unavailable> {
-        let Some(key) = clarp_kernel::rings::binding::key(agent, turn) else {
-            return Ok(None);
-        };
         let _guard = self.binding_admission.read().await;
         self.fleet
-            .kept("opening_by_turn", key)
+            .opening_audio(agent,turn)
             .await?
             .map(|raw| {
                 serde_json::from_slice(&raw).map_err(|e| crate::agent::Unavailable(e.to_string()))

@@ -1579,6 +1579,11 @@ voice worker skips synthesis once its authority has been withdrawn. A ring can l
 while its call continues. Its answering phone can still send a greeting, and closing the
 call or revoking the pairing retires its audio. A shim that recorded a failure to spawn
 lets the same admission try again. Its proof applies to that attempt alone.
+R77 and R78 give opening clips a durable owner. At admission, the opening stores
+`clip_bindings` entries with `turn_id`, `kind`, `admission_id` and `epoch`.
+The agent and turn identify the clip through synthesis, delayed announcement and replay.
+An unbound turn plays ordinarily even when it reuses an opening's trace. An ended call's
+retired opening and its lookup entries are collected after 24 hours.
 The push by which such a ring reaches a
 locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
 until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user
