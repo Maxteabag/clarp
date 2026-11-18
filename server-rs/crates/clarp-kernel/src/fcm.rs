@@ -87,3 +87,58 @@ pub fn activity(state: &Value, server: &str) -> Value {
     if !server.is_empty() { payload["server_instance_id"] = json!(server); }
     payload
 }
+
+/// The next action after a send. A refused bearer gets one fresh token and
+/// does not consume the transient-error retry budget.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    Refresh,
+    Retry(u64),
+    Finished(u16, String, String),
+}
+
+#[derive(Default)]
+pub struct Sending {
+    transient: u8,
+    refreshed: bool,
+}
+
+impl Sending {
+    pub fn answered(&mut self, status: u16, body: &Value, retry_after: &str) -> Next {
+        if status == 200 {
+            return Next::Finished(200, String::new(), body["name"].as_str().unwrap_or("").into());
+        }
+        if status == 401 && !self.refreshed {
+            self.refreshed = true;
+            return Next::Refresh;
+        }
+        let error = &body["error"];
+        let details = error["details"].as_array().into_iter().flatten();
+        let code = details.clone().filter_map(|d| d["errorCode"].as_str()).find(|c| !c.is_empty()).unwrap_or("");
+        let rpc = error["status"].as_str().unwrap_or("");
+        if code == "UNREGISTERED" || (status == 404 && code.is_empty()) {
+            return Next::Finished(410, "Unregistered".into(), String::new());
+        }
+        if status == 400 && (code == "INVALID_ARGUMENT" || rpc == "INVALID_ARGUMENT") {
+            let other = details.filter(|d| d["@type"].as_str().unwrap_or("").ends_with("google.rpc.BadRequest"))
+                .flat_map(|d| d["fieldViolations"].as_array().into_iter().flatten())
+                .filter_map(|v| v["field"].as_str())
+                .any(|f| !f.is_empty() && f != "message.token");
+            if !other {
+                return Next::Finished(410, "InvalidRegistration".into(), String::new());
+            }
+        }
+        let transient = status == 0 || status == 429 || status >= 500 || matches!(code, "QUOTA_EXCEEDED" | "UNAVAILABLE" | "INTERNAL");
+        if transient && !matches!(status, 401 | 403) && self.transient < 2 {
+            let backoff = 1 << self.transient;
+            self.transient += 1;
+            let raw = retry_after.trim();
+            let wait = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
+                raw.parse::<u64>().unwrap_or(u64::MAX).min(10)
+            } else { 0 };
+            return Next::Retry(backoff.max(wait));
+        }
+        let reason = if status == 0 { "network".into() } else if !code.is_empty() {code.into()} else if !rpc.is_empty() {rpc.into()} else {format!("HTTP{status}")};
+        Next::Finished(status, reason, String::new())
+    }
+}
