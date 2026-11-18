@@ -115,8 +115,10 @@ def submit(ident, data, *, capable, on_completed=None):
         if not row:
             raise contract.Refusal("not_open", "")
         sid = data.get("submission_id") if isinstance(data, dict) else None
+        # Only an id the contract takes is looked up: anything else (a lone half of a UTF-16
+        # pair included) is refused by admit() with its own triple, before SQLite sees it (R71).
         previous = (con.execute("SELECT * FROM form_submissions WHERE submission_id=?", (sid,)).fetchone()
-                    if isinstance(sid, str) else None)
+                    if contract.submission_id_ok(sid) else None)
         result = contract.admit(ident, json.loads(row["payload_json"]), row["status"], data, previous)
         if not result["repeat"]:
             now = db.now_ms()

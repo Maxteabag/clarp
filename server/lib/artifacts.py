@@ -256,6 +256,8 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
     title = strip_hidden_blocks(title).strip()
     if type == "render_spec":
         from . import render_spec_store, render_spec
+        render_spec.envelope({"session": session, "title": title, "summary": summary, "status": status,
+                              "reference_id": reference_id, "artifact_id": artifact_id})
         agent = agents.get_by_session(session.strip())
         if not agent:
             raise render_spec.Refusal("not_open", "/session")
@@ -737,6 +739,8 @@ def update(artifact_id: str, data: dict) -> dict:
             raise render_spec.Refusal("unknown_key", "/payload_patch")
         if "payload" not in data:
             raise render_spec.Refusal("missing_key", "/payload")
+        # Taken from the body as they are: each must be text before anything strips or slices it (R72).
+        render_spec.envelope({key: data[key] for key in ("title", "summary", "status") if key in data})
         return create(session=current["session"], type="render_spec", artifact_id=artifact_id,
                       title=data.get("title", current["title"]), summary=data.get("summary", current["summary"]),
                       status=data.get("status", current["status"]), reference_id=current["reference_id"],

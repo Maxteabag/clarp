@@ -318,3 +318,11 @@ def test_the_owner_functions_refuse_to_run_outside_a_transaction():
         with pytest.raises(RuntimeError, match="inside the caller's transaction"):
             call()
     assert con.execute("SELECT count(*) FROM form_submissions").fetchone()[0] == 0
+
+
+def test_a_refusal_raised_before_any_catalog_read_says_the_catalog_is_unavailable(tmp_path, catalog_at):
+    """The guard in Refusal.triple is live (R74 kept it): a refusal that reads no catalog itself,
+    such as not_open for an unknown session, still answers catalog_unavailable without one."""
+    catalog_at(tmp_path / "missing")
+    assert spec.Refusal("not_open", "/session").triple() == {
+        "code": "catalog_unavailable", "path": "", "message": spec.CATALOG_UNAVAILABLE_SENTENCE}
