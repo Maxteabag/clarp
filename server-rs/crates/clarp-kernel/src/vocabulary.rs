@@ -225,3 +225,4 @@ pub fn compile(packs: &[Pack], budget: &Budget) -> Value {
     json!({"payload":payload,"form":form,"unit":budget.unit,"used":selection.used,"capacity":capacity,
         "headroom":capacity-selection.used,"rarity_floor":floor,"included":included,"dropped":selection.dropped})
 }
+pub mod sources;
