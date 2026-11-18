@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from . import db,artifacts,countdown_attention,quiet_agents
 # workflow_run is deliberately absent: a CI result is not something the owner
 # can act on from Updates. An agent blocked by a failed run raises a question.
-TYPES={'countdown','document','research','file','audio','video','code_change','data','release','directory','html_form'}
+TYPES={'countdown','document','research','file','audio','video','code_change','data','release','directory','html_form','render_spec'}
 FAILURES={'failure','timed_out','action_required','startup_failure'}
 class StaleCursor(ValueError): pass
 
@@ -45,12 +45,12 @@ _FIELDS=('attention_kind','conclusion')
 _OBJECT="CASE WHEN json_valid(a.payload_json) THEN json_type(a.payload_json)='object' ELSE 0 END"
 _LITE=', '.join(f"CASE WHEN {_OBJECT} THEN json_extract(a.payload_json,'$.{k}') END AS pj_{k}" for k in _FIELDS)
 
-def page(*,limit=100,cursor='',representation=''):
+def page(*,limit=100,cursor='',representation='',render_capable=False):
     # One summary request: its hash budget and cache protection end with it.
     with artifacts.summary_request() as budget:
-        return _page(limit=limit,cursor=cursor,representation=representation,budget=budget)
+        return _page(limit=limit,cursor=cursor,representation=representation,budget=budget, render_capable=render_capable)
 
-def _page(*,limit,cursor,representation,budget):
+def _page(*,limit,cursor,representation,budget,render_capable=False):
     if representation not in artifacts.REPRESENTATIONS: raise ValueError('unsupported artifact representation')
     limit=max(1,min(int(limit),200))
     if len(cursor)>2048: raise ValueError("invalid attention cursor")
@@ -59,7 +59,7 @@ def _page(*,limit,cursor,representation,budget):
     c=db.conn();c.execute('SAVEPOINT attention_read')
     try:
         selected,revision=_selection(c,now_ms)
-        return _render_page(c,selected,revision,limit,cursor,representation,budget)
+        return _render_page(c,selected,revision,limit,cursor,representation,budget,render_capable)
     finally:c.execute('RELEASE SAVEPOINT attention_read')
 
 @contextmanager
@@ -130,7 +130,7 @@ def _selection(c,now_ms):
         sort_keys=True,default=str).encode()).hexdigest()
     return selected,revision
 
-def _render_page(c,selected,revision,limit,cursor,representation,budget):
+def _render_page(c,selected,revision,limit,cursor,representation,budget,render_capable=False):
     offset=0
     if cursor:
         try:
@@ -143,7 +143,7 @@ def _render_page(c,selected,revision,limit,cursor,representation,budget):
     full=_full_rows(c,[r['artifact_id'] for r,_ in window])
     result=[]
     for r,b in window:
-        public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation,budget=budget);public['attention_bucket']=b;result.append(public)
+        public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation,budget=budget,render_capable=render_capable);public['attention_bucket']=b;result.append(public)
     end=offset+len(result)
     next_cursor=base64.urlsafe_b64encode(json.dumps({'revision':revision,'offset':end}).encode()).decode() if end<len(selected) else None
     return {'artifacts':result,'next_cursor':next_cursor,'snapshot_revision':revision,'total':len(selected),'index_version':1}

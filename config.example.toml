@@ -336,3 +336,7 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 # Optional per-thread read attribution, aggregated every 20 autonomy passes.
 [diagnostics]
 janitor_autonomy_reads = false
+
+# Development only. Leave unset in production until a client ships.
+# [artifacts]
+# render_spec_min_client = 74

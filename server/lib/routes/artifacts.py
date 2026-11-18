@@ -8,7 +8,37 @@ import threading
 from lib import events
 
 
+def _can_render(handler):
+    from lib import config, server_identity
+    return server_identity.render_spec_capable(
+        handler.headers.get(server_identity.CLIENT_HEADER), config.load().render_spec_min_client)
+
+
+def _spec_refusal(handler, error):
+    from lib.log import log
+    triple = error.triple()  # the catalog_unavailable triple whenever the catalog cannot be read
+    code = triple["code"]
+    log("renderSpecRefused", f"code={code} path={triple['path']}")
+    status = (503 if code == "catalog_unavailable" else 403 if code == "client_contract" else 409 if code in
+              {"reused_id", "reused_id_audio", "version_mismatch", "already_answered", "not_open"} else 400)
+    return handler._json(status, {"error": triple})
+
+
 class ArtifactRoutes:
+    def _artifact_mutation_row(self, row):
+        if row["type"] == "render_spec":
+            from lib import render_spec_store
+            return render_spec_store.summary(row, _can_render(self))
+        return row
+
+    def _handle_render_spec_catalog(self):
+        from lib import render_spec
+        try:
+            raw = render_spec.catalog().raw
+        except render_spec.Refusal as exc:
+            return _spec_refusal(self, exc)
+        return self._send(200, raw, "application/json")
+
     def _broadcast_artifact(self, artifact: dict) -> None:
         if getattr(self.ctx, "stream", None) is None:
             return
@@ -30,22 +60,30 @@ class ArtifactRoutes:
         return self._handle_artifact_inbox_action(artifact_id, discard=False)
 
     def _handle_artifact_create(self):
-        from lib import artifacts
+        from lib import artifacts, render_spec
         data = self._read_json()
         if not isinstance(data, dict): return self._json_error(400, "json object required")
         if str(data.get("type") or "").strip().lower() in {"decision", "question", "plan"}:
             return self._json_error(409, "reserved artifact type")
         try:
+            validate_only = self._query().get("validate_only") == ["1"]
+            if str(data.get("type") or "").strip().lower() == "render_spec":
+                render_spec.unique_object(data)
             row = artifacts.create(
                 session=str(data.get("session") or ""), type=str(data.get("type") or ""),
                 title=str(data.get("title") or ""), summary=str(data.get("summary") or ""),
                 status=str(data.get("status") or "ready"),
                 reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
-                artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"))
+                artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"),
+                validate_only=validate_only)
+        except render_spec.Refusal as exc:
+            return _spec_refusal(self, exc)
         except (ValueError, sqlite3.IntegrityError) as exc:
             return self._json_error(409, str(exc))
+        if validate_only:
+            return self._json_ok(row)
         self._broadcast_artifact(row)
-        return self._json(201, {"artifact": row})
+        return self._json(201, {"artifact": self._artifact_mutation_row(row)})
 
     def _handle_artifact_discard(self, artifact_id: str):
         return self._handle_artifact_inbox_action(artifact_id, discard=True)
@@ -65,6 +103,15 @@ class ArtifactRoutes:
         row = artifacts.get(artifact_id)
         if not row:
             return self._json_error(404, "artifact not found")
+        if row["type"] == "render_spec":
+            from lib import render_spec, render_spec_store
+            if _can_render(self):
+                try:
+                    render_spec.catalog()
+                except render_spec.Refusal as exc:
+                    return _spec_refusal(self, exc)
+                row = render_spec_store.open_current(artifact_id)
+            return self._json_ok({"artifact": row})
         # Exactly flat-v1 drops the duplicate `payload`; any other value is
         # ignored, as it always was (no new 400 on this route).
         if self._query().get("representation", [""])[0] == "flat-v1":
@@ -106,7 +153,7 @@ class ArtifactRoutes:
         except ValueError as exc:
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row, "changed": changed})
+        return self._json_ok({"artifact": self._artifact_mutation_row(row), "changed": changed})
 
     def _handle_artifact_pin(self, artifact_id: str):
         from lib import artifacts
@@ -122,15 +169,18 @@ class ArtifactRoutes:
             return self._json_error(status, str(exc))
         if changed:
             self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row, "changed": changed})
+        return self._json_ok({"artifact": self._artifact_mutation_row(row), "changed": changed})
 
     def _handle_artifact_submit(self, artifact_id: str):
-        from lib import html_forms
+        from lib import html_forms, render_spec
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "JSON object required")
         try:
-            receipt = html_forms.submit(artifact_id, data)
+            receipt = html_forms.submit(artifact_id, data, render_capable=_can_render(self),
+                                        on_completed=self._broadcast_artifact)
+        except render_spec.Refusal as exc:
+            return _spec_refusal(self, exc)
         except html_forms.ReadOnlyForm as exc:
             return self._json_error(400, str(exc))
         except ValueError as exc:
@@ -138,14 +188,16 @@ class ArtifactRoutes:
         return self._json_ok(receipt)
 
     def _handle_artifact_update(self, artifact_id: str):
-        from lib import artifacts
+        from lib import artifacts, render_spec
         data = self._read_json()
         if not isinstance(data, dict): return self._json_error(400, "json object required")
         try: row = artifacts.update(artifact_id, data)
+        except render_spec.Refusal as exc:
+            return _spec_refusal(self, exc)
         except ValueError as exc:
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
-        return self._json_ok({"artifact": row})
+        return self._json_ok({"artifact": self._artifact_mutation_row(row)})
 
     def _handle_artifacts_list(self):
         from lib import artifacts
@@ -171,7 +223,8 @@ class ArtifactRoutes:
         )
         with artifacts.summary_request() as budget:
             body = {"artifacts": [
-                artifacts.response_representation(row, representation, budget=budget)
+                artifacts.response_representation(row, representation, budget=budget,
+                                                  render_capable=row.get("type") == "render_spec" and _can_render(self))
                 for row in rows]}
         return self._json_ok(body)
 
@@ -196,7 +249,7 @@ class ArtifactRoutes:
         try:
             result = attention_index.page(limit=int(query.get("limit", ["100"])[0]),
                                           cursor=query.get("cursor", [""])[0],
-                                          representation=query.get("representation", [""])[0])
+                                          representation=query.get("representation", [""])[0], render_capable=_can_render(self))
         except attention_index.StaleCursor as exc:
             return self._json_error(409, str(exc))
         except (ValueError, TypeError):
@@ -327,6 +380,7 @@ class ArtifactRoutes:
             return self._json_error(400, "unsupported artifact representation")
         with artifacts.summary_request() as budget:
             body = {"artifacts": [
-                artifacts.response_representation(row, representation, budget=budget)
+                artifacts.response_representation(row, representation, budget=budget,
+                                                  render_capable=row.get("type") == "render_spec" and _can_render(self))
                 for row in artifacts.list_pinned()]}
         return self._json_ok(body)

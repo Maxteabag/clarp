@@ -512,6 +512,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/goal-ledger": "_handle_goal_ledger",
         "/goal-ledger/delegations": "_handle_goal_delegations",
         "/artifacts": "_handle_artifacts_list",
+        "/artifact-catalogs/clarp.form/1": "_handle_render_spec_catalog",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
         "/pinned-artifacts": "_handle_pinned_artifacts",
@@ -1046,7 +1047,11 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         try:
             n = int(self.headers.get("Content-Length", "0"))
             self._body_consumed = True
-            data = json.loads(self.rfile.read(n)) if n > 0 else {}
+            if n and self.path.partition("?")[0].split("/", 2)[1:2] == ["artifacts"]:
+                from lib.render_spec import JsonObject
+                data = json.loads(self.rfile.read(n), object_pairs_hook=JsonObject)
+            else:
+                data = json.loads(self.rfile.read(n)) if n > 0 else {}
         except (ValueError, json.JSONDecodeError) as e:
             log_exception("requestJsonParseFail", e, detail=redact_query_secrets(self.path))
             return None
