@@ -3,31 +3,7 @@ use serde_json::{Value, json};
 
 use crate::python;
 
-/// The arguments after the executable for a run or a single routing question.
-pub fn command(session: &str, model: &str, effort: &str, thinking: bool) -> Vec<String> {
-    let mut args = ["run", "--format", "json", "--auto"]
-        .map(String::from)
-        .to_vec();
-    if thinking {
-        args.push("--thinking".into());
-    }
-    for (flag, value) in [
-        ("--model", model),
-        ("--variant", effort),
-        ("--session", session),
-    ] {
-        if !value.is_empty() {
-            args.extend([flag.to_owned(), value.to_owned()]);
-        }
-    }
-    args
-}
-
-pub fn model_pair(model: &str) -> Option<Value> {
-    let (provider, model) = model.split_once('/')?;
-    (!provider.is_empty() && !model.is_empty())
-        .then(|| json!({"providerID": provider, "modelID": model}))
-}
+pub use clarp_tool_args::opencode::{command, model_pair};
 
 pub fn permissions(raw: &str) -> Value {
     let mut rules = serde_json::from_str::<serde_json::Map<String, Value>>(raw).unwrap_or_default();

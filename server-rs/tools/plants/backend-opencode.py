@@ -3,11 +3,12 @@
 import runner
 
 KERNEL = 'clarp-kernel/src/opencode.rs'
+ARGS = "clarp-tool-args/src/opencode.rs"
 RUNS = {'vectors': ['test', '--test', 'backend_opencode_vectors']}
 PLANTS = [
-    (KERNEL, 'vectors', 'thinking is enabled for one-shot questions too', 'if thinking {', 'if !thinking {'),
-    (KERNEL, 'vectors', 'the effort becomes a model option', '("--variant", effort)', '("--model", effort)'),
-    (KERNEL, 'vectors', 'a nested model id loses its provider', "model.split_once('/')?", "model.rsplit_once('/')?"),
+    (ARGS, 'vectors', 'thinking is enabled for one-shot questions too', 'if thinking {', 'if !thinking {'),
+    (ARGS, 'vectors', 'the effort becomes a model option', '("--variant", effort)', '("--model", effort)'),
+    (ARGS, 'vectors', 'a nested model id loses its provider', "model.split_once('/')?", "model.rsplit_once('/')?"),
     (KERNEL, 'vectors', 'an explicit question permission is discarded', 'rules.entry("question").or_insert(json!("deny"));', 'rules.insert("question".into(), json!("deny"));'),
     (KERNEL, 'vectors', 'system text enters the answer', 'Some("user" | "system")', 'Some("user")'),
     (KERNEL, 'vectors', 'an uppercase family name falls out of the catalogue', 'id.to_lowercase().contains("deepseek")', 'id.contains("deepseek")'),
@@ -23,12 +24,14 @@ def rules(file, run, changes):
     for name, old, new in changes:
         PLANTS.append((file, run, name, old, new))
 
-rules(KERNEL, 'vectors', [
+rules(ARGS, 'vectors', [
     ('does not request automatic approval', '"--auto"', '"--ask"'),
     ('a new turn has a session argument', 'if !value.is_empty()', 'if value.is_empty()'),
     ('the provider is used as the model', '"modelID": model', '"modelID": provider'),
     ('a model without a provider is accepted', '!provider.is_empty() && !model.is_empty()', '!model.is_empty()'),
     ('a provider without a model is accepted', '!provider.is_empty() && !model.is_empty()', '!provider.is_empty()'),
+])
+rules(KERNEL, 'vectors', [
     ('the primary session id is ignored', '["sessionID", "session_id", "sessionId"]', '["missing", "session_id", "sessionId"]'),
     ('session id whitespace is kept', 'event[k].as_str().map(python::strip)', 'event[k].as_str()'),
     ('nested session properties are missed', '["properties", "session", "data", "part"]', '["other", "session", "data", "part"]'),
@@ -48,7 +51,7 @@ rules('clarp-shim/src/main.rs','stop',[
     ('the wait exceeds its bound', 'stage, early.wait,', 'stage, early.wait * 3,'),
     ('the group is signalled immediately', 'stage, early.wait,', 'stage, Duration::ZERO,'),
     ('a second stop asks again', '!matches!(*stage, StopStage::Ready)', 'matches!(*stage, StopStage::Signalled)'),
-    ('the driver exit does not end the wait', '|_| !self.exited.load(Ordering::SeqCst)', '|_| true'),
+    ('the driver exit does not end the wait', '                    !self.leader_exited.load(Ordering::SeqCst)\n', '                    true\n'),
 ])
 rules('clarp-shim/src/opencode.rs','host',[
     ('the server binds to an unusable loopback address', '"--hostname", "127.0.0.1"', '"--hostname", "127.0.0.2"'),
@@ -142,7 +145,7 @@ rules(HISTORY,'host',[
 ])
 PLANTS.append(('clarp-shim/src/main.rs', 'stop', 'an uncooperative descendant survives an early driver exit',
                'Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);',
-               'if !self.exited.load(Ordering::SeqCst) { Self::signal(self.pid, &self.to_spool, Signal::SIGKILL); }'))
+               'if !self.leader_exited.load(Ordering::SeqCst) { Self::signal(self.pid, &self.to_spool, Signal::SIGKILL); }'))
 rules(DRIVER, 'host', [
     ('a new session has no permissions set', '"permission":rules', '"ignored":rules'),
     ('a resumed session is created afresh', 'if old.is_empty()', 'if !old.is_empty()'),
@@ -162,19 +165,13 @@ rules('clarp-host/src/logins/opencode.rs','host',[
 rules(DRIVER, 'host', [
     ('normal shutdown kills the server without asking it to end', 'kill(server, Signal::SIGTERM)', 'kill(server, Signal::SIGKILL)'),
     ('a server is killed before its five seconds are up', 'wait.recv_timeout(Duration::from_secs(5))', 'wait.recv_timeout(Duration::from_secs(1))'),
-    ('an externally aborted driver reports success', 'let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTERM);', 'std::process::exit(0);'),
+    ('an externally aborted driver reports success', 'let _ = kill(Pid::this(), Signal::SIGTERM);', 'std::process::exit(0);'),
 ])
 MAIN = 'clarp-shim/src/main.rs'
-WAIT_FOR_STOP = """        let stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-        drop(
-            early
-                .changed
-                .wait_while(stage, |s| matches!(s, StopStage::Asked))
-                .unwrap_or_else(PoisonError::into_inner),
-        );"""
+WAIT_FOR_STOP = """    stage = control.changed.wait_while(stage, |s| matches!(s, StopStage::Asked)).unwrap_or_else(PoisonError::into_inner);"""
 rules(MAIN,'stop',[
-    ('the turn end waits for group escalation', '        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {',
-     WAIT_FOR_STOP + '\n        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {'),
+    ('the turn end waits for group escalation', '    if to_spool.send(ToSpool::Last(entry, done)).is_ok() {',
+     WAIT_FOR_STOP + '\n    if to_spool.send(ToSpool::Last(entry, done)).is_ok() {'),
     ('group escalation can append to a finished spool', 'to_spool.send(ToSpool::Last(entry, done))', 'to_spool.send(ToSpool::Now(entry, done))'),
 ])
 RUNS['spool_end'] = ['test','-p','clarp-shim','--bin','clarp-shim','the_last_spool_record_discards']

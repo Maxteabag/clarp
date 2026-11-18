@@ -38,7 +38,7 @@ PLANTS = [
     (MAIN, 'plain', 'the end is written without waiting for the pipes to close',
      'let _ = pump.join();', 'drop(pump);'),
     (MAIN, 'stop', 'the wait for direct abort is omitted', 'stage, early.wait,', 'stage, Duration::ZERO,'),
-    (MAIN, 'stop', 'the abort wait continues after leader exit', '|_| !self.leader_exited.load(Ordering::SeqCst)', '|_| true'),
+    (MAIN, 'stop', 'the abort wait continues after leader exit', '                    !self.leader_exited.load(Ordering::SeqCst)\n', '                    true\n'),
     ('clarp-shim/src/opencode.rs', 'served', 'a shim-directed abort is mistaken for a completed turn',
      'let _ = kill(Pid::this(), Signal::SIGTERM);', 'std::process::exit(0);'),
     ('clarp-shim/src/opencode.rs', 'served', 'the loopback JSON request loses its body',

@@ -1,0 +1,12 @@
+[package]
+name = "clarp-tool-args"
+description = "Native tool arguments shared by the Host and its standalone turn driver"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
