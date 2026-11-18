@@ -21,11 +21,14 @@ pub struct Worker {
     pub call: Joined,
     pub active: Arc<AtomicBool>,
     pub team: Team,
+    pub began: tokio::time::Instant,
+    pub replay:
+        tokio::sync::mpsc::UnboundedSender<(Value, tokio::sync::oneshot::Sender<Option<bool>>)>,
     pub taken: Vec<Value>,
     pub asked: std::collections::BTreeSet<String>,
     pub answers: clarp_kernel::live_call::answers::Answers,
     pub auto_decided: bool,
-    pub reconciled:tokio::sync::mpsc::UnboundedSender<String>,
+    pub reconciled: tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 pub fn time(epoch_ms: i64) -> String {
@@ -36,11 +39,18 @@ pub fn time(epoch_ms: i64) -> String {
 }
 
 impl super::Desk {
-    fn tool_slot(&self,slot:&str)->Arc<tokio::sync::Mutex<()>>{
-        let mut slots=self.tool_slots.lock().unwrap_or_else(|err|err.into_inner());
-        slots.retain(|_,slot|slot.strong_count()>0);
-        let slot=slots.entry(slot.into()).or_default();
-        slot.upgrade().unwrap_or_else(||{let active=Arc::new(tokio::sync::Mutex::new(()));*slot=Arc::downgrade(&active);active})
+    fn tool_slot(&self, slot: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut slots = self
+            .tool_slots
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        slots.retain(|_, slot| slot.strong_count() > 0);
+        let slot = slots.entry(slot.into()).or_default();
+        slot.upgrade().unwrap_or_else(|| {
+            let active = Arc::new(tokio::sync::Mutex::new(()));
+            *slot = Arc::downgrade(&active);
+            active
+        })
     }
 }
 
@@ -82,8 +92,8 @@ impl Worker {
     async fn callback(&self, name: &str, args: &Value, explicit: bool) -> Value {
         let b = self.binding();
         let slot = b.slot();
-        let mutex=self.app.calls.tool_slot(&slot);
-        let _owner=mutex.lock().await;
+        let mutex = self.app.calls.tool_slot(&slot);
+        let _owner = mutex.lock().await;
         let known = self.app.fleet.kept("live_tools", slot.clone()).await;
         let mut row = match known {
             Ok(Some(bytes)) => match serde_json::from_slice::<Value>(&bytes) {
@@ -93,8 +103,10 @@ impl Worker {
             Ok(None) => Value::Null,
             Err(_) => return failed(name),
         };
-        let now=self.app.clock.now_ms() as f64 / 1000.0;
-        if row["at"].as_f64().is_some_and(|at| now-at >= 86400.0){row=Value::Null;}
+        let now = self.app.clock.now_ms() as f64 / 1000.0;
+        if row["at"].as_f64().is_some_and(|at| now - at >= 86400.0) {
+            row = Value::Null;
+        }
         let principal = self.call.principal.clone();
         let eligible = self
             .app
@@ -227,7 +239,31 @@ impl Worker {
             return self.ask(args).await;
         }
         if tool == "read_result" {
-            return self.answers.read(args);
+            let receipt = self.answers.read(args);
+            if receipt["status"] != "nothing_to_read"
+                && let Some(part) = self
+                    .answers
+                    .due(self.began.elapsed().as_secs_f64(), 0.0, 0.0)
+            {
+                let (done, delivered) = tokio::sync::oneshot::channel();
+                let msg = json!({"type":format!("session.{}.append",part.channel),"content":part.text,"delegation_id":Value::Null});
+                let sent = if self.replay.send((msg, done)).is_ok() {
+                    delivered.await.unwrap_or(Some(false))
+                } else {
+                    Some(false)
+                };
+                if self
+                    .answers
+                    .delivered(&part, sent, self.began.elapsed().as_secs_f64())
+                    && self.current().await
+                    && crate::oracle::acknowledge_live(&self.app, &part.id, &self.call.principal)
+                        .await
+                        .unwrap_or(false)
+                {
+                    self.answers.acknowledged(&part.id);
+                }
+            }
+            return receipt;
         }
         if matches!(tool, "schedule_callback" | "cancel_callback") {
             return self.callback(tool, args, explicit).await;
@@ -315,14 +351,30 @@ impl Worker {
                 });
                 row["receipt"] = receipt.clone();
                 let _ = self.save(&id, &row).await;
-                if let Some(intent)=receipt["intent"].as_str().filter(|s|!s.is_empty()) && !receipt["sesjon"].is_null() {
-                    let key=team::operation("dl-",&[b.host,b.principal,b.agent,proposed.session,intent]);
-                    let mutex=self.app.calls.tool_slot(&key);
-                    let _guard=mutex.lock().await;
-                    let mut known=row.clone();known["kind"]=json!("delegate_intent");known["request_id"]=json!(id);
-                    if self.save(&key,&known).await && receipt["status"]=="queued_at_regi" &&
-                        let Some(url)=live_call::on_this_machine(cfg["delegate"].get("reconcile_url")) {
-                        self.reconcile(key,url.into(),receipt.clone(),id,proposed.name.to_owned());
+                if let Some(intent) = receipt["intent"].as_str().filter(|s| !s.is_empty())
+                    && !receipt["sesjon"].is_null()
+                {
+                    let key = team::operation(
+                        "dl-",
+                        &[b.host, b.principal, b.agent, proposed.session, intent],
+                    );
+                    let mutex = self.app.calls.tool_slot(&key);
+                    let _guard = mutex.lock().await;
+                    let mut known = row.clone();
+                    known["kind"] = json!("delegate_intent");
+                    known["request_id"] = json!(id);
+                    if self.save(&key, &known).await
+                        && receipt["status"] == "queued_at_regi"
+                        && let Some(url) =
+                            live_call::on_this_machine(cfg["delegate"].get("reconcile_url"))
+                    {
+                        self.reconcile(
+                            key,
+                            url.into(),
+                            receipt.clone(),
+                            id,
+                            proposed.name.to_owned(),
+                        );
                     }
                 }
                 receipt
@@ -330,31 +382,90 @@ impl Worker {
         }
     }
 
-    fn reconcile(&self,key:String,url:String,receipt:Value,attempt:String,agent:String){
-        let (app,active,call)=(self.app.clone(),self.active.clone(),self.call.clone());
-        let notes=self.reconciled.clone();
-        tokio::spawn(async move{
+    fn reconcile(&self, key: String, url: String, receipt: Value, attempt: String, agent: String) {
+        let (app, active, call) = (self.app.clone(), self.active.clone(), self.call.clone());
+        let notes = self.reconciled.clone();
+        tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            if !active.load(Ordering::Acquire) || !app.calls.step(&app,(&call.call_id,call.call_epoch),|b|b.holds()).await.unwrap_or(false){return;}
-            let session=receipt["sesjon"].as_i64().or_else(||receipt["sesjon"].as_str()?.parse().ok());
-            let Some(session)=session else{return;};
-            let encode=|s:&str|clarp_kernel::portraits::quoted(s).replace("%20","+");
-            let url=format!("{url}?sesjon={session}&principal={}&intent={}",encode(&call.principal),encode(receipt["intent"].as_str().unwrap_or("")));
-            let answer=tokio::task::spawn_blocking(move || {
-                let agent:ureq::Agent=ureq::Agent::config_builder().proxy(None).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
-                let mut response=agent.get(&url).call().ok()?;
-                response.body_mut().with_config().limit(65536).read_json::<Value>().ok()
-            }).await.ok().flatten();
-            let Some(answer)=answer else{return;};
-            let mutex=app.calls.tool_slot(&key);
-            let _guard=mutex.lock().await;
-            let Some(mut row)=app.fleet.kept("live_tools",key.clone()).await.ok().flatten().and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok()) else{return;};
-            if row["request_id"]!=attempt{return;}
-            let status=match answer["intent_status"].as_str(){Some("sendt") if answer["sent"]==true=>"forwarded",Some("sender"|"venter")=>"queued_at_regi",Some("feil")=>"not_forwarded",_=>"unknown_delivery"};
-            row["status_text"]=json!(status);row["reconciled"]=json!(true);row["intent_status"]=answer["intent_status"].clone();
-            if app.fleet.keep("live_tools",key,Some(row.to_string().into_bytes())).await.is_ok() && status=="forwarded" && active.load(Ordering::Acquire){
-                let note=format!("Host note (reconciled, untrusted data): {} Mention it only if it matters.",clarp_kernel::python::dumps_ascii(&json!({"agent":agent,"status":"forwarded"})));
-                let _=notes.send(note);
+            if !active.load(Ordering::Acquire)
+                || !app
+                    .calls
+                    .step(&app, (&call.call_id, call.call_epoch), |b| b.holds())
+                    .await
+                    .unwrap_or(false)
+            {
+                return;
+            }
+            let session = receipt["sesjon"]
+                .as_i64()
+                .or_else(|| receipt["sesjon"].as_str()?.parse().ok());
+            let Some(session) = session else {
+                return;
+            };
+            let encode = |s: &str| clarp_kernel::portraits::quoted(s).replace("%20", "+");
+            let url = format!(
+                "{url}?sesjon={session}&principal={}&intent={}",
+                encode(&call.principal),
+                encode(receipt["intent"].as_str().unwrap_or(""))
+            );
+            let answer = tokio::task::spawn_blocking(move || {
+                let agent: ureq::Agent = ureq::Agent::config_builder()
+                    .proxy(None)
+                    .max_redirects(0)
+                    .timeout_global(Some(Duration::from_secs(30)))
+                    .build()
+                    .into();
+                let mut response = agent.get(&url).call().ok()?;
+                response
+                    .body_mut()
+                    .with_config()
+                    .limit(65536)
+                    .read_json::<Value>()
+                    .ok()
+            })
+            .await
+            .ok()
+            .flatten();
+            let Some(answer) = answer else {
+                return;
+            };
+            let mutex = app.calls.tool_slot(&key);
+            let _guard = mutex.lock().await;
+            let Some(mut row) = app
+                .fleet
+                .kept("live_tools", key.clone())
+                .await
+                .ok()
+                .flatten()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            else {
+                return;
+            };
+            if row["request_id"] != attempt {
+                return;
+            }
+            let status = match answer["intent_status"].as_str() {
+                Some("sendt") if answer["sent"] == true => "forwarded",
+                Some("sender" | "venter") => "queued_at_regi",
+                Some("feil") => "not_forwarded",
+                _ => "unknown_delivery",
+            };
+            row["status_text"] = json!(status);
+            row["reconciled"] = json!(true);
+            row["intent_status"] = answer["intent_status"].clone();
+            if app
+                .fleet
+                .keep("live_tools", key, Some(row.to_string().into_bytes()))
+                .await
+                .is_ok()
+                && status == "forwarded"
+                && active.load(Ordering::Acquire)
+            {
+                let note = format!(
+                    "Host note (reconciled, untrusted data): {} Mention it only if it matters.",
+                    clarp_kernel::python::dumps_ascii(&json!({"agent":agent,"status":"forwarded"}))
+                );
+                let _ = notes.send(note);
             }
         });
     }
@@ -499,10 +610,12 @@ impl callback::Director for Callback<'_> {
         ))
     }
     fn save(&mut self, row: &Value) -> Result<(), callback::Failure> {
-        let mut row=row.clone();
-        let now=self.worker.app.clock.now_ms() as f64/1000.0;
-        if row.get("at").is_none(){row["at"]=json!(now);}
-        row["updated_at"]=json!(now);
+        let mut row = row.clone();
+        let now = self.worker.app.clock.now_ms() as f64 / 1000.0;
+        if row.get("at").is_none() {
+            row["at"] = json!(now);
+        }
+        row["updated_at"] = json!(now);
         self.rt
             .block_on(self.worker.save(self.slot, &row))
             .then_some(())

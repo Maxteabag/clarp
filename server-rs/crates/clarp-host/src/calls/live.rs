@@ -311,7 +311,7 @@ impl Desk {
             device_ok: &paired,
             host_id: &app.server_id,
             has_key: true,
-            runs_tools: false,
+            runs_tools: true,
         };
         books.rings.sees(ring, principal, &world)
     }
@@ -755,12 +755,15 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         && joined.snapshot["live_tools"]["from"] == joined.snapshot["agent"]["session"]
         && joined.principal != joined.snapshot["agent"]["session"]
         && !joined.principal.is_empty();
-    let (reconciled, mut confirmations)=mpsc::unbounded_channel();
+    let (reconciled, mut confirmations) = mpsc::unbounded_channel();
+    let (replay, mut replays) = mpsc::unbounded_channel();
     let mut worker = configured.then(|| super::tools::Worker {
         app: app.clone(),
         call: joined.clone(),
         active: active.clone(),
         team: Default::default(),
+        began,
+        replay,
         taken: Vec::new(),
         asked: Default::default(),
         answers: Default::default(),
@@ -909,6 +912,12 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             biased;
             // A request ended the call on its ring: that is why the session is over.
             Some(reason) = stopped.recv() => machine.stopped(&mut told, &reason),
+            Some((msg,done))=replays.recv()=> {
+                let sent=if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) && let Some(voice)=voice.as_mut() {
+                    voice.send(Message::Text(python::dumps_ascii(&msg).into())).await.ok().map(|_|true)
+                }else{Some(false)};
+                let _=done.send(sent);
+            }
             Some(note)=confirmations.recv()=> {
                 if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) {
                     told.said.push(Said::Voice(json!({"type":"session.thinking.append","content":note,"delegation_id":Value::Null})));
