@@ -16,10 +16,12 @@ def _can_render(handler):
 
 def _spec_refusal(handler, error):
     from lib.log import log
-    log("renderSpecRefused", f"code={error.code} path={error.path}")
-    status = (403 if error.code == "client_contract" else 409 if error.code in
+    triple = error.triple()  # the catalog_unavailable triple whenever the catalog cannot be read
+    code = triple["code"]
+    log("renderSpecRefused", f"code={code} path={triple['path']}")
+    status = (503 if code == "catalog_unavailable" else 403 if code == "client_contract" else 409 if code in
               {"reused_id", "reused_id_audio", "version_mismatch", "already_answered", "not_open"} else 400)
-    return handler._json(status, {"error": error.triple()})
+    return handler._json(status, {"error": triple})
 
 
 class ArtifactRoutes:
@@ -30,8 +32,12 @@ class ArtifactRoutes:
         return row
 
     def _handle_render_spec_catalog(self):
-        from lib.render_spec import CATALOG_BYTES
-        return self._send(200, CATALOG_BYTES, "application/json")
+        from lib import render_spec
+        try:
+            raw = render_spec.catalog().raw
+        except render_spec.Refusal as exc:
+            return _spec_refusal(self, exc)
+        return self._send(200, raw, "application/json")
 
     def _broadcast_artifact(self, artifact: dict) -> None:
         if getattr(self.ctx, "stream", None) is None:
@@ -98,8 +104,12 @@ class ArtifactRoutes:
         if not row:
             return self._json_error(404, "artifact not found")
         if row["type"] == "render_spec":
-            from lib import render_spec_store
+            from lib import render_spec, render_spec_store
             if _can_render(self):
+                try:
+                    render_spec.catalog()
+                except render_spec.Refusal as exc:
+                    return _spec_refusal(self, exc)
                 row = render_spec_store.open_current(artifact_id)
             return self._json_ok({"artifact": row})
         # Exactly flat-v1 drops the duplicate `payload`; any other value is

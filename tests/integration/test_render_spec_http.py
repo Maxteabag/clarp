@@ -181,9 +181,13 @@ def test_section_eight_wire_vectors(host, monkeypatch):
                 path, data = read_path + "/submit", step["body"]
             else:
                 path = "/artifacts?validate_only=1" if step["action"] == "validate" else "/artifacts"
-                data = {"type": "render_spec", "session": "theo", "artifact_id": ident, "title": ident,
-                        "payload": step["payload"]}
-            code, result = _request(host, path, data, headers=headers)
+                data = {"type": "render_spec", "session": "theo", "artifact_id": ident,
+                        "title": case.get("title", ident), "payload": step["payload"]}
+            if "payload_text" in step:
+                text = json.dumps({**data, "payload": "PAYLOAD"}).replace('"PAYLOAD"', step["payload_text"])
+                code, result = _post_raw(host, path, text.encode())  # sends the capable header
+            else:
+                code, result = _request(host, path, data, headers=headers)
             assert code == step["http"], case["name"]
             if "error" in step:
                 assert result == {"error": step["error"]}
@@ -313,3 +317,130 @@ def test_update_requires_whole_fresh_revision_and_preserves_prior_row_on_refusal
         assert _request(host, path, headers=headers) == previous
     assert _request(host, path, {"payload": new, "expected_version": "build-1"}, headers=headers)[0] == 200
     assert _request(host, path, headers=headers)[1]["artifact"]["version"] == "build-2"
+
+
+# ---- a missing catalog refuses render_spec alone ------------------------------------------------
+
+def _masked(value, prefix):
+    """A response with its clock values masked and this run's id prefix replaced."""
+    def mask(v):
+        if isinstance(v, dict):
+            return {k: "T" if (k.endswith("_at") or k in ("revision", "event_id")) and isinstance(x, int)
+                    else mask(x) for k, x in v.items()}
+        return [mask(x) for x in v] if isinstance(v, list) else v
+    return mask(json.loads(json.dumps(value).replace(prefix, "P")))
+
+
+def html_form_route_answers(host, prefix):
+    """Every html_form route an agent or the app uses, in order, with its answers."""
+    ident = prefix + "-form"
+    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "additionalProperties": False}
+    form = {"session": "theo", "type": "html_form", "artifact_id": ident, "title": "Form " + prefix,
+            "payload": {"content": "<p>Hi</p>", "version": "1", "answer_schema": schema}}
+    out = []
+
+    def call(path, body=None):
+        status, answer = _request(host, path, body, headers={"X-Clarp-Client": "ios/12 contract=74"})
+        out.append([path.replace(prefix, "P"), status, _masked(answer, prefix)])
+        return answer
+
+    call("/artifacts", form)
+    call("/artifacts?validate_only=1", {**form, "artifact_id": ident + "-v"})
+    call("/artifacts/" + ident, {"payload": {**form["payload"], "version": "2"}, "expected_version": "1"})
+    call("/artifacts/" + ident, {"title": "Form " + prefix + " renamed"})
+    row = call("/artifacts/" + ident).get("artifact") or {}
+    call("/artifacts?type=html_form&search=" + prefix)
+    call("/artifacts/" + ident + "/submit", {"submission_id": prefix + "-submission-0001",
+                                            "version": row.get("version", "2"), "answers": {"ok": True}})
+    call("/artifacts/" + ident + "/pin", {"pinned": True})
+    row = call("/artifacts/" + ident).get("artifact") or {}
+    call("/artifacts/" + ident + "/archive", {"archived": True, "expected_updated_at": row.get("updated_at")})
+    other = call("/artifacts", {**form, "artifact_id": ident + "-2"}).get("artifact") or {}
+    call("/artifacts/" + ident + "-2/discard", {"expected_updated_at": other.get("updated_at")})
+    call("/artifacts?search=" + prefix)
+    return out
+
+
+def test_a_missing_catalog_changes_no_html_form_route_and_refuses_render_spec(host, envelope, monkeypatch,
+                                                                            tmp_path, capfd):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    capable = {"X-Clarp-Client": "ios/12 contract=74"}
+    assert _request(host, "/artifacts", envelope, headers=capable)[0] == 201
+    present = html_form_route_answers(host, "aaa")
+    monkeypatch.setattr(render_spec, "_catalog_dir", lambda: tmp_path / "missing")
+    render_spec._loaded.cache_clear()
+    try:
+        capfd.readouterr()
+        assert html_form_route_answers(host, "bbb") == present
+        fixed = {"error": {"code": "catalog_unavailable", "path": "", "message": render_spec.CATALOG_UNAVAILABLE_SENTENCE}}
+        answer = {"submission_id": "sub-0000000000000001", "version": "build-1",
+                  "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
+        refused = [_request(host, "/artifacts", {**envelope, "artifact_id": "other"}, headers=capable),
+                   _request(host, "/artifacts?validate_only=1", envelope, headers=capable),
+                   _request(host, "/artifacts/artifact-spec", headers=capable),
+                   _request(host, "/artifacts/artifact-spec/submit", answer, headers=capable),
+                   _request(host, "/artifacts/artifact-spec", {"payload": envelope["payload"],
+                                                               "expected_version": "build-1"}, headers=capable),
+                   _request(host, "/artifact-catalogs/clarp.form/1", headers=capable)]
+        assert refused == [(503, fixed)] * 6
+        lines = [line for line in capfd.readouterr().err.splitlines() if "renderSpec" in line]
+        assert len(lines) == 6 and all(line.endswith("renderSpecRefused code=catalog_unavailable path=")
+                                       for line in lines)
+        assert str(tmp_path) not in "\n".join(lines)
+        # A client below the threshold still reads the plain row, as it reads every list row.
+        assert _request(host, "/artifacts/artifact-spec")[0] == 200
+    finally:
+        render_spec._loaded.cache_clear()
+
+
+def test_invalid_keys_reach_no_response_log_or_telemetry(host, envelope, monkeypatch, capfd):
+    """A caller's key that fails the identifier rule is never named: not in the pointer, on stderr or in telemetry."""
+    from lib import log as log_module, server_identity
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    rows = []
+    monkeypatch.setattr(log_module, "_eventlog_emit", lambda event, level, detail: rows.append([event, detail]))
+    capable = {"X-Clarp-Client": "ios/12 contract=74"}
+    canary = "QzxCanary"
+    assert _request(host, "/artifacts", envelope, headers=capable)[0] == 201
+    answers = []
+    for change in (lambda p: (p["spec"]["elements"].update({"a" + canary + "-x": {"type": "divider", "props": {}}}),
+                              p["spec"]["elements"]["root"]["children"].append("a" + canary + "-x")),
+                   lambda p: p["answer_schema"]["properties"].update({canary: {"type": "string"}}),
+                   lambda p: p["spec"]["state"].update({canary: 1}),
+                   lambda p: p.update({canary: 1})):
+        payload = json.loads(json.dumps(envelope["payload"]))
+        change(payload)
+        answers.append(_request(host, "/artifacts", {**envelope, "artifact_id": "x", "payload": payload},
+                                headers=capable))
+    base = {"submission_id": "sub-0000000000000002", "version": "build-1",
+            "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
+    answers.append(_request(host, "/artifacts/artifact-spec/submit",
+                            {**base, "answers": {"intent": "submit_decision", "state": {"choice": "send", canary: 1}}},
+                            headers=capable))
+    answers.append(_request(host, "/artifacts/artifact-spec/submit", {**base, "version": {canary: 1.5}},
+                            headers=capable))
+    assert [a[1]["error"]["code"] for a in answers] == ["element_id", "schema_shape", "unknown_key", "unknown_key",
+                                                         "unknown_key", "invalid_version"]
+    assert [a[1]["error"]["path"] for a in answers] == ["/spec/elements", "/answer_schema/properties", "/spec/state",
+                                                         "", "/answers/state", "/version"]
+    err = capfd.readouterr().err
+    assert canary.lower() not in (json.dumps(answers) + err + json.dumps(rows)).lower()
+    assert sum("renderSpecRefused" in line for line in err.splitlines()) == 6
+    assert sum(event == "renderSpecRefused" for event, _ in rows) == 6
+
+
+def test_an_agent_withdraws_an_unanswered_spec_by_discarding_it(host, envelope, monkeypatch):
+    """Archive only files it away: it can still be answered. Discard withdraws it."""
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    capable = {"X-Clarp-Client": "ios/12 contract=74"}
+    answer = {"version": "build-1", "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
+    for ident, action in (("kept", "archive"), ("gone", "discard")):
+        row = _request(host, "/artifacts", {**envelope, "artifact_id": ident}, headers=capable)[1]["artifact"]
+        body = {"expected_updated_at": row["updated_at"], **({"archived": True} if action == "archive" else {})}
+        assert _request(host, f"/artifacts/{ident}/{action}", body, headers=capable)[0] == 200
+    assert _request(host, "/artifacts/kept/submit", {**answer, "submission_id": "sub-kept-000000000001"},
+                    headers=capable)[0] == 200
+    assert _request(host, "/artifacts/gone/submit", {**answer, "submission_id": "sub-gone-000000000001"},
+                    headers=capable) == (409, {"error": render_spec.Refusal("not_open", "").triple()})

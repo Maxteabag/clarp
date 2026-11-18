@@ -133,15 +133,20 @@ def test_section_eight_pure_verdicts():
                     sid = body["submission_id"]
                     result = spec.admit(case["artifact_id"], stored, status, body, prior.get(sid))
                     assert result["repeat"] == (sid in prior)
-                    assert spec.message_text({"title": case["artifact_id"], "artifact_id": case["artifact_id"]}, body) == step["prompt"]
+                    title = case.get("title", case["artifact_id"])
+                    assert spec.message_text({"title": title, "artifact_id": case["artifact_id"]}, body) == step["prompt"]
                     if not result["repeat"]:
                         assert result["payload_hash"] == step["payload_hash"]
                         prior[sid] = {"payload_hash": result["payload_hash"], "synthesize_audio": True}
                     status = "completed"
                 else:
-                    spec.validate(step["payload"])
+                    payload = step["payload"]
+                    if "payload_text" in step:
+                        payload = json.loads(step["payload_text"], object_pairs_hook=spec.JsonObject)
+                        assert payload == step["payload"]
+                    spec.validate(payload)
                     if step["action"] == "publish":
-                        stored = step["payload"]
+                        stored = payload
                         status = "ready"
                         assert spec.content_identity(stored["spec"], stored["version"]) == step["identity"]
             except spec.Refusal as exc:
