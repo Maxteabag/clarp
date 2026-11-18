@@ -151,9 +151,9 @@ for why,old,new in [
     wrong(R,'host',why,old,new)
 
 for why,old,new in [
-        ('text previews pass the whole provider map as a voice','name.is_some() || provider=="google"','name.is_none() || provider=="google"'),
-        ('text preview sent as supplied to file engine','let direct=name.is_some();','let direct=true;'),
-        ('the selected fallback gets the primary voice','let chosen=resolve(fallback);','let chosen=resolve(provider);')]:
+        ('text previews pass the whole provider map as a voice','name.is_some() || provider == "google"','name.is_none() || provider=="google"'),
+        ('text preview sent as supplied to file engine','let direct = name.is_some();','let direct=true;'),
+        ('the selected fallback gets the primary voice','let chosen = resolve(fallback);','let chosen=resolve(provider);')]:
     wrong(V,'host',why,old,new)
 wrong(S,'fallback','live speech keeps emotion tags for every engine','match engine.speak_turn(Line { text, voice }, sink)','match engine.speak(Line { text, voice }, sink)')
 

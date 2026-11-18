@@ -46,11 +46,16 @@ pub trait Speaker: Send + Sync {
     /// called where nothing may wait.
     fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute>;
     /// Gemini interprets emotion tags; ordinary synthesis strips them.
-    fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8])) -> Result<u64,Mute>{
-        let text=crate::markup::strip_emotion_tags(line.text);
-        self.speak(Line{text:&text,..line},sink)
+    fn speak_turn(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
+        let text = crate::markup::strip_emotion_tags(line.text);
+        self.speak(
+            Line {
+                text: &text,
+                ..line
+            },
+            sink,
+        )
     }
-
 }
 
 /// Says a line with the first of these engines that can: the next is tried when the one

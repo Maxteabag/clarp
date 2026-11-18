@@ -157,7 +157,10 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
     }
     impl Speaker for Speaks {
         fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
-            self.calls.lock().unwrap().push(json!([self.name,line.text]));
+            self.calls
+                .lock()
+                .unwrap()
+                .push(json!([self.name, line.text]));
             if self.mode != "failed" {
                 sink(b"x");
             }
@@ -173,8 +176,12 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
     }
     struct Gemini(Speaks);
     impl Speaker for Gemini {
-        fn speak(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.0.speak(line,sink)}
-        fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.speak(line,sink)}
+        fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
+            self.0.speak(line, sink)
+        }
+        fn speak_turn(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
+            self.speak(line, sink)
+        }
     }
     for case in vectors()["ladders"].as_array().unwrap() {
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -184,7 +191,7 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
             calls: calls.clone(),
         };
         let first = engine("deepgram", "primary");
-        let next = Gemini(engine("gemini","second"));
+        let next = Gemini(engine("gemini", "second"));
         let mut engines: Vec<(&dyn Speaker, &str)> = vec![(&first, "")];
         if case["fallback"] == "gemini" {
             engines.push((&next, ""));
@@ -194,7 +201,7 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
             chunks.push(String::from_utf8(b.into()).unwrap())
         });
         assert_eq!(json!(chunks), case["chunks"]);
-        assert_eq!(json!(*calls.lock().unwrap()),case["calls"]);
+        assert_eq!(json!(*calls.lock().unwrap()), case["calls"]);
         match result {
             Ok((_, n)) => assert_eq!(case["size"], n),
             Err(Mute::Failed { why, .. }) => assert_eq!(case["error"], why),

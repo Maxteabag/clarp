@@ -210,6 +210,7 @@ impl Gemini {
             },
         });
         let config = ureq::Agent::config_builder()
+            .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(10)))
             .timeout_recv_response(Some(self.timeout))
             // A line is minutes at most: an answer that never ends is cut.
@@ -252,7 +253,9 @@ impl Gemini {
 }
 
 impl Speaker for Gemini {
-    fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.speak(line,sink)}
+    fn speak_turn(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
+        self.speak(line, sink)
+    }
 
     fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
         let Some(key) = (self.key)().filter(|key| !key.is_empty()) else {
