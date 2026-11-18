@@ -2420,12 +2420,12 @@ turns it on.
   routed in, a message sent again), `answered` (what is made of an answer, and the second asking), `apply`
   (what is done: a message given to an agent, a word aloud, a message held while its user is asked, an agent
   opened, stopped or started) and `finish` (what is kept: the decision, the receipt of the run, what the apps
-  are told). `tools/router-flow-vectors.py` drives the Python Host's `OrchestratorService` through 101
-  messages in eight stories with a model that answers what each story says and a Host around it that writes
+  are told). `tools/router-flow-vectors.py` drives the Python Host's `OrchestratorService` through 107
+  messages in nine stories with a model that answers what each story says and a Host around it that writes
   down what it is asked to do; `tests/router_flow_vectors.rs` holds this router to it message by message:
-  the 162 packets as text, what was given, said, held and played again, the decisions as rows, the runs with
+  the 170 packets as text, what was given, said, held and played again, the decisions as rows, the runs with
   their receipts. A story may make agents as it begins (one known by a name that is not its session, two of
-  one name of which one is put away, one whose name folds to more letters, one with no name).
+  one name of which one is put away, one whose name folds to more letters, one with no name; twenty-one more than a packet shows in detail).
 - **Holds, commands and names, as the Python Host has them since its PR 436** (18 Nov 2026; until then this
   router did three things otherwise on purpose, the Python Host's R32 to R34, which that PR fixed):
   - A command is never held. It is carried out only where it is as sure as a message has to be; a fork is
@@ -2433,14 +2433,18 @@ turns it on.
     other, and only on one the model was shown (in a call, one of the call). Refused, it becomes a question
     in its sentence ("I do not have an agent by that name.", "Which agent did you mean?", "That agent does
     not accept voice commands.", "I cannot do that for that agent from here.", "I am not sure what you wanted
-    me to do.", "Please fork agents from the app."), said as the agent the message was said to unless an app
-    asked, and nothing is held: a later "yes" must not give a command's words to an agent as a message. A
-    refused command keeps the phrase key its model gave, which is none: the Python Host gives those sentences
-    no key of their own until its R76 does, and the place is `command_check` and its caller in `flow.rs`.
+    me to do.", "Please fork agents from the app.", "I already have an agent by that name."), said as the
+    agent the message was said to unless an app asked, and nothing is held: a later "yes" must not give a
+    command's words to an agent as a message. The decision keeps the key of its sentence (`no_such_agent`,
+    `which_agent`, ...: the Python Host's `orchestrator_phrases`, its R76 of the same day, PR 439). A new
+    agent never takes a name an agent has already as it is spoken, one put away included (its R75). A start
+    the Host itself refuses is said ("I could not do that.") and kept as a question with the Host's word for
+    why, never as a silent error: the Host hands the kernel the refusal (`Done::Refused`) and says what the
+    outcome still has to say.
   - A held message belongs to the session it was made in. The packet shows only the holds of the agent the
     message was said to; a confirmation claims only such a hold, and one that confirms a hold that is not
     there (its time is up, it was given, it was made while speaking to another agent) gives nothing and says
-    "That message is no longer waiting. Please say it again.", also where an app asked. Asked about again in
+    "That message is no longer waiting. Please say it again." (kept under its key), also where an app asked. Asked about again in
     its own session while its time is not up, a held message keeps its words, its id, its trace, its time and
     the way it came in; whom it may be for, why it is asked and until when are the new question's, whom
     even where it names nobody. Anything else is held anew under an id of its own.
@@ -2467,11 +2471,12 @@ turns it on.
 - **How the router asks its model.** The router asks one question outside every conversation.
   Claude Code and Codex read it on stdin. Grok and Muse read a private file. For tools
   that require an argument, the Host checks the byte limit before launch. See **Model fallbacks**.
-- **How much a model is shown when everyone is in view.** The Python Host shows the last ten messages of
-  every agent that is not put away. Measured on the owner's Host on 17 Nov (read-only, by a query of the
-  check's own): 204 such agents, half a megabyte of question. Here every agent is in view by its name and
-  what it is doing, and the last words are shown of the twenty that were last active, and always of the agent
-  the message was said to and of the one that is open. Of an agent's conversation the model is shown what
+- **How much a model is shown when everyone is in view.** Every agent by its name; what they were last
+  told and said, and what they are doing, of the agent the message was said to, of the one that is open,
+  and of the twenty others that were last active (of those equally recent, the first listed): the kernel's
+  packet chooses them (`BROAD_DETAIL_MOST`), and the Host reads the last words of as many. The Python Host
+  does the same since 18 Nov 2026 (its `BROAD_DETAIL_AGENTS`); before, it showed every agent's last words
+  (measured on the owner's Host on 17 Nov, read-only: 204 agents, half a megabyte of question). Of an agent's conversation the model is shown what
   people and other agents wrote to it and what it answered, and not what the Host sends by itself on its
   schedule.
 - **The routes** are the Python Host's, in its shapes and words: `POST /orchestrator/route-delegation` (a
