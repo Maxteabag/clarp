@@ -85,6 +85,8 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
             let index = codex.join("state_5.sqlite");
             past::codex_sessions(&codex.join("sessions"), Some(&index), &of, all, limit)
         }
+        "grok" => past::native_sessions(clarp_kernel::grok_muse::Tool::Grok,&home,if all {""} else {&of},limit),
+        "muse" => past::native_sessions(clarp_kernel::grok_muse::Tool::Muse,&home,if all {""} else {&of},limit),
         AGY => past::agy_sessions(&agy, if all { "" } else { &of }, limit),
         _ => past::claude_sessions(&root, &of, all, limit),
     };
@@ -284,6 +286,18 @@ pub(crate) async fn begins(
     if tool.eq_ignore_ascii_case(CODEX) {
         let forks = fork.is_some();
         return begins_where_it_ran(app, asked, resume, forks, "Codex", read_of_codex).await;
+    }
+    if tool.eq_ignore_ascii_case("grok") {
+        return begins_where_it_ran(app,asked,resume,fork.is_some(),"Grok",|id| {
+            let log = past::native_transcript(clarp_kernel::grok_muse::Tool::Grok,&crate::config::home(),id)?;
+            Some((clarp_kernel::grok_muse_history::grok(&log),String::new()))
+        }).await;
+    }
+    if tool.eq_ignore_ascii_case("muse") {
+        return begins_where_it_ran(app,asked,resume,fork.is_some(),"Muse Code",|id| {
+            let log = past::native_transcript(clarp_kernel::grok_muse::Tool::Muse,&crate::config::home(),id)?;
+            Some((clarp_kernel::grok_muse_history::muse(&log),String::new()))
+        }).await;
     }
     if tool.eq_ignore_ascii_case(AGY) {
         let forks = fork.is_some();

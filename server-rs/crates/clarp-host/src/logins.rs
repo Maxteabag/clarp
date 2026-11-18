@@ -133,7 +133,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
     let files = files(home);
     let rows: Vec<Value> = TOOLS
         .iter()
-        .filter(|(_, _, login_kind)| every || *login_kind != "none")
+        .filter(|(tool, _, _)| every || matches!(*tool, "claude" | "codex"))
         .map(|(tool, name, login_kind)| {
             let mut row = json!({ "id": tool, "name": name, "login_kind": login_kind });
             if every {
@@ -143,6 +143,16 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 row["note"] = json!("Sign in with the tool itself on this Computer.");
             }
             let program = clarp_backend::program(tool).unwrap_or_default();
+            if *tool == "muse" {
+                let present = installed(&program);
+                row["installed"] = json!(present);
+                for key in ["logged_in","credential_present","can_logout"] { row[key] = json!(false); }
+                for key in ["account","method","validation_error","error"] { row[key] = json!(""); }
+                row["expires_at"] = json!(0);
+                row["state"] = json!(if present { "host_managed" } else { "signed_out" });
+                row["note"] = json!(if present { "Sign in to Muse Code on the Host." } else { "" });
+                return row;
+            }
             if !installed(&program) {
                 row["installed"] = json!(false);
                 row["logged_in"] = json!(false);
