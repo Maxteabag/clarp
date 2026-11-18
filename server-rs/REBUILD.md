@@ -1955,9 +1955,10 @@ stages, as a code from the closed list, a pointer and the catalog's sentence for
 and never naming a key the caller wrote unless it is an identifier; whether answers are taken (accepted, the
 same again, or refused); what the agent is told; and the canonical bytes (RFC 8785, whole numbers only)
 that a spec is counted, hashed and capped by. They are held to `server/lib/render_spec.py` run as it is by
-781 recorded cases (`tools/render-spec-vectors.py`): 86 bodies, 260 payloads (every stage, every cap at and
+787 recorded cases (`tools/render-spec-vectors.py`): 86 bodies, 260 payloads (every stage, every cap at and
 one over), 71 submissions, the reference's own 35 scenarios played through as its store plays them, 278
-clients, 10 messages and 41 catalog files, each that loads asked about nine payloads. The body of a request is read as the Python Host reads it,
+clients, 10 messages and 47 catalog files, each that loads asked about nine payloads (the reference as of
+its PR 431, which asks that a bound property's schema be the catalog's shape of a binding). The body of a request is read as the Python Host reads it,
 because that reader is not JSON as it is defined and the refusals depend on it: it finds UTF-16 and UTF-32
 by their first bytes, lets half of a pair of signs through (refused later as `invalid_json`), takes `NaN`
 and numbers of any length (refused as `number_form`), reads `-0` as the whole number 0, and keeps that a

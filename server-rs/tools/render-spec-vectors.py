@@ -743,6 +743,22 @@ def catalogs():
     variant('a read of no property', lambda d: d['components']['text']['reads'].update(title='$state'))
     variant('a bound property that requires two', lambda d: d['components']['toggle']['props']['properties'][
         'value']['required'].append('x'))
+    variant('a bound property of another shape', lambda d: d['components']['toggle']['props']['properties'][
+        'value']['properties']['$bindState'].update(maxLength=40))
+    variant('a bound property written in another order', lambda d: d['components']['choice']['props'][
+        'properties'].update(value=dict(reversed(list(d['components']['choice']['props']['properties'][
+            'value'].items())))))
+    variant('a bound property whose length is written as a fraction', lambda d: d['components']['toggle'][
+        'props']['properties']['value']['properties']['$bindState'].update(maxLength=41.0))
+    variant('a bound property whose length is written as a truth', lambda d: d['components']['toggle'][
+        'props']['properties']['value']['properties']['$bindState'].update(minLength=True))
+    variant('without the shape of a binding', lambda d: d['expression_shapes'].pop('$bindState'))
+
+    def truthful(d):
+        d['expression_shapes']['$bindState']['properties']['$bindState']['minLength'] = 1
+        for name in ('text_field', 'toggle', 'choice'):
+            d['components'][name]['props']['properties']['value']['properties']['$bindState']['minLength'] = True
+    variant('bound properties whose least length is a truth where the shape says one', truthful)
     variant('a type of no schema language', lambda d: d['components']['heading']['props']['properties'][
         'level'].update(type='number'))
     variant('a keyword deep in a schema', lambda d: d['components']['choice']['props']['properties']['options'][

@@ -185,6 +185,47 @@ fn named_pairs(
     Ok(named)
 }
 
+/// Two values equal as Python compares what its reader made: an object by its keys and their
+/// values in any order, a number by its value whatever its type (a truth is a number too).
+fn python_eq(one: &J, two: &J) -> bool {
+    match (one, two) {
+        (J::Object(one), J::Object(two)) => {
+            one.len() == two.len()
+                && one
+                    .iter()
+                    .all(|(key, value)| two.at(key).is_some_and(|other| python_eq(value, other)))
+        }
+        (J::Array(one), J::Array(two)) => {
+            one.len() == two.len() && one.iter().zip(two).all(|(a, b)| python_eq(a, b))
+        }
+        (J::Text(one), J::Text(two)) => one == two,
+        (J::Null, J::Null) => true,
+        _ => match (numeric(one), numeric(two)) {
+            (Some(Ok(a)), Some(Ok(b))) => a == b,
+            (Some(a), Some(b)) => as_float(a) == as_float(b),
+            _ => false,
+        },
+    }
+}
+
+/// A number as Python holds it: a whole one, or a fraction.
+fn numeric(value: &J) -> Option<Result<i128, f64>> {
+    match value {
+        J::Int(number) => Some(Ok(*number)),
+        J::Bool(truth) => Some(Ok(i128::from(*truth))),
+        J::Float(number) => Some(Err(*number)),
+        _ => None,
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn as_float(number: Result<i128, f64>) -> f64 {
+    match number {
+        Ok(whole) => whole as f64,
+        Err(fraction) => fraction,
+    }
+}
+
 /// A whole number, as Python compares one: a truth value is one too.
 fn whole(value: Option<&J>) -> Result<i128, Unavailable> {
     match value {
@@ -266,9 +307,12 @@ impl Catalog {
                 BINDINGS.contains(&what)
             })?;
             let reads = named_pairs(component, "reads", declared, &|what| shapes.contains(what))?;
+            // The file says the shape of a binding twice: the validator reads the property's
+            // copy, so it must be the shape itself (the reference's PR 430).
+            let bind_shape = shapes.get("$bindState");
             for (key, _) in &bindings {
                 let bound = declared.get(key).ok_or(Unavailable)?;
-                if required_count(bound)? != 1 {
+                if !bind_shape.is_some_and(|shape| python_eq(bound, shape)) {
                     return Err(Unavailable);
                 }
             }

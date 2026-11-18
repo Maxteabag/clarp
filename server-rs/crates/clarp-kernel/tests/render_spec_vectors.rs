@@ -117,8 +117,9 @@ fn pair(value: &Value) -> Option<[&str; 2]> {
 /// Two descriptions the same, where a number beyond 128 bits is held at their end here.
 fn same(ours: &Value, theirs: &Value) -> bool {
     match (ours.as_array(), theirs.as_array()) {
-        (Some(one), Some(two)) if one.len() == two.len() && one.first() == two.first() => {
-            if one.first() == Some(&json!("int")) {
+        (Some(one), Some(two)) if one.len() == two.len() => {
+            let int = Some(&json!("int"));
+            if one.first() == int && two.first() == int {
                 return same_number(ours, theirs);
             }
             one.iter().zip(two).all(|(a, b)| same(a, b))
@@ -460,5 +461,5 @@ fn a_catalog_is_loaded_or_not_as_the_python_host_loads_it() {
     // While the catalog cannot be loaded, every refusal is that one.
     let unavailable = Refusal::new("not_open", "").triple(Err(Unavailable));
     assert_eq!(unavailable, vectors["without_a_catalog"]);
-    assert_eq!((loaded, not), (14, 27));
+    assert_eq!((loaded, not), (17, 30));
 }
