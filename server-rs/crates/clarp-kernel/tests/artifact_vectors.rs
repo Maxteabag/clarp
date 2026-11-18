@@ -360,6 +360,7 @@ impl Fleet {
                     payload: args.get("payload").cloned(),
                     artifact_id: text(args, "artifact_id"),
                     expected_version: args.get("expected_version").cloned(),
+                    validate_only: false,
                 };
                 let nobody = || artifacts::create_of_nobody(&new);
                 self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {
@@ -851,6 +852,7 @@ fn artifacts_and_decisions_answer_as_the_python_hosts_do() {
                         Why::Value => "ValueError",
                         Why::Permission => "PermissionError",
                         Why::Integrity => "IntegrityError",
+                        Why::Spec(code) => code,
                     };
                     if kind != theirs["kind"] || ours.message != theirs["message"].as_str().unwrap()
                     {

@@ -17,7 +17,7 @@ use crate::python::canonical;
 
 /// The kinds of artifact that are shown. A run of a workflow is not among them: its result
 /// is nothing a user acts on from here. Requests and plans have lists of their own.
-pub const TYPES: [&str; 11] = [
+pub const TYPES: [&str; 12] = [
     "countdown",
     "document",
     "research",
@@ -29,6 +29,7 @@ pub const TYPES: [&str; 11] = [
     "release",
     "directory",
     "html_form",
+    "render_spec",
 ];
 
 /// What a cursor of a list that is no longer the list is refused with.

@@ -41,6 +41,10 @@ pub struct Submission {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_at: Option<i64>,
+    /// The answers themselves, where they are shown again: a render spec's, as they were
+    /// taken (its single read shows what was sent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers: Option<Value>,
 }
 
 impl Submission {
@@ -216,6 +220,7 @@ impl ArtifactBook {
             created_at: now,
             prompt: Some(prompt),
             delivered_at: None,
+            answers: None,
         };
         let receipt = submission.receipt(artifact_id);
         let mut form = form.clone();
