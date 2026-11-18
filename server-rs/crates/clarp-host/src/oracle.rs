@@ -25,6 +25,8 @@ use crate::fleet::Directory;
 use crate::owner::{self, OwnerFile};
 use crate::personas::object;
 
+mod delegations;
+
 type Answered = Result<Json<Value>, ApiError>;
 
 /// The Oracle's desk: one request at a time reads what is kept of the Oracle and writes it,
@@ -32,6 +34,9 @@ type Answered = Result<Json<Value>, ApiError>;
 #[derive(Default)]
 pub struct Desk {
     turn: Mutex<()>,
+    /// What the Oracle handed to agents: read from what was kept when it is first asked
+    /// for, and read and written by one request at a time.
+    delegations: Mutex<Option<clarp_kernel::oracle::delegations::Book>>,
 }
 
 /// The agents of this Host, as a contact is held against them. Its janitors are apart from
@@ -145,4 +150,5 @@ pub fn routes() -> Router<App> {
     Router::new()
         .route("/oracle/contact", get(contact).post(choose_contact))
         .route("/oracle/voice-provider", get(voice).post(choose_voice))
+        .merge(delegations::routes())
 }

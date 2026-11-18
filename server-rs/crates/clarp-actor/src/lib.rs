@@ -267,6 +267,29 @@ pub struct Sent {
     pub queue: QueueState,
 }
 
+/// What became of the turn a message was sent for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TurnFate {
+    /// The agent has no message of the id.
+    Unknown,
+    /// The message waits in the queue: its turn has not begun.
+    Waits,
+    /// Its turn runs.
+    Runs,
+    /// Its turn is over: how it ended (`completed`, `failed` or `interrupted`), the row that
+    /// closed it, and what it left: its answer, or the words it was told to have failed in
+    /// (none for a turn that was stopped).
+    Ended {
+        status: String,
+        closes: String,
+        text: String,
+        ended_at_ms: i64,
+    },
+    /// Its turn neither waits nor runs nor ended: the message was taken back before its
+    /// turn began.
+    Gone,
+}
+
 /// Where an agent's queue stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct QueueState {
@@ -1408,6 +1431,46 @@ impl Actor {
             Some(turn) => self.turn_end(turn),
             None => Ok(None),
         }
+    }
+
+    /// What became of the turn that answers the message with this id: for whoever handed
+    /// the agent that message and follows what comes of it.
+    pub fn fate_of(&self, message_id: &str) -> Result<TurnFate, ActorError> {
+        let message = self.recorder.log().find(message_id)?;
+        let Some(turn) = message.and_then(|message| message.turn) else {
+            return Ok(TurnFate::Unknown);
+        };
+        if let Some(end) = self.turn_end(turn)? {
+            // What it left: the answer, in the row that closed it; of a turn that did not
+            // finish, the row under its message that says why, where there is one.
+            let left = if end.status == "completed" {
+                end.closes.clone()
+            } else {
+                format!("marker-{message_id}")
+            };
+            let left = self.recorder.log().find(&left)?;
+            let text = match left.as_ref().map(Entry::from_item) {
+                Some(Ok(Some(Entry::Reply(reply)))) => reply.text,
+                Some(Ok(Some(Entry::Notice(notice)))) => notice.text,
+                _ => String::new(),
+            };
+            return Ok(TurnFate::Ended {
+                status: end.status,
+                closes: end.closes,
+                text,
+                ended_at_ms: end.ended_at_ms,
+            });
+        }
+        let agent = self.recorder.agent();
+        if agent.live().is_some_and(|live| live.id().0 == turn) {
+            return Ok(TurnFate::Runs);
+        }
+        let waits = agent.waiting().any(|queued| queued.id.0 == turn);
+        Ok(if waits {
+            TurnFate::Waits
+        } else {
+            TurnFate::Gone
+        })
     }
 
     fn turn_end(&self, turn: u64) -> Result<Option<TurnEnd>, ActorError> {
