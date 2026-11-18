@@ -51,6 +51,10 @@ from .orchestrator_model import (  # noqa: E402,F401  (split_apply: orchestrator
     _model_prompt, _typesafe_questions, _typesafe_state, _call_typesafe, _extract_json,
     parse_decision, _public_decision,
 )
+NO_SUCH_AGENT = "I do not have an agent by that name."
+HELD_MESSAGE_GONE = "That message is no longer waiting. Please say it again."
+
+
 class _StaleJanitorRun(RuntimeError):
     pass
 
@@ -675,14 +679,15 @@ class OrchestratorService:
                 # agents of this packet, a group call's participants (RTO-03).
                 decision = self._as_clarify(decision, "I am not sure what you wanted me to do.")
             elif (decision.kind == DECISION_AGENT_CONTROL
-                    and action in {"relaunch", "restart", "resume"} and acted_on is None):
+                    and action in {"relaunch", "restart", "resume"} and acted_on is None
+                    and not fallback_request):
                 # Starting again needs an agent to start: none is made from a
                 # name alone, and there is nothing to hold for a question.
                 decision = OrchestratorDecision(**{
                     **asdict(decision), "kind": DECISION_CLARIFY,
-                    "spoken_text": "I do not have an agent by that name."})
+                    "spoken_text": NO_SUCH_AGENT})
                 final_action = FINAL_CLARIFY
-                self._speak_as_session(decision.spoken_text, requested_session)
+                self._speak_as_session(NO_SUCH_AGENT, requested_session)
             elif (decision.kind == DECISION_AGENT_CONTROL
                     and action == "fork"):
                 # No fork source is trusted from the router (RTO-03).
@@ -729,43 +734,52 @@ class OrchestratorService:
                 else:
                     self._require_current(janitor_run_id)
                     held = self._claim_pending(decision.pending_id)
-                    routed_admission = prompt_admission
-                    if held is not None:
-                        routed_admission = prompt_admissions.PromptAdmission.from_json(
-                            str(held.get("prompt_admission_json") or "")
+                    if decision.pending_id and held is None:
+                        # The message the model confirms is no longer held (expired,
+                        # or sent already): the confirmation is not sent in its place.
+                        final_action = FINAL_CLARIFY
+                        decision = OrchestratorDecision(**{
+                            **asdict(decision), "kind": DECISION_CLARIFY,
+                            "spoken_text": HELD_MESSAGE_GONE})
+                        self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
+                    else:
+                        routed_admission = prompt_admission
+                        if held is not None:
+                            routed_admission = prompt_admissions.PromptAdmission.from_json(
+                                str(held.get("prompt_admission_json") or "")
+                            )
+                        text_to_send = (
+                            (held or {}).get("utterance")
+                            or decision.text_to_send.strip()
+                            or packet["utterance"]
                         )
-                    text_to_send = (
-                        (held or {}).get("utterance")
-                        or decision.text_to_send.strip()
-                        or packet["utterance"]
-                    )
-                    self._require_current(janitor_run_id)
-                    dispatch_result = dispatch(
-                        text=text_to_send,
-                        requested_session=requested_session,
-                        trace_id=trace_id,
-                        client_msg_id=(
-                            routed_admission.client_admission_id
-                            if routed_admission else ""
-                        ),
-                        origin=routed_admission.origin if routed_admission else "user",
-                        sender_agent_id=(
-                            routed_admission.sender_agent_id
-                            if routed_admission else ""
-                        ),
-                        prompt_admission=routed_admission,
-                        synthesize_audio=synthesize_audio,
-                        unheard_audio_sessions=unheard_audio_sessions,
-                        forced_session=target,
-                        routed_by_orchestrator=True,
-                    )
-                    record_routing_message(
-                        session=target,
-                        role="user",
-                        text=text_to_send,
-                        trace_id=trace_id,
-                    )
-                    final_action = FINAL_ROUTE
+                        self._require_current(janitor_run_id)
+                        dispatch_result = dispatch(
+                            text=text_to_send,
+                            requested_session=requested_session,
+                            trace_id=trace_id,
+                            client_msg_id=(
+                                routed_admission.client_admission_id
+                                if routed_admission else ""
+                            ),
+                            origin=routed_admission.origin if routed_admission else "user",
+                            sender_agent_id=(
+                                routed_admission.sender_agent_id
+                                if routed_admission else ""
+                            ),
+                            prompt_admission=routed_admission,
+                            synthesize_audio=synthesize_audio,
+                            unheard_audio_sessions=unheard_audio_sessions,
+                            forced_session=target,
+                            routed_by_orchestrator=True,
+                        )
+                        record_routing_message(
+                            session=target,
+                            role="user",
+                            text=text_to_send,
+                            trace_id=trace_id,
+                        )
+                        final_action = FINAL_ROUTE
             if final_action == FINAL_ERROR and decision.kind in {
                 DECISION_CLARIFY,
                 DECISION_AMBIGUOUS,
