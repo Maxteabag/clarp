@@ -33,6 +33,8 @@ const CONNECTING: &str = "connecting";
 const READY: &str = "ready";
 const ACTIVE: &str = "active";
 const RETIRED: &str = "retired";
+/// Why a call is over that was joined under a Host before this one.
+const HOST_RESTART: &str = "host_restart";
 const SWITCHED: &str = "classic";
 const JOIN_EXPIRED: &str = "live_join_expired";
 
@@ -1028,14 +1030,15 @@ impl Rings {
     }
 
     /// When a Host starts, no call of an earlier one has a session: what was joined then is
-    /// over. Which calls were retired so.
+    /// over (the Python Host's `agent_rings.recover_joined_live_calls`). A call that was
+    /// granted and not yet joined keeps its minute. Which calls were retired so.
     pub fn orphaned(&mut self, out: &mut Effects) -> Vec<String> {
         let mut ended = Vec::new();
         for ring in &mut self.rings {
             let Some(live) = ring.live.as_mut() else {
                 continue;
             };
-            if live.holds() && live.phase != WAITING && live.retire("host_restarted") {
+            if live.holds() && live.phase != WAITING && live.retire(HOST_RESTART) {
                 ended.push(live.call_id.clone());
                 out.changed.rings = true;
             }
@@ -1158,6 +1161,10 @@ impl Rings {
             let mut answer = Self::answered(ring, call, false, None, now_ms);
             answer["conversation_mode"] = json!(super::CLASSIC);
             return Ok(Claim::Before(answer));
+        }
+        // A call that a Host's start ended is not switched: its phone calls anew.
+        if live.retired_reason == HOST_RESTART {
+            return Err(not_allowed());
         }
         // Claimed before, by a switch under way or one that failed; or the owner hung up.
         if !live.fallback_request_id.is_empty() {
