@@ -383,7 +383,15 @@ pub struct Setup {
     pub tally: crate::usage::Tally,
     /// The pool of the accounts of the agent's tool, on a Host that runs the owner's
     /// selector itself and has one for this tool.
-    pub pool: Option<Arc<crate::pool::Service>>,
+    pub pools: Vec<Arc<crate::pool::Service>>,
+}
+
+impl Setup {
+    fn pool(&self) -> Option<&Arc<crate::pool::Service>> {
+        self.pools
+            .iter()
+            .find(|pool| pool.tool() == self.record.backend)
+    }
 }
 
 /// What an agent's tool is started with in a terminal, of what its turns are started with.
@@ -1132,7 +1140,7 @@ impl Worker {
             if matches!(ask, Ask::Close) {
                 // The agent is gone: the pool of its tool's accounts does not wait for its
                 // turn, and does not take it up.
-                if let (Some(pool), Some(_)) = (&self.setup.pool, self.pooled) {
+                if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
                     pool.disowned(&self.setup.record.agent_id);
                 }
                 return;
@@ -1216,7 +1224,7 @@ impl Worker {
         )
         .map_err(|error| error.to_string())?;
         self.actor = Some(actor);
-        if let (Some(pool), Some(actor)) = (&self.setup.pool, self.actor.as_mut()) {
+        if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
             actor.pooled(pool.of(&self.setup.record.agent_id));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
@@ -1650,7 +1658,7 @@ impl Worker {
             Ask::Stop { by, answer } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
                 // accounts does not wait for it, and does not take it up.
-                if let (Some(pool), Some(_)) = (&self.setup.pool, self.pooled) {
+                if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
                     pool.disowned(&self.setup.record.agent_id);
                 }
                 // A Stop holds the agent's goals too: each one that is being worked is paused
@@ -1789,7 +1797,7 @@ impl Worker {
             Ask::AccountStop => {
                 if self.held.is_some() {
                     // Its launch is held: nothing of it runs.
-                    if let Some(pool) = &self.setup.pool {
+                    if let Some(pool) = self.setup.pool() {
                         pool.stopped(&self.setup.record.agent_id);
                     }
                     return Ok(());
@@ -1904,7 +1912,7 @@ impl Worker {
             self.carry_out(action);
         }
         // The pool of the tool's accounts is told when the turn it knows is over.
-        if let (Some(pool), Some(turn)) = (&self.setup.pool, self.pooled) {
+        if let (Some(pool), Some(turn)) = (self.setup.pool(), self.pooled) {
             let live = self.actor.as_ref().and_then(|actor| actor.status().live);
             if live.map(|live| live.turn) != Some(turn) {
                 pool.over(&self.setup.record.agent_id, turn);
@@ -1959,13 +1967,13 @@ impl Worker {
             // An attempt of a turn is about to be launched: the pool of the tool's accounts
             // says whether it has to wait for an account instead. One that does is launched
             // when the pool takes the turn up.
-            Action::Launch(order) if self.setup.pool.is_some() => {
+            Action::Launch(order) if self.setup.pool().is_some() => {
                 let now = self.now_ms();
                 let model = self
                     .actor
                     .as_ref()
                     .and_then(|actor| actor.profile().model.clone());
-                let waits = self.setup.pool.as_ref().is_some_and(|pool| {
+                let waits = self.setup.pool().is_some_and(|pool| {
                     let model = model.as_deref().unwrap_or("");
                     pool.starting(&self.setup.record.agent_id, order.turn, model)
                 });
@@ -1986,12 +1994,12 @@ impl Worker {
                 turn,
                 attempt,
                 socket,
-            } if self.setup.pool.is_some() => {
+            } if self.setup.pool().is_some() => {
                 let model = self
                     .actor
                     .as_ref()
                     .and_then(|actor| actor.profile().model.clone());
-                let waits = self.setup.pool.as_ref().is_some_and(|pool| {
+                let waits = self.setup.pool().is_some_and(|pool| {
                     let model = model.as_deref().unwrap_or("");
                     pool.starting(&self.setup.record.agent_id, turn, model)
                 });
@@ -2018,7 +2026,7 @@ impl Worker {
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(mut order) => {
-                if let Some(pool) = &self.setup.pool {
+                if let Some(pool) = self.setup.pool() {
                     pool.guard_turn(&mut order);
                 }
                 let launcher = self.setup.launcher.clone();

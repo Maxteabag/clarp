@@ -70,6 +70,12 @@ def capture(place):
             for req in [(),("opus",)]:
                 add([seat("current",have,scoped_remaining={"opus":0}),seat("z",other)],
                     required=req,last={"from":"z","to":"current","at":at})
+    # A sole active seat has healthy general quota but no Opus quota. Running
+    # Sonnet work changes the outcome from exhausted to a blocked-model no-op.
+    for running in [(), ("sonnet",)]:
+        add([seat("current",70,scoped_remaining={"opus":0})],required=("opus",),running=running)
+    add([seat("current",70,scoped_remaining={"opus":0}),
+         seat("backup",85,scoped_remaining={"opus":40})],required=("opus",))
     from lib import hotseat_desk
     hotseat_desk.log = lambda *args, **kw: None
     hotseat_desk.now_ms = lambda: 1000000

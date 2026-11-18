@@ -274,6 +274,12 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
     let Some(kept) = state.kept(app).await else {
         return;
     };
+    // A read or a recommendation can finish after a manual switch. Never resume
+    // a model, send a push or publish inventory from the superseded decision.
+    let latest = kept.last_switch.get(tool).unwrap_or(&Value::Null);
+    if (!switched && latest != &last) || (switched && latest["to"] != decision["target"]) {
+        return;
+    }
     match read {
         Ok(body) => {
             kept.seats.read(tool, &body, now);
