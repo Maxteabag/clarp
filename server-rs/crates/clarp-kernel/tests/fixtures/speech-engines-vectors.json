@@ -2070,5 +2070,225 @@
     ]
    }
   }
+ ],
+ "guards": [
+  {
+   "raw": "{\"id\":\"other\"}",
+   "executable": null,
+   "resolution": {},
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"other\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"other\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": []
+   },
+   "code": null
+  },
+  {
+   "raw": "invalid",
+   "executable": null,
+   "resolution": {},
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "invalid",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "invalid",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": []
+   },
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "[]",
+   "executable": null,
+   "resolution": {},
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "[]",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "[]",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": []
+   },
+   "code": "google_id_unverifiable"
+  },
+  {
+   "raw": "{\"id\":\" Google \"}",
+   "executable": null,
+   "resolution": {},
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\" Google \"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\" Google \"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "5e9d53febf6bbcb83ebb59b466a75b2fdb52a8fca490fe7d824a4fdbdc307ed1"
+    ]
+   },
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"\"}",
+   "executable": null,
+   "resolution": {},
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "b1c2923ddeb1c587e76589235d271f6d63995aa60bfc465dd8bbe6e67cd01b23"
+    ]
+   },
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": null,
+   "resolution": {},
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": null,
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "8057358fb905b5626dc6b36dd7aac983109d1d61c4c2245b24a656b00b173d49"
+    ]
+   },
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": "fixture program",
+   "resolution": {},
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": "fixture program",
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"run\"}",
+   "executable": "fixture program",
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "cdb0b7a989450d85576dd5931948ef5eafe83b84afab13534ebea38dd8340861"
+    ]
+   },
+   "code": null
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"inner/run\"}",
+   "executable": "nested program",
+   "resolution": {},
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"inner/run\"}",
+   "executable": "nested program",
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "different"
+    ]
+   },
+   "code": "google_id_collision"
+  },
+  {
+   "raw": "{\"id\":\"google\",\"executable\":\"inner/run\"}",
+   "executable": "nested program",
+   "resolution": {
+    "choice": "builtin",
+    "packages": [
+     "377f0c07f163471c8c70d6a5f823d8c3aca7abadf029a3db7e93b04c47910f86"
+    ]
+   },
+   "code": null
+  }
  ]
 }

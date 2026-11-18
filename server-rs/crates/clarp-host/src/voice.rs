@@ -224,6 +224,11 @@ impl Mouth {
         file
     }
 
+    pub async fn google_refusal(&self)->Option<&'static str>{
+        let owner=self.owner.clone();
+        tokio::task::spawn_blocking(move||owner.google_refusal(&owner.read().unwrap_or_default())).await.unwrap_or(Some("google_id_unverifiable"))
+    }
+
     /// Whether an engine that speaks has its key.
     pub(crate) fn has_key(&self, provider: &str, owners: &Table) -> bool {
         if provider == "google" {
@@ -423,7 +428,7 @@ impl Mouth {
                 let why = match error {
                     Mute::Unavailable(why) | Mute::Failed { why, .. } => why,
                 };
-                if why != "voice_unavailable"
+                if !matches!(why.as_str(),"voice_unavailable"|"google_id_collision"|"google_id_unverifiable")
                     && let Some((engine, voice)) = fallback
                 {
                     bytes.clear();
@@ -739,8 +744,9 @@ impl Mouth {
                     token_url: self.google_token_at.clone(),
                     allowed: clarp_kernel::voices::google_has,
                     account: Box::new(move || {
-                        owner::google_voice_account(&owner.read().unwrap_or_default())
-                            .map_err(str::to_string)
+                        let file=owner.read().unwrap_or_default();
+                        if let Some(code)=owner.google_refusal(&file){return Err(code.into());}
+                        owner::google_voice_account(&file).map_err(str::to_string)
                     }),
                 }))
             }

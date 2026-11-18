@@ -154,7 +154,30 @@ def reference(root):
         with patch.object(cartesia_stt.urllib.request,'urlopen',receive):
             heard=cartesia_stt.transcribe(audio_bytes=b'clip',content_type=ctype,api_key='unit',language='nb',keyterms=['never sent'])
         ink_batch.append(dict(ctype=ctype,duration=duration,heard=heard,request=requests[0]))
-    return dict(deepgram=deepgram,google_input=google,eleven=eleven,ink_queries=ink_queries,ink_streams=ink_streams,ladders=ladders,google_http=google_http,ink_batch=ink_batch)
+    from lib import custom_tts_adapters as adapters
+    import shutil
+    guards=[]
+    store=root/'adapters'
+    for raw,executable in [
+            ('{"id":"other"}',None),('invalid',None),('[]',None),
+            ('{"id":" Google "}',None),('{"id":"google","executable":""}',None),
+            ('{"id":"google","executable":"run"}',None),('{"id":"google","executable":"run"}','fixture program'),
+            ('{"id":"google","executable":"inner/run"}','nested program')]:
+        if store.exists(): shutil.rmtree(store)
+        package=store/'sample'
+        package.mkdir(parents=True)
+        (package/'manifest.json').write_text(raw)
+        if executable is not None:
+            target=package/json.loads(raw)['executable']
+            target.parent.mkdir(exist_ok=True)
+            target.write_text(executable)
+        inventory=adapters.collision_inventory(store)
+        packages=[r['fingerprint'] for r in inventory['collisions']]
+        for resolution in ({},{'choice':'builtin','packages':['different']},{'choice':'builtin','packages':packages}):
+            with patch.object(adapters,'collision_inventory',lambda:inventory):
+                code=google_tts.collision_code(SimpleNamespace(tts_google_resolution=resolution))
+            guards.append(dict(raw=raw,executable=executable,resolution=resolution,code=code))
+    return dict(deepgram=deepgram,google_input=google,eleven=eleven,ink_queries=ink_queries,ink_streams=ink_streams,ladders=ladders,google_http=google_http,ink_batch=ink_batch,guards=guards)
 
 
 if __name__ == '__main__':
