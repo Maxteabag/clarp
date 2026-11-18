@@ -2032,12 +2032,13 @@ def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
         "ring_state": str(ring.get("state") or ""),
         "session": str(ring.get("session") or ""),
         "persona": persona,
-        "reason": str(ring.get("reason") or ""),
         "opening_line": str(ring.get("opening_line") or ""),
         "opening_audio_url": str(ring.get("opening_audio_url") or ""),
         "expires_at": ring.get("expires_at"),
         "notification_id": agent_ring_collapse_id(ring),
     }
+    if show_reason:
+        payload["reason"] = str(ring.get("reason") or "")
     if ring.get("conversation_mode"):           # an agent-live ring only; classic is unchanged
         payload["conversation_mode"] = str(ring["conversation_mode"])
     if server_instance_id:

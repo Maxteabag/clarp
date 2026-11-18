@@ -304,7 +304,8 @@ def test_the_ring_push_is_time_sensitive_with_answer_actions():
     # By default the lock screen shows who is calling, not why.
     private = apns.agent_ring_payload(ring, "ring")
     assert private["aps"]["alert"] == {"title": "Theo is calling", "body": "Incoming call"}
-    assert private["reason"] == "Possible water leak at pump 01"
+    assert "reason" not in private
+    assert payload["reason"] == ring["reason"]
     missed = apns.agent_ring_payload({**ring, "state": "missed"}, "missed")
     assert missed["aps"]["alert"]["title"] == "Missed call from Theo"
     assert missed["aps"]["interruption-level"] == "active" and "category" not in missed["aps"]
