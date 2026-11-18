@@ -59,17 +59,20 @@ pub struct Key {
 
 /// The key the owner's file names, when it names one whole and the file is there to read.
 pub fn key(owner: &OwnerFile) -> Option<Key> {
-    let file = owner.read()?;
-    let named = text_at(&file, &["apns", "key_path"])?;
+    key_in(&owner.read()?)
+}
+
+fn key_in(file: &toml::Table) -> Option<Key> {
+    let named = text_at(file, &["apns", "key_path"])?;
     let path = match named.strip_prefix("~/") {
         Some(rest) => crate::config::home().join(rest),
         None => PathBuf::from(&named),
     };
     let key = Key {
-        key_id: text_at(&file, &["apns", "key_id"])?,
-        team_id: text_at(&file, &["apns", "team_id"])?,
-        bundle_id: text_at(&file, &["apns", "bundle_id"]).unwrap_or_else(|| BUNDLE.to_string()),
-        environment: text_at(&file, &["apns", "environment"])
+        key_id: text_at(file, &["apns", "key_id"])?,
+        team_id: text_at(file, &["apns", "team_id"])?,
+        bundle_id: text_at(file, &["apns", "bundle_id"]).unwrap_or_else(|| BUNDLE.to_string()),
+        environment: text_at(file, &["apns", "environment"])
             .map_or_else(|| "production".to_string(), |said| said.to_lowercase()),
         file: path,
     };
@@ -164,6 +167,16 @@ impl Direct {
     /// The key the owner gave, as his file names it now.
     pub fn key(&self) -> Option<Key> {
         key(&self.owner)
+    }
+
+    /// Read the mode and key together once per alert batch.
+    pub fn alert_settings(&self) -> (String, Option<Key>) {
+        let Some(file) = self.owner.read() else {
+            return ("auto".to_string(), None);
+        };
+        let mode = text_at(&file, &["apns", "mode"])
+            .map_or_else(|| "auto".to_string(), |mode| mode.to_lowercase());
+        (mode, key_in(&file))
     }
 
     /// The token to push with now: the one in use while it serves, else one signed anew.

@@ -5307,6 +5307,51 @@ fn a_finished_turn_and_a_request_are_pushed_to_the_phone_that_registered() {
 }
 
 #[test]
+fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto() {
+    for (mode, relay_status, direct_status, handed, relayed, sent, failed, disabled) in [
+        ("direct", 200, 200, 1, 0, 1, 0, 0),
+        ("direct", 200, 410, 1, 0, 0, 0, 1),
+        ("auto", 503, 200, 1, 1, 1, 0, 0),
+        ("auto", 403, 200, 0, 1, 0, 1, 0),
+        ("relay", 503, 200, 0, 1, 0, 1, 0),
+    ] {
+        let place = Place::new("direct-alert");
+        let service = stand_in_push_service();
+        service.answers(&[(direct_status, "")]);
+        let relay = StandInRelay::start();
+        relay.answers(relay_status, json!({"results": [{"status": 200}]}));
+        let (key, public) = push_key(&place);
+        let settings = place.root.join("push.toml");
+        std::fs::write(&settings, format!(
+            "[apns]\nmode = '{mode}'\nkey_path = '{}'\nkey_id = 'KEY'\nteam_id = 'TEAM'\n", key.display()
+        )).unwrap();
+        let host = place.start_in("admin-of-test", &["--push-relay", &format!("http://{}", relay.address), "--push-keys", settings.to_str().unwrap()], &[("CLARP_APNS_ENDPOINT", &service.address)]);
+        let agent = host.new_agent("Echo");
+        let (phone, _) = pair(&host, "Phone", "full");
+        let token = "ab".repeat(32);
+        let grant = format!("pg1.{}.{}.{}", "a".repeat(64), "b".repeat(16), "c".repeat(64));
+        assert_eq!(host.ask_as(&phone, "POST", "/devices", Some(&json!({"token": token, "push_grant": grant}))).0, 200);
+        let (status, rung) = host.ask("POST", "/calls/ring", Some(&json!({"agent": agent, "reason": "Water", "opening_line": "Hello"})));
+        assert_eq!(status, 200, "{rung}");
+        let delivery = &rung["delivery"];
+        assert_eq!((&delivery["sent"], &delivery["failed"], &delivery["disabled"]), (&json!(sent), &json!(failed), &json!(disabled)), "{mode} {rung}");
+        assert_eq!(relay.taken().len(), relayed);
+        let requests = service.handed();
+        assert_eq!(requests.len(), handed);
+        if let Some((path, headers, payload)) = requests.first() {
+            assert_eq!(path, &format!("/3/device/{token}"));
+            assert_eq!(headers["apns-push-type"], "alert");
+            assert_eq!(headers["apns-topic"], "com.maxteabag.clarp");
+            assert_eq!(read_push_token(&headers["authorization"], &public).1["iss"], "TEAM");
+            assert_eq!(payload["ring_id"], rung["ring"]["ring_id"]);
+        }
+        if disabled > 0 {
+            wait_for("direct rejection disables the token", || host.get("/devices/push-tokens")["tokens"][0]["disabled_at"].is_number());
+        }
+    }
+}
+
+#[test]
 fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away() {
     let place = Place::new("pair");
     let host = place.start_with_token("the-administrators-token");

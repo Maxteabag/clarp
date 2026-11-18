@@ -1888,6 +1888,15 @@ one caught. Writing it showed three things the vectors did not hold yet, and the
 is a no, a word counted in signs and not in bytes, and this Host's own words where the Python Host speaks
 its language's.
 
+**Pushes with the Host's own key, and Android** (18 Nov 2026). An alert can go through the
+phone's grant, the Host's relay account or the key named by its explicit `--push-keys` file.
+Direct mode bypasses the relay. Auto mode falls back when the relay is unavailable, and
+a refused phone grant is cleared even when another path delivers the push. The routing
+vectors run the reference router across four consecutive deliveries for each configuration
+and service response. A desktop reply suppresses the phone alert on both Hosts. The
+reference's sender for a silent sync has no production caller. Android and direct Live
+Activity updates remain open.
+
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
 on, changes and removes it, and a runner looks every fifteen seconds for what is due, moves each schedule
