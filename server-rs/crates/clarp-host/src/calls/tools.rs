@@ -328,9 +328,12 @@ impl Worker {
                     let answer =
                         tokio::task::block_in_place(|| post(&cfg["delegate"]["url"], &body, 30));
                     let outcome = match answer {
-                        Some((code, answer)) => receipts::director(&answer, Some(i64::from(code))),
-                        None => {
-                            json!({"state":"unconfirmed","status":"unknown_delivery","note":"regi's answer was unclear; not retried"})
+                        Ok((code, answer)) => receipts::director(&answer, Some(i64::from(code))),
+                        Err(FailedPost::Unreachable(why)) => {
+                            json!({"state":"unconfirmed","status":"unknown_delivery","reason":why,"note":"regi did not answer; not retried"})
+                        }
+                        Err(FailedPost::Unconfirmed(why)) => {
+                            json!({"state":"unconfirmed","status":"unknown_delivery","reason":why,"note":"regi's answer was unclear; not retried"})
                         }
                     };
                     let mut receipt = json!({"tool":tool,"agent":proposed.name,"request_id":id});
@@ -555,8 +558,16 @@ fn failed(tool: &str) -> Value {
     json!({"tool":tool,"status":"failed","error":"ledger unavailable"})
 }
 
-fn post(url: &Value, body: &Value, seconds: u64) -> Option<(u16, Value)> {
-    let url = live_call::on_this_machine(Some(url))?;
+enum FailedPost {
+    Unreachable(String),
+    Unconfirmed(String),
+}
+
+fn post(url: &Value, body: &Value, seconds: u64) -> Result<(u16, Value), FailedPost> {
+    use FailedPost::{Unconfirmed, Unreachable};
+    let Some(url) = live_call::on_this_machine(Some(url)) else {
+        return Ok((400, json!({})));
+    };
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .proxy(None)
         .max_redirects(0)
@@ -564,33 +575,39 @@ fn post(url: &Value, body: &Value, seconds: u64) -> Option<(u16, Value)> {
         .http_status_as_error(false)
         .build()
         .into();
-    let mut result = agent.post(url).send_json(body).ok()?;
+    let mut result = agent.post(url).send_json(body).map_err(|err| match err {
+        ureq::Error::Io(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+            Unreachable("connection refused".into())
+        }
+        ureq::Error::Timeout(_) => Unconfirmed("TimeoutError".into()),
+        _ => Unconfirmed("connection to director failed".into()),
+    })?;
     let code = result.status().as_u16();
-    if matches!(code, 300..=399 | 404 | 405) {
-        return None;
+    if matches!(code, 404 | 405) {
+        return Err(Unreachable(format!("HTTP {code}")));
     }
-    let data = result
-        .body_mut()
-        .with_config()
-        .limit(65536)
-        .read_to_vec()
-        .ok()?;
-    let reply = if data.is_empty() {
-        json!({})
-    } else {
-        serde_json::from_slice(&data).ok()?
-    };
-    if !reply.is_object() {
-        return None;
+    if (300..400).contains(&code) {
+        return Err(Unconfirmed(format!("redirect {code} refused")));
     }
-    Some((
-        if (200..300).contains(&code) {
-            200
+    let raw = result.body_mut().with_config().limit(65536).read_to_vec();
+    let parsed = raw.ok().and_then(|raw| {
+        if raw.is_empty() {
+            Some(json!({}))
         } else {
-            code
-        },
-        reply,
-    ))
+            serde_json::from_slice::<Value>(&raw).ok()
+        }
+    });
+    if !(200..300).contains(&code) {
+        return Ok((
+            code,
+            parsed.filter(Value::is_object).unwrap_or_else(|| json!({})),
+        ));
+    }
+    let reply = parsed.ok_or_else(|| Unconfirmed("unreadable answer".into()))?;
+    if !reply.is_object() {
+        return Err(Unconfirmed("answer is not a JSON object".into()));
+    }
+    Ok((200, reply))
 }
 
 struct Callback<'a> {
@@ -607,7 +624,8 @@ impl callback::Director for Callback<'_> {
             &self.worker.call.snapshot["live_tools"]["callback"]["url"],
             body,
             10,
-        ))
+        )
+        .ok())
     }
     fn save(&mut self, row: &Value) -> Result<(), callback::Failure> {
         let mut row = row.clone();
