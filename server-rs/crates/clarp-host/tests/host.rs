@@ -21275,7 +21275,7 @@ if args == ["models"]:
     sys.exit(0)
 flag = "--resume" if "--resume" in args else "--session-id"
 sid = args[args.index(flag)+1]
-prompt = open("/dev/stdin").read() if "--prompt-file" in args else args[-1]
+prompt = open(args[args.index("--prompt-file")+1]).read() if "--prompt-file" in args else args[-1]
 with open(os.path.join(os.environ["HOME"], "calls"), "a") as calls:
     calls.write(json.dumps([flag, sid, prompt[-20:]])+"\n")
 def emit(**event):

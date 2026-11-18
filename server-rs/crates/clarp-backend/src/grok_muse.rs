@@ -61,7 +61,7 @@ impl Backend for Adapter {
 
     fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
         Box::new(Stream { tool: self.tool, turn, name: name.into(), part: 0, text: String::new(),
-            calls: BTreeMap::new(), outcome: None, stderr: ErrorTail::default() })
+            calls: BTreeMap::new(), session:None, outcome: None, stderr: ErrorTail::default() })
     }
 }
 
@@ -72,6 +72,7 @@ struct Stream {
     part: usize,
     text: String,
     calls: BTreeMap<String,ToolCall>,
+    session: Option<String>,
     outcome: Option<RunOutcome>,
     stderr: ErrorTail,
 }
@@ -190,6 +191,10 @@ impl Interpreter for Stream {
                     out.push(Signal::Live(LiveReply { id: self.id(), text: self.text.clone() }));
                 }
             }
+            Entry::Shim(ShimEvent::Session{id}) => self.session=Some(id.clone()),
+            Entry::Shim(ShimEvent::Spawned{..}) => {
+                if let Some(id)=&self.session {out.push(Signal::Bound {backend_session:id.clone()});}
+            }
             Entry::Err(line) => self.stderr.push(line),
             Entry::Shim(ShimEvent::Exited {code,signal}) => {
                 self.flush(Vec::new(),out);
@@ -197,7 +202,13 @@ impl Interpreter for Stream {
                 let outcome = self.outcome.take().unwrap_or_else(|| match (code,signal) {
                     (_,Some(n)) => RunOutcome::Interrupted { reason: format!("{tool} was ended by signal {n}") },
                     (Some(0),_) => RunOutcome::Completed,
-                    _ => RunOutcome::Failed {reason: self.stderr.text().unwrap_or_else(|| format!("{tool} exited rc={}",code.unwrap_or(-1)))},
+                    _ => {
+                        let mut reason = self.stderr.text().unwrap_or_else(|| format!("{tool} exited rc={}",code.unwrap_or(-1)));
+                        if self.tool == Tool::Muse && self.session.as_ref().is_some_and(|id| reason.trim() == format!("session {id} is already in use")) {
+                            reason = "muse_session_locked: Muse session is held or could not be reclaimed; unverifiable. Close the other Muse process and resend.".into();
+                        }
+                        RunOutcome::Failed {reason}
+                    }
                 });
                 out.push(Signal::Ended(outcome));
             }
