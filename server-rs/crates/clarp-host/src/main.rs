@@ -110,8 +110,20 @@ async fn serve(config: Config) -> Result<(), String> {
         if config.accounts == clarp_kernel::recovery::Accounts::Select {
             let owners = OwnerFile::new(config.speech_keys.clone()).read();
             let selectors = owners.as_ref().map(clarp_host::owner::selectors);
-            let made = selectors.unwrap_or_default().into_iter();
-            made.map(|(tool, command)| clarp_host::pool::Service::new(tool, command, clock.clone()))
+            let mut made = selectors.unwrap_or_default();
+            if !config.seats_tool.is_empty() {
+                for tool in ["claude", "codex"] {
+                    if !made.iter().any(|(t, _)| *t == tool) {
+                        made.push((tool, Vec::new()));
+                    }
+                }
+            }
+            made.into_iter()
+                .map(|(tool, command)| {
+                    let lock = (!config.seats_tool.is_empty())
+                        .then(|| config.data_dir.join(format!("account-{tool}.lock")));
+                    clarp_host::pool::Service::with_lock(tool, command, clock.clone(), lock)
+                })
                 .collect()
         } else {
             Vec::new()
@@ -223,6 +235,7 @@ async fn serve(config: Config) -> Result<(), String> {
         audio: Arc::default(),
         limits,
         // A Host that keeps the logins itself lets the owner's tool renew one as it reads.
+        pools: pools.clone(),
         seats: Arc::new(clarp_host::seats::Desk::new(
             &config.seats_tool,
             config.accounts == clarp_kernel::recovery::Accounts::Select,

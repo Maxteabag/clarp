@@ -251,6 +251,7 @@ pub struct App {
     pub limits: Arc<crate::quota::Desk>,
     /// The desk of the machine's account seats, as the owner's own tool says them.
     pub seats: Arc<crate::seats::Desk>,
+    pub pools: Vec<Arc<crate::pool::Service>>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
     /// What the door keeps count of: who failed to say who they are, and whose right to

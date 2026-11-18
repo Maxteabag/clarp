@@ -2017,7 +2017,10 @@ impl Worker {
         };
         let tx = self.tx.clone();
         let spawned = match action {
-            Action::Launch(order) => {
+            Action::Launch(mut order) => {
+                if let Some(pool) = &self.setup.pool {
+                    pool.guard_turn(&mut order);
+                }
                 let launcher = self.setup.launcher.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 std::thread::Builder::new()

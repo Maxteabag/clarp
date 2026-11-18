@@ -899,6 +899,27 @@ pub struct Desk {
 }
 
 impl Desk {
+    pub fn mark_active(&mut self, tool: &str, alias: &str) {
+        let Some(rows) = self
+            .read
+            .as_mut()
+            .and_then(|s| s["accounts"].as_array_mut())
+        else {
+            return;
+        };
+        let names = |r: &Value| {
+            r["alias"] == alias
+                || r["aliases"]
+                    .as_array()
+                    .is_some_and(|all| all.iter().any(|a| a == alias))
+        };
+        if rows.iter().any(|r| r["provider"] == tool && names(r)) {
+            for r in rows.iter_mut().filter(|r| r["provider"] == tool) {
+                r["active"] = json!(names(r));
+            }
+        }
+    }
+
     /// When the last full live read that worked was made.
     pub fn live_read_at(&self) -> Option<i64> {
         moment(&self.read.as_ref()?["live_read_at"])
