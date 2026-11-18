@@ -70,7 +70,7 @@ pub mod trust;
 pub mod turn;
 pub mod usage;
 pub mod usage_ask;
-pub mod voices;
 pub mod vocabulary;
+pub mod voices;
 
 pub use clarp_tool_args::native_session_name;
