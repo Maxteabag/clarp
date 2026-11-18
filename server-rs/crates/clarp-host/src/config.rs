@@ -111,7 +111,7 @@ pub struct Config {
     pub cartesia_endpoint: String,
     pub deepgram_voice_endpoint: String,
     pub eleven_voice_endpoint: String,
-    pub google_voice_endpoint:String,
+    pub google_voice_endpoint: String,
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
     /// Empty: the push service itself.
     pub apns_endpoint: String,
@@ -425,20 +425,26 @@ impl Config {
             }
         };
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
-        let voice_endpoint=|variable:&str| -> Result<String,String> {
-            let endpoint=stand_in(variable)?;
+        let voice_endpoint = |variable: &str| -> Result<String, String> {
+            let endpoint = stand_in(variable)?;
             if !endpoint.is_empty() {
-                let uri=endpoint.parse::<axum::http::Uri>().map_err(|_|format!("invalid {variable}"))?;
-                let authority=uri.authority().ok_or_else(||format!("missing {variable} host"))?;
-                if authority.as_str().contains('@') || !matches!(authority.host(),"127.0.0.1"|"[::1]"|"localhost") {
+                let uri = endpoint
+                    .parse::<axum::http::Uri>()
+                    .map_err(|_| format!("invalid {variable}"))?;
+                let authority = uri
+                    .authority()
+                    .ok_or_else(|| format!("missing {variable} host"))?;
+                if authority.as_str().contains('@')
+                    || !matches!(authority.host(), "127.0.0.1" | "[::1]" | "localhost")
+                {
                     return Err(format!("{variable} must be on loopback"));
                 }
             }
             Ok(endpoint)
         };
-        let deepgram_voice_endpoint=voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
-        let google_voice_endpoint=voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
-        let eleven_voice_endpoint=voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
+        let deepgram_voice_endpoint = voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        let google_voice_endpoint = voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
+        let eleven_voice_endpoint = voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
         let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
         let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
