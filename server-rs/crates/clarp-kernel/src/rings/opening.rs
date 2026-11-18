@@ -505,3 +505,48 @@ pub fn record(new: Record<'_>, proof: &dyn Proof) -> Value {
           "retired":null,"requests":{},"created_at":new.now,"updated_at":new.now,"fence":{
             "answered_at":new.now,"stop_generation":stop,"paused_at_answer":paused,"auth":proof.auth(new.principal),"host_gen":new.generation}})
 }
+
+/// Validate the older admission and current session without leaking a nonce
+/// in a denial. The newer Stop wins even if the mailbox was already paused.
+pub fn fence(ring:&super::Ring, calls:&crate::calls::Calls, host:&str, proof:&dyn Proof)->Option<&'static str>{
+    let op=&ring.opening;
+    if op["server_id"]!=host{return Some("host_changed");}
+    let owner=op["principal"].as_str().unwrap_or("");
+    if ring.state!="answered" || ring.answered_by!=owner || op["call_id"]!=ring.call_id{return Some("ring_changed");}
+    if !calls.of(owner).iter().any(|c|c.call_id==ring.call_id && c.state=="live"){return Some("call_ended");}
+    let saved=&op["fence"]["auth"];
+    if !saved.is_null(){
+        let current=proof.auth(owner);
+        if current.is_null(){return Some("auth_revoked");}
+        if &current!=saved{return Some("auth_changed");}
+    }
+    if let Some(stop)=op["fence"]["stop_generation"].as_u64() && proof.stop(&ring.agent_id).0!=stop{return Some("stopped_after_answer");}
+    None
+}
+
+impl super::Rings{
+    pub fn opening(&self,token:&Value)->Option<&super::Ring>{
+        let token=token.as_str().filter(|s|s.starts_with("opn_"))?;
+        self.rings.iter().find(|r|r.opening["token"]==token)
+    }
+
+    /// A refusal may itself change the opening (e.g. an identity breach).
+    /// Apply and persist those changes before returning the refusal.
+    pub fn change_opening<T>(&mut self,id:&str,now:i64,out:&mut super::Effects,apply:impl FnOnce(&mut super::Ring,&mut Effects)->T)->Option<(T,Effects)>{
+        let ring=self.rings.iter_mut().find(|r|r.ring_id==id && !r.opening.is_null())?;
+        let mut changed=Effects::default();
+        let answer=apply(ring,&mut changed);
+        if changed.dirty{
+            ring.opening["updated_at"]=json!(now);
+            out.changed.rings=true;
+        }
+        if changed.announce {out.events.push(ring.event(now));}
+        Some((answer,changed))
+    }
+
+    pub fn opening_audit(&mut self,id:&str,claim:&str,principal:&str,route:Option<&str>,now:i64,out:&mut super::Effects){
+        let mut event=json!({"outcome":"opening","ring_id":id,"claim":claim,"by":principal});
+        if let Some(route)=route{event["route"]=json!(route);}
+        self.write(event,now,out);
+    }
+}
