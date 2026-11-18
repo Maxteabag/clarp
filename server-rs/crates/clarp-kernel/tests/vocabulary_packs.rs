@@ -30,4 +30,17 @@ fn budgets_and_compilations_match_the_python_reference() {
             "{case}"
         );
     }
+    for case in v["sources"].as_array().unwrap(){
+        let sources:vocabulary::sources::Sources=serde_json::from_value(case["input"].clone()).unwrap();
+        assert_eq!(json!(sources.packs()),case["packs"]);
+    }
+    for case in v["workspaces"].as_array().unwrap(){
+        let paths:Vec<String>=serde_json::from_value(case["paths"].clone()).unwrap();
+        assert_eq!(json!(vocabulary::sources::identifiers(&paths)),case["ids"]);
+    }
+    for case in v["verdicts"].as_array().unwrap(){
+        let text=case["transcript"].as_str().unwrap();
+        assert_eq!(case["discard"],vocabulary::judged_text(text,case["probability"].as_f64()).is_empty());
+    }
+
 }
