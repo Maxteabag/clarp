@@ -725,10 +725,7 @@ class OrchestratorService:
                 if not target:
                     target = requested_session
                     final_action = FINAL_CLARIFY
-                    decision = self._as_clarify(
-                        decision,
-                        "I am not sure which agent that was for.",
-                    )
+                    decision = self._as_clarify(decision, PHRASES["no_valid_target"])
                     if not fallback_request:
                         self._hold_and_speak_clarification(
                             decision=decision,
@@ -849,6 +846,9 @@ class OrchestratorService:
                     # silent error (issue 360, R75). Nothing was done.
                     final_action = FINAL_CLARIFY
                     error = refused.code
+                    decision = OrchestratorDecision(**{
+                        **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": COMMAND_REFUSED,
+                        "phrase_key": _FIXED_KEY[COMMAND_REFUSED]})
                     self._speak_as_session(COMMAND_REFUSED, requested_session)
             if final_action == FINAL_ERROR and decision.kind == DECISION_IGNORED:
                 final_action = FINAL_IGNORED
@@ -957,7 +957,7 @@ class OrchestratorService:
             return NO_SUCH_AGENT, ""
         if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
             return NO_VOICE_COMMANDS, ""
-        if agent.get("archived_at") or agent["session"] not in sessions:
+        if agent["session"] not in sessions:      # the packet holds no archived agent either
             return CANNOT_COMMAND, ""
         return "", agent["session"]
 
@@ -1149,20 +1149,23 @@ class OrchestratorService:
         return f"{persona} is active, but I do not have recent work details yet."
 
     @staticmethod
-    def _clip_key(text: str, phrase_key: str) -> str:
-        """The cache key to try: the one given (the model's, _as_clarify's default), else the
-        router's own key for one of its fixed sentences (lib.orchestrator_phrases, R76). Whoever
-        chose it, its clip plays only when it is this very text (R80)."""
-        return phrase_key or _FIXED_KEY.get(text, "")
+    def _clip_key(text: str, phrase_key: str) -> tuple[str, bool]:
+        """The cache key to try, and whether it is the table's. One of the router's own sentences
+        (lib.orchestrator_phrases) always uses its own key, whatever key was given; a given key
+        (the model's, _as_clarify's default) is used only for a sentence outside the table.
+        Whoever chose it, its clip plays only when it is this very text (R76, R80)."""
+        own = _FIXED_KEY.get(text, "")
+        return (own, True) if own else (phrase_key, False)
 
     def _speak_orchestrator(self, text: str, settings: OrchestratorSettings,
                             *, phrase_key: str = "") -> None:
-        key = self._clip_key(text, phrase_key)
+        key, own = self._clip_key(text, phrase_key)
         if key and self._play_cached_phrase(
             phrase_key=key,
             session="",
             voice_id=settings.voice_id,
             expected_text=text,
+            stale_is_news=own,
         ):
             return
         self.ctx.speak_announcement(text, settings.voice_id, session=None)
@@ -1171,18 +1174,19 @@ class OrchestratorService:
                           *, phrase_key: str = "") -> None:
         agent = identity.lookup(session)
         if agent:
-            key = self._clip_key(text, phrase_key)
+            key, own = self._clip_key(text, phrase_key)
             if key and self._play_cached_phrase(
                 phrase_key=key,
                 session=session,
                 voice_id=agent.get("voice_id") or "",
                 expected_text=text,
+                stale_is_news=own,
             ):
                 return
             self.ctx.speak_announcement(text, agent.get("voice_id"), session=session)
 
     def _play_cached_phrase(self, *, phrase_key: str, session: str,
-                            voice_id: str, expected_text: str) -> bool:
+                            voice_id: str, expected_text: str, stale_is_news: bool = False) -> bool:
         """Play the cached clip of ``expected_text`` under ``phrase_key``, if there is one: only a
         row whose text is that very sentence plays (R80: a clip never says other words than the
         ones meant, whoever chose the key)."""
@@ -1205,7 +1209,10 @@ class OrchestratorService:
             return False
         if row["text"] != expected_text:
             # A clip of another text never stands in for the sentence (R76, R80): spoken instead.
-            log("orchestratorPhraseMismatch", f"key={phrase_key}")
+            # Logged only when one of the router's own sentences meets a stale clip; a free-text
+            # question under a default key is no news.
+            if stale_is_news:
+                log("orchestratorPhraseMismatch", f"key={phrase_key}")
             return False
         path = str(row["audio_path"])
         if not path.startswith("/audio/") and not os.path.exists(path):

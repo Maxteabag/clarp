@@ -165,7 +165,7 @@ def test_the_question_about_another_agent_is_said_not_played_as_the_default_clip
     _cache("clarify_target", "Was that for me?")
     say("send the report")
     assert played == [] and effects["spoken"] == ["Was that for Antoni?"]
-    assert ("orchestratorPhraseMismatch", "key=clarify_target") in lines
+    assert lines == []      # a free-text question under a default key is no news (439 review, 5)
 
 
 def test_the_cached_sentence_itself_still_plays_its_clip(effects, played):
@@ -189,3 +189,76 @@ def test_no_caller_can_play_a_clip_without_the_sentence_it_must_be():
     import inspect
     parameter = inspect.signature(orchestrator.OrchestratorService._play_cached_phrase).parameters["expected_text"]
     assert parameter.default is inspect.Parameter.empty
+
+
+
+# ---- PR 439 review follow-up ---------------------------------------------------------------------
+
+def test_the_no_valid_target_question_has_its_own_key_and_plays_its_clip(effects, played):
+    say, _ = router(lambda packet: {"kind": "agent_message", "target_session": "zed",
+                                    "confidence": 0.95, "reason": "unsure"}, effects)
+    _cache("no_valid_target", "I am not sure which agent that was for.")
+    say("send the report")
+    assert [clip["phrase_key"] for clip in played] == ["no_valid_target"] and effects["spoken"] == []
+
+
+def test_a_table_sentence_uses_its_own_key_whatever_key_was_given(effects, played):
+    say, _ = router(lambda packet: {"kind": "clarify", "confidence": 0.9, "reason": "who",
+                                    "phrase_key": "clarify_target",
+                                    "spoken_text": "I do not have an agent by that name."}, effects)
+    _cache("no_such_agent", "I do not have an agent by that name.")
+    say("send it to Zed")
+    assert [clip["phrase_key"] for clip in played] == ["no_such_agent"] and effects["spoken"] == []
+
+
+def test_a_stale_clip_for_a_table_sentence_is_still_news(effects, played, monkeypatch):
+    lines = []
+    monkeypatch.setattr(orchestrator, "log", lambda event, detail="", **_: lines.append((event, detail)))
+    say, _ = router(_command("restart", target="zed"), effects)
+    _cache("no_such_agent", "Some older words.")
+    say("restart Zed")
+    assert played == [] and ("orchestratorPhraseMismatch", "key=no_such_agent") in lines
+
+
+def test_the_orchestrator_voice_plays_no_clip_of_other_words_either(effects, played):
+    say, _ = router(lambda packet: {"kind": "status_query", "target_session": "zed",
+                                    "confidence": 0.95, "reason": "status"}, effects)
+    _cache("no_such_agent", "Some older words.", voice=orchestrator.get_settings().voice_id)
+    say("what is Zed doing?")
+    assert played == [] and effects["spoken"] == ["I do not have an agent by that name."]
+
+
+def test_a_lifecycle_refusal_is_recorded_under_its_key(effects, monkeypatch):
+    class Refusing:
+        def __init__(self, _ctx):
+            pass
+
+        def create(self, payload):
+            raise agent_lifecycle.AgentLifecycleError(409, "contact_occupied")
+    monkeypatch.setattr(agent_lifecycle, "AgentLifecycleService", Refusing)
+    say, _ = router(_command("restart", target="antoni"), effects)
+    outcome = say("restart Antoni")
+    assert outcome.decision["phrase_key"] == "command_refused"
+    row = db.conn().execute("SELECT phrase_key, error FROM orchestrator_decisions").fetchone()
+    assert tuple(row) == ("command_refused", "contact_occupied")
+
+
+def test_a_rows_audio_always_belongs_to_its_text():
+    """The generator's record-only run changes a row's text: the old audio is not kept with it."""
+    import importlib.util
+    script = pathlib.Path(orchestrator.__file__).parents[2] / "scripts/generate_orchestrator_phrases.py"
+    spec = importlib.util.spec_from_file_location("generate_orchestrator_phrases", script)
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="Old words.", audio_path="/audio/old.mp3")
+    generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="Old words.")
+    assert _row("no_such_agent")["audio_path"] == "/audio/old.mp3"      # same words: the audio stays
+    generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="New words.")
+    assert _row("no_such_agent")["audio_path"] == ""                    # new words, no new audio
+    generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="New words.", audio_path="/audio/new.mp3")
+    assert _row("no_such_agent")["audio_path"] == "/audio/new.mp3"
+
+
+def _row(key):
+    return dict(db.conn().execute("SELECT text, audio_path FROM orchestrator_phrase_cache WHERE phrase_key=?",
+                                  (key,)).fetchone())
