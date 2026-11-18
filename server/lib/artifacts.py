@@ -774,6 +774,22 @@ def _apply_update(current, data, *, report_payload=False):
     return get(artifact_id) or {}
 
 
+def replace_render_spec_in(con, artifact_id: str, *, title: str, summary: str, status: str,
+                           reference: str, payload_json: str, now: int) -> None:
+    """A render spec's whole new revision, written on the caller's connection inside its
+    transaction: render_spec_store holds the one writer lock for publish and submit."""
+    con.execute("UPDATE artifacts SET title=?,summary=?,status=?,reference_id=?,payload_json=?,"
+                "updated_at=? WHERE artifact_id=?",
+                (title, summary, status, reference, payload_json, now, artifact_id))
+
+
+def complete_in(con, artifact_id: str, *, now: int, updated_at: int) -> None:
+    """Mark an artifact completed on the caller's connection, in the same transaction
+    as what completed it (a render spec's one accepted submission)."""
+    con.execute("UPDATE artifacts SET status='completed',completed_at=?,updated_at=? WHERE artifact_id=?",
+                (now, updated_at, artifact_id))
+
+
 def _decision_text(value: Any, field: str, limit: int, *, required: bool = False) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field} must be a string")
