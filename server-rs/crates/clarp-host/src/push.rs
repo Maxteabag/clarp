@@ -13,7 +13,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use clarp_kernel::devices::Refused;
+use clarp_kernel::devices::{self, Refused};
 use clarp_kernel::presence::LEASE_MS;
 use serde_json::{Map, Value, json};
 
@@ -71,15 +71,27 @@ async fn register(
         } => device_id.clone(),
         _ => String::new(),
     };
+    // An Android phone says with its token how it can hold a ring's conversation; any other
+    // registration says nothing of it, whatever it sent.
+    let (platform, provider) = (text(&data, "platform"), text(&data, "provider"));
+    let android = platform == "android" && devices::provider_for(&platform, &provider) == "fcm";
+    let modes = match data.get("supported_conversation_modes") {
+        Some(said) if android => match clarp_kernel::rings::declared_modes(said) {
+            Ok(modes) => modes.into_iter().map(str::to_string).collect(),
+            Err(_) => return Ok(refused(StatusCode::BAD_REQUEST, "live_mode_invalid")),
+        },
+        _ => Vec::new(),
+    };
     let registration = PushRegistration {
         token,
         session: text(&data, "session"),
         environment: text(&data, "environment"),
-        platform: text(&data, "platform"),
+        platform,
         base_url: text(&data, "base_url"),
         push_grant: text(&data, "push_grant"),
         owner,
-        provider: text(&data, "provider"),
+        provider,
+        modes,
     };
     Ok(match app.fleet.push_register(registration).await? {
         Ok(()) => Json(json!({ "ok": true })).into_response(),

@@ -4111,21 +4111,27 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         host.ask("POST", "/calls/ring", Some(&json!(["theo"]))),
         (400, json!({ "error": "bad json" }))
     );
-    // What this Host does not hold is refused with the way to ring instead.
+    // A ring asked to be held as a live voice call says what it is about: without that it
+    // is refused before anything else is looked at.
     let mut live = another.clone();
     live["conversation_mode"] = json!("agent_live_v1");
     let (status, refused) = host.ask("POST", "/calls/ring", Some(&live));
     assert_eq!(
         (status, &refused["error"]),
-        (409, &json!("the user is already being called"))
+        (400, &json!("live_context_invalid"))
     );
+    // A phone switches rings off for itself: nobody else does that for it.
     assert_eq!(
         host.ask(
             "POST",
             "/calls/ring/device",
             Some(&json!({ "receive_rings": false }))
-        )
-        .0,
+        ),
+        (403, json!({ "ok": false, "error": "ring_device_required" }))
+    );
+    // And what this Host does not have of rings is said in words: one that listens first.
+    assert_eq!(
+        host.ask("POST", "/calls/ring/opening", Some(&json!({}))).0,
         501
     );
 
@@ -4412,6 +4418,64 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
     // A phone that may only read and send has nothing to do with rings.
     let (limited, _) = pair(&host, "Watch", "limited");
     assert_eq!(host.ask_as(&limited, "GET", "/calls/ring", None).0, 403);
+
+    // A phone that switched rings off for itself is left out of a ring's alert and shown
+    // no ring, and every other phone is rung as ever.
+    let (tablet, _) = pair(&host, "Tablet", "full");
+    let its_grant = format!(
+        "pg1.{}.{}.{}",
+        "4".repeat(64),
+        "5".repeat(16),
+        "6".repeat(64)
+    );
+    let its_row = json!({ "token": "c3".repeat(32), "session": theo, "push_grant": its_grant });
+    assert_eq!(
+        host.ask_as(&tablet, "POST", "/devices", Some(&its_row)),
+        (200, json!({ "ok": true }))
+    );
+    let off =
+        json!({ "ok": true, "receive_rings": false, "alerts_suppressed": true, "state": "off" });
+    assert_eq!(
+        as_phone(
+            "POST",
+            "/calls/ring/device",
+            Some(json!({ "receive_rings": false }))
+        ),
+        (200, off)
+    );
+    make("Nadia");
+    let told_before = relay.taken().len();
+    let asked = json!({ "agent": "nadia", "reason": "A third thing", "opening_line": "Hello." });
+    let (status, rung) = host.ask("POST", "/calls/ring", Some(&asked));
+    assert_eq!(status, 200, "{rung}");
+    let third_id = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    wait_for("the ring's alert", || relay.taken().len() > told_before);
+    let rung_as: Vec<String> = relay.taken()[told_before..]
+        .iter()
+        .map(|(_, sent_as, _)| sent_as.clone())
+        .collect();
+    assert_eq!(rung_as, [format!("Bearer {its_grant}")]);
+    assert!(as_phone("GET", "/calls/ring", None).1["ring"].is_null());
+    assert_eq!(
+        host.ask_as(&tablet, "GET", "/calls/ring", None).1["ring"]["ring_id"],
+        third_id.as_str()
+    );
+    let (status, _) = host.ask(
+        "POST",
+        "/calls/ring/cancel",
+        Some(&json!({ "ring_id": third_id })),
+    );
+    assert_eq!(status, 200);
+    let on_again =
+        json!({ "ok": true, "receive_rings": true, "alerts_suppressed": false, "state": "on" });
+    assert_eq!(
+        as_phone(
+            "POST",
+            "/calls/ring/device",
+            Some(json!({ "receive_rings": true }))
+        ),
+        (200, on_again)
+    );
 
     // The rings are the Host's to keep: a Host that was killed has them as they were.
     let (_, before) = as_phone("GET", &format!("/calls/ring?ring_id={ring_id}"), None);
@@ -24823,4 +24887,1131 @@ fn a_clip_is_heard_by_deepgram_and_its_engine_may_be_set_to_find_the_ends_of_tur
         ),
         (&json!(false), &json!(true))
     );
+}
+
+/// A stand-in for the voice of a live call, on this machine: it takes the key of the tests
+/// and no other; told to start, it says that it has; given its opening, it speaks a little
+/// before it says that it took it, and a little after; told to be still, it says that it
+/// was interrupted; and it counts the sound it is given, the silence apart.
+struct LiveVoice {
+    address: String,
+    /// The keys it was shown, one for each time it was reached.
+    asked: Arc<Mutex<Vec<String>>>,
+    /// What it was told, without the sound; and how it is begun with, as it was written.
+    told: Arc<Mutex<Vec<Value>>>,
+    written: Arc<Mutex<Vec<String>>>,
+    /// How many bytes of sound it was given that were not silence, and how many pieces of
+    /// silence.
+    sound: Arc<AtomicU64>,
+    silence: Arc<AtomicU64>,
+}
+
+fn stand_in_live_voice() -> LiveVoice {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("ws://{}", listener.local_addr().unwrap());
+    let (asked, told) = (
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    let (sound, silence) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let written = Arc::new(Mutex::new(Vec::new()));
+    let kept = written.clone();
+    let (keys, noted, heard, quiet) = (asked.clone(), told.clone(), sound.clone(), silence.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let (keys, noted, heard, quiet) =
+                (keys.clone(), noted.clone(), heard.clone(), quiet.clone());
+            let kept = kept.clone();
+            std::thread::spawn(move || {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let shown = Arc::new(Mutex::new(String::new()));
+                let seen = shown.clone();
+                #[allow(clippy::result_large_err)]
+                let note =
+                    move |request: &tungstenite::handshake::server::Request,
+                          response: tungstenite::handshake::server::Response| {
+                        let key = request.headers().get("authorization");
+                        let key = key.and_then(|key| key.to_str().ok()).unwrap_or("");
+                        *seen.lock().unwrap() = key.to_string();
+                        if key != "Bearer a-key-of-the-test" {
+                            let refused = tungstenite::http::Response::builder().status(401);
+                            return Err(refused.body(None).unwrap());
+                        }
+                        Ok(response)
+                    };
+                let opened = tungstenite::accept_hdr(stream, note);
+                keys.lock().unwrap().push(shown.lock().unwrap().clone());
+                let Ok(mut socket) = opened else { return };
+                let says = |socket: &mut tungstenite::WebSocket<TcpStream>, said: Value| {
+                    let _ = socket.send(tungstenite::Message::Text(said.to_string().into()));
+                };
+                let speaks = |bytes: usize| {
+                    let sound = clarp_kernel::python::b64encode(&vec![3u8; bytes]);
+                    json!({ "type": "session.output_audio.delta", "delta": sound })
+                };
+                // What a Host passes over: words that are no message.
+                let _ = socket.send(tungstenite::Message::Text("not a message".into()));
+                loop {
+                    let Ok(tungstenite::Message::Text(text)) = socket.read() else {
+                        break;
+                    };
+                    let said: Value = serde_json::from_str(text.as_str()).unwrap();
+                    if said["type"] == "session.start" {
+                        kept.lock().unwrap().push(text.as_str().to_string());
+                    }
+                    match said["type"].as_str().unwrap_or("") {
+                        "session.input_audio.append" => {
+                            let audio = said["audio"].as_str().unwrap_or("");
+                            if audio.bytes().all(|sign| sign == b'A') {
+                                quiet.fetch_add(1, Ordering::SeqCst);
+                            } else {
+                                let bytes = clarp_kernel::python::b64decode(audio).unwrap();
+                                heard.fetch_add(bytes.len() as u64, Ordering::SeqCst);
+                            }
+                        }
+                        "session.start" => {
+                            noted.lock().unwrap().push(said);
+                            says(&mut socket, json!({ "type": "session.started" }));
+                        }
+                        "session.instructions.append" => {
+                            let named = said["event_id"].clone();
+                            noted.lock().unwrap().push(said);
+                            if named.is_null() {
+                                says(
+                                    &mut socket,
+                                    json!({ "type": "session.output_audio.interrupted" }),
+                                );
+                                continue;
+                            }
+                            // It begins to say the opening before it says that it took it.
+                            says(&mut socket, speaks(480));
+                            let took = json!({
+                                "type": "session.instructions.appended", "client_event_id": named,
+                            });
+                            says(&mut socket, took);
+                            says(&mut socket, speaks(960));
+                        }
+                        "session.close" => {
+                            noted.lock().unwrap().push(said);
+                            let _ = socket.close(None);
+                            break;
+                        }
+                        _ => noted.lock().unwrap().push(said),
+                    }
+                }
+            });
+        }
+    });
+    LiveVoice {
+        address,
+        asked,
+        told,
+        written,
+        sound,
+        silence,
+    }
+}
+
+/// The profile an operator approved for an agent, in the Host's folder of profiles, with
+/// the one file it pins.
+fn live_profile(place: &Place, name: &str, session: &str, more: Value) {
+    let persona = format!("You are {name}, who guards the pumps.\n");
+    let folder = place.root.join("data/agent-live/profiles").join(name);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("PERSONA.md"), &persona).unwrap();
+    let mut profile = json!({
+        "profile_id": name, "version": "1", "agent_session": session,
+        "display_name": format!("{name} the guard"),
+        "files": { "persona": {
+            "file": "PERSONA.md", "sha256": clarp_kernel::live_call::sum(persona.as_bytes()),
+        } },
+        "stories": { "pump": ["persona"], "user_call": ["persona"] },
+    });
+    for (key, value) in more.as_object().unwrap() {
+        profile[key] = value.clone();
+    }
+    std::fs::write(folder.join("profile.json"), profile.to_string()).unwrap();
+}
+
+/// What a producer says of an event, for a ring of this profile with this opening line.
+fn live_event(profile: &str, event_id: &str, line: &str) -> Value {
+    json!({
+        "version": 1, "profile_id": profile, "story": "pump", "source": "leak-watch",
+        "event": {
+            "id": event_id, "time": "2026-11-18T04:08:00+01:00", "camera_id": "cam-2",
+            "camera_label": "Camera 2", "when_text": "just now",
+            "what_text": "Water on the floor below pump 01.", "log": ["04:08 water seen"],
+        },
+        "opening_text": line,
+    })
+}
+
+/// The join a phone says first on the socket of a call: the grant of its answer.
+fn join_of(grant: &Value) -> Value {
+    let mut join = json!({ "type": "agent_live.join" });
+    for name in [
+        "protocol",
+        "host_id",
+        "ring_id",
+        "call_id",
+        "call_epoch",
+        "attempt_id",
+        "context_digest",
+        "owner_nonce",
+        "join_ticket",
+    ] {
+        join[name] = grant[name].clone();
+    }
+    join
+}
+
+fn says(door: &mut Door, said: &Value) {
+    door.send(tungstenite::Message::Text(said.to_string().into()))
+        .unwrap();
+}
+
+/// The names of a call, as every word about it carries them.
+fn named(grant: &Value, kind: &str) -> Value {
+    json!({
+        "type": kind, "call_id": grant["call_id"], "call_epoch": grant["call_epoch"],
+        "attempt_id": grant["attempt_id"],
+    })
+}
+
+/// The socket of a live call for a phone, once the one it held before is let go of.
+fn live_socket(host: &Host, token: &str) -> Door {
+    let mut door = socket_at(host, token, "/calls/ring/live");
+    wait_for("the socket the phone held before to be let go of", || {
+        if door.is_err() {
+            door = socket_at(host, token, "/calls/ring/live");
+        }
+        door.is_ok()
+    });
+    door.unwrap()
+}
+
+/// The next words on a socket, whatever signs of life come before them.
+fn next_words(door: &mut Door) -> Value {
+    loop {
+        match door.read() {
+            Ok(tungstenite::Message::Text(text)) => {
+                return serde_json::from_str(text.as_str()).unwrap();
+            }
+            Ok(tungstenite::Message::Ping(_) | tungstenite::Message::Pong(_)) => {}
+            other => panic!("a call tells in words, it said {other:?}"),
+        }
+    }
+}
+
+/// Joins a call and brings it under way: the phone says its join and that it is ready, the
+/// voice takes its opening. Answers what the phone was told meanwhile, in its order.
+fn under_way(door: &mut Door, grant: &Value) -> Vec<Value> {
+    says(door, &join_of(grant));
+    // What a phone is told is written without a blank between its parts.
+    let first = written_on(door);
+    assert!(
+        first.starts_with("{\"type\":\"agent_live.session\",") && !first.contains("\": "),
+        "{first}"
+    );
+    let first: Value = serde_json::from_str(&first).unwrap();
+    let mut heard = vec![first, told_on(door)];
+    let mut ready = named(grant, "agent_live.client_ready");
+    ready["audio"] = json!(true);
+    ready["capture"] = json!(true);
+    says(door, &ready);
+    for _ in 0..3 {
+        heard.push(told_on(door));
+    }
+    heard
+}
+
+#[test]
+fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
+    const ADMIN: &str = "the-administrators-token";
+    const LIVE: &str = "agent_live_v1";
+    let place = Place::new("live-call");
+    let voice = stand_in_live_voice();
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    // A relay for pushes, to see what it is not handed: a live ring has no alert. And an
+    // engine that speaks, to see when it is asked: the opening of a live call is its voice's
+    // own, and no line is voiced for it until the call is switched to an ordinary one.
+    let relay = StandInRelay::start();
+    let relay_at = format!("http://{}", relay.address);
+    let sound: Vec<u8> = (0..5_000_u32).map(|at| (at % 241) as u8).collect();
+    let speaks = cartesia_stand_in(sound);
+    let owners = place.root.join("owners-settings.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
+         Mike = \"voice-of-mike\"\n",
+    )
+    .unwrap();
+    let args = [
+        "--push-relay",
+        relay_at.as_str(),
+        "--speech-keys",
+        owners.to_str().unwrap(),
+    ];
+    let world = [
+        world[0],
+        world[1],
+        ("CLARP_CARTESIA_ENDPOINT", speaks.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let host = place.start_in(ADMIN, &args, &world);
+    let (theo, mike) = (host.new_agent("Theo"), host.new_agent("Mike"));
+    let nadia = host.new_agent("Nadia");
+    let id_of = |session: &str| -> String {
+        let agents = host.get("/agents/snapshot")["agents"].clone();
+        let mut rows = agents.as_array().unwrap().iter();
+        let row = rows.find(|row| row["session"] == session).unwrap();
+        row["agent_id"].as_str().unwrap().to_string()
+    };
+    let theo_id = id_of(&theo);
+    let calls = json!({ "user_call_default": "live", "user_call_opening": " Hei,  det er Theo. " });
+    live_profile(&place, "theo", &theo, calls);
+    live_profile(&place, "mike", &mike, json!({}));
+    live_profile(&place, "nadia", &nadia, json!({}));
+    let line = "Camera 2 shows a possible water leak at pump 01.";
+    let ring_of = |agent: &str, event_id: &str| {
+        json!({
+            "agent": agent, "reason": "Possible water leak", "opening_line": line,
+            "conversation_mode": LIVE, "event_context": live_event(agent, event_id, line),
+        })
+    };
+
+    // No phone can hold a live call: the ring is refused, and never placed as another kind.
+    assert_eq!(
+        host.ask("POST", "/calls/ring", Some(&ring_of("theo", "evt-1"))),
+        (409, json!({ "ok": false, "error": "live_client_required" }))
+    );
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let (other, _) = pair(&host, "Old phone", "full");
+    let as_phone = |method: &str, path: &str, body: Option<Value>| {
+        host.ask_as(&phone, method, path, body.as_ref())
+    };
+    // The phone is one that is pushed to, as a ring of the ordinary kind would alert it.
+    let its_grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let pushed_at = json!({ "token": "d4".repeat(32), "push_grant": its_grant });
+    assert_eq!(
+        as_phone("POST", "/devices", Some(pushed_at)),
+        (200, json!({ "ok": true }))
+    );
+    // The phone says that it can hold one, with the token a call would be pushed to.
+    let token =
+        json!({ "token": "a1".repeat(32), "supported_conversation_modes": ["classic", LIVE] });
+    assert_eq!(
+        as_phone("POST", "/calls/ring/voip-token", Some(token)),
+        (200, json!({ "ok": true, "registered": true }))
+    );
+    let heard_by_phone = host.listen_at(&format!("/events?token={phone}"));
+    let heard_by_other = host.listen_at(&format!("/events?token={other}"));
+    let rings_heard = |heard: &Arc<Mutex<Vec<Value>>>| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let rings = heard.iter().filter(|event| event["type"] == "agent-ring");
+        rings.map(|event| event["state"].clone()).collect()
+    };
+
+    // The ring: placed with nothing voiced, since its opening is the voice's own, and told
+    // to the phone that can hold it and to no other.
+    let (status, rung) = host.ask("POST", "/calls/ring", Some(&ring_of("theo", "evt-1")));
+    assert_eq!(status, 200, "{rung}");
+    let ring_id = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        (
+            &rung["ring"]["conversation_mode"],
+            &rung["ring"]["opening_audio_url"],
+            &rung["delivery"]
+        ),
+        (
+            &json!(LIVE),
+            &json!(""),
+            &json!({ "voip": { "enabled": false, "sent": 0, "failed": 0 } })
+        )
+    );
+    assert!(rung["ring"].get("_live").is_none(), "{rung}");
+    // The same event rings once.
+    let (_, again) = host.ask("POST", "/calls/ring", Some(&ring_of("theo", "evt-1")));
+    assert_eq!(
+        (
+            &again["changed"],
+            &again["ring"]["ring_id"],
+            &again["summary"]
+        ),
+        (
+            &json!(false),
+            &json!(ring_id),
+            &json!("This event already rang the user; no second call.")
+        )
+    );
+    assert_eq!(
+        as_phone("GET", "/calls/ring", None).1["ring"]["ring_id"],
+        ring_id.as_str()
+    );
+    assert!(host.ask_as(&other, "GET", "/calls/ring", None).1["ring"].is_null());
+    assert!(host.ask("GET", "/calls/ring", None).1["ring"].is_null());
+    assert_eq!(
+        host.ask_as(
+            &other,
+            "GET",
+            &format!("/calls/ring?ring_id={ring_id}"),
+            None
+        ),
+        (404, json!({ "ok": false, "error": "unknown call" }))
+    );
+    wait_for("the phone to be told of the ring", || {
+        rings_heard(&heard_by_phone) == [json!("ringing")]
+    });
+
+    // It is answered by the phone that asks to hold it live, and by nobody as a call.
+    let answer = |more: Value| {
+        let mut said = json!({ "ring_id": ring_id });
+        for (key, value) in more.as_object().unwrap() {
+            said[key] = value.clone();
+        }
+        said
+    };
+    assert_eq!(
+        as_phone("POST", "/calls/ring/answer", Some(answer(json!({})))),
+        (409, json!({ "ok": false, "error": "live_client_required" }))
+    );
+    let live =
+        json!({ "conversation_mode": LIVE, "request_id": "answer-1", "client_nonce": "nonce-1" });
+    assert_eq!(
+        host.ask("POST", "/calls/ring/answer", Some(&answer(live.clone()))),
+        (403, json!({ "ok": false, "error": "live_auth" }))
+    );
+    let (status, taken) = as_phone("POST", "/calls/ring/answer", Some(answer(live.clone())));
+    assert_eq!(status, 200, "{taken}");
+    let grant = taken["live"].clone();
+    assert_eq!(
+        (
+            &taken["changed"],
+            &taken["conversation_mode"],
+            &taken["ring"]["answered_by"],
+            taken.get("call")
+        ),
+        (&json!(true), &json!(LIVE), &json!(phone_id), None)
+    );
+    assert_eq!(
+        (
+            &grant["protocol"],
+            &grant["ring_id"],
+            &grant["call_epoch"],
+            &grant["provider"],
+            &grant["model"],
+            &grant["voice"],
+            &grant["join_consumed"],
+            &grant["opening_owner"]
+        ),
+        (
+            &json!(1),
+            &json!(ring_id),
+            &json!(1),
+            &json!("openai"),
+            &json!("gpt-live-1"),
+            &json!("marin"),
+            &json!(false),
+            &json!("live")
+        )
+    );
+    // Asked again by its phone, the same grant; by another phone, none.
+    let (_, repeated) = as_phone("POST", "/calls/ring/answer", Some(answer(live.clone())));
+    assert_eq!(
+        (&repeated["changed"], &repeated["live"]),
+        (&json!(false), &grant)
+    );
+    assert_eq!(
+        host.ask_as(&other, "POST", "/calls/ring/answer", Some(&answer(live))),
+        (409, json!({ "ok": false, "error": "live_owner_conflict" }))
+    );
+    wait_for("the phone to be told of the answer", || {
+        rings_heard(&heard_by_phone) == [json!("ringing"), json!("answered")]
+    });
+    // A phone that cannot hold a live call was told of none of it; and a listener that asks
+    // for what it missed is told by the same rule.
+    assert_eq!(rings_heard(&heard_by_other), Vec::<Value>::new());
+    let missed_by = |token: &str| {
+        let heard = host.listen_at(&format!("/events?token={token}&last_event_id=0"));
+        wait_for("what was missed to be told", || {
+            let heard = heard.lock().unwrap();
+            heard.iter().any(|event| event["type"] == "agent-roster")
+        });
+        rings_heard(&heard)
+    };
+    assert_eq!(missed_by(&phone), [json!("ringing"), json!("answered")]);
+    assert_eq!(missed_by(&other), Vec::<Value>::new());
+    assert_eq!(missed_by(ADMIN), Vec::<Value>::new());
+
+    // The socket of the call: a socket, a paired phone's, one at a time.
+    assert_eq!(
+        as_phone("GET", "/calls/ring/live", None),
+        (426, json!({ "error": "live_websocket_required" }))
+    );
+    assert_eq!(socket_at(&host, ADMIN, "/calls/ring/live").err(), Some(403));
+    assert_eq!(socket_at(&host, "", "/calls/ring/live").err(), Some(401));
+    // A join that is not the grant's is refused with the names it claimed, and uses up
+    // nothing.
+    // What is said first on the socket is the join: sound is none, and words that are no
+    // message are nobody's.
+    for (first, code) in [
+        (
+            tungstenite::Message::Binary(vec![1, 2].into()),
+            "live_join_expired",
+        ),
+        (
+            tungstenite::Message::Text("not a join".into()),
+            "live_owner_conflict",
+        ),
+        (
+            tungstenite::Message::Text("[1]".into()),
+            "live_owner_conflict",
+        ),
+    ] {
+        let mut door = live_socket(&host, &phone);
+        door.send(first).unwrap();
+        let mut refused = json!({
+            "type": "agent_live.error", "call_id": "", "call_epoch": 0, "attempt_id": "",
+        });
+        refused["code"] = json!(code);
+        refused["message"] = json!(code);
+        refused["retryable"] = json!(false);
+        assert_eq!(told_on(&mut door), refused);
+    }
+    let mut door = live_socket(&host, &phone);
+    let mut wrong = join_of(&grant);
+    wrong["join_ticket"] = json!("0".repeat(64));
+    says(&mut door, &wrong);
+    let mut refused = named(&grant, "agent_live.error");
+    refused["code"] = json!("live_owner_conflict");
+    refused["message"] = json!("live_owner_conflict");
+    refused["retryable"] = json!(false);
+    assert_eq!(told_on(&mut door), refused);
+    assert!(matches!(
+        door.read(),
+        Ok(tungstenite::Message::Close(_)) | Err(_)
+    ));
+    let mut door = live_socket(&host, &phone);
+    assert_eq!(
+        socket_at(&host, &phone, "/calls/ring/live").err(),
+        Some(409),
+        "one phone holds one live call's socket"
+    );
+
+    // The call: joined, both sides ready, the voice given its opening; what the voice says
+    // before it took the opening is held and follows the word that it did, in its order.
+    let heard = under_way(&mut door, &grant);
+    let mut of_the_call = named(&grant, "agent_live.session");
+    for (name, value) in [
+        ("protocol", json!(1)),
+        ("host_id", grant["host_id"].clone()),
+        ("ring_id", json!(ring_id)),
+        ("agent_id", json!(theo_id)),
+        ("context_digest", grant["context_digest"].clone()),
+        ("provider", json!("openai")),
+        ("model", json!("gpt-live-1")),
+        ("voice", json!("marin")),
+    ] {
+        of_the_call[name] = value;
+    }
+    assert_eq!(heard[0], of_the_call);
+    assert_eq!(heard[1], named(&grant, "agent_live.provider_ready"));
+    let mut admitted = named(&grant, "agent_live.opening_admitted");
+    admitted["context_digest"] = grant["context_digest"].clone();
+    assert_eq!(heard[2], admitted);
+    let spoken = |event: &Value| {
+        let sound = clarp_kernel::python::b64decode(event["delta"].as_str().unwrap()).unwrap();
+        (event["type"].as_str().unwrap().to_string(), sound.len())
+    };
+    assert_eq!(
+        (spoken(&heard[3]), spoken(&heard[4])),
+        (
+            ("session.output_audio.delta".to_string(), 480),
+            ("session.output_audio.delta".to_string(), 960)
+        )
+    );
+    // The voice was reached with the owner's key, told who it is and what the call is about,
+    // fed a moment of silence, and given its opening under a name.
+    assert_eq!(
+        voice.asked.lock().unwrap().clone(),
+        ["Bearer a-key-of-the-test"]
+    );
+    let told = voice.told.lock().unwrap().clone();
+    let start = &told[0]["session"];
+    let instructions = start["instructions"].as_str().unwrap();
+    assert!(
+        instructions.starts_with(
+            "You are theo the guard.\n\n[persona]\nYou are theo, who guards the pumps."
+        ) && instructions.contains("The pump event you are calling about (data from leak-watch):")
+            && instructions.contains("\"what\": \"Water on the floor below pump 01.\"")
+            && instructions.contains("You have no tools in this call"),
+        "{instructions}"
+    );
+    assert_eq!(
+        (&start["model"], &start["audio"], &start["delegation"]),
+        (
+            &json!("gpt-live-1"),
+            &json!({ "output": { "voice": "marin" }, "format": { "type": "audio/pcm", "rate": 24000 } }),
+            &json!({ "type": "client" })
+        )
+    );
+    assert_eq!(
+        (
+            &told[1]["type"],
+            &told[1]["content"],
+            told[1]["event_id"].as_str().map(str::len)
+        ),
+        (
+            &json!("session.instructions.append"),
+            &json!(format!("OPENING: say exactly this, once, now: {line}")),
+            Some(32)
+        )
+    );
+    assert!(voice.silence.load(Ordering::SeqCst) >= 1);
+    // What the voice is told is written as the Python Host writes it there: with a blank
+    // after each colon and comma.
+    let written = voice.written.lock().unwrap().clone();
+    let begins = "{\"type\": \"session.start\", \"session\": {\"model\": \"gpt-live-1\", ";
+    assert!(written[0].starts_with(begins), "{}", &written[0][..80]);
+
+    // The user's sound goes to the voice; breaking in tells the voice to be still and the
+    // phone to be quiet.
+    let sound = clarp_kernel::python::b64encode(&[5u8; 640]);
+    says(
+        &mut door,
+        &json!({ "type": "session.input_audio.append", "audio": sound }),
+    );
+    wait_for("the voice to hear the user", || {
+        voice.sound.load(Ordering::SeqCst) == 640
+    });
+    says(&mut door, &json!({ "type": "oracle_v2.interrupt" }));
+    for _ in 0..2 {
+        assert_eq!(
+            told_on(&mut door),
+            json!({ "type": "oracle_v2.playback_flush" })
+        );
+        assert_eq!(told_on(&mut door), json!({ "type": "oracle_v2.quiet" }));
+    }
+    // The phone hangs up: both sides are told, and the socket ends well.
+    says(&mut door, &json!({ "type": "session.close" }));
+    let mut closed = named(&grant, "agent_live.closed");
+    closed["reason"] = json!("user_hangup");
+    assert_eq!(told_on(&mut door), closed);
+    assert!(matches!(
+        door.read(),
+        Ok(tungstenite::Message::Close(_)) | Err(_)
+    ));
+    wait_for("the voice to be told that the call is over", || {
+        let told = voice.told.lock().unwrap();
+        told.last()
+            .is_some_and(|said| said["type"] == "session.close")
+    });
+    // Its grant is used up, whatever became of the call.
+    let mut door = live_socket(&host, &phone);
+    says(&mut door, &join_of(&grant));
+    assert_eq!(told_on(&mut door)["code"], "live_join_consumed");
+    drop(door);
+    let trail = host.get("/calls/ring/settings")["audit"].clone();
+    let outcomes: Vec<&str> = trail
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|line| line["outcome"].as_str())
+        .collect();
+    assert!(
+        outcomes.contains(&"live_joined") && outcomes.contains(&"answered"),
+        "{trail}"
+    );
+
+    // The user calls an agent that takes calls live: the call is the phone's own, already
+    // answered, and nobody else is told of it.
+    let agents = host.get("/agents/snapshot")["agents"].clone();
+    let mode_of = |session: &str| {
+        let mut rows = agents.as_array().unwrap().iter();
+        rows.find(|row| row["session"] == session).unwrap()["call_mode"].clone()
+    };
+    assert_eq!(
+        (mode_of(&theo), mode_of(&mike)),
+        (json!(LIVE), json!("classic"))
+    );
+    let call = json!({ "agent": theo_id, "request_id": "call-1", "client_nonce": "nonce-1" });
+    assert_eq!(
+        host.ask("POST", "/calls/live", Some(&call)),
+        (403, json!({ "ok": false, "error": "live_auth" }))
+    );
+    assert_eq!(
+        host.ask("POST", "/calls/live", Some(&json!({ "agent": theo_id }))),
+        (403, json!({ "ok": false, "error": "live_auth" }))
+    );
+    let mut more = call.clone();
+    more["and"] = json!("more");
+    assert_eq!(
+        as_phone("POST", "/calls/live", Some(more)),
+        (400, json!({ "ok": false, "error": "live_request_invalid" }))
+    );
+    let (status, called) = as_phone("POST", "/calls/live", Some(call.clone()));
+    assert_eq!(status, 200, "{called}");
+    assert_eq!(
+        (
+            &called["ring"]["origin"],
+            &called["ring"]["state"],
+            &called["ring"]["opening_line"],
+            &called["changed"]
+        ),
+        (
+            &json!("user_call"),
+            &json!("answered"),
+            &json!("Hei, det er Theo."),
+            &json!(true)
+        )
+    );
+    let grant = called["live"].clone();
+    assert_eq!(as_phone("POST", "/calls/live", Some(call)).1["live"], grant);
+    let own_ring = called["ring"]["ring_id"].as_str().unwrap();
+    assert_eq!(
+        host.ask("GET", &format!("/calls/ring?ring_id={own_ring}"), None)
+            .0,
+        404
+    );
+    let mut door = live_socket(&host, &phone);
+    let heard = under_way(&mut door, &grant);
+    assert_eq!(heard[2]["type"], "agent_live.opening_admitted");
+    let told = voice.told.lock().unwrap().clone();
+    let begun: Vec<&Value> = told
+        .iter()
+        .filter(|said| said["type"] == "session.start")
+        .collect();
+    let instructions = begun[1]["session"]["instructions"].as_str().unwrap();
+    assert!(
+        instructions.contains("The user called you from the Clarp app.")
+            && !instructions.contains("event you are calling about"),
+        "{instructions}"
+    );
+    // It is closed beside its socket: retired on its ring, and its session told at once.
+    let control = |more: Value| {
+        let mut said = json!({
+            "call_id": grant["call_id"], "owner_nonce": grant["owner_nonce"],
+            "attempt_id": grant["attempt_id"],
+        });
+        for (key, value) in more.as_object().unwrap() {
+            said[key] = value.clone();
+        }
+        said
+    };
+    let switch =
+        control(json!({ "expected_epoch": 1, "audio_stopped": true, "request_id": "fallback-1" }));
+    assert_eq!(
+        as_phone("POST", "/calls/ring/live/fallback", Some(switch)),
+        (
+            409,
+            json!({ "ok": false, "error": "live_fallback_not_allowed" })
+        )
+    );
+    let hangup =
+        control(json!({ "call_epoch": 1, "reason": "transport_lost", "request_id": "close-1" }));
+    assert_eq!(
+        host.ask("POST", "/calls/ring/live/close", Some(&hangup)),
+        (403, json!({ "ok": false, "error": "live_auth" }))
+    );
+    assert_eq!(
+        as_phone("POST", "/calls/ring/live/close", Some(hangup.clone())),
+        (
+            200,
+            json!({ "ok": true, "call_id": grant["call_id"], "call_epoch": 1, "state": "retired" })
+        )
+    );
+    let mut closed = named(&grant, "agent_live.closed");
+    closed["reason"] = json!("transport_lost");
+    assert_eq!(told_on(&mut door), closed);
+    assert_eq!(
+        as_phone("POST", "/calls/ring/live/close", Some(hangup)).0,
+        200
+    );
+    drop(door);
+
+    // The agent's own tool rings so too, with what the ring is about in a file it reads
+    // where it was called: one that cannot be used is said so, and nothing is asked.
+    let dir = place.root.clone();
+    let at = (host.address.clone(), host.token.clone());
+    let at = (at.0.as_str(), at.1.as_str());
+    let rings_live = |file: &str| {
+        let args = [
+            "ring",
+            "--reason",
+            "r",
+            "--say",
+            line,
+            "--oracle",
+            "--context-file",
+            file,
+        ];
+        call_tool(at, &dir, &nadia, &args)
+    };
+    std::fs::write(dir.join("large.json"), " ".repeat(32 * 1024 + 1)).unwrap();
+    std::fs::write(dir.join("no.json"), "{\"version\": 1,").unwrap();
+    std::fs::write(dir.join("latin.json"), b"{\"a\": \"\xe5\"}").unwrap();
+    let about = live_event("nadia", "evt-tool", line);
+    std::fs::write(dir.join("about.json"), about.to_string()).unwrap();
+    for (file, why) in [
+        ("gone.json", "No such file or directory"),
+        ("large.json", "over 32768 bytes"),
+        ("no.json", "EOF while parsing"),
+        ("latin.json", "invalid utf-8"),
+    ] {
+        let (code, said, err) = rings_live(file);
+        let begins = "clarp-admin call ring: cannot use --context-file: ";
+        assert_eq!((code, said), (2, Value::Null), "{file}: {err}");
+        assert!(
+            err.starts_with(begins) && err.contains(why),
+            "{file}: {err}"
+        );
+    }
+    let (code, rung, err) = rings_live("about.json");
+    assert_eq!(code, 0, "{rung} {err}");
+    assert_eq!(
+        (&rung["ring"]["conversation_mode"], &rung["ring"]["session"]),
+        (&json!(LIVE), &json!(nadia))
+    );
+    let by_tool = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    // The tool is shown its ring as the administrator is: a live ring is no phone's but
+    // one that can hold it, and the agent takes it back all the same.
+    let (code, status, _) = call_tool(at, &dir, &nadia, &["ring-status", &by_tool]);
+    assert_eq!((code, &status["error"]), (1, &json!("unknown call")));
+    let (code, cancelled, _) = call_tool(at, &dir, &nadia, &["ring-cancel", &by_tool]);
+    assert_eq!(
+        (code, &cancelled["ring"]["state"]),
+        (0, &json!("cancelled"))
+    );
+
+    // An Android phone says with its push token how it can hold a call, and then it can; an
+    // iPhone's push token says nothing of it, whatever is sent with it.
+    let (android, _) = pair(&host, "Android phone", "full");
+    let pushed_to = |platform: &str, modes: Value| {
+        let token = match platform {
+            "android" => "fcm-token-of-the-android-phone".to_string(),
+            _ => "b2".repeat(32),
+        };
+        json!({ "token": token, "platform": platform, "supported_conversation_modes": modes })
+    };
+    let as_android = |path: &str, body: &Value| host.ask_as(&android, "POST", path, Some(body));
+    let own_call = json!({ "agent": theo_id, "request_id": "call-a", "client_nonce": "nonce-a" });
+    let cannot = (409, json!({ "ok": false, "error": "live_client_required" }));
+    assert_eq!(as_android("/calls/live", &own_call), cannot);
+    assert_eq!(
+        as_android("/devices", &pushed_to("android", json!(["agent_live_v2"]))),
+        (400, json!({ "ok": false, "error": "live_mode_invalid" }))
+    );
+    assert_eq!(
+        as_android("/devices", &pushed_to("ios", json!("agent_live_v1"))),
+        (200, json!({ "ok": true }))
+    );
+    assert_eq!(as_android("/calls/live", &own_call), cannot);
+    assert_eq!(
+        as_android("/devices", &pushed_to("android", json!([LIVE, LIVE]))),
+        (200, json!({ "ok": true }))
+    );
+    let (status, called) = as_android("/calls/live", &own_call);
+    assert_eq!(status, 200, "{called}");
+    let grant = called["live"].clone();
+    let given_up = json!({
+        "call_id": grant["call_id"], "owner_nonce": grant["owner_nonce"],
+        "attempt_id": grant["attempt_id"], "call_epoch": grant["call_epoch"],
+        "reason": "user_hangup", "request_id": "close-a",
+    });
+    assert_eq!(as_android("/calls/ring/live/close", &given_up).0, 200);
+
+    // A live call that its voice has not opened is switched to an ordinary one, once: the
+    // line is said in the agent's voice after all, and a call starts.
+    let (status, rung) = host.ask("POST", "/calls/ring", Some(&ring_of("mike", "evt-2")));
+    assert_eq!(status, 200, "{rung}");
+    let mikes = rung["ring"]["ring_id"].as_str().unwrap().to_string();
+    // The Android phone is shown the ring, and nothing is pushed to it: this Host reaches no
+    // phone of its kind. Once a registration of its token says nothing of how it holds a
+    // call, it holds none.
+    assert_eq!(
+        rung["delivery"],
+        json!({ "voip": { "enabled": false, "sent": 0, "failed": 0 } })
+    );
+    let shown = |token: &str| {
+        let (_, seen) = host.ask_as(token, "GET", "/calls/ring", None);
+        seen["ring"]["ring_id"].clone()
+    };
+    assert_eq!(shown(&android), json!(mikes));
+    let silent = json!({ "token": "fcm-token-of-the-android-phone", "platform": "android" });
+    assert_eq!(
+        as_android("/devices", &silent),
+        (200, json!({ "ok": true }))
+    );
+    assert_eq!(shown(&android), Value::Null);
+    // While a ring rings nobody calls, whoever it is.
+    let next_call = json!({ "agent": theo_id, "request_id": "call-b", "client_nonce": "nonce-b" });
+    assert_eq!(
+        as_android("/calls/live", &next_call),
+        (
+            409,
+            json!({ "ok": false, "error": "the user is already being called" })
+        )
+    );
+    let live = json!({
+        "ring_id": mikes, "conversation_mode": LIVE, "request_id": "answer-2", "client_nonce": "nonce-2",
+    });
+    let grant = as_phone("POST", "/calls/ring/answer", Some(live)).1["live"].clone();
+    let mut door = live_socket(&host, &phone);
+    says(&mut door, &join_of(&grant));
+    assert_eq!(told_on(&mut door)["type"], "agent_live.session");
+    assert_eq!(told_on(&mut door)["type"], "agent_live.provider_ready");
+    let switch = json!({
+        "call_id": grant["call_id"], "owner_nonce": grant["owner_nonce"],
+        "attempt_id": grant["attempt_id"], "expected_epoch": 1, "audio_stopped": true,
+        "request_id": "fallback-1",
+    });
+    // Until now nothing was voiced for any ring of this test: the opening of a live call is
+    // its voice's own.
+    assert_eq!(speaks.asked(), Vec::<Value>::new());
+    let (status, switched) = as_phone("POST", "/calls/ring/live/fallback", Some(switch.clone()));
+    assert_eq!(status, 200, "{switched}");
+    assert_eq!(
+        (
+            &switched["conversation_mode"],
+            &switched["changed"],
+            &switched["call"]["state"],
+            &switched["opening"]["text"]
+        ),
+        (
+            &json!("classic"),
+            &json!(true),
+            &json!("live"),
+            &json!(line)
+        )
+    );
+    // The line was voiced once the session of the live call had ended, and is where the
+    // ordinary call says its opening is.
+    let said: Vec<Value> = speaks.asked();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(said[0]["transcript"], line);
+    let clip = switched["opening"]["audio_url"].as_str().unwrap();
+    assert!(
+        clip.starts_with("/audio/") && clip.ends_with(".mp3"),
+        "{clip}"
+    );
+    let mut closed = named(&grant, "agent_live.closed");
+    closed["reason"] = json!("fallback");
+    assert_eq!(told_on(&mut door), closed);
+    let (_, again) = as_phone("POST", "/calls/ring/live/fallback", Some(switch));
+    assert_eq!(
+        (&again["changed"], &again["call"]["call_id"]),
+        (&json!(false), &switched["call"]["call_id"])
+    );
+    assert_eq!(
+        as_phone("GET", "/calls", None).1["call"]["call_id"],
+        switched["call"]["call_id"]
+    );
+    drop(door);
+
+    assert_eq!(as_android("/calls/live", &next_call), cannot);
+
+    // A phone switches rings off for itself: then no live ring can ring anybody.
+    assert_eq!(
+        as_phone("GET", "/calls/ring/device", None),
+        (
+            200,
+            json!({ "ok": true, "receive_rings": true, "alerts_suppressed": false, "state": "on" })
+        )
+    );
+    assert_eq!(
+        as_phone(
+            "POST",
+            "/calls/ring/device",
+            Some(json!({ "receive_rings": false }))
+        ),
+        (
+            200,
+            json!({ "ok": true, "receive_rings": false, "alerts_suppressed": true, "state": "off" })
+        )
+    );
+    assert_eq!(
+        as_phone(
+            "POST",
+            "/calls/ring/device",
+            Some(json!({ "receive_rings": "no" }))
+        ),
+        (400, json!({ "ok": false, "error": "ring_device_invalid" }))
+    );
+    // The one phone that can hold a live call receives no ring now: none is placed, and
+    // once it receives rings again one is.
+    let quinn = host.new_agent("Quinn");
+    live_profile(&place, "quinn", &quinn, json!({}));
+    assert_eq!(
+        host.ask("POST", "/calls/ring", Some(&ring_of("quinn", "evt-9"))),
+        (409, json!({ "ok": false, "error": "live_client_required" }))
+    );
+    let on =
+        json!({ "ok": true, "receive_rings": true, "alerts_suppressed": false, "state": "on" });
+    assert_eq!(
+        as_phone(
+            "POST",
+            "/calls/ring/device",
+            Some(json!({ "receive_rings": true }))
+        ),
+        (200, on)
+    );
+    let (status, rung) = host.ask("POST", "/calls/ring", Some(&ring_of("quinn", "evt-9")));
+    assert_eq!(status, 200, "{rung}");
+    let taken_back = json!({ "ring_id": rung["ring"]["ring_id"] });
+    let (status, cancelled) = host.ask("POST", "/calls/ring/cancel", Some(&taken_back));
+    assert_eq!(
+        (status, &cancelled["ring"]["state"]),
+        (200, &json!("cancelled"))
+    );
+
+    // A Host that starts again has no session of a call from before: the call is over, and
+    // the phone's next one is not held up by it.
+    let call = json!({ "agent": theo_id, "request_id": "call-2", "client_nonce": "nonce-2" });
+    let grant = as_phone("POST", "/calls/live", Some(call)).1["live"].clone();
+    let mut door = live_socket(&host, &phone);
+    under_way(&mut door, &grant);
+    let busy = json!({ "agent": theo_id, "request_id": "call-3", "client_nonce": "nonce-3" });
+    assert_eq!(
+        as_phone("POST", "/calls/live", Some(busy.clone())),
+        (409, json!({ "ok": false, "error": "live_call_active" }))
+    );
+    // Of all of this no phone was alerted: a ring held as a live voice call has no alert,
+    // in any state of it.
+    let alerted = relay.taken();
+    assert!(alerted.is_empty(), "{alerted:?}");
+    drop(host);
+    let host = place.start_in(ADMIN, &args, &world);
+    let (status, called) = host.ask_as(&phone, "POST", "/calls/live", Some(&busy));
+    assert_eq!(status, 200, "{called}");
+    assert_eq!(called["ring"]["origin"], "user_call");
+    // A call that was granted and not joined is still the phone's over a start of the Host,
+    // for its minute: the same asking is answered with the same grant, and another is held
+    // up by it until the phone gives it up.
+    let grant = called["live"].clone();
+    drop(host);
+    let host = place.start_in(ADMIN, &args, &world);
+    let (_, repeated) = host.ask_as(&phone, "POST", "/calls/live", Some(&busy));
+    assert_eq!(
+        (&repeated["changed"], &repeated["live"]),
+        (&json!(false), &grant)
+    );
+    let later = json!({ "agent": theo_id, "request_id": "call-4", "client_nonce": "nonce-4" });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/live", Some(&later)),
+        (409, json!({ "ok": false, "error": "live_call_active" }))
+    );
+    let given_up = json!({
+        "call_id": grant["call_id"], "owner_nonce": grant["owner_nonce"],
+        "attempt_id": grant["attempt_id"], "call_epoch": grant["call_epoch"],
+        "reason": "user_hangup", "request_id": "close-3",
+    });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/ring/live/close", Some(&given_up))
+            .0,
+        200
+    );
+    drop(host);
+
+    // A Host without a key for the voice holds no live call, and says so when one is asked
+    // for; one whose profile opts into tools it does not run says that.
+    let host = place.start_without(ADMIN, &args, &[], &["OPENAI_API_KEY"]);
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/live", Some(&later)),
+        (503, json!({ "ok": false, "error": "live_unavailable" }))
+    );
+    drop(host);
+    let tools = json!({
+        "user_call_default": "live", "user_call_opening": "Hei.",
+        "live_tools": { "enabled": true, "agents": [{ "session": mike, "name": "Mike" }] },
+    });
+    live_profile(&place, "theo", &theo, tools);
+    let host = place.start_in(ADMIN, &args, &world);
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/live", Some(&later)),
+        (
+            501,
+            json!({ "ok": false, "error": "this Host does not run the tools of a live call" })
+        )
+    );
+}
+
+#[test]
+fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it_only_asks() {
+    const ADMIN: &str = "the-administrators-token";
+    const LIVE: &str = "agent_live_v1";
+    let place = Place::new("live-idle");
+    let voice = stand_in_live_voice();
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let theo = host.new_agent("Theo");
+    let agents = host.get("/agents/snapshot")["agents"].clone();
+    let theo_id = agents[0]["agent_id"].as_str().unwrap().to_string();
+    let calls = json!({ "user_call_default": "live", "user_call_opening": "Hei." });
+    live_profile(&place, "theo", &theo, calls);
+    let (phone, _) = pair(&host, "Phone", "full");
+    let token = json!({ "token": "a1".repeat(32), "supported_conversation_modes": [LIVE] });
+    let left = host.ask_as(&phone, "POST", "/calls/ring/voip-token", Some(&token));
+    assert_eq!(left.0, 200, "{}", left.1);
+    let call = json!({ "agent": theo_id, "request_id": "call-1", "client_nonce": "nonce-1" });
+    let (status, called) = host.ask_as(&phone, "POST", "/calls/live", Some(&call));
+    assert_eq!(status, 200, "{called}");
+    let grant = called["live"].clone();
+    let mut door = live_socket(&host, &phone);
+    under_way(&mut door, &grant);
+    // A phone whose microphone is paused says nothing, and asks now and then whether the
+    // Host is there: for longer than a silent phone is waited for, the call goes on.
+    let began = Instant::now();
+    for _ in 0..7 {
+        std::thread::sleep(Duration::from_secs(5));
+        door.send(tungstenite::Message::Ping(Vec::new().into()))
+            .unwrap();
+    }
+    says(&mut door, &json!({ "type": "oracle_v2.interrupt" }));
+    assert_eq!(
+        next_words(&mut door),
+        json!({ "type": "oracle_v2.playback_flush" })
+    );
+    assert!(began.elapsed() >= Duration::from_secs(35));
+    // Then it gives no sign of life at all, and the call is over for that.
+    let silent_since = Instant::now();
+    let stream = door.get_ref();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(45)))
+        .unwrap();
+    let mut closed = named(&grant, "agent_live.closed");
+    closed["reason"] = json!("transport_lost");
+    let last = loop {
+        let said = next_words(&mut door);
+        if said["type"] == "agent_live.closed" {
+            break said;
+        }
+    };
+    assert_eq!(last, closed);
+    let silent_for = silent_since.elapsed();
+    assert!(
+        silent_for >= Duration::from_secs(29) && silent_for < Duration::from_secs(40),
+        "{silent_for:?}"
+    );
+    wait_for("the voice to be told that the call is over", || {
+        let told = voice.told.lock().unwrap();
+        told.last()
+            .is_some_and(|said| said["type"] == "session.close")
+    });
 }

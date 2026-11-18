@@ -100,9 +100,18 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("group_calls", 60),
     // Rings: an agent calls its owner, and answering starts a call in which the agent's
     // opening line is heard first (`/calls/ring`, the `agent-ring` event and push;
-    // `docs/agent-rings.md`). The ring whose line is said: not the live voice call
-    // (`agent_ring_live`), not the one that listens first, not a phone's own switch.
+    // `docs/agent-rings.md`). The ring whose line is said, and not the one that listens
+    // first.
     ("agent_rings", 64),
+    // A ring held as a live voice call: placed with what its producer says of an event,
+    // answered with a grant, and held on a socket of its own between the phone and a voice
+    // (`conversation_mode: agent_live_v1`, `GET /calls/ring/live`, its close and its switch).
+    ("agent_ring_live", 71),
+    // A phone switches rings off for itself (`/calls/ring/device`).
+    ("agent_ring_device_optout", 72),
+    // The user calls an agent that takes calls live (`POST /calls/live`; `call_mode` of an
+    // agent in the list).
+    ("agent_call_live", 76),
     // The chip a phone shows of the fleet on its lock screen is kept current by pushes
     // (`POST /devices/live-activity`; `docs/live-items.md` §8). Listed only by a Host that
     // can reach an activity: one with a relay and an account of its own there.
@@ -990,11 +999,19 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let put_away = |member: &Arc<Member>| member.record.archived_at_ms.is_some();
     let families = Families::of(&directory);
     let used_up = crate::quota::used_up(&app).await;
+    // Which agents the user calls live: by their profiles, as they are now.
+    let called_live = app.calls.taking(&app).await;
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
-        .map(|member| agent_row(&directory, &families, member, &app.faces, &used_up))
+        .map(|member| {
+            let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
+            if called_live.contains(&member.record.session) {
+                row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
+            }
+            row
+        })
         .collect();
     // And the janitors, after them: members of the fleet that are no agents to chat with.
     // An app tells them by `is_janitor` and lists them apart; each is shown with the
@@ -2626,11 +2643,29 @@ fn unnumbered(event: &Value) -> SseEvent {
     SseEvent::default().data(event.to_string())
 }
 
+/// Whether an event is one this client is not to be told: a ring it may not be told of.
+/// Read off the event as it is written, so that the many that are no ring cost nothing.
+async fn not_for(app: &App, published: &Published, principal: &str) -> bool {
+    if !published.json.contains("\"agent-ring\"") {
+        return false;
+    }
+    let event: Value = serde_json::from_str(&published.json).unwrap_or(Value::Null);
+    let ring_id = event["ring_id"].as_str().unwrap_or("");
+    event["type"] == "agent-ring" && !app.calls.shows(app, ring_id, principal).await
+}
+
 async fn events(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     Query(query): Query<EventsQuery>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    // Who listens, as the rings know a client: a phone by its id, anybody else as the
+    // administrator.
+    let listener = match &principal {
+        Principal::Device { device_id, .. } => device_id.clone(),
+        _ => clarp_kernel::calls::ADMINISTRATOR.to_string(),
+    };
     let after = headers
         .get("last-event-id")
         .and_then(|value| value.to_str().ok())
@@ -2651,13 +2686,18 @@ async fn events(
     // while it was away for longer than the hub remembers, the snapshot and the conversations
     // will tell.
     let mut first = VecDeque::with_capacity(missed.len() + 2);
-    first.extend(missed.iter().map(|published| numbered(published)));
+    for published in &missed {
+        if !not_for(&app, published, &listener).await {
+            first.push_back(numbered(published));
+        }
+    }
     first.push_back(unnumbered(&json!({ "type": "agent-roster" })));
     let clock = app.clock.clone();
     let stream = stream::unfold(
         (first, live, watched),
         move |(mut first, mut live, mut watched)| {
             let clock = clock.clone();
+            let (app, listener) = (app.clone(), listener.clone());
             async move {
                 // A heartbeat is due this long after the last thing that was sent, whatever was
                 // heard meanwhile and was not for this connection.
@@ -2682,7 +2722,13 @@ async fn events(
                     })
                     .await;
                     let event = match heard {
-                        Ok(Heard::Event(Ok(published))) => numbered(&published),
+                        Ok(Heard::Event(Ok(published))) => {
+                            // A ring this client may not be told of is passed over.
+                            if not_for(&app, &published, &listener).await {
+                                continue;
+                            }
+                            numbered(&published)
+                        }
                         Ok(Heard::Shown(Ok(shown))) => {
                             let wanted = watched.as_ref().map(|(wanted, _)| wanted);
                             match wanted.and_then(|wanted| shown.for_one(wanted)) {

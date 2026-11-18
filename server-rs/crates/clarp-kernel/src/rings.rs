@@ -11,20 +11,28 @@
 //! outcome is written to a trail the owner can read.
 //!
 //! This is the Python Host's contract (`docs/agent-rings.md`, `server/lib/agent_rings.py`)
-//! for the ring whose opening line is said, as rules without a store, a clock, a voice or a
-//! phone: a request is given the moment and the Host's agents, and says what it answers,
-//! what the apps are told, what phones are pushed and what is noted in the agent's
-//! conversation. A ring held as a live voice call, and a ring that listens first, are other
-//! contracts this Host does not have: asked for, they are refused in words that tell the
-//! caller how to ring instead.
+//! as rules without a store, a clock, a voice or a phone: a request is given the moment and
+//! the Host's agents, and says what it answers, what the apps are told, what phones are
+//! pushed and what is noted in the agent's conversation. A ring asks for one of two kinds of
+//! conversation, and is placed and answered as the kind it is ([`Rings::admit`],
+//! [`Rings::answer`]): the ordinary one here, and the one held as a live voice call in
+//! [`live`]. A ring that listens first is another contract this Host does not have: asked
+//! for, it is refused in words that tell the caller how to ring instead.
 //!
-//! Held to the Python Host's own module by `tests/fixtures/rings-vectors.json`.
+//! Held to the Python Host's own module by `tests/fixtures/rings-vectors.json` and
+//! `tests/fixtures/live-ring-vectors.json`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::calls::{self, Asker, Calls, Contact, Refused, refused, refused_with};
 use crate::python;
+
+mod live;
+
+pub use live::{
+    Admission, Android, Claim, Given, JOIN_MS, Joined, Live, Minted, Profiles, Sent, World, claimed,
+};
 
 /// How long a ring rings before it is missed.
 pub const RING_MS: i64 = 45 * 1000;
@@ -48,7 +56,7 @@ const DECLINED: &str = "declined";
 const MISSED: &str = "missed";
 const CANCELLED: &str = "cancelled";
 
-/// The ways a conversation of a ring can be held. This Host holds the first.
+/// The ways a conversation of a ring can be held.
 const CLASSIC: &str = "classic";
 const LIVE: &str = "agent_live_v1";
 /// The ways a ring can open. This Host has the first.
@@ -56,7 +64,7 @@ const SAY: &str = "say";
 const LISTEN_FIRST: &str = "listen_first";
 
 /// One ring, as it is kept and as an app reads it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ring {
     pub ring_id: String,
     pub session: String,
@@ -81,6 +89,12 @@ pub struct Ring {
     /// The call the answer started.
     #[serde(default)]
     pub call_id: String,
+    /// How its conversation is held when not as a call: `agent_live_v1`, live with a voice.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub conversation_mode: String,
+    /// What a ring held as a live voice call keeps of it. Kept, and never shown.
+    #[serde(default, rename = "_live", skip_serializing_if = "Option::is_none")]
+    pub live: Option<Box<Live>>,
 }
 
 impl Ring {
@@ -88,23 +102,47 @@ impl Ring {
         self.state == RINGING
     }
 
+    /// A ring nobody took can be held as no live call any more: what its voice would have
+    /// been told is let go.
+    fn unheld(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.shed();
+        }
+    }
+
+    /// A call the user started with the agent: this phone's own, and no ring of the agent's.
+    fn of_the_user(&self) -> Option<&str> {
+        let live = self.live.as_ref()?;
+        (!live.user_call.is_empty()).then_some(live.user_call.as_str())
+    }
+
     /// As an app and an agent's tool read it.
     pub fn told(&self, now_ms: i64) -> Value {
         let mut told = serde_json::to_value(self).unwrap_or_else(|_| json!({}));
+        if let Some(fields) = told.as_object_mut() {
+            fields.shift_remove("_live");
+            if self.of_the_user().is_some() {
+                fields.insert("origin".to_string(), json!("user_call"));
+            }
+        }
         told["server_now"] = json!(now_ms);
         told
     }
 
     /// What the apps are told when it changes.
     fn event(&self, now_ms: i64) -> Value {
-        json!({
+        let mut event = json!({
             "type": "agent-ring", "ring_id": self.ring_id, "session": self.session,
             "agent_id": self.agent_id, "persona": self.persona, "reason": self.reason,
             "opening_line": self.opening_line, "opening_audio_url": self.opening_audio_url,
             "state": self.state, "created_at": self.created_at, "expires_at": self.expires_at,
             "ended_at": self.ended_at, "answered_by": self.answered_by, "call_id": self.call_id,
             "server_now": now_ms,
-        })
+        });
+        if !self.conversation_mode.is_empty() {
+            event["conversation_mode"] = json!(self.conversation_mode);
+        }
+        event
     }
 }
 
@@ -146,12 +184,15 @@ pub struct Asked<'a> {
 }
 
 /// A ring that may be placed: who rings, and what the incoming call says.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Admitted {
     caller: Caller,
     reason: String,
     opening: String,
     at: i64,
+    /// What a ring held as a live voice call keeps of it: its voice is told its opening,
+    /// and no line is voiced before.
+    live: Option<Box<Live>>,
 }
 
 impl Admitted {
@@ -163,6 +204,12 @@ impl Admitted {
     pub fn caller(&self) -> &Caller {
         &self.caller
     }
+
+    /// Whether the ring is held as a live voice call: its opening is the voice's own, and
+    /// nothing is voiced for it before.
+    pub fn is_live(&self) -> bool {
+        self.live.is_some()
+    }
 }
 
 /// An answer to a ring.
@@ -173,6 +220,10 @@ pub struct Answer<'a> {
     pub ring_id: &'a str,
     pub conversation_mode: &'a Value,
     pub opening_mode: Option<&'a Value>,
+    /// What a phone names its answer by, where it asks to hold the ring as a live voice
+    /// call.
+    pub request_id: &'a Value,
+    pub client_nonce: &'a Value,
 }
 
 /// A notice for the conversation of the agent that rang: quiet, never spoken.
@@ -186,7 +237,7 @@ pub struct Notice {
 
 /// What the owner's phones are pushed: a ring as it is now, and what happened to it
 /// (`ring`, `answered`, `declined`, `missed`, `cancelled`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pushed {
     pub ring: Ring,
     pub kind: &'static str,
@@ -199,6 +250,8 @@ pub struct Changed {
     pub audit: bool,
     pub settings: bool,
     pub voip: bool,
+    /// The phones that switched rings off for themselves.
+    pub prefs: bool,
 }
 
 /// What a request did beside its answer.
@@ -222,6 +275,8 @@ pub struct Rings {
     enabled: bool,
     show_reason: bool,
     voip: Vec<Value>,
+    /// The phones that switched rings off for themselves, each with when.
+    prefs: Vec<Value>,
 }
 
 impl Default for Rings {
@@ -234,6 +289,7 @@ impl Default for Rings {
             enabled: true,
             show_reason: false,
             voip: Vec::new(),
+            prefs: Vec::new(),
         }
     }
 }
@@ -278,6 +334,35 @@ fn live_asked(conversation_mode: &Value) -> Result<bool, Refused> {
     }
 }
 
+/// Whether a request names the live voice call as the way to hold its conversation.
+fn names_live(conversation_mode: &Value) -> bool {
+    conversation_mode.as_str() == Some(LIVE)
+}
+
+/// The ways a phone says it can hold a ring's conversation (`supported_conversation_modes`,
+/// with an iPhone's call token and with an Android phone's push token): nothing said, or a
+/// list of the ways there are, each counted once. Anything else is refused.
+pub fn declared_modes(said: &Value) -> Result<Vec<&'static str>, Refused> {
+    let invalid = || refused(400, "live_mode_invalid");
+    let listed = match said {
+        Value::Null => return Ok(Vec::new()),
+        Value::Array(listed) if listed.len() <= 2 => listed,
+        _ => return Err(invalid()),
+    };
+    let mut known = Vec::new();
+    for mode in listed {
+        let mode = match mode.as_str() {
+            Some(CLASSIC) => CLASSIC,
+            Some(LIVE) => LIVE,
+            _ => return Err(invalid()),
+        };
+        if !known.contains(&mode) {
+            known.push(mode);
+        }
+    }
+    Ok(known)
+}
+
 impl Rings {
     /// From what is kept. `settings` is what [`Rings::settings`] gave.
     pub fn kept(rings: Vec<Ring>, audit: Vec<Value>, settings: &Value, voip: Vec<Value>) -> Self {
@@ -287,6 +372,7 @@ impl Rings {
             enabled: settings["enabled"].as_bool().unwrap_or(true),
             show_reason: settings["show_reason"].as_bool().unwrap_or(false),
             voip,
+            prefs: Vec::new(),
         }
     }
 
@@ -355,6 +441,7 @@ impl Rings {
 
     /// Every ring that is overdue is missed from now on. Answers which became so.
     fn settle(&mut self, now_ms: i64, out: &mut Effects) -> Vec<String> {
+        self.settle_live(now_ms, out);
         let mut missed = Vec::new();
         for place in 0..self.rings.len() {
             if !self.rings[place].rings() || now_ms < self.rings[place].expires_at {
@@ -362,6 +449,7 @@ impl Rings {
             }
             self.rings[place].state = MISSED.to_string();
             self.rings[place].ended_at = Some(now_ms);
+            self.rings[place].unheld();
             let ring = self.rings[place].clone();
             out.changed.rings = true;
             let entry = json!({
@@ -384,24 +472,6 @@ impl Rings {
     fn place_of(&self, ring_id: &str) -> Result<usize, Refused> {
         let found = self.rings.iter().position(|ring| ring.ring_id == ring_id);
         found.ok_or_else(|| refused(404, "unknown call"))
-    }
-
-    /// `GET /calls/ring`: one ring by its id, or the one that rings now, with the owner's
-    /// switches.
-    pub fn look(
-        &mut self,
-        ring_id: &str,
-        now_ms: i64,
-        out: &mut Effects,
-    ) -> Result<Value, Refused> {
-        self.settle(now_ms, out);
-        let ring = if ring_id.is_empty() {
-            self.ringing()
-        } else {
-            Some(&self.rings[self.place_of(ring_id)?])
-        };
-        let ring = ring.map_or(Value::Null, |ring| ring.told(now_ms));
-        Ok(json!({ "ring": ring, "settings": self.settings() }))
     }
 
     /// The agent that calls. One proven by its turn rings as itself only.
@@ -444,7 +514,9 @@ impl Rings {
             return Err(refused(409, "the user is already being called"));
         }
         let mut own = self.rings.iter().rev();
-        if let Some(last) = own.find(|ring| ring.agent_id == caller.agent_id)
+        let own_ring =
+            |ring: &&Ring| ring.agent_id == caller.agent_id && ring.of_the_user().is_none();
+        if let Some(last) = own.find(own_ring)
             && now_ms - last.created_at < BETWEEN_MS
         {
             let wait = (BETWEEN_MS - (now_ms - last.created_at) + 999) / 1000;
@@ -456,7 +528,7 @@ impl Rings {
         }
         let this_hour = self.rings.iter();
         if this_hour
-            .filter(|ring| now_ms - ring.created_at < HOUR_MS)
+            .filter(|ring| ring.of_the_user().is_none() && now_ms - ring.created_at < HOUR_MS)
             .count()
             >= HOURLY_MOST
         {
@@ -465,10 +537,28 @@ impl Rings {
         Ok(())
     }
 
-    /// `POST /calls/ring`, its first half: whether this ring may be placed. What is refused
-    /// is written to the trail with the reason it gave. An admitted ring is voiced, and
-    /// then placed ([`Rings::place`]): no other ring is admitted in between.
+    /// `POST /calls/ring`, its first half: whether this ring may be placed, as the kind of
+    /// ring it asks to be. What is refused is written to the trail with the reason it gave.
+    /// An admitted ring is placed ([`Rings::place`]), an ordinary one once its line is
+    /// voiced: no other ring is admitted in between. One that asks to be held as a live
+    /// voice call is admitted as that or not at all, never as an ordinary ring in its place.
     pub fn admit(
+        &mut self,
+        asked: &Asked,
+        people: People,
+        world: &World,
+        now_ms: i64,
+        out: &mut Effects,
+    ) -> Result<Admission, Refused> {
+        if names_live(asked.conversation_mode) {
+            return self.admit_live(asked, people, world, now_ms, out);
+        }
+        let admitted = self.admit_ordinary(asked, people, now_ms, out);
+        admitted.map(Admission::Place)
+    }
+
+    /// The ring whose opening line is said, and whose answer starts an ordinary call.
+    fn admit_ordinary(
         &mut self,
         asked: &Asked,
         people: People,
@@ -484,29 +574,14 @@ impl Rings {
             asked.turn_agent_id.to_string(),
         );
         let mut admitted = || -> Result<Caller, Refused> {
-            let live = live_asked(asked.conversation_mode)?;
+            // What is no way to hold a conversation is refused before anything else.
+            live_asked(asked.conversation_mode)?;
             let caller = Self::caller(asked, people)?;
             who = (
                 caller.session.clone(),
                 caller.persona.clone(),
                 caller.agent_id.clone(),
             );
-            if live {
-                // A live voice call's opening is its own; it is asked for with no other.
-                if reason.is_empty() {
-                    return Err(refused(400, "reason required"));
-                }
-                if opening.is_empty() {
-                    return Err(refused(400, "opening_line required"));
-                }
-                if asked.opening_mode.is_some_and(|mode| mode != SAY) {
-                    return Err(refused(400, "live_mode_invalid"));
-                }
-                self.may_ring(&caller, now_ms)?;
-                // No phone holds a live voice call through this Host: the caller rings an
-                // ordinary call instead, as it does where no phone can.
-                return Err(refused(409, "live_client_required"));
-            }
             if reason.is_empty() {
                 return Err(refused(400, "reason required"));
             }
@@ -537,6 +612,7 @@ impl Rings {
                 reason,
                 opening,
                 at: now_ms,
+                live: None,
             }),
             Err(why) => {
                 let (session, persona, agent_id) = who;
@@ -565,6 +641,7 @@ impl Rings {
             reason,
             opening,
             at,
+            live,
         } = admitted;
         let ring = Ring {
             ring_id: format!("rng_{new_id}"),
@@ -580,6 +657,8 @@ impl Rings {
             ended_at: None,
             answered_by: String::new(),
             call_id: String::new(),
+            conversation_mode: live.as_ref().map_or_else(String::new, |_| LIVE.to_string()),
+            live,
         };
         self.rings.push(ring.clone());
         if self.rings.len() > KEPT {
@@ -617,6 +696,9 @@ impl Rings {
         self.settle(now_ms, out);
         let place = self.place_of(ring_id)?;
         let ring = &self.rings[place];
+        if ring.of_the_user().is_some_and(|phone| phone != by) {
+            return Err(refused(404, "unknown call"));
+        }
         if own.is_some_and(|agent| !agent.is_empty() && ring.agent_id != agent) {
             return Err(refused(403, "an agent can only cancel its own call"));
         }
@@ -628,6 +710,7 @@ impl Rings {
         }
         self.rings[place].state = state.to_string();
         self.rings[place].ended_at = Some(now_ms);
+        self.rings[place].unheld();
         out.changed.rings = true;
         let ring = self.rings[place].clone();
         let entry = json!({
@@ -657,6 +740,9 @@ impl Rings {
         out: &mut Effects,
     ) -> Result<Value, Refused> {
         let ring = &self.rings[self.place_of(ring_id)?];
+        if ring.of_the_user().is_some() {
+            return Err(refused(404, "unknown call"));
+        }
         if !ring.rings() {
             return Ok(json!({ "ok": true, "ring": ring.told(now_ms), "changed": false }));
         }
@@ -668,22 +754,28 @@ impl Rings {
         self.end(ring_id, (CANCELLED, by), Some(turn_agent_id), now_ms, out)
     }
 
-    /// `POST /calls/ring/answer`: the user takes the call. A call starts with the agent on
-    /// the floor, and the answer hands back the opening line to play first. The same phone
-    /// asking again is given the same call; another is told the call was answered elsewhere.
+    /// `POST /calls/ring/answer`: the user takes the call, as the ring was placed. For an
+    /// ordinary ring a call starts with the agent on the floor, and the answer hands back the
+    /// opening line to play first; the same phone asking again is given the same call, and
+    /// another is told the call was answered elsewhere. For a ring held as a live voice call
+    /// the phone is given its grant instead, and no call of the ordinary kind starts.
     pub fn answer(
         &mut self,
         calls: &mut Calls,
         asked: &Answer,
-        with: (&[Contact], &str),
+        given: Given,
+        world: &World,
         at: calls::At,
         (out, of_calls): (&mut Effects, &mut calls::Effects),
     ) -> Result<Value, Refused> {
         let now_ms = at.now_ms;
+        if self.is_live(asked.ring_id) {
+            return self.answer_live(asked, (calls, given.minted), world, now_ms, out);
+        }
         let live = live_asked(asked.conversation_mode)?;
         let known = self.rings.iter().any(|ring| ring.ring_id == asked.ring_id);
         if known && live {
-            // A ring is answered as it was placed: none of this Host's is a live voice call.
+            // A ring is answered as it was placed, and this one is no live voice call.
             return Err(refused(409, "live_mode_conflict"));
         }
         self.settle(now_ms, out);
@@ -717,7 +809,7 @@ impl Rings {
         let started = calls.start(
             asker,
             (&agents, &ring.ring_id, Some(placed)),
-            with,
+            (given.roster, given.new_id),
             at,
             of_calls,
         )?;
@@ -829,24 +921,7 @@ impl Rings {
         if !token.is_empty() && !((32..=200).contains(&signs) && hex) {
             return Err(refused(400, "token must be hex"));
         }
-        let modes: Vec<&str> = match modes {
-            Value::Null => Vec::new(),
-            Value::Array(modes) if modes.len() <= 2 => {
-                let mut known = Vec::new();
-                for mode in modes {
-                    match mode.as_str() {
-                        Some(mode @ (CLASSIC | LIVE)) => {
-                            if !known.contains(&mode) {
-                                known.push(mode);
-                            }
-                        }
-                        _ => return Err(refused(400, "live_mode_invalid")),
-                    }
-                }
-                known
-            }
-            _ => return Err(refused(400, "live_mode_invalid")),
-        };
+        let modes = declared_modes(modes)?;
         let place = self
             .voip
             .iter()
@@ -900,31 +975,59 @@ mod tests {
         }
     }
 
+    /// A Host with no profile and no phone that holds a live call.
+    struct Bare;
+
+    impl Profiles for Bare {
+        fn profile(&self, _: &str) -> Option<String> {
+            None
+        }
+
+        fn file(&self, _: &str, _: &str) -> Option<Vec<u8>> {
+            None
+        }
+
+        fn takes_calls(&self, _: &str) -> Result<Option<String>, Refused> {
+            Ok(None)
+        }
+    }
+
+    fn world<'a>(device_ok: &'a dyn Fn(&str) -> bool) -> World<'a> {
+        World {
+            profiles: &Bare,
+            android: &[],
+            can_push_android: false,
+            device_ok,
+            host_id: "host-1",
+            has_key: false,
+            runs_tools: false,
+        }
+    }
+
+    fn placed(admission: Admission) -> Admitted {
+        match admission {
+            Admission::Place(admitted) => admitted,
+            Admission::Again(answer) => panic!("{answer}"),
+        }
+    }
+
     #[test]
-    fn what_this_host_does_not_hold_is_refused_with_the_way_to_ring_instead() {
+    fn a_ring_that_listens_first_is_refused_with_the_way_to_ring_instead() {
         let known = |agent_id: &str| (agent_id == "a-theo").then(theo);
         let people = People {
             roster: &[],
             known: &known,
         };
+        let anyone = |_: &str| true;
+        let world = world(&anyone);
         let mut rings = Rings::default();
         let mut out = Effects::default();
-        // A live voice call: the caller is told that no phone can hold one, which is what
-        // it rings an ordinary call on.
-        let live = json!("agent_live_v1");
-        let refused = rings
-            .admit(&asked(&live, None), people, 1_000, &mut out)
-            .unwrap_err();
-        assert_eq!(
-            (refused.status, &refused.body["error"]),
-            (409, &json!("live_client_required"))
-        );
-        // One that listens first: the same, in words.
         let listens = json!("listen_first");
         let refused = rings
             .admit(
                 &asked(&Value::Null, Some(&listens)),
                 people,
+                &world,
                 1_000,
                 &mut out,
             )
@@ -932,20 +1035,21 @@ mod tests {
         assert_eq!(refused.status, 409);
         let said = refused.body["error"].as_str().unwrap();
         assert!(said.ends_with("ring with opening_mode say"), "{said}");
-        // Both are in the trail, and nothing rings.
-        assert_eq!(out.audited.len(), 2);
+        // It is in the trail, and nothing rings.
+        assert_eq!(out.audited.len(), 1);
         assert!(rings.ringing().is_none() && out.events.is_empty());
-        // The same ring as an ordinary call is placed.
+        // The same ring with its line said is placed.
         let say = json!("say");
         let admitted = rings
             .admit(
                 &asked(&json!("classic"), Some(&say)),
                 people,
+                &world,
                 1_000,
                 &mut out,
             )
             .unwrap();
-        let ring = rings.place(admitted, "", "1", 1_000, &mut out);
+        let ring = rings.place(placed(admitted), "", "1", 1_000, &mut out);
         assert_eq!(rings.ringing(), Some(&ring));
         assert_eq!(ring.expires_at, 1_000 + RING_MS);
     }
@@ -957,11 +1061,19 @@ mod tests {
             roster: &[],
             known: &known,
         };
+        let anyone = |_: &str| true;
         let mut rings = Rings::default();
         let mut out = Effects::default();
         let admitted = rings
-            .admit(&asked(&Value::Null, None), people, 1_000, &mut out)
+            .admit(
+                &asked(&Value::Null, None),
+                people,
+                &world(&anyone),
+                1_000,
+                &mut out,
+            )
             .unwrap();
+        let admitted = placed(admitted);
         rings.place(admitted, "/audio/1000__theo-97e5.mp3", "1", 1_000, &mut out);
         rings
             .change(

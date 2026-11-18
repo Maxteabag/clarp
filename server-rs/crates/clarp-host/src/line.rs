@@ -22,6 +22,7 @@
 //! that nobody is there any more, also while it waits for something else ([`Line::gone`]).
 
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -82,6 +83,9 @@ pub struct Line {
     /// What was said, each thing with the room it takes until it is heard.
     heard: mpsc::UnboundedReceiver<(Heard, OwnedSemaphorePermit)>,
     told: mpsc::Sender<Told>,
+    /// How many signs of life the client gave: what it said, and what its carrier saw of it
+    /// beside (a socket's own asking whether the other end is there).
+    signs: Arc<AtomicU64>,
 }
 
 /// The same socket, as whoever carries it has it.
@@ -96,6 +100,7 @@ pub struct Hearer {
     heard: mpsc::UnboundedSender<(Heard, OwnedSemaphorePermit)>,
     /// The room that is left on the line.
     room: Arc<Semaphore>,
+    signs: Arc<AtomicU64>,
 }
 
 /// Why a line did not take what a client said.
@@ -108,8 +113,15 @@ pub enum NotTaken {
 }
 
 impl Hearer {
+    /// The client is there, though it said nothing a route hears: a route that lets a silent
+    /// client go does not take this one for gone.
+    pub fn alive(&self) {
+        self.signs.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Hands the route what its client said. It never waits.
     pub fn said(&self, said: Heard) -> Result<(), NotTaken> {
+        self.alive();
         let weight = u32::try_from(said.weight()).unwrap_or(u32::MAX);
         let Ok(room) = self.room.clone().try_acquire_many_owned(weight) else {
             return Err(NotTaken::TooMuch);
@@ -124,15 +136,24 @@ impl Line {
     pub fn new() -> (Self, Carrier) {
         let (heard_by, heard) = mpsc::unbounded_channel();
         let (told, told_to) = mpsc::channel(TOLD_MOST);
+        let signs = Arc::new(AtomicU64::new(0));
         let hearer = Hearer {
             heard: heard_by,
             room: Arc::new(Semaphore::new(WAITING_MOST)),
+            signs: signs.clone(),
         };
         let carrier = Carrier {
             heard: hearer,
             told: told_to,
         };
-        (Self { heard, told }, carrier)
+        let line = Self { heard, told, signs };
+        (line, carrier)
+    }
+
+    /// How many signs of life the client has given so far. A route that lets a client go
+    /// for saying nothing looks whether this grew meanwhile.
+    pub fn signs_of_life(&self) -> u64 {
+        self.signs.load(Ordering::Relaxed)
     }
 
     /// The next thing the client said. `None`: the client is gone.
@@ -255,8 +276,13 @@ async fn carried_at_the_door(mut socket: WebSocket, carrier: Carrier) {
                     Some(Ok(Message::Text(text))) => Heard::Text(text.as_str().to_string()),
                     Some(Ok(Message::Binary(bytes))) => Heard::Bytes(bytes.to_vec()),
                     // The library answers a ping by itself, and a close: the next reading
-                    // sends its answer and says that the client is gone.
-                    Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Close(_))) => continue,
+                    // sends its answer and says that the client is gone. A client that asks
+                    // whether the Host is there is there itself.
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {
+                        heard.alive();
+                        continue;
+                    }
+                    Some(Ok(Message::Close(_))) => continue,
                     // The client is gone: the route learns of it by both ends of its line.
                     Some(Err(_)) | None => return,
                 };

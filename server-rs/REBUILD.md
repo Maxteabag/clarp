@@ -1135,8 +1135,8 @@ while the engine chosen is one that can, and both are changed together. Not with
 words to listen for, no runs written) and the keeping of sound, which this Host has not; both are
 registered. Of 144 wrong rules planted one at a time (80 into the kernel's rules, 64 into the route, the engine for clips and the setting) each is caught. Two were missed at first and got their case (a run written as nothing is no run; what a phone says in words that is not its leave-taking ends nothing), one planting of mine did not compile and was planted again in other words, and two let a Host start that was to refuse, where its test waited without end and held the build machine's one slot until the run was ended by hand: every command of the Host's own program in the tests has a limit now.
 
-Not built on the line yet, and closed through the relay as sockets that failed: a ring's live socket, the
-Oracle's.
+On the line since: the socket of a live voice call ("A ring held as a live voice call" below). Not built on
+the line yet, and closed through the relay as sockets that failed: the Oracle's.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
@@ -1468,8 +1468,85 @@ incoming call breaks through Focus and has Answer and Decline; what became of it
 noted quietly in the agent's conversation. An agent rings as itself with its own tool (`clarp-admin call
 ring --reason .. --say .. [--wait]`, `ring-status`, `ring-cancel`, `rings on|off|status`); the next thing its
 user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). Not
-built with it, and refused in words that say how to ring instead: a ring held as a live voice call, a ring
-that listens first, a phone's own switch for rings (`docs/differences.md`).
+built with it, and refused in words that say how to ring instead: a ring that listens first
+(`docs/differences.md`).
+
+**A ring held as a live voice call** (18 Nov 2026; the owner uses it: most of the rings his Host keeps are
+of this kind, counted there and read only). A ring may ask that its
+conversation be held live: the phone that answers talks to a voice model, which is told who it is and what
+the call is about, and no call of the ordinary kind starts. The owner may start such a call with an agent
+too (`POST /calls/live`). It is built in three layers, each held to the Python Host by that Host's own
+answers, and one landing of two: this one is the call, the next is the tools a profile may opt its calls
+into.
+*What a call is told* (`clarp-kernel` `live_call.rs`, by `agent_ring_live.py` and
+`agent_live_settings.py`; `tools/live-call-vectors.py`): the context a producer gives of an event
+(CONTEXT-v1: every field, its length, what a moment with a zone is, as CPython reads one: 5,298 moments),
+the profile an operator approved for an agent (its stories, each file pinned by its sum), the snapshot a
+ring is frozen with and its digest, what the voice is told from it, the context of a call the user starts,
+which agents take such calls (the folder of profiles read as far as it may be, and what is known kept
+through a moment in which a profile cannot be read), and the tools a profile opts into (170 profiles,
+which this Host reads and does not run yet).
+*The ring* (`rings/live.rs`, by `agent_rings.py` and `agent_ring_live.py`; `tools/live-ring-vectors.py`,
+12 scripts of 585 steps): it is placed only where a phone that can hold such a call still receives rings,
+and never as an ordinary ring in its place; the same event rings once; it is shown to the phones that may
+be told of it and to nobody else; answering hands one phone a grant that is joined once, within a minute;
+the call ends by a close, which one request may ask again, or is switched once to an ordinary call before
+its voice opened and before the user was heard, and a close that comes while that call is being started
+calls the switch off; a call the user starts is the phone's own, already answered, and no other's to see or
+to end; a phone switches rings off for itself. Where the authority of a call lies is on its ring, in a
+phase from the answer to the end: whatever acts for a call asks the ring first. An ordinary ring and a
+live one are placed and answered through one entry each (`Rings::admit`, `Rings::answer`), which goes by
+the kind of ring: no caller chooses.
+*The session* (`live_session.rs`, by `agent_ring_live_socket.py`'s `LiveSocket`;
+`tools/live-session-vectors.py`, which drives the real class with a stand-in phone, voice and clock: 60
+stories of 387 steps, 20 ways a call ends): both sides ready, the opening handed to the voice once after a
+moment of silence, what the voice says before it took the opening held and told in its order after, the
+user's sound to the voice from the first of it, breaking in, and every way either side is gone, late, or
+no longer the call's.
+*The Host's part* (`clarp-host` `calls/live.rs`): the profiles as their folders have them (no link leads
+out of a profile, a link among the folders is no profile), the requests of an app, and the socket of a call
+(`GET /calls/ring/live`, on the line every socket of this Host is carried by, at the door and through the
+relay). One task owns one session and stands between the phone and the voice. Every step takes the desk's
+lock, writes on the ring, and only then tells either side; a request that ends a call tells its session so
+before it lets go of that lock, and a stop that waits is taken before the next tick: so a call is never
+retired with its session not told, and nothing is sent for a call that has lost its authority. The voice is
+a provider's, reached with the owner's key (`[openai] api_key`, `OPENAI_API_KEY`), which never leaves the
+Host; in a test it is a stand-in on this machine (`CLARP_LIVE_ENDPOINT`, which takes a loopback address and
+no other). A call that was under way when the Host stopped is over when it starts again; one that was
+granted and not joined keeps its minute. The agent's own tool rings so too
+(`clarp-admin call ring --oracle --context-file FILE`). The features are advertised (`agent_ring_live`,
+`agent_call_live`, `agent_ring_device_optout`), and an agent's row says how it takes the user's call
+(`call_mode`).
+Not with this landing, each registered in `docs/differences.md`: the pushes of calls with a key of the
+Host's own (a live ring reaches a phone whose app is open; a call the user starts needs none), the tools of
+a call (a profile that opts a call into them is refused in words until they are built, since a voice told
+that it has tools it has not would promise what nobody does), and pushes to Android phones. No test and no
+live check reaches the paid voice.
+Tested: each kernel layer by its vectors; the Shelf on real folders; and through a real Host process with
+a stand-in voice on a loopback socket (`a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice`):
+a ring refused where no phone can hold one, placed, the same event once, shown to the phone that can hold
+it and to no other, on `GET /calls/ring` and on the stream of events; the grant; every refusal of the
+socket; the join, the voice reached with the key and told who it is, the opening, held sound, the user's
+sound, breaking in, the hangup; the user's own call and its close beside the socket; the tool's ring from a
+file; an Android phone's word; the switch to an ordinary call; a Host started again; a Host without a key;
+a profile with tools.
+Wrong rules were planted one at a time, each run against the tests that should catch it. Into the kernel's
+three layers 278 at first: 254 were caught and 24 were not. Of those 24, sixteen showed a rule no vector held
+and got their cases (among them a pinned file under a name no pin may have that is there all the same, the
+user calling while a ring rings, a grant asked for again after its minute, a join that leaves a part out, a
+close that comes between the two halves of a switch, a call that lost its authority before its opening, an
+interruption before a call is under way, and the two time limits at a clock off the session's ticks); seven
+showed code that could never matter, which is gone (a check that an address names nobody, the form of a sum
+beside its comparison, two filters of the look at a ring, a guard the one entry makes impossible, a count of
+instructions that is one whenever it is asked); and one changes nothing that can be seen and was taken out
+with its reason (whichever profile a planted rule goes on with is held to the same agent by the next rule, in
+the same words). On the mended code 277 were planted: 275 were caught, one had been given the wrong test to be
+run against and is caught by the right one, and one showed a kept detail no script kept (a way to hold a ring
+that a phone says twice is kept once), which has its case. Into the Host's part 40: 37 were caught; one of the
+three showed a check the kernel already makes (gone), and two got what was missing (an engine that speaks in
+the test, so that it is seen that nothing is voiced for a live ring until it is switched; and frames read as
+they are written, compact to the phone and with blanks to the voice). What was mended was planted again on the
+code as it is landed, and is caught.
 
 **The chip on a phone's lock screen** (16 Nov 2026). A phone that shows the fleet's work as a Live Activity
 leaves the Host the token its pushes go to, and the Host keeps the chip current: how many agents work, how
@@ -2057,8 +2134,8 @@ connection relay under the name the phone is paired with. Each of these is true 
    built against one port that a socket at the door and the relay's tunnel both carry, and is shown
    through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a gate, not a
    note"). The port and its two carriers are built, and on them the Host's own terminal, an agent's, and
-   the stream of speech (18 Nov 2026, "Sockets" in section 6). Still closed as sockets that failed: a
-   ring's live socket, the Oracle's.
+   the stream of speech and the socket of a live voice call (18 Nov 2026, "Sockets" in section 6).
+   Still closed as sockets that failed: the Oracle's.
 2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
    session for a name and closes the older one when another dials: a Python Host that came back would take
    the phones again, and neither Host would report an error, only lose its connection again and again. The

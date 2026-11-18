@@ -96,6 +96,8 @@ pub struct Config {
     /// ends of turns on a stream of speech, which is a socket on this machine.
     pub nova_endpoint: String,
     pub flux_endpoint: String,
+    /// The same for the voice of a ring held as a live voice call, which is a socket too.
+    pub live_endpoint: String,
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
     pub gemini_endpoint: String,
@@ -409,6 +411,12 @@ impl Config {
             let not_here = format!("CLARP_FLUX_ENDPOINT {flux_endpoint}: a socket on this machine");
             return Err(not_here);
         }
+        let live_endpoint = std::env::var("CLARP_LIVE_ENDPOINT").unwrap_or_default();
+        if !live_endpoint.is_empty() && !local.iter().any(|begin| live_endpoint.starts_with(begin))
+        {
+            let not_here = format!("CLARP_LIVE_ENDPOINT {live_endpoint}: a socket on this machine");
+            return Err(not_here);
+        }
         let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
         let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
@@ -480,6 +488,7 @@ impl Config {
             scribe_endpoint,
             nova_endpoint,
             flux_endpoint,
+            live_endpoint,
             cartesia_endpoint,
             gemini_endpoint,
             google_token_endpoint,

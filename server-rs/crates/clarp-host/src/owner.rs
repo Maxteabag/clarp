@@ -262,6 +262,8 @@ impl OwnerFile {
             "elevenlabs" => (&["elevenlabs", "api_key"], "ELEVEN_API_KEY"),
             "cartesia" => (&["cartesia", "api_key"], "CARTESIA_API_KEY"),
             "deepgram" => (&["deepgram", "api_key"], "DEEPGRAM_API_KEY"),
+            // The voice of a ring held as a live voice call.
+            "openai" => (&["openai", "api_key"], "OPENAI_API_KEY"),
             "gemini" => (&["gemini_tts", "api_key"], "GEMINI_API_KEY"),
             // Google's other door has a key of its own.
             "vertex" => (&["gemini_tts", "vertex_api_key"], "GOOGLE_VERTEX_API_KEY"),
