@@ -394,8 +394,11 @@ impl Desk {
             text: rules::header(op),
         };
         let _guard = app.mouth.binding_admission.write().await;
-        let proof=json!({"ring_id":ring_id,"kind":"initiative","epoch":op["epoch"]});
-        let sent = member.agent.send_reserved(msg, Admission::Later,Some(proof)).await?;
+        let proof = json!({"ring_id":ring_id,"kind":"initiative","epoch":op["epoch"]});
+        let sent = member
+            .agent
+            .send_reserved(msg, Admission::Later, Some(proof))
+            .await?;
         if let Some(turn) = sent.turn {
             self.bind_clip(
                 app,
@@ -449,25 +452,57 @@ impl Desk {
 
     /// The message journal proves which admission actually got the turn.
     /// Older messages without this receipt keep their ordinary audio.
-    pub async fn recover_bindings(&self,app:&App)->Result<(),Unavailable> {
-        let _serial=self.opening_turn.lock().await;
-        let mut records=Self::archived_openings(app).await?;
+    pub async fn recover_bindings(&self, app: &App) -> Result<(), Unavailable> {
+        let _serial = self.opening_turn.lock().await;
+        let mut records = Self::archived_openings(app).await?;
         {
-            let mut held=self.books.lock().await;
-            let books=Self::read(&mut held,app).await?;
+            let mut held = self.books.lock().await;
+            let books = Self::read(&mut held, app).await?;
             records.extend(books.rings.opening_records().cloned());
         }
         for r in records {
-            let Some(member)=app.member(&r.session) else{continue};
-            let op=&r.opening;
-            for (kind,admission) in [(clarp_kernel::rings::binding::Kind::Initiative,&op["intent"]["admission_id"]),(clarp_kernel::rings::binding::Kind::GreetingReply,&op["greeting"]["client_msg_id"])] {
-                let Some(id)=admission.as_str() else{continue};
-                if op["clip_bindings"].as_array().is_some_and(|all|all.iter().any(|b|b["admission_id"]==id && b["kind"]==json!(kind))){continue;}
-                let row=member.agent.opening_row(id).await?;
-                let proof=&row["reservation"];
-                if proof["ring_id"] == r.ring_id && proof["kind"]==json!(kind)
-                    && let (Some(turn_id),Some(epoch))=(row["turn"].as_u64(),proof["epoch"].as_u64()){
-                    self.bind_clip(app,&r.ring_id,&r.agent_id,clarp_kernel::rings::binding::Binding{turn_id,kind,epoch,admission_id:id.into()}).await?;
+            let Some(member) = app.member(&r.session) else {
+                continue;
+            };
+            let op = &r.opening;
+            for (kind, admission) in [
+                (
+                    clarp_kernel::rings::binding::Kind::Initiative,
+                    &op["intent"]["admission_id"],
+                ),
+                (
+                    clarp_kernel::rings::binding::Kind::GreetingReply,
+                    &op["greeting"]["client_msg_id"],
+                ),
+            ] {
+                let Some(id) = admission.as_str() else {
+                    continue;
+                };
+                if op["clip_bindings"].as_array().is_some_and(|all| {
+                    all.iter()
+                        .any(|b| b["admission_id"] == id && b["kind"] == json!(kind))
+                }) {
+                    continue;
+                }
+                let row = member.agent.opening_row(id).await?;
+                let proof = &row["reservation"];
+                if proof["ring_id"] == r.ring_id
+                    && proof["kind"] == json!(kind)
+                    && let (Some(turn_id), Some(epoch)) =
+                        (row["turn"].as_u64(), proof["epoch"].as_u64())
+                {
+                    self.bind_clip(
+                        app,
+                        &r.ring_id,
+                        &r.agent_id,
+                        clarp_kernel::rings::binding::Binding {
+                            turn_id,
+                            kind,
+                            epoch,
+                            admission_id: id.into(),
+                        },
+                    )
+                    .await?;
                 }
             }
         }

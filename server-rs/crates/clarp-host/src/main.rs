@@ -291,7 +291,7 @@ async fn serve(config: Config) -> Result<(), String> {
     // A ring that rang when the Host stopped has its time again, or is missed now: the apps
     // and its agent are told without anybody having to ask first.
     // Repair admissions before speech queued by surviving shims can be voiced.
-    app.calls.recover_bindings(&app).await.map_err(|e|e.0)?;
+    app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
     app.mouth.bindings_ready.notify_one();
     clarp_host::calls::resume(&app);
     let pruning = app.clone();

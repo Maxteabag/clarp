@@ -2167,8 +2167,12 @@ async fn send_as(
     } else {
         None
     };
-    let proof=binding.map(|(ring,_,epoch)|json!({"ring_id":ring,"kind":"greeting_reply","epoch":epoch}));
-    let sent = member.agent.send_reserved(message, admission,proof).await?;
+    let proof = binding
+        .map(|(ring, _, epoch)| json!({"ring_id":ring,"kind":"greeting_reply","epoch":epoch}));
+    let sent = member
+        .agent
+        .send_reserved(message, admission, proof)
+        .await?;
     if let (Some((ring, id, epoch)), Some(turn)) = (binding, sent.turn) {
         app.calls
             .bind_clip(

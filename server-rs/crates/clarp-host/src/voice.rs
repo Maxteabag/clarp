@@ -548,7 +548,7 @@ impl Waiting {
     pub fn run(mut self, works: Works) -> Arc<Mouth> {
         let audio = works.config.data_dir.join("audio");
         let mouth = Arc::new(Mouth {
-            bindings_ready:Default::default(),
+            bindings_ready: Default::default(),
             binding_admission: Default::default(),
             owner: OwnerFile::new(works.config.speech_keys.clone()),
             newest: Mutex::new(newest_clip(&audio)),
@@ -901,7 +901,7 @@ impl Mouth {
     ) -> Result<Option<Value>, crate::agent::Unavailable> {
         let _guard = self.binding_admission.read().await;
         self.fleet
-            .opening_audio(agent,turn)
+            .opening_audio(agent, turn)
             .await?
             .map(|raw| {
                 serde_json::from_slice(&raw).map_err(|e| crate::agent::Unavailable(e.to_string()))
