@@ -265,6 +265,50 @@ pub fn collapse_id(payload: &Value) -> String {
     }
 }
 
+/// A ring pushed to a phone as an incoming call (a push of the kind the phone must show as a
+/// call the moment it arrives): no alert, only what the phone needs to say who calls. `ring`
+/// is the ring as it is kept.
+pub fn call(rung: &Rung<'_>, conversation_mode: &str) -> Value {
+    let persona = match rung.persona.trim() {
+        "" => "Clarp",
+        persona => persona,
+    };
+    let mut payload = json!({
+        "kind": "agent-ring", "ring_id": rung.ring_id, "ring_state": "ringing",
+        "session": rung.session, "persona": persona, "reason": rung.reason,
+        "expires_at": rung.expires_at,
+    });
+    // A ring held as a live voice call says so; an ordinary one says nothing of it.
+    if !conversation_mode.is_empty() {
+        payload["conversation_mode"] = json!(conversation_mode);
+    }
+    if !rung.server_instance_id.is_empty() {
+        payload["server_instance_id"] = json!(rung.server_instance_id);
+    }
+    payload
+}
+
+/// Until when the push service keeps a call push for a phone it cannot reach: the second
+/// the ring is missed in.
+pub fn call_expires(expires_at_ms: i64) -> i64 {
+    expires_at_ms.div_euclid(1000)
+}
+
+/// What became of the call pushes of one ring, as the one who rang is told. `answers`: the
+/// status the push service gave for each phone that was pushed, and `None` where it could
+/// not be asked. No phone was pushed where there is none to push, and where the Host has no
+/// key of its own at the service: then it pushes no calls, and says so.
+pub fn calls_counted(answers: &[Option<u16>]) -> Value {
+    if answers.is_empty() {
+        return json!({ "enabled": false, "sent": 0, "failed": 0 });
+    }
+    let sent = answers
+        .iter()
+        .filter(|answer| **answer == Some(200))
+        .count();
+    json!({ "enabled": true, "sent": sent, "failed": answers.len() - sent })
+}
+
 /// A collapse id as the push service takes it: at most 64 bytes, cut between characters.
 pub fn collapse_id_on_the_wire(collapse_id: &str) -> &str {
     let mut end = collapse_id.len().min(64);

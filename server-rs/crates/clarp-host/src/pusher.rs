@@ -9,6 +9,11 @@
 //! `send_user_notification`, `send_decision_created`): to every live row of the register
 //! whose owner may still receive, not while the user sits at a desk with the app open, and a
 //! token the push service calls dead is not sent to again.
+//!
+//! A ring that begins to ring is first pushed as an incoming call to the phones that left a
+//! token for one, by the Host itself, where its owner gave it a key at the push service
+//! ([`crate::direct`]); the alert follows only where that reached no phone, and never for a
+//! ring held as a live voice call (`agent_rings._deliver`).
 
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -18,6 +23,7 @@ use clarp_kernel::push::{self, Asked, Told};
 use clarp_ports::clock::Clock;
 use serde_json::Value;
 
+use crate::direct::Direct;
 use crate::fleet::{FleetHandle, Pushed};
 use crate::relay::{Outcome, Push, Relay};
 
@@ -58,6 +64,34 @@ pub struct Rung {
     pub show_reason: bool,
     /// The phones that switched rings off for themselves: none of their rows is told.
     pub without: Vec<String>,
+    /// The phones a ring that begins to ring is pushed to as an incoming call: the token
+    /// each left for calls, and the side of the push service it belongs to.
+    pub calls: Vec<(String, String)>,
+}
+
+/// What became of the pushes of one change of a ring, as the one who rang is told.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Rang {
+    /// The pushes as incoming calls, for a ring that begins to ring (`delivery.voip`).
+    pub calls: Option<Value>,
+    /// The alert, where one followed.
+    pub alert: Option<Counted>,
+}
+
+impl Rang {
+    /// As the Python Host says it (`agent_rings._deliver`).
+    pub fn told(&self) -> Value {
+        let mut delivery = serde_json::json!({});
+        if let Some(calls) = &self.calls {
+            delivery["voip"] = calls.clone();
+        }
+        if let (Some(alert), Some(delivery)) = (&self.alert, delivery.as_object_mut())
+            && let Value::Object(counted) = alert.told()
+        {
+            delivery.extend(counted);
+        }
+        delivery
+    }
 }
 
 /// What became of a push, as the one who asked for it is told: whether this Host pushes at
@@ -83,8 +117,8 @@ impl Counted {
 enum Job {
     Turn(TurnDone),
     Request(Requested),
-    /// A ring, and who waits to hear what became of its push.
-    Ring(Rung, Option<tokio::sync::oneshot::Sender<Counted>>),
+    /// A ring, and who waits to hear what became of its pushes.
+    Ring(Box<Rung>, Option<tokio::sync::oneshot::Sender<Rang>>),
 }
 
 /// The way to the pusher's thread. Handing it something never waits.
@@ -105,14 +139,14 @@ impl Pusher {
     /// A ring changed: the owner's phones are told, whether or not anybody sits at a desk.
     /// An agent calling is the one interruption its user asked for.
     pub fn rung(&self, rung: Rung) {
-        let _ = self.tx.send(Job::Ring(rung, None));
+        let _ = self.tx.send(Job::Ring(Box::new(rung), None));
     }
 
     /// The same, for the one who placed the ring and is told what became of its push. The
     /// answer comes when every phone was tried; a pusher that is gone answers nothing.
-    pub fn rung_and_told(&self, rung: Rung) -> tokio::sync::oneshot::Receiver<Counted> {
+    pub fn rung_and_told(&self, rung: Rung) -> tokio::sync::oneshot::Receiver<Rang> {
         let (told, answer) = tokio::sync::oneshot::channel();
-        let _ = self.tx.send(Job::Ring(rung, Some(told)));
+        let _ = self.tx.send(Job::Ring(Box::new(rung), Some(told)));
         answer
     }
 }
@@ -142,6 +176,10 @@ pub struct Works {
     /// What signs the address a phone fetches an agent's own picture by: the Host's own
     /// token. Empty on a Host that asks no token of anybody.
     pub secret: String,
+    /// The way to the push service itself, for the pushes the relay does not carry.
+    pub direct: Arc<Direct>,
+    /// Where what is spoken over a connection of the Host's own is run.
+    pub runtime: tokio::runtime::Handle,
 }
 
 impl Waiting {
@@ -151,19 +189,99 @@ impl Waiting {
             .name("pusher".to_string())
             .spawn(move || {
                 for job in self.rx {
-                    // Without a relay what is handed over is taken and let go.
-                    let counted = match &works.relay {
-                        Some(relay) => deliver(relay, &works, &job),
-                        None => Counted::default(),
+                    let (job, told) = match job {
+                        Job::Ring(rung, told) => (Job::Ring(rung, None), told),
+                        other => (other, None),
                     };
-                    if let Job::Ring(_, Some(told)) = job {
-                        let _ = told.send(counted);
+                    let mut rang = Rang::default();
+                    // A ring is pushed as an incoming call first, to the phones the desk names
+                    // for it: the phones of a ring that begins to ring, and none for what
+                    // becomes of one.
+                    let mut reached = 0;
+                    if let Job::Ring(rung, _) = &job {
+                        let counted = called(&works, rung);
+                        reached = counted["sent"].as_u64().unwrap_or(0);
+                        rang.calls = Some(counted);
+                    }
+                    // The alert of a ring follows where no phone was rung as a call, and
+                    // never for a ring held as a live voice call, in any state of it: a
+                    // phone that cannot hold one must never be shown one.
+                    let alerted = match &job {
+                        Job::Ring(rung, _) => {
+                            let mode = rung.ring.conversation_mode.as_str();
+                            clarp_kernel::rings::alert_follows(mode, reached)
+                        }
+                        _ => true,
+                    };
+                    if alerted {
+                        // Without a relay what is handed over is taken and let go.
+                        rang.alert = Some(match &works.relay {
+                            Some(relay) => deliver(relay, &works, &job),
+                            None => Counted::default(),
+                        });
+                    }
+                    if let Some(told) = told {
+                        let _ = told.send(rang);
                     }
                 }
             })
             .map(|_| ())
             .map_err(|error| format!("the pusher's thread could not be started: {error}"))
     }
+}
+
+/// Pushes a ring that begins to ring as an incoming call to the phones that are to have it,
+/// one after the other, and says what became of it as the one who rang is told
+/// (`apns.send_agent_ring_voip`). Without a key of the Host's own nothing is pushed.
+fn called(works: &Works, rung: &Rung) -> Value {
+    let key = works.direct.key();
+    let Some(key) = key.filter(|_| !rung.calls.is_empty()) else {
+        return push::calls_counted(&[]);
+    };
+    let ring = &rung.ring;
+    let said = push::Rung {
+        ring_id: &ring.ring_id,
+        session: &ring.session,
+        persona: &ring.persona,
+        reason: &ring.reason,
+        expires_at: ring.expires_at,
+        server_instance_id: &works.server_id,
+        ..push::Rung::default()
+    };
+    let payload = push::call(&said, &ring.conversation_mode);
+    let collapse_id = push::ring_notification_id(&ring.ring_id);
+    let push = clarp_kernel::direct_push::Push {
+        payload: &payload,
+        push_type: "voip",
+        priority: "10",
+        collapse_id: &collapse_id,
+        expiration: Some(push::call_expires(ring.expires_at)),
+    };
+    let mut answers = Vec::new();
+    for (token, environment) in &rung.calls {
+        let pushed = works.direct.push(&key, (token, environment), &push);
+        let answer = match works.runtime.block_on(pushed) {
+            Ok((status, reason, _)) => {
+                if status != 200 {
+                    let reason = reason.as_str().unwrap_or("");
+                    eprintln!(
+                        "clarp-host: push ring {}: a phone was not rung ({status} {reason})",
+                        ring.ring_id
+                    );
+                }
+                Some(status)
+            }
+            Err(crate::direct::Unsent(why)) => {
+                eprintln!(
+                    "clarp-host: push ring {}: a phone was not rung: {why}",
+                    ring.ring_id
+                );
+                None
+            }
+        };
+        answers.push(answer);
+    }
+    push::calls_counted(&answers)
 }
 
 /// The payload of a job, and the name it goes by in what the Host says of it. `face` is

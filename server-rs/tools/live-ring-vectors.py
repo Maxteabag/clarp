@@ -190,6 +190,17 @@ def taking():
     return {'do': 'taking'}
 
 
+def callkit(has):
+    """Whether the Host has a key of its own at the push service: only with one a ring is pushed as an incoming call."""
+    return {'do': 'callkit', 'has': has}
+
+
+def call_push(principal, status=200, reason='', raises=False):
+    """What the push service answers from now on when a ring is pushed as a call to this phone: a status and its
+    reason, or nothing at all (the way to it fails)."""
+    return {'do': 'call_push', 'principal': principal, 'answer': 'raises' if raises else [status, reason]}
+
+
 TOKEN_A, TOKEN_B, TOKEN_C = 'a' * 64, 'b' * 64, 'c' * 64
 PHONE_A = voip(A, TOKEN_A, [CLASSIC, LIVE])
 
@@ -338,6 +349,20 @@ SCRIPTS = [
                answer(A), prefs(A, False), look(A, 2), look(A), look(B, 2), call(A), answer(A), prefs(A, True),
                tick(61 * SECOND), live_ring(event_id='evt-3'), prefs(A, False), look(A), look(A, 3), live_answer(A, request='answer-3'),
                prefs(A, True), live_answer(A, request='answer-3'), prefs(A, False), look(A, 3), fallback(A), look(A, 3), call(A)]},
+    {'name': 'a ring is pushed as an incoming call to the phones that left a token for one, and alerted where that reached none',
+     'steps': [ring('a-theo'), decline(A), tick(61 * SECOND),
+               PHONE_A, voip(B, TOKEN_B, [CLASSIC]), voip(C, TOKEN_C), voip(D, 'd' * 64, [LIVE]), voip(B, 'AB' * 32, 'sandbox'),
+               ring('a-mike'), decline(A), tick(61 * SECOND),
+               call_push(A, 410, 'Unregistered'), call_push(B, raises=True), ring('a-theo'), cancel(''), tick(61 * SECOND),
+               call_push(C, 400, 'BadDeviceToken'), call_push(D, 403, 'InvalidProviderToken'), ring('a-mike'), tick(46 * SECOND),
+               timer(), tick(61 * SECOND),
+               call_push(A), prefs(B, False), prefs(C, False), prefs(D, False), ring('a-theo'), answer(A), tick(61 * SECOND),
+               prefs(A, False), ring('a-mike'), cancel('a-mike'), prefs(A, True), tick(61 * SECOND),
+               callkit(False), ring('a-theo'), decline(A), tick(61 * SECOND),
+               callkit(True), prefs(D, True), call_push(D), live_ring('a-mike', event_id='evt-1'), live_answer(D), live_answer(A),
+               close(A), tick(61 * SECOND),
+               call_push(A, 500, 'InternalServerError'), call_push(D, raises=True), live_ring(event_id='evt-2'), cancel(''),
+               tick(61 * SECOND), callkit(False), live_ring('a-mike', event_id='evt-3'), decline(A)]},
     {'name': 'rings are kept, and a live one keeps what it was told',
      'steps': [PHONE_A, voip(B, TOKEN_B, [LIVE, LIVE]), voip(C, TOKEN_C), voip(D, 'd' * 64, [CLASSIC, CLASSIC])]
      + [step for n in range(3) for step in (live_ring(event_id=f'evt-{n}'), live_answer(A, request=f'answer-{n}'),
@@ -360,9 +385,11 @@ def run() -> dict:
     import threading
 
     from lib import (agent_ring_live, agent_ring_live_socket, agent_ring_openings, agent_rings, agent_rings_base, agents,
-                     apns, group_calls, oracle_contact, settings_store)
+                     apns, config, group_calls, oracle_contact, settings_store)
 
     live = agent_ring_live
+    # The Python Host's own pushing of a ring as an incoming call, before anything stands in for it.
+    push_as_calls = apns.send_agent_ring_voip
     group_calls._host_id = lambda: 'host-1'
     live.ROOT = root / 'agent-live'
     for name, held in PROFILES.items():
@@ -379,7 +406,7 @@ def run() -> dict:
         live.reset_for_tests()
         heard, noted, pushed, trail = [], [], [], []
         state = {'now': 1_800_000_000_000, 'made': 0, 'rings': [], 'devices': dict(DEVICES), 'android': [], 'key': True,
-                 'fcm': False}
+                 'fcm': False, 'callkit': True, 'answers': {}, 'sends': []}
 
         class Stream:
             def broadcast(self, told):
@@ -433,10 +460,41 @@ def run() -> dict:
         agent_rings._voice = lambda text, agent: f"/audio/{state['now']}__{agent['session']}.mp3"
         agent_rings._schedule_expiry = lambda record: None
 
+        class Direct:
+            """A stand-in for the way to the push service with a key of the Host's own: it takes what it is handed for a
+            phone and answers what the story says."""
+
+            def __init__(self, cfg):
+                pass
+
+            def send(self, token, environment, payload, *, push_type='alert', priority='10', collapse_id=None,
+                     expiration=None):
+                principal = next((row['principal'] for row in agent_rings.voip_tokens() if row['token'] == token), '')
+                answer = state['answers'].get(principal, [200, ''])
+                state['sends'].append({'principal': principal, 'token': token, 'environment': environment,
+                                       'payload': payload, 'push_type': push_type, 'priority': priority,
+                                       'collapse_id': collapse_id, 'expiration': expiration, 'answered': answer})
+                if answer == 'raises':
+                    raise RuntimeError('the way to the push service is gone')
+                return answer[0], answer[1], ''
+
+            def reset(self):
+                pass
+
+        apns._DirectTransport = Direct
+        apns._server_instance_id = lambda: 'host-1'
+        apns.log = lambda *said, **more: None
+        apns.log_exception = lambda *said, **more: None
+        config.Config.apns_direct_ready = lambda self: state['callkit']
+
         def voip_push(record, tokens):
+            """The Python Host's own pushing of a ring as a call, over the stand-in: what it handed over for each phone,
+            and what it says became of it."""
+            state['sends'] = []
+            counted = push_as_calls(record, tokens)
             pushed.append({'ring_id': record['ring_id'], 'kind': 'ring', 'state': record['state'],
-                           'voip': [row['principal'] for row in tokens]})
-            return {'enabled': True, 'sent': len(tokens), 'failed': 0}
+                           'voip': [row['principal'] for row in tokens], 'sends': state['sends'], 'counted': counted})
+            return counted
 
         def alert(record, kind, tokens=None, exclude_owners=None):
             pushed.append({'ring_id': record['ring_id'], 'kind': kind, 'state': record['state'],
@@ -504,6 +562,12 @@ def run() -> dict:
                 return None
             if do == 'fcm':
                 state['fcm'] = step['usable']
+                return None
+            if do == 'callkit':
+                state['callkit'] = step['has']
+                return None
+            if do == 'call_push':
+                state['answers'][step['principal']] = step['answer']
                 return None
             if do == 'device':
                 state['devices'][step['principal']] = step['state']

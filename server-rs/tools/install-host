@@ -6,6 +6,7 @@
 #   server-rs/tools/install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH]
 #                                [--push-relay URL|off] [--whisper PYTHON|off] [--speech-keys FILE|off]
 #                                [--transcription-engine NAME] [--relay on|off] [--relay-config FILE|off]
+#                                [--push-keys FILE|off]
 #                                [--seats-tool PATH|off] [--start] [--files-only]
 #
 #   --from DIR     where clarp-host, clarp-shim and SHA256SUMS are (default: server-rs/dist)
@@ -51,6 +52,11 @@
 #                  config, when it is there. Nothing of it is copied or kept: a key the owner
 #                  changes there is the key this Host uses next. `off`: only the Host's own
 #                  environment (ELEVEN_API_KEY in ~/.config/clarp-host/env) is asked
+#   --push-keys    the file that names the owner's key at the push service ([apns] key_path, key_id,
+#                  team_id): with it this Host pushes a ring to a phone as an incoming call, as the
+#                  Python Host does with the same key. Default: `off`, whatever --speech-keys names:
+#                  a Host that is installed to be tried does not push to its owner's phones with
+#                  his key. It is given on the day this Host takes the phones, with his word
 #   --transcription-engine   the engine that hears a clip no app named one for: `local` (the
 #                  Host's own, the default) or a cloud engine's name (elevenlabs:scribe_v2)
 #   --relay        whether phones reach this Host through the connection relay: `on` or `off` (the
@@ -73,7 +79,7 @@
 #   --files-only   write the files and ask systemd nothing: to look at what would be installed
 #
 # What an installation was told (--listen, --name, --claude, --codex, --push-relay, --whisper,
-# --speech-keys, --transcription-engine, --relay, --relay-config, --seats-tool) is kept with
+# --speech-keys, --push-keys, --transcription-engine, --relay, --relay-config, --seats-tool) is kept with
 # it, in ~/.config/clarp-host/install.conf, so that an update is this command with no more than
 # --start: a relay that was turned off stays off. What is said now replaces what was kept, and
 # `default` forgets it (--push-relay default).
@@ -96,7 +102,7 @@ declare -A said=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) from="$2"; shift 2 ;;
-        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
+        --listen|--name|--claude|--codex|--agy|--push-relay|--accounts|--whisper|--speech-keys|--push-keys|--transcription-engine|--relay|--relay-config|--seats-tool) said["${1#--}"]="$2"; shift 2 ;;
         --start) start=1; shift ;;
         --files-only) files_only=1; shift ;;
         *) echo "usage: install-host [--from DIR] [--listen ADDR:PORT] [--name NAME] [--claude PATH] [--codex PATH] [--agy PATH] [--push-relay URL|off] [--accounts follow|none|select] [--relay on|off] [--relay-config FILE|off] [--seats-tool PATH|off] [--start] [--files-only]" >&2; exit 2 ;;
@@ -114,7 +120,7 @@ declare -A chosen=()
 if [ -f "$kept" ]; then
     while IFS= read -r line; do
         case "${line%%=*}" in
-            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
+            listen|name|claude|codex|agy|push-relay|accounts|whisper|speech-keys|push-keys|transcription-engine|relay|relay-config|seats-tool) chosen["${line%%=*}"]="${line#*=}" ;;
         esac
     done < "$kept"
 fi
@@ -209,6 +215,12 @@ if [ "$whisper" != off ]; then
     speech=" --whisper-python \"$whisper\" --whisper-worker \"$share/libexec/whisper-worker.py\" --whisper-model $whisper_model --whisper-compute $whisper_compute${whisper_source:+ --whisper-source \"$whisper_source\"}"
 fi
 speech="$speech${speech_keys:+ --speech-keys \"$speech_keys\"} --transcription-engine $transcription_engine"
+# Whether this Host pushes a ring to a phone as an incoming call, with the owner's key at the
+# push service: only where it is told the file that names the key.
+push_keys="${chosen[push-keys]:-off}"
+[ "$push_keys" = off ] && push_keys=""
+if [ -n "$push_keys" ] && [ ! -f "$push_keys" ]; then echo "install-host: --push-keys $push_keys: no such file" >&2; exit 2; fi
+speech="$speech${push_keys:+ --push-keys \"$push_keys\"}"
 # Whether phones reach this Host through the connection relay, and under which name there. The
 # name a file gives a Host, when the file turns the relay on: nothing else of it is read here.
 relay_name() {

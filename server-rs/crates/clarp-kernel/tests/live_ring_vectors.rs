@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_kernel::calls::{self, Asker, At, Calls, Contact, Refused};
 use clarp_kernel::live_call::{self, Found, Scan};
+use clarp_kernel::push;
 use clarp_kernel::rings::{
     Admission, Android, Answer, Asked, Caller, Claim, Effects, Given, JOIN_MS, Minted, People,
     Profiles, Ring, Rings, World, claimed,
@@ -184,14 +185,60 @@ fn kept(ring: &Ring) -> Value {
 
 /// What the vectors' phones answer a push with: every call token takes it, and where none
 /// does one phone takes the alert.
-fn delivery(rings: &Rings, ring: &Ring, world: &World) -> Value {
+/// The way to the push service with a key of the Host's own, as a story has it: whether the
+/// Host has such a key, and what the service answers for a phone from now on (a status and
+/// its reason, or nothing at all).
+struct CallPushes {
+    ready: bool,
+    answers: BTreeMap<String, Value>,
+}
+
+impl CallPushes {
+    /// A ring pushed as an incoming call to the phones that are to have it: what is handed
+    /// over for each, what the service answers, and what the one who rang is told of it.
+    fn pushed(&self, rings: &Rings, ring: &Ring, phones: &[String]) -> (Vec<Value>, Value) {
+        let asked = self.ready && !phones.is_empty();
+        let rung = push::Rung {
+            ring_id: &ring.ring_id,
+            session: &ring.session,
+            persona: &ring.persona,
+            reason: &ring.reason,
+            expires_at: ring.expires_at,
+            server_instance_id: "host-1",
+            ..push::Rung::default()
+        };
+        let (mut sends, mut answers) = (Vec::new(), Vec::new());
+        for phone in phones.iter().filter(|_| asked) {
+            let (token, environment) = rings.call_token(phone).unwrap();
+            let answer = self.answers.get(phone).cloned();
+            let answer = answer.unwrap_or_else(|| json!([200, ""]));
+            answers.push(
+                answer[0]
+                    .as_u64()
+                    .and_then(|status| u16::try_from(status).ok()),
+            );
+            sends.push(json!({
+                "principal": phone, "token": token, "environment": environment,
+                "payload": push::call(&rung, &ring.conversation_mode), "push_type": "voip",
+                "priority": "10", "collapse_id": push::ring_notification_id(&ring.ring_id),
+                "expiration": push::call_expires(ring.expires_at), "answered": answer,
+            }));
+        }
+        (sends, push::calls_counted(&answers))
+    }
+}
+
+/// What the one who rang is told became of ringing the phones: the call pushes, the Android
+/// phones a live ring is told to, and the alert where no call push reached a phone.
+fn delivery(rings: &Rings, ring: &Ring, world: &World, calls: &CallPushes) -> Value {
     let sent = rings.sent(ring, "ring", world);
-    let tokens = sent.voip.as_ref().map_or(0, Vec::len);
-    let mut delivery = json!({ "voip": { "enabled": true, "sent": tokens, "failed": 0 } });
+    let (_, counted) = calls.pushed(rings, ring, &sent.voip.unwrap_or_default());
+    let reached = counted["sent"].as_u64().unwrap();
+    let mut delivery = json!({ "voip": counted });
     if !sent.android.is_empty() {
         delivery["fcm_live"] = json!({ "pending": sent.android.len() });
     }
-    if sent.alert_without.is_some() {
+    if rings.alerted(ring, reached).is_some() {
         for (name, value) in [
             ("enabled", json!(true)),
             ("sent", json!(1)),
@@ -242,7 +289,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
         .map(|(name, held)| (name.clone(), held.as_str().unwrap().as_bytes().to_vec()))
         .collect();
     let (mut steps, mut refusals, mut placed, mut joined) = (0, 0, 0, 0);
-    let mut closes_between = 0;
+    let (mut closes_between, mut call_pushes_sent) = (0, 0);
     for script in vectors["scripts"].as_array().unwrap() {
         let name = script["name"].as_str().unwrap();
         let shelf = Shelf {
@@ -260,6 +307,10 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             .map(|(phone, state)| (phone.clone(), state.as_str().unwrap().to_string()))
             .collect();
         let mut androids: Vec<Android> = Vec::new();
+        let mut call_pushes = CallPushes {
+            ready: true,
+            answers: BTreeMap::new(),
+        };
         let (mut has_key, mut can_push_android) = (true, false);
         let mut unsettled: BTreeSet<String> = BTreeSet::new();
         for (place, row) in script["steps"].as_array().unwrap().iter().enumerate() {
@@ -308,6 +359,15 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             };
             let answered: Result<Value, Refused> = match do_ {
                 "tick" => Ok(Value::Null),
+                "callkit" => {
+                    call_pushes.ready = step["has"].as_bool().unwrap();
+                    Ok(Value::Null)
+                }
+                "call_push" => {
+                    let phone = text(step, "principal");
+                    call_pushes.answers.insert(phone, step["answer"].clone());
+                    Ok(Value::Null)
+                }
                 "key" => {
                     has_key = step["has"].as_bool().unwrap();
                     Ok(Value::Null)
@@ -373,7 +433,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                             let ring = rings.place(admitted, &voiced, &id(1), now, &mut out);
                             made += 1;
                             placed += 1;
-                            let delivery = delivery(&rings, &ring, &world);
+                            let delivery = delivery(&rings, &ring, &world, &call_pushes);
                             Rings::rung(&ring, delivery, now)
                         }
                     })
@@ -568,7 +628,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             let notices: Vec<Value> = of_call.chain(of_ring).collect();
             assert_eq!(json!(notices), row["notices"], "{here}");
             // Who is pushed what: the Android phones of a live ring, the call tokens of a ring
-            // that begins to ring, and the alert where no call token took it.
+            // that begins to ring, and the alert where no call push reached a phone.
             let mut pushes: Vec<Value> = Vec::new();
             for pushed in &out.pushes {
                 let sent = rings.sent(&pushed.ring, pushed.kind, &world);
@@ -581,11 +641,19 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                 if !sent.android.is_empty() {
                     pushes.push(of("fcm_live", &sent.android));
                 }
-                if let Some(tokens) = &sent.voip {
-                    pushes.push(of("voip", tokens));
+                let mut reached = 0;
+                if let Some(phones) = &sent.voip {
+                    let (sends, counted) = call_pushes.pushed(&rings, &pushed.ring, phones);
+                    reached = counted["sent"].as_u64().unwrap();
+                    call_pushes_sent += sends.len();
+                    let mut as_calls = of("voip", phones);
+                    as_calls["sends"] = json!(sends);
+                    as_calls["counted"] = counted;
+                    pushes.push(as_calls);
                 }
-                if let Some(without) = &sent.alert_without {
-                    pushes.push(of("alert", without));
+                if let Some(mut without) = rings.alerted(&pushed.ring, reached) {
+                    without.sort();
+                    pushes.push(of("alert", &without));
                 }
             }
             assert_eq!(json!(pushes), row["pushes"], "{here}");
@@ -640,6 +708,6 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             );
         }
     }
-    assert_eq!((steps, refusals, placed, joined), (588, 175, 53, 14));
-    assert_eq!(closes_between, 3);
+    assert_eq!((steps, refusals, placed, joined), (642, 180, 63, 14));
+    assert_eq!((closes_between, call_pushes_sent), (3, 97));
 }

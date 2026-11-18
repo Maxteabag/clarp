@@ -40,7 +40,7 @@ use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use super::{Desk, RINGS, RINGS_KEPT, With, answered, caller, ring_asked, text};
+use super::{Desk, RINGS, RINGS_KEPT, answered, caller, ring_asked, text};
 use crate::agent::Unavailable;
 use crate::edge::{App, Principal};
 use crate::fleet::Directory;
@@ -420,25 +420,25 @@ impl Names {
     }
 }
 
-/// A ring held as a live voice call that was admitted is placed, under the desk's lock: with
-/// no line voiced, since its opening is the voice's own. Answers what the one who rang is
-/// told, and until when the ring rings.
-pub(super) fn placed(
-    rings: &mut Rings,
-    admitted: rings::Admitted,
-    with: &With,
-    out: &mut rings::Effects,
-) -> (Value, i64) {
-    let now = with.at.now_ms;
-    let ring = rings.place(admitted, "", with.new_id, now, out);
-    let sent = rings.sent(&ring, "ring", &with.world);
-    // No call is pushed with a key of this Host's own: a live ring reaches the phones whose
-    // app is open, by its event and when they ask.
-    let mut delivery = json!({ "voip": { "enabled": false, "sent": 0, "failed": 0 } });
-    if !sent.android.is_empty() {
-        delivery["fcm_live"] = json!({ "pending": sent.android.len() });
+/// A ring that was placed, and whom it is pushed to: the phones that are pushed it as an
+/// incoming call (the token each left for calls and its side of the push service), and how
+/// many Android phones a live ring would be told to.
+pub(super) struct Placed {
+    pub ring: rings::Ring,
+    pub calls: Vec<(String, String)>,
+    pub android: usize,
+}
+
+/// Whom a ring that was just placed is pushed to, read under the desk's lock.
+pub(super) fn placed(rings: &Rings, ring: rings::Ring, world: &rings::World) -> Placed {
+    let phones = rings.rung_as_calls(&ring, world);
+    let tokens = phones.iter().filter_map(|phone| rings.call_token(phone));
+    let calls = tokens.map(|(token, environment)| (token.to_string(), environment.to_string()));
+    Placed {
+        calls: calls.collect(),
+        android: rings.sent(&ring, "ring", world).android.len(),
+        ring,
     }
-    (Rings::rung(&ring, delivery, now), ring.expires_at)
 }
 
 /// `POST /calls/live` with exactly `{agent, request_id, client_nonce}`: the user calls an

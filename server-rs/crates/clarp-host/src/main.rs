@@ -174,6 +174,14 @@ async fn serve(config: Config) -> Result<(), String> {
         server_id: server_id.clone(),
         faces: faces.clone(),
         secret: config.auth_token.clone(),
+        // The key the owner gave for the push service is named in the file he names for
+        // it; without that word nothing is handed to the service.
+        direct: Arc::new(clarp_host::direct::Direct::new(
+            OwnerFile::new(config.push_keys.clone()),
+            &config.apns_endpoint,
+            clock.clone(),
+        )),
+        runtime: tokio::runtime::Handle::current(),
     })?;
     let mouth = to_speak.run(clarp_host::voice::Works {
         config: config.clone(),

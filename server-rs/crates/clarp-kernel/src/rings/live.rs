@@ -201,9 +201,12 @@ pub struct Sent {
     pub voip: Option<Vec<String>>,
     /// The Android phones that are told of a live ring, in every state of it.
     pub android: Vec<String>,
-    /// The phones left out of the alert every other phone gets, when one is sent at all: a
-    /// live ring has none, and a ring whose call tokens took it needs none.
-    pub alert_without: Option<Vec<String>>,
+}
+
+/// Whether a change of a ring is alerted once its call pushes are over: never for a ring held
+/// as a live voice call, and not where a call push reached a phone.
+pub fn alert_follows(conversation_mode: &str, reached: u64) -> bool {
+    conversation_mode != LIVE && reached == 0
 }
 
 /// Two texts compared without saying where they differ by how long it took.
@@ -376,11 +379,33 @@ impl Rings {
             };
             sent.voip = Some(tokens);
         }
-        let took = sent.voip.as_ref().is_some_and(|tokens| !tokens.is_empty());
-        if !live && !took {
-            sent.alert_without = Some(self.switched_off());
-        }
         sent
+    }
+
+    /// The phones a ring that begins to ring is pushed to as an incoming call: those the
+    /// Python Host pushes it to ([`Rings::sent`]), less every one that is no longer paired
+    /// with all rights. That Host pushes the call to those too (R56 in
+    /// `docs/reference-defects.md`): a phone taken out of the fleet would go on showing who
+    /// calls, and count as rung.
+    pub fn rung_as_calls(&self, ring: &Ring, world: &World) -> Vec<String> {
+        let phones = self.sent(ring, "ring", world).voip.unwrap_or_default();
+        let paired = phones.into_iter().filter(|phone| world.a_phone(phone));
+        paired.collect()
+    }
+
+    /// Whether a change of a ring is alerted, once its call pushes are over, and the phones
+    /// that are left out of the alert every other phone gets. `reached`: how many phones a
+    /// call push reached. A ring held as a live voice call has no alert, in any state of it,
+    /// and a ring that reached a phone as an incoming call needs none.
+    pub fn alerted(&self, ring: &Ring, reached: u64) -> Option<Vec<String>> {
+        alert_follows(&ring.conversation_mode, reached).then(|| self.switched_off())
+    }
+
+    /// The token a phone left for calls, and the side of the push service it belongs to.
+    pub fn call_token(&self, principal: &str) -> Option<(&str, &str)> {
+        let mut rows = self.voip.iter();
+        let row = rows.find(|row| row["principal"] == principal)?;
+        Some((row["token"].as_str()?, row["environment"].as_str()?))
     }
 
     /// The phones that switched rings off for themselves: the alert of a ring leaves them

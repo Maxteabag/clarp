@@ -25145,13 +25145,18 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     let relay_at = format!("http://{}", relay.address);
     let sound: Vec<u8> = (0..5_000_u32).map(|at| (at % 241) as u8).collect();
     let speaks = cartesia_stand_in(sound);
+    // The owner's file names his key at the push service too, as it does where a Host is
+    // installed beside another to be tried: this Host was not given the word to push with
+    // it (`--push-keys`), and hands nothing to the push service, though it could reach it.
+    let service = stand_in_push_service();
+    let (key_file, _) = push_key(&place);
     let owners = place.root.join("owners-settings.toml");
-    std::fs::write(
-        &owners,
+    let settings = format!(
         "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
-         Mike = \"voice-of-mike\"\n",
-    )
-    .unwrap();
+         Mike = \"voice-of-mike\"\n\n[apns]\nkey_path = \"{}\"\nkey_id = \"K1\"\nteam_id = \"T1\"\n",
+        key_file.display()
+    );
+    std::fs::write(&owners, settings).unwrap();
     let args = [
         "--push-relay",
         relay_at.as_str(),
@@ -25161,6 +25166,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     let world = [
         world[0],
         world[1],
+        ("CLARP_APNS_ENDPOINT", service.address.as_str()),
         ("CLARP_CARTESIA_ENDPOINT", speaks.address.as_str()),
         ("CARTESIA_API_KEY", ""),
         ("GEMINI_API_KEY", ""),
@@ -25893,6 +25899,9 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     // in any state of it.
     let alerted = relay.taken();
     assert!(alerted.is_empty(), "{alerted:?}");
+    // And no ring was pushed as a call: the key in the owner's file was not this Host's to
+    // push with.
+    assert_eq!(service.handed().len(), 0);
     drop(host);
     let host = place.start_in(ADMIN, &args, &world);
     let (status, called) = host.ask_as(&phone, "POST", "/calls/live", Some(&busy));
@@ -26014,4 +26023,434 @@ fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it
         told.last()
             .is_some_and(|said| said["type"] == "session.close")
     });
+}
+
+/// What the stand-in for the push service was handed for one push: where it went, what its
+/// head said, and its body.
+type Handed = (String, std::collections::BTreeMap<String, String>, Value);
+
+/// A stand-in for the push service on this machine. It speaks HTTP/2, as the service does,
+/// without TLS; writes down what it is handed; and answers what it was told to answer next,
+/// or that it took the push.
+struct PushService {
+    address: String,
+    handed: Arc<Mutex<Vec<Handed>>>,
+    answers: Arc<Mutex<std::collections::VecDeque<(u16, String)>>>,
+    /// Set: once it has answered the next push it lets that connection go.
+    hangs_up: Arc<AtomicBool>,
+    /// How many connections it took.
+    connections: Arc<AtomicU64>,
+}
+
+impl PushService {
+    fn handed(&self) -> Vec<Handed> {
+        self.handed.lock().unwrap().clone()
+    }
+
+    /// It lets the connection go once it has answered the next push, as the service does
+    /// with a connection that was left alone for long.
+    fn hangs_up_after_the_next(&self) {
+        self.hangs_up.store(true, Ordering::SeqCst);
+    }
+
+    /// The next pushes are answered so, in this order; after them it takes every push again.
+    fn answers(&self, next: &[(u16, &str)]) {
+        let mut answers = self.answers.lock().unwrap();
+        answers.extend(
+            next.iter()
+                .map(|(status, said)| (*status, (*said).to_string())),
+        );
+    }
+}
+
+fn stand_in_push_service() -> PushService {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let handed: Arc<Mutex<Vec<Handed>>> = Arc::new(Mutex::new(Vec::new()));
+    let answers = Arc::new(Mutex::new(std::collections::VecDeque::new()));
+    let hangs_up = Arc::new(AtomicBool::new(false));
+    let lets_go = hangs_up.clone();
+    let connections = Arc::new(AtomicU64::new(0));
+    let taken = connections.clone();
+    let (kept, told) = (handed.clone(), answers.clone());
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let (kept, told) = (kept.clone(), told.clone());
+                let lets_go = lets_go.clone();
+                taken.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(async move {
+                    let Ok(mut connection) = h2::server::handshake(stream).await else {
+                        return;
+                    };
+                    while let Some(Ok((request, mut respond))) = connection.accept().await {
+                        let (head, mut body) = request.into_parts();
+                        let mut said = Vec::new();
+                        while let Some(Ok(piece)) = body.data().await {
+                            let _ = body.flow_control().release_capacity(piece.len());
+                            said.extend_from_slice(&piece);
+                        }
+                        let headers = head.headers.iter().map(|(name, value)| {
+                            (name.to_string(), value.to_str().unwrap_or("").to_string())
+                        });
+                        let payload = serde_json::from_slice(&said).unwrap_or(Value::Null);
+                        let path = head.uri.path().to_string();
+                        kept.lock()
+                            .unwrap()
+                            .push((path, headers.collect(), payload));
+                        let next = told.lock().unwrap().pop_front();
+                        let (status, answer) = next.unwrap_or((200, String::new()));
+                        let response = http::Response::builder()
+                            .status(status)
+                            .header("apns-id", "id-of-the-stand-in")
+                            .body(())
+                            .unwrap();
+                        let Ok(mut sent) = respond.send_response(response, answer.is_empty())
+                        else {
+                            continue;
+                        };
+                        if !answer.is_empty() {
+                            let _ = sent.send_data(bytes::Bytes::from(answer), true);
+                        }
+                        // What it answered is sent, and then the connection is over.
+                        if lets_go.swap(false, Ordering::SeqCst) {
+                            connection.graceful_shutdown();
+                        }
+                    }
+                });
+            }
+        });
+    });
+    PushService {
+        address,
+        handed,
+        answers,
+        hangs_up,
+        connections,
+    }
+}
+
+/// A key as the push service gives one to those who push, in a file; and the public half of
+/// it, by which what was signed with it is known.
+fn push_key(place: &Place) -> (PathBuf, Vec<u8>) {
+    use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair};
+    let random = ring::rand::SystemRandom::new();
+    let made = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &random).unwrap();
+    let pair =
+        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, made.as_ref(), &random).unwrap();
+    let body = clarp_kernel::python::b64encode(made.as_ref());
+    let lines: Vec<&str> = (0..body.len().div_ceil(64))
+        .map(|line| &body[line * 64..body.len().min(line * 64 + 64)])
+        .collect();
+    let text = format!(
+        "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+        lines.join("\n")
+    );
+    let file = place.root.join("AuthKey_OF_THE_TEST.p8");
+    std::fs::write(&file, text).unwrap();
+    (file, pair.public_key().as_ref().to_vec())
+}
+
+/// What a token of the Host's says, once it is seen to be signed with the key: its head and
+/// its claims.
+fn read_push_token(bearer: &str, public: &[u8]) -> (Value, Value) {
+    use ring::signature::{ECDSA_P256_SHA256_FIXED, UnparsedPublicKey};
+    let token = bearer.strip_prefix("bearer ").expect("a bearer token");
+    let parts: Vec<&str> = token.split('.').collect();
+    assert_eq!(parts.len(), 3, "a token of three parts");
+    let bytes = |part: &str| {
+        let fitted = part.replace('-', "+").replace('_', "/");
+        let filled = format!("{fitted}{}", "=".repeat((4 - fitted.len() % 4) % 4));
+        clarp_kernel::python::b64decode(&filled).unwrap()
+    };
+    let signed = format!("{}.{}", parts[0], parts[1]);
+    UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, public)
+        .verify(signed.as_bytes(), &bytes(parts[2]))
+        .expect("signed with the key of the test");
+    (
+        serde_json::from_slice(&bytes(parts[0])).unwrap(),
+        serde_json::from_slice(&bytes(parts[1])).unwrap(),
+    )
+}
+
+#[test]
+fn a_ring_is_pushed_to_a_phone_as_an_incoming_call_with_a_key_of_the_hosts_own() {
+    const ADMIN: &str = "the-administrators-token";
+    const LIVE: &str = "agent_live_v1";
+    let place = Place::new("call-push");
+    let service = stand_in_push_service();
+    let relay = StandInRelay::start();
+    let relay_at = format!("http://{}", relay.address);
+    let (key_file, public) = push_key(&place);
+    let owners = place.root.join("owners-settings.toml");
+    let named = format!(
+        "[apns]\nkey_path = \"{}\"\nkey_id = \"KEYOFTEST1\"\nteam_id = \"TEAMOFTEST\"\n",
+        key_file.display()
+    );
+    // The Host starts with no key named: its owner gave it none yet.
+    std::fs::write(&owners, "[tts]\nprovider = \"none\"\n").unwrap();
+    // The file is named twice: for the keys of speech, as a Host is installed, and with the
+    // word that lets the Host push with what it names.
+    let args = [
+        "--push-relay",
+        relay_at.as_str(),
+        "--speech-keys",
+        owners.to_str().unwrap(),
+        "--push-keys",
+        owners.to_str().unwrap(),
+    ];
+    let voice = stand_in_live_voice();
+    let world = [
+        ("CLARP_APNS_ENDPOINT", service.address.as_str()),
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &args, &world);
+    // Agents enough: each rings once, since an agent's rings are a minute apart.
+    let agents: Vec<String> = ["Ada", "Ben", "Cleo", "Dag", "Eli", "Finn", "Gro", "Hal"]
+        .iter()
+        .map(|name| host.new_agent(name))
+        .collect();
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let (tablet, tablet_id) = pair(&host, "Tablet", "full");
+    let grant = |of: &str| {
+        format!(
+            "pg1.{}.{}.{}",
+            of.repeat(64),
+            "2".repeat(16),
+            "3".repeat(64)
+        )
+    };
+    for (token, row, of) in [(&phone, "a1", "1"), (&tablet, "c3", "4")] {
+        let row = json!({ "token": row.repeat(32), "push_grant": grant(of) });
+        assert_eq!(host.ask_as(token, "POST", "/devices", Some(&row)).0, 200);
+    }
+    // Each phone leaves the token an incoming call is pushed to; the phone can hold a live
+    // call, the tablet cannot, and its token is of the other side of the push service.
+    let (of_phone, of_tablet) = ("ab".repeat(32), "cd".repeat(32));
+    let left = json!({ "token": of_phone, "supported_conversation_modes": ["classic", LIVE] });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/calls/ring/voip-token", Some(&left))
+            .0,
+        200
+    );
+    let left = json!({ "token": of_tablet, "environment": "sandbox" });
+    assert_eq!(
+        host.ask_as(&tablet, "POST", "/calls/ring/voip-token", Some(&left))
+            .0,
+        200
+    );
+    let alerts = || -> Vec<(String, String)> {
+        let taken = relay.taken();
+        let told = taken.iter().map(|(_, sent_as, body)| {
+            let state = body["notifications"][0]["payload"]["ring_state"]
+                .as_str()
+                .unwrap_or("");
+            (sent_as.clone(), state.to_string())
+        });
+        told.collect()
+    };
+    let rings = |agent: usize| -> Value {
+        let asked = json!({
+            "agent": agents[agent], "reason": "Possible water leak", "opening_line": "Shall I look?",
+        });
+        let (status, rung) = host.ask("POST", "/calls/ring", Some(&asked));
+        assert_eq!(status, 200, "{rung}");
+        rung
+    };
+    let taken_back = |rung: &Value| {
+        let asked = json!({ "ring_id": rung["ring"]["ring_id"] });
+        assert_eq!(host.ask("POST", "/calls/ring/cancel", Some(&asked)).0, 200);
+    };
+    let no_calls = json!({ "enabled": false, "sent": 0, "failed": 0 });
+    let alerted = json!({ "enabled": true, "sent": 2, "failed": 0, "disabled": 0 });
+    let with = |calls: &Value, alert: Option<&Value>| {
+        let mut delivery = json!({ "voip": calls });
+        if let Some(Value::Object(alert)) = alert {
+            delivery.as_object_mut().unwrap().extend(alert.clone());
+        }
+        delivery
+    };
+
+    // Without a key of its own the Host pushes no call: the ring is an alert, through the
+    // relay, to both phones.
+    let rung = rings(0);
+    assert_eq!(rung["delivery"], with(&no_calls, Some(&alerted)));
+    assert_eq!(service.handed().len(), 0);
+    assert_eq!(alerts().len(), 2);
+    taken_back(&rung);
+    wait_for("the alert of what became of it", || alerts().len() == 4);
+
+    // The owner names his key. From the next ring on a ring is pushed as an incoming call
+    // to each phone that left a token for one, and no alert follows where one was reached.
+    std::fs::write(&owners, format!("[tts]\nprovider = \"none\"\n\n{named}")).unwrap();
+    let rung = rings(1);
+    let calls = json!({ "enabled": true, "sent": 2, "failed": 0 });
+    assert_eq!(rung["delivery"], with(&calls, None));
+    assert_eq!(alerts().len(), 4, "no alert for a ring that rang as a call");
+    let handed = service.handed();
+    assert_eq!(handed.len(), 2);
+    let ring = &rung["ring"];
+    let seconds = ring["expires_at"].as_i64().unwrap() / 1000;
+    for ((path, head, payload), token) in handed.iter().zip([&of_phone, &of_tablet]) {
+        assert_eq!(path, &format!("/3/device/{token}"));
+        let said = |name: &str| head.get(name).map_or("", String::as_str);
+        assert_eq!(
+            (
+                said("apns-topic"),
+                said("apns-push-type"),
+                said("apns-priority"),
+                said("apns-collapse-id"),
+                said("apns-expiration")
+            ),
+            (
+                "com.maxteabag.clarp.voip",
+                "voip",
+                "10",
+                format!("ring-{}", ring["ring_id"].as_str().unwrap()).as_str(),
+                seconds.to_string().as_str()
+            )
+        );
+        // The token is the Host's own, signed with the key its owner named, for his team.
+        let (signed_as, claims) = read_push_token(said("authorization"), &public);
+        assert_eq!(
+            signed_as,
+            json!({ "alg": "ES256", "kid": "KEYOFTEST1", "typ": "JWT" })
+        );
+        assert_eq!(claims["iss"], "TEAMOFTEST");
+        assert_eq!(
+            payload,
+            &json!({
+                "kind": "agent-ring", "ring_id": ring["ring_id"], "ring_state": "ringing",
+                "session": ring["session"], "persona": "Ben", "reason": "Possible water leak",
+                "expires_at": ring["expires_at"], "server_instance_id": host.get("/server-info")["server_id"],
+            })
+        );
+    }
+    // One token serves both pushes, and the next ring's too; and one connection carried
+    // both.
+    let bearer = |at: usize| service.handed()[at].1["authorization"].clone();
+    assert_eq!(bearer(0), bearer(1));
+    assert_eq!(service.connections.load(Ordering::SeqCst), 1);
+    // What becomes of the ring is alerted as ever.
+    taken_back(&rung);
+    wait_for("the alert that the ring was taken back", || {
+        alerts().len() == 6
+    });
+    assert_eq!(alerts()[5].1, "cancelled");
+
+    // A phone the service no longer knows, and one it does not answer for: where no phone
+    // was reached the alert follows.
+    service.answers(&[(410, r#"{"reason": "Unregistered"}"#), (500, "")]);
+    let rung = rings(2);
+    let calls = json!({ "enabled": true, "sent": 0, "failed": 2 });
+    assert_eq!(rung["delivery"], with(&calls, Some(&alerted)));
+    assert_eq!((service.handed().len(), alerts().len()), (4, 8));
+    assert_eq!(bearer(3), bearer(0));
+    taken_back(&rung);
+    wait_for("the alert that the ring was taken back", || {
+        alerts().len() == 10
+    });
+
+    // A token of the Host's that the service does not take is signed anew, once, and the
+    // push handed over again; the other phone is reached at once. And the service lets the
+    // connection go meanwhile: what is handed over next goes over a new one, once.
+    service.answers(&[(403, r#"{"reason": "ExpiredProviderToken"}"#)]);
+    service.hangs_up_after_the_next();
+    let rung = rings(3);
+    let calls = json!({ "enabled": true, "sent": 2, "failed": 0 });
+    assert_eq!(rung["delivery"], with(&calls, None));
+    let handed = service.handed();
+    assert_eq!(handed.len(), 7);
+    assert_eq!((&handed[4].0, &handed[5].0), (&handed[0].0, &handed[0].0));
+    assert_ne!(bearer(5), bearer(4));
+    assert_eq!(bearer(6), bearer(5));
+    read_push_token(&bearer(5), &public);
+    taken_back(&rung);
+    wait_for("the alert that the ring was taken back", || {
+        alerts().len() == 12
+    });
+
+    // A phone that switched rings off is not rung, and one whose pairing was taken away is
+    // not either, though the token it left is still there: the Python Host rings that one.
+    // (The connection is let go after the first of these pushes, and the next finds a new
+    // one.)
+    service.hangs_up_after_the_next();
+    let off = json!({ "receive_rings": false });
+    assert_eq!(
+        host.ask_as(&tablet, "POST", "/calls/ring/device", Some(&off))
+            .0,
+        200
+    );
+    let rung = rings(4);
+    let calls = json!({ "enabled": true, "sent": 1, "failed": 0 });
+    assert_eq!(rung["delivery"], with(&calls, None));
+    assert_eq!(service.handed().len(), 8);
+    assert_eq!(service.handed()[7].0, format!("/3/device/{of_phone}"));
+    // And it is left out of the alert of what became of the ring.
+    taken_back(&rung);
+    wait_for("the alert that the ring was taken back", || {
+        alerts().len() == 13
+    });
+    assert_eq!(
+        alerts()[12],
+        (format!("Bearer {}", grant("1")), "cancelled".to_string())
+    );
+    let on = json!({ "receive_rings": true });
+    assert_eq!(
+        host.ask_as(&tablet, "POST", "/calls/ring/device", Some(&on))
+            .0,
+        200
+    );
+    host.post("/paired-devices/revoke", json!({ "device_id": tablet_id }));
+    let rung = rings(5);
+    assert_eq!(rung["delivery"], with(&calls, None));
+    assert_eq!(service.handed().len(), 9);
+    assert_eq!(service.handed()[8].0, format!("/3/device/{of_phone}"));
+    taken_back(&rung);
+    wait_for("the alert that the ring was taken back", || {
+        alerts().len() == 14
+    });
+
+    // A ring held as a live voice call is pushed as a call to the phones that can hold one,
+    // and says what kind of call it is; whatever becomes of that push, it has no alert.
+    live_profile(&place, "gro", &agents[6], json!({}));
+    live_profile(&place, "hal", &agents[7], json!({}));
+    let line = "Camera 2 shows a possible water leak at pump 01.";
+    let live_ring = |agent: &str, event_id: &str| {
+        let asked = json!({
+            "agent": agent, "reason": "Possible water leak", "opening_line": line,
+            "conversation_mode": LIVE, "event_context": live_event(agent, event_id, line),
+        });
+        let (status, rung) = host.ask("POST", "/calls/ring", Some(&asked));
+        assert_eq!(status, 200, "{rung}");
+        rung
+    };
+    let told_before = alerts().len();
+    let rung = live_ring("gro", "evt-1");
+    assert_eq!(rung["delivery"], with(&calls, None));
+    let handed = service.handed();
+    assert_eq!(handed.len(), 10);
+    assert_eq!(handed[9].0, format!("/3/device/{of_phone}"));
+    assert_eq!(
+        (&handed[9].2["conversation_mode"], &handed[9].2["ring_id"]),
+        (&json!(LIVE), &rung["ring"]["ring_id"])
+    );
+    taken_back(&rung);
+    service.answers(&[(400, r#"{"reason": "BadDeviceToken"}"#)]);
+    let rung = live_ring("hal", "evt-2");
+    let calls = json!({ "enabled": true, "sent": 0, "failed": 1 });
+    assert_eq!(rung["delivery"], with(&calls, None));
+    taken_back(&rung);
+    assert_eq!(alerts().len(), told_before, "a live ring has no alert");
+    let _ = phone_id;
 }
