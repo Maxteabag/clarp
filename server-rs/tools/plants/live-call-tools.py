@@ -128,5 +128,21 @@ for what,old,new in [
     PLANTS.append((H,'host',what,old,new))
 # Endpoint isolation, proxy disabling and redirect refusal are not planted. Changing
 # them could allow tests to contact an external provider or director.
+cases('team', [
+    ('question words joined with a different separator','.join(" ");\n        if question.is_empty()', '.join("|");\n        if question.is_empty()'),
+    ('question cannot fill the last character','question.chars().count() > 4000','question.chars().count() >= 4000'),
+    ('one extra question character is sent','question.chars().count() > 4000','question.chars().count() > 4001'),
+    ('question ids are case sensitive','&question.to_lowercase()','&question'),
+    ('phone omitted from question binding','&[host, phone, call, session,','&[host, call, session,'),
+    ('an ambiguous readback says failed','if unknown {','if false {'),
+    ('failed admission loses its reason','if row["status"]=="failed"','if false'),
+])
+for what,old,new in [
+    ('late admitted action is sent after hangup','row["status_text"] = json!("not_sent")','row["status_text"] = json!("forwarded")'),
+    ('role of answering agent is substituted','team::prompted(proposed.name, &id, verdict)','team::prompted(proposed.session, &id, verdict)'),
+    ('reconciliation listens on the wrong intent','encode(receipt["intent"].as_str().unwrap_or(""))','encode("wrong")'),
+]:
+    PLANTS.append((H,'host',what,old,new))
+
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
