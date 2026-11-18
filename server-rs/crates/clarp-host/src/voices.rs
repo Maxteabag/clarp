@@ -29,7 +29,6 @@ use crate::fleet::{Amend, Directory};
 use crate::media::header_text;
 use crate::owner;
 
-
 /// The engines that speak which are built into this Host.
 use crate::voice::BUILT;
 
@@ -102,8 +101,8 @@ pub fn engines(owners: &Table, has_key: &dyn Fn(&str) -> bool) -> Value {
         Some(_) => "google_tts",
         None => "google_stt",
     };
-    let mut result=voices::status(&speech, source);
-    result["voice"]=json!(owner::text_at(owners,&["local_tts","voice"]).unwrap_or_default());
+    let mut result = voices::status(&speech, source);
+    result["voice"] = json!(owner::text_at(owners, &["local_tts", "voice"]).unwrap_or_default());
     result
 }
 
@@ -124,18 +123,40 @@ async fn engines_told(State(app): State<App>) -> Json<Value> {
 
 /// `POST /tts/providers`: choosing the engine from an app. Who speaks is read from the
 /// owner's file here.
-async fn choose(State(app):State<App>,body:Bytes)->Result<Json<Value>,ApiError>{
-    let data:Value=serde_json::from_slice(&body).map_err(|_|bad("bad json"))?;
-    let word=|key:&str,default:&str| data[key].as_str().filter(|s|!s.is_empty()).unwrap_or(default).trim().to_string();
-    let provider=word("provider","").to_lowercase();
-    let fallback=word("fallback","none").to_lowercase();
-    if [&provider,&fallback].iter().any(|p|p.as_str()!="none" && !BUILT.contains(&p.as_str())){return Err(bad("unsupported TTS provider or fallback"));}
-    let mut changes=vec![("speech.provider".into(),provider),("speech.fallback".into(),fallback)];
-    let voice=word("voice","");
-    if !voice.is_empty(){changes.push(("speech.local_voice".into(),voice));}
-    app.fleet.set(changes).await.map_err(|_|ApiError::new(StatusCode::SERVICE_UNAVAILABLE,"speech settings could not be saved"))?;
-    let Json(mut result)=engines_told(State(app)).await;
-    result["restart_scheduled"]=json!(false);
+async fn choose(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let data: Value = serde_json::from_slice(&body).map_err(|_| bad("bad json"))?;
+    let word = |key: &str, default: &str| {
+        data[key]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(default)
+            .trim()
+            .to_string()
+    };
+    let provider = word("provider", "").to_lowercase();
+    let fallback = word("fallback", "none").to_lowercase();
+    if [&provider, &fallback]
+        .iter()
+        .any(|p| p.as_str() != "none" && !BUILT.contains(&p.as_str()))
+    {
+        return Err(bad("unsupported TTS provider or fallback"));
+    }
+    let mut changes = vec![
+        ("speech.provider".into(), provider),
+        ("speech.fallback".into(), fallback),
+    ];
+    let voice = word("voice", "");
+    if !voice.is_empty() {
+        changes.push(("speech.local_voice".into(), voice));
+    }
+    app.fleet.set(changes).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "speech settings could not be saved",
+        )
+    })?;
+    let Json(mut result) = engines_told(State(app)).await;
+    result["restart_scheduled"] = json!(false);
     Ok(Json(result))
 }
 
@@ -292,17 +313,30 @@ async fn preview(
 }
 
 /// A number as the Python Host reads one from an app: a number, never a truth.
-async fn cartesia_voices(State(app):State<App>,Query(asked):Query<HashMap<String,String>>)->Result<Json<Value>,ApiError>{
-    let force=asked.get("force").is_some_and(|s|matches!(s.as_str(),"1"|"true"));
-    let rows=app.mouth.cartesia_rows(force,false).await.map_err(|_|ApiError::new(StatusCode::BAD_GATEWAY,"Cartesia voice library unavailable"))?;
-    let owners=app.mouth.owners();
-    let settings=owner::voices(&owners);
-    let available=settings.provider=="cartesia" && app.mouth.has_key("cartesia",&owners);
-    let directory=app.fleet.directory();
-    let mut occupied=HashMap::new();
+async fn cartesia_voices(
+    State(app): State<App>,
+    Query(asked): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let force = asked
+        .get("force")
+        .is_some_and(|s| matches!(s.as_str(), "1" | "true"));
+    let rows = app.mouth.cartesia_rows(force, false).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            "Cartesia voice library unavailable",
+        )
+    })?;
+    let owners = app.mouth.owners();
+    let settings = owner::voices(&owners);
+    let available = settings.provider == "cartesia" && app.mouth.has_key("cartesia", &owners);
+    let directory = app.fleet.directory();
+    let mut occupied = HashMap::new();
     for agent in agents_of(&directory) {
-        let voice=resolve_voice(Some(agent.voice_id),"cartesia").or_else(||settings.cartesia_voice_for(agent.name).map(str::to_string));
-        if let Some(id)=voice {occupied.insert(id,agent.name);}
+        let voice = resolve_voice(Some(agent.voice_id), "cartesia")
+            .or_else(|| settings.cartesia_voice_for(agent.name).map(str::to_string));
+        if let Some(id) = voice {
+            occupied.insert(id, agent.name);
+        }
     }
     let voices=rows.iter().filter(|_|available).filter_map(|r|{
         let id=r["id"].as_str().filter(|s|!s.is_empty())?;
@@ -318,29 +352,63 @@ async fn cartesia_voices(State(app):State<App>,Query(asked):Query<HashMap<String
     Ok(Json(json!({"available":available,"voices":voices})))
 }
 
-async fn cartesia_preview(State(app):State<App>,Query(asked):Query<HashMap<String,String>>, headers:HeaderMap)->Response{
-    let id=asked.get("id").map_or("",|id|id.trim());
-    let rows=app.mouth.cartesia_rows(false,true).await.unwrap_or_default();
-    let Some(row)=rows.iter().find(|r|r["id"]==id) else {return ApiError::plain(StatusCode::NOT_FOUND,"not found").into_response()};
-    let name:String=row["name"].as_str().filter(|s|!s.is_empty()).unwrap_or("this voice").chars().take(80).collect();
-    let prompt=format!("Hello, I'm {name}. This is how I'll sound in Clarp.");
-    let model=owner::cartesia_model(&app.mouth.owners());
-    let key=format!("{:x}",Sha256::digest(format!("v1\0{id}\0{name}\0{model}\0{prompt}").as_bytes()));
-    match app.mouth.preview("cartesia",id,&prompt,&key).await {
-        Ok(p)=>p.send(&header_text(&headers,"range")),
-        Err(_)=>ApiError::plain(StatusCode::BAD_GATEWAY,"preview unavailable").into_response()
+async fn cartesia_preview(
+    State(app): State<App>,
+    Query(asked): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let id = asked.get("id").map_or("", |id| id.trim());
+    let rows = app
+        .mouth
+        .cartesia_rows(false, true)
+        .await
+        .unwrap_or_default();
+    let Some(row) = rows.iter().find(|r| r["id"] == id) else {
+        return ApiError::plain(StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let name: String = row["name"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("this voice")
+        .chars()
+        .take(80)
+        .collect();
+    let prompt = format!("Hello, I'm {name}. This is how I'll sound in Clarp.");
+    let model = owner::cartesia_model(&app.mouth.owners());
+    let key = format!(
+        "{:x}",
+        Sha256::digest(format!("v1\0{id}\0{name}\0{model}\0{prompt}").as_bytes())
+    );
+    match app.mouth.preview("cartesia", id, &prompt, &key).await {
+        Ok(p) => p.send(&header_text(&headers, "range")),
+        Err(_) => ApiError::plain(StatusCode::BAD_GATEWAY, "preview unavailable").into_response(),
     }
 }
 
-async fn legacy_preview(State(app):State<App>,body:Bytes)->Result<Json<Value>,ApiError>{
-    let data:Value=serde_json::from_slice(&body).map_err(|_|bad("bad json"))?;
-    let voice=data["voice_id"].as_str().unwrap_or("").trim();
-    if voice.is_empty(){return Err(bad("voice_id required"));}
-    let text=data["text"].as_str().filter(|s|!s.is_empty()).unwrap_or("Hi there, this is what I sound like.").trim();
-    let owners=app.mouth.owners();
-    let default=owner::text_at(&owners,&["server","default_session"]).unwrap_or_else(||"claude".into());
-    let session=data["session"].as_str().map(str::trim).filter(|s|!s.is_empty()).unwrap_or(&default);
-    let name=app.mouth.legacy_preview(session,voice,clarp_kernel::python::first(text,200)).await.map_err(|e|ApiError::new(StatusCode::INTERNAL_SERVER_ERROR,&e))?;
+async fn legacy_preview(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
+    let data: Value = serde_json::from_slice(&body).map_err(|_| bad("bad json"))?;
+    let voice = data["voice_id"].as_str().unwrap_or("").trim();
+    if voice.is_empty() {
+        return Err(bad("voice_id required"));
+    }
+    let text = data["text"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Hi there, this is what I sound like.")
+        .trim();
+    let owners = app.mouth.owners();
+    let default =
+        owner::text_at(&owners, &["server", "default_session"]).unwrap_or_else(|| "claude".into());
+    let session = data["session"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&default);
+    let name = app
+        .mouth
+        .legacy_preview(session, voice, clarp_kernel::python::first(text, 200))
+        .await
+        .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     Ok(Json(json!({"ok":true,"url":format!("/audio/{name}")})))
 }
 
@@ -396,9 +464,9 @@ pub fn routes() -> Router<App> {
         .route("/voices", get(settings_voices))
         .route("/agent-voice", post(agent_voice))
         .route("/voice-preview", get(preview))
-        .route("/cartesia-voices",get(cartesia_voices))
-        .route("/cartesia-voice-preview",get(cartesia_preview))
-        .route("/preview",post(legacy_preview))
+        .route("/cartesia-voices", get(cartesia_voices))
+        .route("/cartesia-voice-preview", get(cartesia_preview))
+        .route("/preview", post(legacy_preview))
         .route("/voice-events", post(voice_events))
 }
 
@@ -484,7 +552,10 @@ mod tests {
             .filter(|row| row["available"] == true)
             .map(|row| row["id"].as_str().unwrap())
             .collect();
-        assert_eq!(usable, ["cartesia","elevenlabs","gemini","deepgram","google"]);
+        assert_eq!(
+            usable,
+            ["cartesia", "elevenlabs", "gemini", "deepgram", "google"]
+        );
         // ElevenLabs was chosen, with Deepgram as its fallback.
         assert_eq!(ours["voice_available"], true);
         assert_eq!(whole(Some(&json!(12.9))), Some(12));

@@ -217,77 +217,81 @@ fn refused(what: &str, status: u16, said: &str) -> String {
     format!("{what} HTTP {status}: {detail}")
 }
 
-pub(crate) fn pcm_decoder()->Vec<String> { [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            "pipe:0",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-f",
-            "s16le",
-            "pipe:1",
-        ].into_iter().map(str::to_string).collect() }
+pub(crate) fn pcm_decoder() -> Vec<String> {
+    [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        "pipe:0",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-f",
+        "s16le",
+        "pipe:1",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
 
-    /// A clip as plain sound, whatever it was recorded as.
-    pub(crate) fn pcm(decoder:&[String], audio: &[u8]) -> Result<Vec<u8>, String> {
-        let Some((program, given)) = decoder.split_first() else {
+/// A clip as plain sound, whatever it was recorded as.
+pub(crate) fn pcm(decoder: &[String], audio: &[u8]) -> Result<Vec<u8>, String> {
+    let Some((program, given)) = decoder.split_first() else {
+        return Err("ffmpeg is not installed".to_string());
+    };
+    let started = Command::new(program)
+        .args(given)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match started {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err("ffmpeg is not installed".to_string());
-        };
-        let started = Command::new(program)
-            .args(given)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match started {
-            Ok(child) => child,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err("ffmpeg is not installed".to_string());
-            }
-            Err(error) => return Err(format!("could not decode audio: {error}")),
-        };
-        let (mut to, mut from, mut complaints) =
-            match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
-                (Some(to), Some(from), Some(complaints)) => (to, from, complaints),
-                _ => return Err("could not decode audio: the decoder has no pipes".to_string()),
-            };
-        let (done, is_done) = mpsc::channel();
-        let outcome = std::thread::scope(|scope| {
-            // The clip goes in while the sound comes out: neither waits for the other.
-            scope.spawn(move || {
-                let _ = to.write_all(audio);
-            });
-            scope.spawn(move || {
-                let mut sound = Vec::new();
-                let read = from.read_to_end(&mut sound).map(|_| sound);
-                let mut said = String::new();
-                let _ = complaints.read_to_string(&mut said);
-                let _ = done.send((read, said));
-            });
-            let outcome = is_done.recv_timeout(Duration::from_secs(30));
-            if outcome.is_err() {
-                // It takes too long: it is ended, which ends both pipes.
-                let _ = child.kill();
-            }
-            outcome
-        });
-        let ended = child.wait();
-        match (outcome, ended) {
-            (Ok((Ok(sound), _)), Ok(status)) if status.success() => Ok(sound),
-            (Ok((_, said)), Ok(_)) => {
-                let said: String = strip(&said).chars().take(200).collect();
-                Err(format!("could not decode audio: {said}"))
-            }
-            (Err(_), _) => Err("could not decode audio: timed out".to_string()),
-            (_, Err(error)) => Err(format!("could not decode audio: {error}")),
         }
+        Err(error) => return Err(format!("could not decode audio: {error}")),
+    };
+    let (mut to, mut from, mut complaints) =
+        match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
+            (Some(to), Some(from), Some(complaints)) => (to, from, complaints),
+            _ => return Err("could not decode audio: the decoder has no pipes".to_string()),
+        };
+    let (done, is_done) = mpsc::channel();
+    let outcome = std::thread::scope(|scope| {
+        // The clip goes in while the sound comes out: neither waits for the other.
+        scope.spawn(move || {
+            let _ = to.write_all(audio);
+        });
+        scope.spawn(move || {
+            let mut sound = Vec::new();
+            let read = from.read_to_end(&mut sound).map(|_| sound);
+            let mut said = String::new();
+            let _ = complaints.read_to_string(&mut said);
+            let _ = done.send((read, said));
+        });
+        let outcome = is_done.recv_timeout(Duration::from_secs(30));
+        if outcome.is_err() {
+            // It takes too long: it is ended, which ends both pipes.
+            let _ = child.kill();
+        }
+        outcome
+    });
+    let ended = child.wait();
+    match (outcome, ended) {
+        (Ok((Ok(sound), _)), Ok(status)) if status.success() => Ok(sound),
+        (Ok((_, said)), Ok(_)) => {
+            let said: String = strip(&said).chars().take(200).collect();
+            Err(format!("could not decode audio: {said}"))
+        }
+        (Err(_), _) => Err("could not decode audio: timed out".to_string()),
+        (_, Err(error)) => Err(format!("could not decode audio: {error}")),
     }
-
+}
 
 impl Chirp {
     pub fn new(model: impl Into<String>, account: Asks) -> Self {
@@ -499,7 +503,7 @@ impl Listener for Chirp {
             let none = "[google_stt] project is not configured";
             return Err(Deaf::Failed(none.to_string()));
         }
-        let sound = pcm(&self.decoder,clip.audio).map_err(Deaf::Failed)?;
+        let sound = pcm(&self.decoder, clip.audio).map_err(Deaf::Failed)?;
         let seconds = sound.len() as f64 / BYTES_PER_SECOND as f64;
         if sound.is_empty() {
             return Ok(Heard::default());
