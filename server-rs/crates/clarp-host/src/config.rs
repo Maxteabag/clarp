@@ -112,6 +112,7 @@ pub struct Config {
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
     /// Empty: the push service itself.
     pub apns_endpoint: String,
+    pub fcm_endpoint: Option<String>,
     pub gemini_endpoint: String,
     /// And for Google's engine that listens: where a token is bought, and where speech is
     /// asked.
@@ -439,6 +440,20 @@ impl Config {
         let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
         let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
         let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
+        let fcm_endpoint = std::env::var("CLARP_FCM_ENDPOINT")
+            .ok()
+            .map(|address| {
+                // A single literal loopback socket replaces BOTH credential exchange and messaging.
+                address
+                    .strip_prefix("http://")
+                    .and_then(|host| host.parse::<std::net::SocketAddr>().ok())
+                    .filter(|at| at.ip().is_loopback() && at.port() != 0)
+                    .map(|at| format!("http://{at}"))
+                    .ok_or_else(|| {
+                        "CLARP_FCM_ENDPOINT needs a loopback HTTP socket address".to_string()
+                    })
+            })
+            .transpose()?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
         let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
         let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
@@ -524,6 +539,7 @@ impl Config {
             router_endpoint,
             cartesia_endpoint,
             apns_endpoint,
+            fcm_endpoint,
             gemini_endpoint,
             google_token_endpoint,
             google_speech_endpoint,

@@ -24,6 +24,7 @@ def record(root):
 
     grant = 'pg1.' + 'a' * 64 + '.' + 'b' * 16 + '.' + 'c' * 64
     paths = []
+    bind_status = 200
     cleared = []
     outcomes = {}
     apns.log = lambda *_: None
@@ -31,7 +32,7 @@ def record(root):
 
     def request(method, url, *, headers, json):
         if url.endswith('/devices'):
-            return SimpleNamespace(status_code=200)
+            return SimpleNamespace(status_code=bind_status)
         path = 'grant' if headers['authorization'].endswith(grant) else 'account'
         paths.append(path)
         return SimpleNamespace(status_code=outcomes[path], json=lambda: {'results': [{'status': 200}]})
@@ -71,7 +72,26 @@ def record(root):
                 steps.append([granted, paths.copy(), bool(cleared), status, reason])
             rows.append(dict(mode=mode, relay=relay, account=account, key=key, enabled=bool(cfg.apns_transport()),
                              grant_status=grant_status, account_status=account_status, steps=steps))
-    return rows
+    activities = []
+    for mode in ('auto', 'direct', 'off', 'relay'):
+        for account, key in itertools.product((False, True), repeat=2):
+            cfg = config.Config(apns_mode=mode, audio_central_url='https://127.0.0.1',
+                                audio_central_credential='cav1.x.y.z' if account else '',
+                                apns_key_path=str(test_key) if key else '', apns_key_id='TEST', apns_team_id='TEST')
+            for bind_status, send_status in ((200,200),(200,403),(200,404),(200,405),(200,503),(503,200),(401,200)):
+                apns._RELAY_REGISTERED.clear()
+                outcomes['account'] = send_status
+                router = apns._Router(cfg)
+                steps = []
+                for token in ('chip-a','chip-b','chip-c'):
+                    paths.clear()
+                    try:
+                        status, reason, _ = router.send(token, 'production', {}, push_type='liveactivity')
+                    except apns._RelayUnavailable:
+                        status, reason = 0, 'down'
+                    steps.append([paths.copy(),status,reason])
+                activities.append(dict(mode=mode, account=account, key=key, bind=bind_status, send=send_status, steps=steps))
+    return rows, activities
 
 
 if __name__ == '__main__':
@@ -81,5 +101,7 @@ if __name__ == '__main__':
     else:
         output = subprocess.check_output([sys.executable, '-I', __file__, '--record'],
                                          env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'})
-        rows = json.loads(output)
+        rows, activities = json.loads(output)
+        activity_file = OUT.with_name("direct-activity-vectors.json")
+        activity_file.write_text("[\n" + ",\n".join(json.dumps(row) for row in activities) + "\n]\n", encoding="ascii")
         OUT.write_text('[\n' + ',\n'.join(json.dumps(row) for row in rows) + '\n]\n', encoding='ascii')

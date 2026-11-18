@@ -4662,9 +4662,15 @@ fn the_chip_on_a_phones_lock_screen_is_kept_current_while_agents_work() {
         ),
         (400, json!({ "error": "bad json" }))
     );
-    // The summary for a phone of another kind is not here, and is no administrator's to ask.
+    // A full-scope Android phone needs a registered FCM token before it can request the summary.
     let other = json!({ "platform": "fcm", "kind": "agents-working" });
-    assert_eq!(as_phone("POST", other.clone()).0, 501);
+    assert_eq!(
+        as_phone("POST", other.clone()),
+        (
+            409,
+            json!({ "ok": false, "error": "fcm_push_token_required" })
+        )
+    );
     assert_eq!(
         host.ask("POST", "/devices/live-activity", Some(&other)),
         (403, json!({ "error": "full device access required" }))
@@ -5411,6 +5417,7 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
             .0,
             200
         );
+        // Ringing reports how many phones each route reached or disabled.
         let (status, rung) = host.ask(
             "POST",
             "/calls/ring",
@@ -5445,6 +5452,7 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
                 }
             }
         }
+        // Compare the signed alert with what the relay was handed for the same ring.
         let requests = service.handed();
         assert_eq!(requests.len(), handed);
         if let Some((path, headers, payload)) = requests.first() {
@@ -5490,6 +5498,7 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
             });
         }
     }
+    // A desktop reply stays quiet while a phone reply and a decision carry a fetchable portrait.
     let place = Place::new("direct-reply");
     let (key, _) = push_key(&place);
     let settings = place.root.join("push.toml");
@@ -5592,6 +5601,408 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
     assert_eq!(rung["delivery"]["failed"], 1);
     assert_eq!(rung["delivery"]["disabled"], 0);
     assert_eq!(service.handed().len(), 2);
+    // A paired Android phone registers its own token and subscribes to the
+    // summary. Only the phone can register it, and a deliverable token comes first.
+    let place = Place::new("android-push");
+    let private = Command::new("openssl")
+        .args([
+            "genpkey",
+            "-algorithm",
+            "RSA",
+            "-pkeyopt",
+            "rsa_keygen_bits:2048",
+        ])
+        .output()
+        .unwrap();
+    assert!(private.status.success());
+    let account = place.root.join("android.json");
+    std::fs::write(
+        &account,
+        json!({
+            "type":"service_account","project_id":"sample","client_email":"sender@example.invalid",
+            "private_key_id":"fixture","private_key":String::from_utf8(private.stdout).unwrap()
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let config = place.root.join("push.toml");
+    std::fs::write(
+        &config,
+        format!("[fcm]\nservice_account='{}'\n", account.display()),
+    )
+    .unwrap();
+    let (endpoint, requests) = answers(vec![
+        (
+            "/token",
+            "200 OK",
+            json!({"access_token":"stand-in-bearer","expires_in":3600}).to_string(),
+        ),
+        (
+            "/v1/projects/sample/messages:send",
+            "200 OK",
+            json!({"name":"projects/sample/messages/1"}).to_string(),
+        ),
+    ]);
+    let apple = stand_in_push_service();
+    let voice = stand_in_live_voice();
+    let (key, _) = push_key(&place);
+    use std::io::Write as _;
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&config)
+            .unwrap(),
+        "[apns]\nmode='direct'\nkey_id='KEY'\nteam_id='TEAM'\nkey_path='{}'",
+        key.display()
+    )
+    .unwrap();
+    let host = place.start_in(
+        "admin-test",
+        &["--push-keys", config.to_str().unwrap()],
+        &[
+            ("CLARP_FCM_ENDPOINT", &endpoint),
+            ("CLARP_APNS_ENDPOINT", &apple.address),
+            ("CLARP_LIVE_ENDPOINT", &voice.address),
+            ("OPENAI_API_KEY", "test-only"),
+        ],
+    );
+    let features = host.get("/server-info")["contract"]["features"].clone();
+    assert_eq!(features["push_fcm"], 88);
+    assert_eq!(features["agent_live_fcm"], 94);
+    assert_eq!(features["live_activity_fcm"], 95);
+    assert_eq!(features["live_activity_push"], 45);
+    let (phone, _) = pair(&host, "Android", "full");
+    let route = "/devices/live-activity";
+    let register = json!({"platform":"fcm"});
+    assert_eq!(host.ask("POST", route, Some(&register)).0, 403);
+    assert_eq!(
+        host.ask_as(&phone, "POST", route, Some(&register)),
+        (409, json!({"ok":false,"error":"fcm_push_token_required"}))
+    );
+    let token = "android-test-registration-token";
+    assert_eq!(host.ask_as(&phone,"POST","/devices",Some(&json!({"platform":"android","token":token,"supported_conversation_modes":["agent_live_v1"]}))).0,200);
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            route,
+            Some(&json!({"platform":"fcm","kind":"wrong"}))
+        ),
+        (
+            400,
+            json!({"ok":false,"error":"kind must be agents-working"})
+        )
+    );
+    assert_eq!(
+        host.ask_as(&phone, "POST", route, Some(&register)),
+        (
+            200,
+            json!({"ok":true,"platform":"fcm","kind":"agents-working"})
+        )
+    );
+
+    // A normal answer reaches the local FCM stand-in as data, after one signed
+    // token exchange. The collapse identifier is in data for an alert.
+    let apple_token = "ae".repeat(32);
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            route,
+            Some(&json!({"token":apple_token,"activity_id":"one"}))
+        )
+        .1["activity_id"],
+        "one"
+    );
+    let session = host.new_agent("Finn");
+    host.send(&session, "Android answer", "message-1");
+    let messages = || {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| r.starts_with("POST /v1/projects/sample/messages:send "))
+            .map(|r| {
+                assert!(
+                    r.to_ascii_lowercase()
+                        .contains("authorization: bearer stand-in-bearer")
+                );
+                let (_, body) = r.split_once("\r\n\r\n").unwrap();
+                serde_json::from_str::<Value>(body).unwrap()["message"].clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    wait_for("the Android reply reaches the push service", || {
+        messages()
+            .iter()
+            .any(|m| m["data"]["body"] == "Android answer")
+    });
+    let sent = messages();
+    let reply = sent
+        .iter()
+        .find(|m| m["data"]["body"] == "Android answer")
+        .unwrap();
+    assert_eq!(reply["token"], token);
+    assert_eq!(reply["data"]["session"], session);
+    assert_eq!(reply["data"]["badge"], "true");
+    assert!(reply["data"]["sent_at"].is_string());
+    assert_eq!(reply["android"], json!({"priority":"HIGH"}));
+    assert!(reply.get("notification").is_none());
+    let held = requests.lock().unwrap().clone();
+    let exchanges: Vec<_> = held
+        .iter()
+        .filter(|r| r.starts_with("POST /token "))
+        .collect();
+    assert_eq!(exchanges.len(), 1);
+    assert!(exchanges[0].contains("jwt-bearer&assertion="));
+    // Both phones see work begin and go idle. Android clears its summary with
+    // an end. Apple gets an idle update for the activity the phone started.
+    let activity = || {
+        messages()
+            .into_iter()
+            .filter(|m| m["data"]["kind"] == "agents-working")
+            .collect::<Vec<_>>()
+    };
+    wait_for("both summary states", || {
+        activity().iter().any(|m| m["data"]["event"] == "end")
+    });
+    let states = activity();
+    let first = states
+        .iter()
+        .find(|m| m["data"]["event"] == "update")
+        .unwrap();
+    assert_eq!(first["android"]["collapse_key"], "agents-working");
+    assert_eq!(first["android"]["priority"], "HIGH");
+    let state: Value = serde_json::from_str(first["data"]["state"].as_str().unwrap()).unwrap();
+    assert_eq!(state["working"], 1);
+    let end = states.last().unwrap();
+    assert_eq!(end["data"]["event"], "end");
+    assert_eq!(end["android"]["priority"], "NORMAL");
+    let idle: Value = serde_json::from_str(end["data"]["state"].as_str().unwrap()).unwrap();
+    assert_eq!(idle["working"], 0);
+    wait_for("the iOS idle activity update", || {
+        apple
+            .handed()
+            .iter()
+            .any(|(_, _, p)| p["aps"]["content-state"]["working"] == 0)
+    });
+    let apple_updates = apple.handed();
+    for (path, headers, payload) in &apple_updates {
+        assert_eq!(path, &format!("/3/device/{apple_token}"));
+        assert_eq!(
+            headers["apns-topic"],
+            "com.maxteabag.clarp.push-type.liveactivity"
+        );
+        assert_eq!(headers["apns-push-type"], "liveactivity");
+        assert_eq!(headers["apns-collapse-id"], "live-activity-one");
+        assert_eq!(payload["aps"]["event"], "update");
+    }
+    assert_eq!(apple_updates[0].2["aps"]["content-state"]["working"], 1);
+    assert_eq!(
+        host.ask_as(&phone, "DELETE", route, Some(&json!({"activity_id":"one"})))
+            .1["removed"],
+        1
+    );
+
+    // With no VoIP token, only the declared Android phone admits a live ring.
+    // Its ringing and cancelled states arrive in order, both on the same token.
+    live_profile(&place, "finn", &session, json!({}));
+    let line = "Water is rising.";
+    let ring=host.post("/calls/ring",json!({"agent":"finn","reason":"Leak","opening_line":line,
+       "conversation_mode":"agent_live_v1","event_context":live_event("finn","android-event",line)}));
+    assert_eq!(ring["delivery"]["fcm_live"]["pending"], 1);
+    assert_eq!(ring["delivery"]["voip"]["sent"], 0);
+    let rings = || {
+        messages()
+            .into_iter()
+            .filter(|m| m["data"]["ring_id"] == ring["ring"]["ring_id"])
+            .collect::<Vec<_>>()
+    };
+    wait_for("the live ringing state reaches Android", || {
+        rings().len() == 1
+    });
+    host.post(
+        "/calls/ring/cancel",
+        json!({"ring_id":ring["ring"]["ring_id"]}),
+    );
+    wait_for("the live end reaches the previously rung token", || {
+        rings().len() == 2
+    });
+    let pushes = rings();
+    assert_eq!(pushes[0]["data"]["ring_state"], "ringing");
+    assert_eq!(pushes[1]["data"]["ring_state"], "cancelled");
+    for m in pushes {
+        assert_eq!(m["token"], token);
+        assert_eq!(m["data"]["conversation_mode"], "agent_live_v1");
+        assert_eq!(m["data"]["kind"], "agent-ring");
+        assert!(m["data"].get("reason").is_none());
+    }
+    // Ending the registration affects only this device and is idempotent.
+    assert_eq!(
+        host.ask_as(&phone, "DELETE", route, Some(&register)),
+        (200, json!({"ok":true,"removed":1}))
+    );
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            route,
+            Some(&json!({"platform":"fcm","ended":true}))
+        ),
+        (200, json!({"ok":true,"removed":0}))
+    );
+    // Drive the credential clock at the refresh boundary. The in-memory port
+    // records the exchange and message before returning each scripted refusal.
+    use clarp_ports::fcm::{FcmHttp, Response as AndroidResponse};
+    #[derive(Default)]
+    struct Google {
+        signed: Mutex<Vec<String>>,
+        sends: Mutex<Vec<(String, String)>>,
+        responses: Mutex<std::collections::VecDeque<(u16, Value)>>,
+    }
+    impl FcmHttp for Google {
+        fn exchange(&self, issuer: &str, assertion: &str) -> Option<AndroidResponse> {
+            assert_eq!(issuer, "https://oauth2.googleapis.com/token");
+            let mut signed = self.signed.lock().unwrap();
+            signed.push(assertion.into());
+            Some(AndroidResponse {
+                status: 200,
+                retry_after: String::new(),
+                body: json!({"access_token":format!("token-{}",signed.len()),"expires_in":600})
+                    .to_string()
+                    .into_bytes(),
+            })
+        }
+        fn deliver(&self, project: &str, bearer: &str, body: &[u8]) -> Option<AndroidResponse> {
+            let msg: Value = serde_json::from_slice(body).unwrap();
+            assert_eq!(msg["message"]["token"], "device");
+            self.sends
+                .lock()
+                .unwrap()
+                .push((project.into(), bearer.into()));
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or((200, json!({"name":"accepted"})));
+            Some(AndroidResponse {
+                status,
+                retry_after: String::new(),
+                body: body.to_string().into_bytes(),
+            })
+        }
+    }
+    let google = Arc::new(Google::default());
+    let clock = Arc::new(clarp_ports::clock::ManualClock::starting_at(1_000_000));
+    let adapter = clarp_host::fcm::Sender::new(
+        clarp_host::owner::OwnerFile::new(Some(config.clone())),
+        google.clone(),
+        clock.clone(),
+    );
+    let send = || {
+        adapter.push(
+            "device",
+            &json!({"kind":"agent-ring"}),
+            &Value::Null,
+            "10",
+            "ring-one",
+            false,
+        )
+    };
+    use clarp_kernel::alert_routes::Outcome;
+    assert_eq!(send(), Outcome::Sent);
+    clock.advance_ms(299_999);
+    assert_eq!(send(), Outcome::Sent);
+    assert_eq!(google.signed.lock().unwrap().len(), 1);
+    clock.advance_ms(1);
+    assert_eq!(send(), Outcome::Sent);
+    assert_eq!(google.signed.lock().unwrap().len(), 2);
+    google
+        .responses
+        .lock()
+        .unwrap()
+        .extend([(401, json!({})), (200, json!({}))]);
+    assert_eq!(send(), Outcome::Sent);
+    let sent = google.sends.lock().unwrap().clone();
+    assert_eq!(
+        sent.iter()
+            .map(|(_, bearer)| bearer.as_str())
+            .collect::<Vec<_>>(),
+        ["token-1", "token-1", "token-2", "token-2", "token-3"]
+    );
+    assert!(sent.iter().all(|(project, _)| project == "sample"));
+    let assertion = google.signed.lock().unwrap()[0].clone();
+    let parts: Vec<_> = assertion.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    let decode = |part: &str| {
+        let mut s = part.replace('-', "+").replace('_', "/");
+        s.push_str(&"=".repeat((4 - s.len() % 4) % 4));
+        clarp_kernel::python::b64decode(&s).unwrap()
+    };
+    assert_eq!(
+        serde_json::from_slice::<Value>(&decode(parts[0])).unwrap(),
+        json!({"alg":"RS256","typ":"JWT","kid":"fixture"})
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&decode(parts[1])).unwrap(),
+        json!({"iss":"sender@example.invalid","scope":"https://www.googleapis.com/auth/firebase.messaging","aud":"https://oauth2.googleapis.com/token","iat":1000,"exp":4600})
+    );
+    // The fixture's public key must verify the actual RS256 assertion.
+    let held_account: Value = serde_json::from_slice(&std::fs::read(&account).unwrap()).unwrap();
+    let pem = place.root.join("fixture.pem");
+    std::fs::write(&pem, held_account["private_key"].as_str().unwrap()).unwrap();
+    let public = Command::new("openssl")
+        .args([
+            "rsa",
+            "-in",
+            pem.to_str().unwrap(),
+            "-RSAPublicKey_out",
+            "-outform",
+            "DER",
+        ])
+        .output()
+        .unwrap();
+    assert!(public.status.success());
+    ring::signature::UnparsedPublicKey::new(
+        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+        public.stdout,
+    )
+    .verify(
+        format!("{}.{}", parts[0], parts[1]).as_bytes(),
+        &decode(parts[2]),
+    )
+    .unwrap();
+    google.responses.lock().unwrap().extend([(404,json!({})),(400,json!({"error":{"status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","fieldViolations":[{"field":"message.data"}]}]}}))]);
+    assert_eq!(send(), Outcome::Dead("Unregistered".into()));
+    assert_eq!(
+        send(),
+        Outcome::Refused {
+            status: 400,
+            reason: "INVALID_ARGUMENT".into()
+        }
+    );
+    // Capability discovery follows owner-file changes. A missing required
+    // field or a non-TLS issuer immediately withdraws Android push capability.
+    for key in ["project_id", "client_email", "private_key"] {
+        let mut invalid = held_account.clone();
+        invalid.as_object_mut().unwrap().remove(key);
+        std::fs::write(&account, invalid.to_string()).unwrap();
+        assert!(!adapter.configured(), "{key}");
+        assert!(
+            host.get("/server-info")["contract"]["features"]
+                .get("push_fcm")
+                .is_none()
+        );
+    }
+    let mut invalid = held_account.clone();
+    invalid["token_uri"] = json!("http://127.0.0.1/token");
+    std::fs::write(&account, invalid.to_string()).unwrap();
+    assert!(!adapter.configured());
+    invalid = held_account.clone();
+    invalid["type"] = json!("authorized_user");
+    std::fs::write(&account, invalid.to_string()).unwrap();
+    assert!(!adapter.configured());
 }
 
 #[test]

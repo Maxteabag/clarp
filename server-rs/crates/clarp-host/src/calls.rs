@@ -269,8 +269,7 @@ impl Desk {
             let world = rings::World {
                 profiles: &shelf,
                 android: &androids,
-                // This Host pushes nothing to Android phones.
-                can_push_android: false,
+                can_push_android: app.android.configured(),
                 device_ok: &paired,
                 host_id: &app.server_id,
                 has_key: app.ears.key("openai").is_some(),
@@ -374,6 +373,7 @@ impl Desk {
         let (show_reason, without) = self.alerted().await;
         for pushed in pushes {
             app.pusher.rung(crate::pusher::Rung {
+                live_rows: crate::pusher::live_rows(&app.fleet.directory(), &without, &pushed.ring),
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
@@ -496,6 +496,7 @@ impl Desk {
         for pushed in pushes {
             let begins = pushed.kind == "ring" && pushed.ring.ring_id == placed.ring.ring_id;
             let rung = crate::pusher::Rung {
+                live_rows: crate::pusher::live_rows(&app.fleet.directory(), &without, &pushed.ring),
                 ring: pushed.ring,
                 kind: pushed.kind,
                 show_reason,
