@@ -656,7 +656,9 @@ async fn json_body(request: Request, next: Next) -> Response {
     let Some(length) = value.to_str().ok().and_then(|s| s.parse::<u64>().ok()) else {
         return json_body_refused(StatusCode::BAD_REQUEST, "bad json");
     };
+    let family = path.trim_start_matches('/').split('/').next().unwrap_or("");
     if length > limit as u64 {
+        eprintln!("requestBodyTooLarge family=/{family} bytes={length}");
         return json_body_refused(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
     }
     let (parts, body) = request.into_parts();
@@ -674,7 +676,7 @@ async fn json_body(request: Request, next: Next) -> Response {
         }
     };
     if bytes.len() > LARGE_JSON_BODY {
-        eprintln!("jsonBodyLarge route={path} bytes={}", bytes.len());
+        eprintln!("requestBodyLarge family=/{family} bytes={}", bytes.len());
     }
     // Downstream Bytes and Json extractors receive the admitted body under
     // the same cap, including a control inspected by the janitor middleware.

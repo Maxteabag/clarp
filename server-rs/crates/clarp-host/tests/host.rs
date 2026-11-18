@@ -15627,7 +15627,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
             json!({"error":"request body too large"})
         );
     };
-    let wide = "🦉";
+    let wide = "界";
     let event = json!({"event":wide.repeat(64),"trace_id":wide.repeat(128),"utterance_id":wide.repeat(128),
         "session":wide.repeat(128),"text":wide.repeat(4000),"detail":{"v":"ø".repeat(7992)}});
     let batch = json!({"source":"ios","client_id":wide.repeat(128),"session":wide.repeat(128),"events":vec![event;500]});
@@ -15812,7 +15812,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         .filter(|line| line.starts_with("jsonBodyLarge "))
         .collect();
     let wanted = format!(
-        "jsonBodyLarge route=/application-activity bytes={}",
+        "requestBodyLarge family=/application-activity bytes={}",
         LOG_FROM + 1
     );
     assert_eq!(lines.iter().filter(|l| **l == wanted).count(), 1);
@@ -15825,7 +15825,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         lines
             .iter()
             .any(|line| **line
-                == format!("jsonBodyLarge route=/artifacts/{{*rest}} bytes={DEFAULT}"))
+                == format!("requestBodyLarge family=/artifacts bytes={DEFAULT}"))
     );
 }
 

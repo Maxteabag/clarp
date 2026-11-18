@@ -26,8 +26,8 @@ CHANGES = [
     ('a body of exactly two MiB is logged', 'if bytes.len() > LARGE_JSON_BODY', 'if bytes.len() >= LARGE_JSON_BODY'),
     ('the first byte above the log threshold is missed', 'if bytes.len() > LARGE_JSON_BODY', 'if bytes.len() > LARGE_JSON_BODY + 1'),
     ('the log tells the limit rather than bytes read', 'bytes={}", bytes.len()', 'bytes={}", limit'),
-    ('the log contains the query', 'route={path} bytes={}", bytes.len()', 'route={} bytes={}", parts.uri, bytes.len()'),
-    ('the log includes the body', 'route={path} bytes={}", bytes.len()', 'route={path} bytes={} {}", bytes.len(), String::from_utf8_lossy(&bytes[..128])'),
+    ('the log contains the query', 'family=/{family} bytes={}", bytes.len()', 'family={} bytes={}", parts.uri, bytes.len()'),
+    ('the log includes the body', 'family=/{family} bytes={}", bytes.len()', 'family=/{family} bytes={} {}", bytes.len(), String::from_utf8_lossy(&bytes[..128])'),
 ]
 PLANTS = [(EDGE, 'host', what, old, new) for what, old, new in CHANGES]
 
