@@ -21920,6 +21920,10 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         assert!(!requests().iter().any(|r| path(r) == submit));
         std::fs::remove_file(barrier).unwrap();
         wait_for("first submitted turn", || ended("first"));
+        assert!(root.join("dependent-reaped").is_file());
+        let asked_to_end = || std::fs::read_to_string(root.join("server-term")).unwrap_or_default();
+        let server_pid = || std::fs::read_to_string(root.join("pid")).unwrap();
+        assert_eq!(asked_to_end(), server_pid());
         let calls = requests();
         let paths = calls.iter().map(path).collect::<Vec<_>>();
         assert_eq!(
@@ -22019,7 +22023,12 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
             std::fs::remove_file(root.join(flag)).unwrap();
         }
         std::fs::write(root.join("fail"), "").unwrap();
+        std::fs::write(root.join("resist-term"), "").unwrap();
+        let began = Instant::now();
         send("refusal");
+        assert!(began.elapsed() >= Duration::from_secs(5));
+        assert_eq!(asked_to_end(), server_pid());
+        std::fs::remove_file(root.join("resist-term")).unwrap();
         assert_eq!(host.state(&agent), "interrupted");
         assert!(
             host.turns(&agent)
@@ -22028,6 +22037,22 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         );
         std::fs::remove_file(root.join("fail")).unwrap();
         std::fs::write(root.join("hang"), "").unwrap();
+        let before = requests().len();
+        std::fs::write(root.join("signal-shim"), "").unwrap();
+        send("external-term");
+        assert!(
+            requests()[before..]
+                .iter()
+                .any(|r| path(r) == format!("{session}/abort"))
+        );
+        assert_eq!(host.state(&agent), "interrupted");
+        let turns = host.turns(&agent);
+        assert_eq!(turns.last().unwrap()["turn"]["status"], "interrupted");
+        let spool = std::fs::read_to_string(root.join("signalled-spool")).unwrap();
+        let written = std::fs::read_to_string(spool).unwrap();
+        let last: Value = serde_json::from_str(written.lines().last().unwrap()).unwrap();
+        assert_eq!(last["d"], json!({"event":"exited","signal":15,"code":null}));
+        std::fs::remove_file(root.join("signal-shim")).unwrap();
         let before = requests().len();
         host.send(&agent, "wait here", "stoppable");
         wait_for("hanging submission", || {
@@ -22044,7 +22069,9 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         send("after-stop");
         assert_eq!(host.state(&agent), "done");
         std::fs::write(root.join("fallback"), "").unwrap();
+        std::fs::remove_file(root.join("server-term")).unwrap();
         send("fallback");
+        assert!(!asked_to_end().is_empty());
         assert!(requests().iter().any(|r| {
             r["run"]
                 .as_array()
