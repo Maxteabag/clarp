@@ -692,26 +692,31 @@ class OrchestratorService:
         error = decision.error
         dispatch_result = None
         dispatch_status = 0
+        # Voice requests are answered aloud; an app's request (a failed name delegation asking for
+        # a recipient) never is, whichever sentence it would be (issue 360, R84).
+        aloud = not fallback_request
+        command = decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
 
         try:
             self._require_current(janitor_run_id)
-            if decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}:
+            if command:
                 # A command acts only on the agent it names (or, naming none, the one
                 # spoken to), and only inside this packet, a group call's participants
                 # (RTO-03). Anything else is refused with its sentence. A command is
                 # never held: a later "yes" must not deliver its words as chat.
-                refusal, acted_on = self._command_check(
+                refusal, resolved = self._command_check(
                     decision, settings, sessions, requested_session)
+                # The row, the event and the answer carry the session the name resolved to, or
+                # nothing; the name as said stays in the model's own answer (issue 360, R83).
+                target = resolved
+                decision = OrchestratorDecision(**{**asdict(decision), "target_session": resolved})
                 if refusal:
                     decision = OrchestratorDecision(**{
                         **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": refusal,
                         "phrase_key": _FIXED_KEY[refusal]})
                     final_action = FINAL_CLARIFY
-                    if not fallback_request:
+                    if aloud:
                         self._speak_as_session(refusal, requested_session)
-                elif acted_on:
-                    decision = OrchestratorDecision(**{
-                        **asdict(decision), "target_session": acted_on})
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -726,7 +731,7 @@ class OrchestratorService:
                     target = requested_session
                     final_action = FINAL_CLARIFY
                     decision = self._as_clarify(decision, PHRASES["no_valid_target"])
-                    if not fallback_request:
+                    if aloud:
                         self._hold_and_speak_clarification(
                             decision=decision,
                             packet=packet,
@@ -740,7 +745,7 @@ class OrchestratorService:
                         decision,
                         f"Was that for {self._persona_for_session(target) or target}?",
                     )
-                    if not fallback_request:
+                    if aloud:
                         self._hold_and_speak_clarification(
                             decision=decision,
                             packet=packet,
@@ -758,7 +763,8 @@ class OrchestratorService:
                         decision = OrchestratorDecision(**{
                             **asdict(decision), "kind": DECISION_CLARIFY,
                             "spoken_text": HELD_MESSAGE_GONE, "phrase_key": "held_message_gone"})
-                        self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
+                        if aloud:
+                            self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
                     else:
                         routed_admission = prompt_admission
                         if held is not None:
@@ -802,7 +808,7 @@ class OrchestratorService:
                 DECISION_AMBIGUOUS,
             }:
                 final_action = FINAL_CLARIFY
-                if not fallback_request:
+                if aloud:
                     self._hold_and_speak_clarification(
                         decision=decision,
                         packet=packet,
@@ -838,6 +844,8 @@ class OrchestratorService:
                 final_action = FINAL_CONTROL
                 try:
                     target = self._run_agent_control(decision, requested_session)
+                    # What it acted on, a new agent's session for create (R83).
+                    decision = OrchestratorDecision(**{**asdict(decision), "target_session": target})
                 except Exception as refused:
                     from .agent_lifecycle import AgentLifecycleError
                     if not isinstance(refused, AgentLifecycleError):
@@ -905,7 +913,9 @@ class OrchestratorService:
         return OrchestratorOutcome(
             handled=True,
             ok=final_action != FINAL_ERROR,
-            session=target,
+            # A command that did nothing names the agent spoken to: a client that acts on this
+            # session (a cancelled send's stop) never acts on another agent (issue 360, R83).
+            session=requested_session if command and final_action == FINAL_CLARIFY else target,
             trace_id=trace_id,
             action=final_action,
             decision_id=decision_id,
@@ -917,11 +927,13 @@ class OrchestratorService:
 
     def _command_check(self, decision: OrchestratorDecision, settings: OrchestratorSettings,
                        sessions: set[str], requested_session: str) -> tuple[str, str]:
-        """(the sentence a command is refused with, or ""; the session it acts on).
+        """(the sentence a command is refused with, or ""; the session its name resolved to).
 
         A name given anywhere, in target_session or in the payload, is the target; the agent
         spoken to is the target only when no name is given at all. Names resolve as voice
-        names. Create acts on no existing agent, and fork is said in the app."""
+        names. Create acts on no existing agent, and fork is said in the app. A refused command
+        still answers the session its name resolved to (one out of reach), and "" when it
+        resolved to none."""
         action = (decision.control_action or "").strip().lower()
         if not self._route_confidently(decision, settings):
             return UNSURE_COMMAND, ""
@@ -956,9 +968,9 @@ class OrchestratorService:
         if agent is None:
             return NO_SUCH_AGENT, ""
         if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
-            return NO_VOICE_COMMANDS, ""
+            return NO_VOICE_COMMANDS, agent["session"]
         if agent["session"] not in sessions:      # the packet holds no archived agent either
-            return CANNOT_COMMAND, ""
+            return CANNOT_COMMAND, agent["session"]
         return "", agent["session"]
 
     def _route_confidently(
@@ -1321,6 +1333,9 @@ class OrchestratorService:
             detail={
                 "decision_id": decision_id,
                 "kind": decision.kind,
+                # The session decided on, "" when none was (R83); the row's session above is
+                # where the request was made when no agent was decided on.
+                "target_session": target_session,
                 "final_action": final_action,
                 "confidence": decision.confidence,
                 "reason": decision.reason,
