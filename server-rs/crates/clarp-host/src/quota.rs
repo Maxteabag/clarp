@@ -111,7 +111,7 @@ pub struct Desk {
     /// time reads and changes it.
     known: tokio::sync::Mutex<Known>,
     refresh: tokio::sync::Mutex<()>,
-    verified: std::sync::Mutex<BTreeMap<String, ([u8;32],i64)>>,
+    verified: std::sync::Mutex<BTreeMap<String, ([u8; 32], i64)>>,
     agy_attempt: std::sync::Mutex<Option<i64>>,
     /// Which accounts were used up when that was last looked at, and which tools were
     /// looked at at all: to tell when it is no longer as it was.
@@ -120,108 +120,199 @@ pub struct Desk {
 
 impl Desk {
     /// Success belongs to the exact credential that answered, for the auth cache's minute.
-    pub fn login_verified(&self, tool:&str, home:&Path, now:i64)->bool {
-        let file=clarp_backend::by_id(tool).and_then(|b| b.login_file(home));
-        let stamp=file.and_then(|f|crate::logins::digest(&f));
-        self.verified.lock().unwrap_or_else(PoisonError::into_inner).get(tool)
-            .is_some_and(|(seen,at)|Some(*seen)==stamp && now-*at<60_000)
+    pub fn login_verified(&self, tool: &str, home: &Path, now: i64) -> bool {
+        let file = clarp_backend::by_id(tool).and_then(|b| b.login_file(home));
+        let stamp = file.and_then(|f| crate::logins::digest(&f));
+        self.verified
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(tool)
+            .is_some_and(|(seen, at)| Some(*seen) == stamp && now - *at < 60_000)
     }
 
-    pub async fn refresh(&self, app:&crate::edge::App, home:&Path, force:bool)->Vec<Value>{
-        let _one=self.refresh.lock().await;
-        let provider=crate::usage_provider::Provider{loopback:app.config.usage_loopback};
-        let mut events=Vec::new();
-        for name in [CLAUDE,CODEX,"agy"] {
-            let with=With::of(app,home);
-            let mut known=self.known.lock().await;
-            let instance=format!("{}:{name}",with.server_id);
-            let tool=Tool{provider:name,instance:&instance};
-            let account=if name==CLAUDE {known.claude_account(with,true).await} else {None};
-            let login=if name==CODEX {known.login(with,name,true).await} else {None};
-            let due=match name {
-                CLAUDE=>{
-                    let Some(kept)=known.standing(with.fleet).await else {continue};
-                    let shown=kept.provider(tool,account.as_deref(),with.now_ms);
-                    let at=if shown["observed_at"].is_null(){
-                        if kept.seen_at_ms().is_some(){None} else {self.last_failure(with,CLAUDE).await}
-                    } else {kept.seen_at_ms()};
-                    clarp_kernel::usage_ask::due(at,with.now_ms)
+    pub async fn refresh(&self, app: &crate::edge::App, home: &Path, force: bool) -> Vec<Value> {
+        let _one = self.refresh.lock().await;
+        let provider = crate::usage_provider::Provider {
+            loopback: app.config.usage_loopback,
+        };
+        let mut events = Vec::new();
+        for name in [CLAUDE, CODEX, "agy"] {
+            let with = With::of(app, home);
+            let mut known = self.known.lock().await;
+            let instance = format!("{}:{name}", with.server_id);
+            let tool = Tool {
+                provider: name,
+                instance: &instance,
+            };
+            let account = if name == CLAUDE {
+                known.claude_account(with, true).await
+            } else {
+                None
+            };
+            let login = if name == CODEX {
+                known.login(with, name, true).await
+            } else {
+                None
+            };
+            let due = match name {
+                CLAUDE => {
+                    let Some(kept) = known.standing(with.fleet).await else {
+                        continue;
+                    };
+                    kept.refresh_due(
+                        account.as_deref(),
+                        self.last_failure(with, CLAUDE).await,
+                        with.now_ms,
+                    )
                 }
-                CODEX=>{
-                    let Some(kept)=known.of(with.fleet,name).await else {continue};
-                    kept.refresh_due(login.as_ref().map(Named::login),with.now_ms)
+                CODEX => {
+                    let Some(kept) = known.of(with.fleet, name).await else {
+                        continue;
+                    };
+                    kept.refresh_due(login.as_ref().map(Named::login), with.now_ms)
                 }
-                _=>{
-                    if !crate::logins::installed(&clarp_backend::program("agy").unwrap_or_default()){continue;}
-                    let last=self.agy_read(with).await;
-                    let attempt=*self.agy_attempt.lock().unwrap_or_else(PoisonError::into_inner);
-                    clarp_kernel::usage_ask::due(attempt,with.now_ms) && clarp_kernel::usage_ask::due(last["at"].as_i64(),with.now_ms)
+                _ => {
+                    if !crate::logins::installed(&clarp_backend::program("agy").unwrap_or_default())
+                    {
+                        continue;
+                    }
+                    let last = self.agy_read(with).await;
+                    let attempt = *self
+                        .agy_attempt
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner);
+                    clarp_kernel::usage_ask::due(attempt, with.now_ms)
+                        && clarp_kernel::usage_ask::due(last["at"].as_i64(), with.now_ms)
                 }
             };
             drop(known);
-            if !force && !due {continue;}
-            let stamp=|| clarp_backend::by_id(name)?.login_file(home).and_then(|file|crate::logins::digest(&file));
-            let before=stamp();
-            if name=="agy" {*self.agy_attempt.lock().unwrap_or_else(PoisonError::into_inner)=Some(with.now_ms);}
-            let answer=provider.ask(name,home,with.now_ms).await;
-            let with=With::of(app,home);
-            let mut known=self.known.lock().await;
-            if before!=stamp(){continue;}
-            if name=="agy" {
-                if let Some(record)=answer {
-                    let data=json!({"at":with.now_ms,"groups":record.value});
-                    let _=with.fleet.keep(KIND,name.into(),Some(data.to_string().into_bytes())).await;
+            if !force && !due {
+                continue;
+            }
+            let stamp = || {
+                clarp_backend::by_id(name)?
+                    .login_file(home)
+                    .and_then(|file| crate::logins::digest(&file))
+            };
+            let before = stamp();
+            if name == "agy" {
+                *self
+                    .agy_attempt
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(with.now_ms);
+            }
+            let answer = provider.ask(name, home, with.now_ms).await;
+            let with = With::of(app, home);
+            let mut known = self.known.lock().await;
+            if before != stamp() {
+                continue;
+            }
+            if name == "agy" {
+                if let Some(record) = answer {
+                    let data = json!({"at":with.now_ms,"groups":record.value});
+                    let _ = with
+                        .fleet
+                        .keep(KIND, name.into(), Some(data.to_string().into_bytes()))
+                        .await;
                 }
                 continue;
             }
-            let mut verified=false;
+            let mut verified = false;
             match name {
-                CLAUDE=>{
-                    if known.claude_account(with,false).await!=account {continue;}
-                    let Some(mut kept)=known.standing(with.fleet).await else {continue};
-                    if let Some(record)=answer {
-                        if kept.seen_at_ms().is_none_or(|at| at<=with.now_ms) {
-                            verified=kept.seen(&record.value,account.as_deref(),record.source,with.now_ms);
-                            known.keep_standing(with.fleet,kept.clone()).await;
+                CLAUDE => {
+                    if known.claude_account(with, false).await != account {
+                        continue;
+                    }
+                    let Some(mut kept) = known.standing(with.fleet).await else {
+                        continue;
+                    };
+                    if let Some(record) = answer {
+                        if kept.seen_at_ms().is_none_or(|at| at <= with.now_ms) {
+                            verified = kept.seen(
+                                &record.value,
+                                account.as_deref(),
+                                record.source,
+                                with.now_ms,
+                            );
+                            known.keep_standing(with.fleet, kept.clone()).await;
                         }
                     } else if kept.seen_at_ms().is_none() {
-                        let _=with.fleet.keep(KIND,"claude-failure".into(),Some(with.now_ms.to_string().into_bytes())).await;
+                        let _ = with
+                            .fleet
+                            .keep(
+                                KIND,
+                                "claude-failure".into(),
+                                Some(with.now_ms.to_string().into_bytes()),
+                            )
+                            .await;
                     }
-                    self.looked(with,name,kept.used_up(tool,account.as_deref(),with.now_ms));
+                    self.looked(
+                        with,
+                        name,
+                        kept.used_up(tool, account.as_deref(), with.now_ms),
+                    );
                 }
-                _=>{
-                    let Some(mut kept)=known.of(with.fleet,name).await else {continue};
-                    let on=login.as_ref().map(Named::login);
-                    if let (Some(record),Some(on))=(answer,on) {
-                        for event in kept.seen(tool,on,&record.value,record.source,with.now_ms,&mut drawn){
-                            with.hub.publish(event.clone(),with.now_ms);
+                _ => {
+                    let Some(mut kept) = known.of(with.fleet, name).await else {
+                        continue;
+                    };
+                    let on = login.as_ref().map(Named::login);
+                    if let (Some(record), Some(on)) = (answer, on) {
+                        for event in kept.seen(
+                            tool,
+                            on,
+                            &record.value,
+                            record.source,
+                            with.now_ms,
+                            &mut drawn,
+                        ) {
+                            with.hub.publish(event.clone(), with.now_ms);
                             events.push(event);
                         }
-                        verified=true;
-                    } else {kept.refresh_failed(with.now_ms);}
-                    known.keep(with.fleet,name,kept.clone()).await;
-                    self.looked(with,name,kept.used_up(tool,on,with.now_ms));
+                        verified = true;
+                    } else {
+                        kept.refresh_failed(with.now_ms);
+                    }
+                    known.keep(with.fleet, name, kept.clone()).await;
+                    self.looked(with, name, kept.used_up(tool, on, with.now_ms));
                 }
             }
-            let mut cache=self.verified.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut cache = self.verified.lock().unwrap_or_else(PoisonError::into_inner);
             cache.remove(name);
-            if let Some(stamp)=before.filter(|_|verified){cache.insert(name.into(),(stamp,with.now_ms));}
+            if let Some(stamp) = before.filter(|_| verified) {
+                cache.insert(name.into(), (stamp, with.now_ms));
+            }
         }
         events
     }
 
-    async fn last_failure(&self,with:With<'_>,name:&str)->Option<i64>{
-        let bytes=with.fleet.kept(KIND,format!("{name}-failure")).await.ok()??;
+    async fn last_failure(&self, with: With<'_>, name: &str) -> Option<i64> {
+        let bytes = with
+            .fleet
+            .kept(KIND, format!("{name}-failure"))
+            .await
+            .ok()??;
         std::str::from_utf8(&bytes).ok()?.parse().ok()
     }
 
-    async fn agy_read(&self,with:With<'_>)->Value {
-        with.fleet.kept(KIND,"agy".into()).await.ok().flatten().and_then(|bytes|serde_json::from_slice(&bytes).ok()).unwrap_or(Value::Null)
+    async fn agy_read(&self, with: With<'_>) -> Value {
+        with.fleet
+            .kept(KIND, "agy".into())
+            .await
+            .ok()
+            .flatten()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or(Value::Null)
     }
 
-    pub async fn asked_agy(&self,with:With<'_>)->Value {
-        let kept=self.agy_read(with).await;
-        clarp_kernel::usage_ask::agy_provider(&format!("{}:agy",with.server_id),&kept["groups"],kept["at"].as_i64().unwrap_or(0),with.now_ms)
+    pub async fn asked_agy(&self, with: With<'_>) -> Value {
+        let kept = self.agy_read(with).await;
+        clarp_kernel::usage_ask::agy_provider(
+            &format!("{}:agy", with.server_id),
+            &kept["groups"],
+            kept["at"].as_i64().unwrap_or(0),
+            with.now_ms,
+        )
     }
 
     /// A turn of a tool ended, in the tool's own session: what the tool wrote of its

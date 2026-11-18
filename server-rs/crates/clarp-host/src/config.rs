@@ -484,7 +484,12 @@ impl Config {
             ask_usage,
             usage_loopback: match std::env::var_os("CLARP_USAGE_LOOPBACK") {
                 None => None,
-                Some(raw) => Some(raw.to_str().and_then(|s| s.parse::<std::net::SocketAddr>().ok()).filter(|addr| addr.ip().is_loopback()).ok_or("CLARP_USAGE_LOOPBACK must be a numeric loopback socket address")?),
+                Some(raw) => Some(
+                    raw.to_str()
+                        .and_then(|s| s.parse::<std::net::SocketAddr>().ok())
+                        .filter(|addr| addr.ip().is_loopback())
+                        .ok_or("CLARP_USAGE_LOOPBACK must be a numeric loopback socket address")?,
+                ),
             },
             seats_tool,
             logins_checked_every_ms,
