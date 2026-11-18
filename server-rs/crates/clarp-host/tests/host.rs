@@ -15572,6 +15572,264 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
 }
 
 #[test]
+fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
+    let place = Place::new("body-limits");
+    const DEFAULT: usize = 16 * 1024 * 1024;
+    const LOG_FROM: usize = 2 * 1024 * 1024;
+    let token = "body-limits-token";
+    let relay = StandInWorker::new();
+    let settings = relay_settings(&place, 0o600);
+    let host = place.start_in(
+        token,
+        &["--relay-config", settings.to_str().unwrap()],
+        &[("CLARP_RELAY_DIAL", &relay.address)],
+    );
+    let mut phone = relay.session();
+    let maker = host.new_agent("Maker");
+    let post = |path: &str, body: &[u8]| {
+        fetch(
+            &host,
+            token,
+            "POST",
+            path,
+            &[("Content-Type", "application/json")],
+            body,
+        )
+    };
+    let padded = |body: Value, size: usize| {
+        let mut bytes = serde_json::to_vec(&body).unwrap();
+        assert!(bytes.len() <= size);
+        bytes.resize(size, b' ');
+        bytes
+    };
+    // Send only headers. A reader that polls the body will either hang or send
+    // 100 Continue. A 413 followed by EOF proves refusal without sending data.
+    let refused = |method: &str, path: &str, size: usize| {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream,"{method} {path} HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nExpect: 100-continue\r\nContent-Length: {size}\r\n\r\n").unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).unwrap();
+        assert!(
+            answer.starts_with("HTTP/1.1 413 "),
+            "{method} {path}: {answer}"
+        );
+        assert!(
+            answer
+                .to_ascii_lowercase()
+                .contains("\r\nconnection: close\r\n")
+        );
+        let (_, body) = answer.split_once("\r\n\r\n").unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(body).unwrap(),
+            json!({"error":"request body too large"})
+        );
+    };
+    let wide = "🦉";
+    let event = json!({"event":wide.repeat(64),"trace_id":wide.repeat(128),"utterance_id":wide.repeat(128),
+        "session":wide.repeat(128),"text":wide.repeat(4000),"detail":{"v":"ø".repeat(7992)}});
+    let batch = json!({"source":"ios","client_id":wide.repeat(128),"session":wide.repeat(128),"events":vec![event;500]});
+    let bytes = padded(batch, DEFAULT);
+    let response = post("/voice-events", &bytes);
+    assert_eq!(response.status, 200);
+    let ack: Value = serde_json::from_slice(&response.body).unwrap();
+    assert_eq!(ack["ok"], true);
+    assert_eq!(ack["stored"], 0);
+    drop(bytes);
+    let too_many = post(
+        "/voice-events",
+        &serde_json::to_vec(&json!({"events":vec![json!({});501]})).unwrap(),
+    );
+    assert_eq!(too_many.status, 413);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&too_many.body).unwrap()["error"],
+        "batch too large"
+    );
+
+    let work = place.root.join("work");
+    let page = format!("<form>{}</form>", "a".repeat(4_098_000));
+    let schema = json!({"type":"object","properties":{}});
+    std::fs::write(work.join("form.html"), &page).unwrap();
+    std::fs::write(work.join("schema.json"), schema.to_string()).unwrap();
+    let (code, _, err) = tool(
+        &host,
+        &work,
+        None,
+        &[
+            "clarp-agent-artifacts",
+            "create-form",
+            &maker,
+            "Tool form",
+            "form.html",
+            "schema.json",
+            "--version",
+            "1",
+            "--artifact-id",
+            "tool-limit-form",
+        ],
+    );
+    assert_eq!(code, 0, "{err}");
+
+    let create = json!({"session":maker,"artifact_id":"door-limit-form","type":"html_form",
+        "title":"Door form","payload":{"version":"1","content":page,"answer_schema":schema}});
+    let bytes = padded(create, DEFAULT);
+    assert_eq!(post("/artifacts", &bytes).status, 201);
+    drop(bytes);
+    for id in ["tool-limit-form", "door-limit-form"] {
+        let shown = host.get(&format!("/artifacts/{id}"));
+        assert!(
+            shown["artifact"]["payload"]["content"].as_str() == Some(page.as_str()),
+            "wrong content for {id}"
+        );
+    }
+    let update = padded(json!({"title":"Changed title"}), DEFAULT);
+    let changed = post("/artifacts/door-limit-form", &update);
+    assert_eq!(changed.status, 200);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&changed.body).unwrap()["artifact"]["title"],
+        "Changed title"
+    );
+    drop(update);
+    // Exercise Bytes, typed Json, the janitor control middleware, nested action
+    // routes, and non-POST readers. Invalid JSON reaches each route's validator.
+    let mut invalid = vec![b' '; LOG_FROM + 1];
+    invalid[0] = b'!';
+    for (method, path, status) in [
+        ("POST", "/send", 400),
+        ("PUT", "/turn-queue/nothing", 400),
+        ("POST", "/crash", 400),
+        ("POST", "/clog", 400),
+        ("POST", "/agent-schedules", 400),
+        ("POST", "/tools/run", 400),
+        ("POST", "/artifacts/door-limit-form/pin", 400),
+        ("POST", "/voice-events", 400),
+        ("POST", "/artifacts", 400),
+    ] {
+        let r = fetch(
+            &host,
+            token,
+            method,
+            path,
+            &[("Content-Type", "application/json")],
+            &invalid,
+        );
+        assert_eq!(r.status, status, "{method} {path}");
+        refused(method, path, DEFAULT + 1);
+    }
+    refused("POST", "/artifacts/door-limit-form", DEFAULT + 1);
+    refused("POST", "/agents/import", 512 * 1024 * 1024 + 1);
+    const PAIRING: usize = 64 * 1024;
+    refused("POST", "/pairing/exchange", PAIRING + 1);
+    let issue = host.post(
+        "/pairing/issue",
+        json!({"device_name":"Body limit phone","scope":"full","relay":true}),
+    );
+    let pair = padded(
+        json!({"code":issue["code"],"device_name":"Body limit phone"}),
+        PAIRING,
+    );
+    let sid = phone.ask_sized(
+        "POST",
+        "/pairing/exchange",
+        &[("content-type", "application/json")],
+        &pair,
+        64 * 1024,
+    );
+    let paired = phone.answer(sid);
+    assert_eq!(paired.status, 201, "{}", paired.json());
+    let bearer = format!(
+        "Bearer {}",
+        paired.json()["device"]["token"].as_str().unwrap()
+    );
+    let headers = [
+        ("authorization", bearer.as_str()),
+        ("content-type", "application/json"),
+    ];
+    for (route, size, expected) in [
+        ("/voice-events", DEFAULT, 200),
+        ("/voice-events", DEFAULT + 1, 413),
+        ("/pairing/exchange", PAIRING + 1, 413),
+    ] {
+        let body = padded(json!({"events":[]}), size);
+        let sid = phone.ask_sized("POST", route, &headers, &body, 64 * 1024);
+        let response = phone.answer(sid);
+        assert_eq!(response.status, expected);
+        assert!(response.ended);
+        if expected == 413 {
+            assert_eq!(response.json(), json!({"error":"request body too large"}));
+        } else {
+            assert_eq!(response.json()["ok"], true);
+        }
+    }
+    // Invalid HTTP framing is refused by Hyper; a missing length reaches the JSON policy.
+    for (extra, router_error) in [
+        ("", true),
+        ("Content-Length: nope\r\n", false),
+        ("Transfer-Encoding: chunked\r\n", true),
+    ] {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream,"POST /voice-events HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\n{extra}\r\n").unwrap();
+        let mut raw = String::new();
+        stream.read_to_string(&mut raw).unwrap();
+        assert!(raw.starts_with("HTTP/1.1 400 "), "{raw}");
+        if router_error {
+            let (_, body) = raw.split_once("\r\n\r\n").unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(body).unwrap(),
+                json!({"error":"bad json"})
+            );
+        }
+    }
+    // Larger than the common cap but inside each binary route's cap: each one
+    // asks for the body. Drop the synthetic connection before sending media.
+    for route in ["/upload", "/media", "/tools/media", "/transcribe"] {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream,"POST {route} HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\nContent-Length: {}\r\nExpect: 100-continue\r\n\r\n",DEFAULT+1).unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).unwrap();
+        assert_eq!(line, "HTTP/1.1 100 Continue\r\n", "{route}");
+    }
+    let larger = padded(json!({"private":"SECRET_BODY_MARKER"}), DEFAULT + 1);
+    assert_ne!(post("/agents/import", &larger).status, 413);
+    let over = padded(json!({"private":"SECRET_BODY_MARKER"}), LOG_FROM + 1);
+    assert_ne!(
+        post("/application-activity?nonce=SECRET_QUERY_MARKER", &over).status,
+        413
+    );
+    let exact = padded(json!({}), LOG_FROM);
+    post("/application-activity", &exact);
+    let log = host.heard.lock().unwrap().clone();
+    let lines: Vec<_> = log
+        .lines()
+        .filter(|line| line.starts_with("jsonBodyLarge "))
+        .collect();
+    let wanted = format!(
+        "jsonBodyLarge route=/application-activity bytes={}",
+        LOG_FROM + 1
+    );
+    assert_eq!(lines.iter().filter(|l| **l == wanted).count(), 1);
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.contains("SECRET") || line.ends_with(&format!("bytes={LOG_FROM}")))
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| **line
+                == format!("jsonBodyLarge route=/artifacts/{{*rest}} bytes={DEFAULT}"))
+    );
+}
+
+#[test]
 fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     let place = Place::new("form");
     let token = "form-token";
@@ -20741,6 +20999,17 @@ impl Session {
     /// A phone asks: the frames of its request go down, and the number of its stream is
     /// answered.
     fn ask(&mut self, method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> u32 {
+        self.ask_sized(method, path, headers, body, 7)
+    }
+
+    fn ask_sized(
+        &mut self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+        frame_size: usize,
+    ) -> u32 {
         let sid = self.next;
         self.next += 1;
         let mut named = serde_json::Map::new();
@@ -20749,7 +21018,7 @@ impl Session {
         }
         let meta = json!({ "method": method, "path": path, "headers": named });
         self.tell(relay_rules::json_frame(relay_rules::REQ, sid, &meta));
-        for part in body.chunks(7) {
+        for part in body.chunks(frame_size) {
             self.tell(relay_rules::frame(relay_rules::REQ_BODY, sid, part));
         }
         self.tell(relay_rules::frame(relay_rules::REQ_END, sid, &[]));

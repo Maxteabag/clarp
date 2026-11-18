@@ -667,7 +667,15 @@ async fn asked(
     let method = Method::from_bytes(meta.method.as_str()?.as_bytes()).ok()?;
     let uri: Uri = meta.path.parse().ok()?;
     let handed = rules::handed_on(&meta.headers, local, body.len(), meta.passthrough)?;
+    let empty_post =
+        body.is_empty() && matches!(method, Method::POST | Method::PUT | Method::PATCH);
     let mut request = Request::new(Body::from(body));
+    if empty_post {
+        request.headers_mut().insert(
+            axum::http::header::CONTENT_LENGTH,
+            HeaderValue::from_static("0"),
+        );
+    }
     if let Some(line) = line {
         request.extensions_mut().insert(line);
     }
