@@ -99,7 +99,9 @@ impl Launcher {
                 command
             }
         };
-        if let Some(session) = &order.named_session { command.arg("--named-session").arg(session); }
+        if let Some(session) = &order.named_session {
+            command.arg("--named-session").arg(session);
+        }
         command
             .arg("--spool")
             .arg(&order.spool)

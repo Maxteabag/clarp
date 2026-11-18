@@ -366,7 +366,10 @@ mod tests {
     #[test]
     fn a_tool_this_host_does_not_run_has_no_terminal_here() {
         assert!(clarp_backend::program("muse").is_some());
-        assert_eq!(clarp_kernel::socket::terminal_of("muse", "abc").unwrap(), ["--yolo", "resume", "abc"]);
+        assert_eq!(
+            clarp_kernel::socket::terminal_of("muse", "abc").unwrap(),
+            ["--yolo", "resume", "abc"]
+        );
         let none = (
             StatusCode::NOT_IMPLEMENTED,
             "no interactive terminal for the scripted backend".to_string(),

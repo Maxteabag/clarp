@@ -62,7 +62,9 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         match argv.next().as_deref() {
             Some("--spool") => spool = argv.next().map(PathBuf::from),
             Some("--socket") => socket = argv.next().map(PathBuf::from),
-            Some("--named-session") => named_session = Some(argv.next().ok_or("missing session id")?),
+            Some("--named-session") => {
+                named_session = Some(argv.next().ok_or("missing session id")?)
+            }
             Some("--cwd") => cwd = argv.next().map(PathBuf::from),
             Some("--stdin-file") => stdin_file = argv.next().map(PathBuf::from),
             Some("--") => break,
@@ -387,7 +389,9 @@ fn run(mut args: Args) -> Result<u8, String> {
     // From here on the turn is this shim's, and whatever goes wrong is said in the spool.
     if let Some(id) = args.named_session.clone() {
         let entry = Entry::Shim(ShimEvent::Session { id });
-        writer.append(&Record {t: now_ms(), entry}).and_then(|()| writer.sync())
+        writer
+            .append(&Record { t: now_ms(), entry })
+            .and_then(|()| writer.sync())
             .map_err(|error| format!("cannot record the assigned session: {error}"))?;
     }
     let mut not_started = |error: String| -> Result<u8, String> {
@@ -401,11 +405,20 @@ fn run(mut args: Args) -> Result<u8, String> {
     };
     // The actor already wrote the turn's input into its private file. A tool
     // which needs a seekable prompt file opens it by path until the turn ends.
-    let as_file = args.program_args.ends_with(&["--prompt-file".to_string(), "/dev/stdin".to_string()]) && args.named_session.is_some();
-    if as_file && let (Some(path),Some(arg)) = (&args.stdin_file,args.program_args.last_mut()) {
+    let as_file = args
+        .program_args
+        .ends_with(&["--prompt-file".to_string(), "/dev/stdin".to_string()])
+        && args.named_session.is_some();
+    if as_file && let (Some(path), Some(arg)) = (&args.stdin_file, args.program_args.last_mut()) {
         *arg = path.to_string_lossy().into_owned();
     }
-    let message = match args.stdin_file.as_ref().filter(|_| !as_file).map(std::fs::read).transpose() {
+    let message = match args
+        .stdin_file
+        .as_ref()
+        .filter(|_| !as_file)
+        .map(std::fs::read)
+        .transpose()
+    {
         Ok(message) => message,
         Err(error) => return not_started(format!("the message could not be read: {error}")),
     };
@@ -416,7 +429,11 @@ fn run(mut args: Args) -> Result<u8, String> {
     let mut command = Command::new(&args.program);
     command
         .args(&args.program_args)
-        .stdin(if as_file {Stdio::null()} else {Stdio::piped()})
+        .stdin(if as_file {
+            Stdio::null()
+        } else {
+            Stdio::piped()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0)
