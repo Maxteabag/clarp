@@ -1743,7 +1743,7 @@ conversation between a phone, a voice model that holds no tools, and the Host be
 it as one machine without a clock, a socket or a store (`oracle/conversation.rs`, `routing.rs`, `phone.rs`,
 `attention.rs`, `voice.rs`; by the Python Host's `oracle_live_stable.Conversation`, `oracle_strategy`,
 `oracle_attention` and `oracle_handoff` themselves, run as they are with a clock, a voice, a router and
-tools of the generator's; `tools/oracle-conversation-vectors.py`: 70 stories of 1299 steps, and after every
+tools of the generator's; `tools/oracle-conversation-vectors.py`: 79 stories of 1609 steps, and after every
 step what the voice and the phone were told, what was kept, and what waits to be routed must be what that
 Host's were). What it holds: what a phone may send and what is none of it; sound both ways, and silence
 only for a moment after what was heard; what was said, a fragment at a time, with the number of the talk
@@ -1756,7 +1756,24 @@ left for the next routing); a call in which everything goes to the contact, unre
 two turns of the talk, each with its cue, a long one in parts that follow what the voice spoke, pause after
 eight, and are read again or gone on with from the text that is kept; what waits for the user told one
 thing at a time and once in a thread; a call that goes on within half a minute of the one before as that
-call; and the call put through to an agent, as far as a conversation knows of it. Time passes in two
+call; and the call put through to an agent, as far as a conversation knows of it. Each result is told once,
+by the rules the Python Host took on with its PR 421 the same day (R58 to R61): an answer counts as told
+when its last part was handed over, however it was asked for, also where only that part was; one that was
+told or read part of the way is gone on with from where it stopped, with its cue, in this call or in one
+that goes on in its place; whether it is told is decided before its cue, so no cue sounds for an answer the
+contact gave under another delegation; work that is named and not over is said to be not over, and is no
+text to read; and a stop of an agent silences what of its work is over and not told (not what was called
+off or handed on before the call), holds what is being told of it, and keeps that with the thread
+(`silenced_results`, only where there is any), so that no later call tells it by itself; it is still read
+when asked for. A result that is over only after the stop read the call's work is told as any other. An
+answer paused at the eighth part is paused on purpose: a call that goes on in its place does not go on
+past it by itself, nor this call where it also waited to be told, and a reading on request lifts that
+(the Python Host's follow-ups, its PRs 429 and 435, the same evening).
+What is kept of what was told and silenced is this call's own work only, and of the contact's answers the
+newest five hundred, so that a thread does not grow with every call (an answer known only beyond those is
+told once more under its next alias); a thread that could not be kept ends
+no call (it is said once, and a call that goes on in its place reads what was kept last), unless the
+thread is another call's now. Time passes in two
 halves (whether this is the moment to look for what waits for the user; then what was found), so that a
 Host reads what waits only then: the vectors hold at every tick whether the Python Host looks. The
 generator plays every story with its clock a ten-millionth faster and slower and refuses a story that is
@@ -1812,15 +1829,16 @@ with the agents and what was kept; sound both ways; a wanting said twice routed 
 router is asked, in the letters of the talk; work handed on as a delegation of the phone's with the file of
 where it came from, which only the owner reads; what waits for the user told once; the result with its
 cue; a look at an agent and its conversation read to the voice; work that takes long stopped with other
-work in its place, and what the stop silenced not told; a later call of the phone taking the older one's
-place and going on in the thread with its work and what its voice was told of; the end by the phone, by
+work in its place, and what the stop silenced not told, in that call or in the next; a later call of the
+phone taking the older one's place and going on in the thread with its work and what its voice was told of; the end by the phone, by
 the voice in both its ways and by a phone that went away; a call that begins anew; a thread by its name
 and by its contact; and the thread as it was left after the Host was started again); a call in which
 everything goes to the contact, with the languages its owner wrote and no cues where the owner wants none;
-a Host without a key, a voice that does not take the key, a router that does not answer as one, a file
+a Host without a key, a voice that does not take the key, a router that does not answer as one, a talk
+too long to keep (the call goes on), a file
 that cannot be written, work for an agent there is none of, a tool there is none of, and then the same
 call handing work on as any other; and a call carried through the relay as it is at the door (opened,
-sound both ways, ended by the phone, refused, and left by a phone that went away). Four defects of the reference were found on the way (R58 to R61).
+sound both ways, ended by the phone, refused, and left by a phone that went away). Four defects of the reference were found on the way (R58 to R61); the Python Host mended them the same day (its PR 421), and this Host does as it does since.
 
 **The Oracle: what agents finished** (18 Nov 2026). Between two turns of a call its voice is also told,
 as something from before the call that it is not to bring up by itself, of what an agent finished for the
@@ -2217,9 +2235,9 @@ a turn in the janitor's own conversation.
   of the queue that each step sets, and writes what the Python Host kept after every step. Six stories, 155
   steps, 102 looks: a task of every half hour that is idle, at work, failing and given up; two schedules of
   one janitor that is paused, set anew and removed while a run is out; and four tasks whose times are not
-  evenly apart. The kernel's `janitors/runs.rs` replays them (`tests/janitor_run_vectors.rs`): where the
-  Python Host passes over nothing, what the runner keeps of every trigger, every run and the janitor as it
-  is read are equal after every step.
+  evenly apart. The kernel's `janitors/runs.rs` replays them (`tests/janitor_run_vectors.rs`): what the
+  runner keeps of every trigger, every run and the janitor as it is read are equal after every step, and
+  so are the 42 runs handed over.
 - **A look has two halves**, because the Host's queue is asked outside the book: `Book::look` says what is to
   be handed over (a run is made for a time that is due; a run that is out is offered until the queue takes
   it; a run whose turn has ended is over, `completed` or `error` with why, without what is plainly a
@@ -2230,14 +2248,17 @@ a turn in the janitor's own conversation.
   vectors): a run says of itself that it worked, was idle or failed (`clarp-admin janitor outcome`, `POST
   /janitor-runs/<id>/activity`); idle doubles the wait up to the task's longest, worked puts it back, failed
   leaves it, and a run that says nothing counts as worked.
-- **Where this Host does otherwise** (defect R31 of the reference): the Python Host takes as the wait of a
-  task that keeps its pace the gap between the two runs after its first, and asks for the first time at
-  least that gap after the time that ran. A task of working days first run on a Thursday measures three
-  days and runs on Mondays and Thursdays only; a daily one first run two days before the clocks are put
-  back runs every other day; every daily one loses the day the clocks are put forward. Here a task that
-  keeps its pace runs at the next time its schedule names, and only a wait that idle runs have stretched is
-  counted from the time that ran. The test names the three stories in which the reference loses runs and
-  holds this Host to every time of the schedule in them.
+- **A task that keeps its pace runs at the next time its schedule names**, and only a wait that idle runs
+  have stretched is counted from the time that ran. This was this Host's own rule against defect R31 of the
+  reference (which took as the wait the gap between the two runs after the first, so that a task of working
+  days first run on a Thursday ran on Mondays and Thursdays only, and every daily one lost the day the
+  clocks are put forward); the Python Host took it over with its PR 425 on 18 Nov 2026, and the vectors made
+  anew hold both Hosts to every time of the schedule in those stories.
+- **A janitor put back as it came** (`POST /janitors/<s>/reset-defaults`) gets its job's own settings of the
+  triggers it was installed with (the Goal keeper: a sweep at `17 * * * *`, a goal's triggers folded over
+  300 seconds), each other trigger's own defaults, and the way of running its job is installed with where its
+  tool can run it so (shut off from everything, for the Goal keeper on Antigravity), else the plain one: the
+  Python Host's rule since its PR 425 (R30). Whether each trigger is on stays as it is.
 - **A change cuts a run off.** A pause, a save and a removal move the janitor's generation: the run that was
   out is `cancelled`, may say nothing any more, and the Host takes its turn back (a message that waits is
   withdrawn, a turn that runs is stopped, and the janitor's mailbox is not left held). A run that was cut off

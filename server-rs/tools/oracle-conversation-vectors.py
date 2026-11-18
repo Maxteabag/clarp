@@ -107,6 +107,19 @@ def result(delegation_id, status='completed', text='Done.', error='', session='t
                                     'result_message_id': 'r-' + delegation_id, **more}}
 
 
+def lands(row):
+    """A delegation's result lands in the book right after the tools' results are next read: between that read and
+    what is done with it."""
+    return {'do': 'lands', 'row': row['row']}
+
+
+def finding(session, delegation_id):
+    """What the contact's answer of `result(delegation_id, session=session)` is known by, as a Host keeps it."""
+    import hashlib
+    parts = ['a-' + session, 'tool-1', 'r-' + delegation_id]
+    return hashlib.sha256(json.dumps(parts).encode()).hexdigest()
+
+
 def owns(*ids):
     """Delegations that are this call's own, as its tools know them."""
     return {'do': 'owns', 'ids': list(ids)}
@@ -714,6 +727,72 @@ STORIES = [
     story('silence of a voice that was interrupted is not handed on',
           voice('session.started'), speaks(), wait(0.2), voice('session.output_audio.interrupted'), speaks(still()),
           wait(0.1), speaks(still())),
+    story('an answer counts as told once its last part was read on request, also where only that part was asked for',
+          voice('session.started'), *TALK, speaks(), owns('rtc-1', 'rtc-2', 'rtc-3'),
+          result('rtc-1', text=LONG * 3), call('read_result', operation_id='rtc-1', from_part=5),
+          result('rtc-2', text=LONG * 3), call('read_result', operation_id='rtc-2', from_part=1, verbatim=True),
+          phone({'type': 'oracle_v2.interrupt'}),
+          result('rtc-3', status='queued', text=''), call('read_result', operation_id='rtc-3'),
+          wait(6.0), tick(), *SPOKEN * 6, wait(6.0), tick(), wait(6.0), tick(),
+          call('read_result', operation_id='rtc-3'),
+          owns('rtc-4'), result('rtc-4', text='Waits to be told.'), heard('One more thing.', 30000, 30500), tick(),
+          call('read_result', operation_id='rtc-4'), wait(6.0), tick(), wait(6.0), tick()),
+    story("the one contact's answer read to its end on request is not told again under another delegation",
+          voice('session.started'), *TALK, speaks(), owns('rtc-1', 'rtc-2'),
+          result('rtc-1', text='The pump ran dry.', result_message_id='r-same'),
+          result('rtc-2', text='The pump ran dry.', result_message_id='r-same'),
+          call('read_result', operation_id='rtc-1'), wait(6.0), tick(), wait(6.0), tick(),
+          call('read_result', operation_id='rtc-2'), wait(6.0), tick(),
+          strategy='direct_contact'),
+    story("the one contact's answer that was begun to be told by itself goes on in the call that goes on in its place",
+          voice('session.started'), result('rtc-1', text=LONG * 3), tick(), wait(6.0), tick(), *SPOKEN,
+          result('rtc-2', text='Told, though what it is known by was kept as nothing.'), wait(0.3), *SPOKEN * 3, wait(6.3), tick(),
+          wait(6.3), tick(),
+          saved={'revision': 1, 'fragments': [], 'results_sent': [], 'relay_cursors': {'rtc-1': 1}, 'call_active_ms': -5000,
+                 'call_work': ['rtc-1', 'rtc-2'],
+                 'forwarded_findings': {finding('theo', 'rtc-1'): 'rtc-1', finding('theo', 'rtc-2'): ''}},
+          work=['rtc-1', 'rtc-2'], strategy='direct_contact'),
+    story("what a stop silenced is not told, and what landed after the stop's read is told once",
+          voice('session.started'), *TALK, speaks(), owns('rtc-1', 'rtc-2', 'rtc-3', 'rtc-4', 'rtc-5'),
+          result('rtc-0', text='Handed on before this call.'), result('rtc-5', text='Told before the stop.'), wait(6.0), tick(),
+          result('rtc-3', text=LONG * 3), wait(5.0), tick(), result('rtc-1', text='Of Theo.'), tick(),
+          result('rtc-4', status='cancelled', text=''), result('rtc-6', text='Of Mike.', session='mike'), owns('rtc-6'),
+          owns('rtc-7', 'rtc-8'), result('rtc-7', status='accepted', text=''), result('rtc-8', text='Over, and not seen yet.'),
+          lands(result('rtc-2', text='Landed after the read.')), call('supersede', session='theo'),
+          result('rtc-7', text='Over after the stop.'),
+          *SPOKEN, wait(6.0), tick(), wait(6.0), tick(), wait(6.0), tick(), wait(6.0), tick(),
+          call('read_result', operation_id='rtc-3'), *SPOKEN * 6, wait(6.0), tick(),
+          call('read_result', operation_id='rtc-1'), wait(6.0), tick(), call('supersede', session='theo'),
+          call('supersede', session='mike'), wait(6.0), tick(),
+          work=['rtc-0']),
+    story('what a newer Host kept of a stop is read: what it silenced is not told by itself, and is read on request',
+          voice('session.started'), result('rtc-1', text='Told before.'), result('rtc-2', text='Silenced by a stop.'),
+          result('rtc-3', text='Not told yet.'), tick(), wait(6.0), tick(), wait(6.0), tick(),
+          call('read_result', operation_id='rtc-2'), wait(6.0), tick(),
+          result('rtc-4', text='Read to its end before.'), wait(6.0), tick(), wait(6.0), tick(),
+          saved={'revision': 1, 'fragments': [], 'results_sent': ['rtc-1'], 'silenced_results': ['rtc-2', 'rtc-9'],
+                 'relay_cursors': {'rtc-4': 1}, 'call_active_ms': -5000, 'call_work': ['rtc-1', 'rtc-2', 'rtc-3', 'rtc-4']},
+          work=['rtc-1', 'rtc-2', 'rtc-3', 'rtc-4']),
+    story('of the answers the contact gave under a delegation, the newest five hundred are kept',
+          voice('session.started'), heard('Hello.', 0, 300),
+          saved={'revision': 1, 'fragments': [], 'results_sent': [],
+                 'forwarded_findings': {f'finding-{n:03}': f'rtc-{n}' for n in range(501)}},
+          strategy='direct_contact'),
+    story('an answer that ends at its eighth part is told to its end, and not paused',
+          voice('session.started'), *TALK, speaks(), owns('rtc-1'), wait(5.0), result('rtc-1', text=LONG * 5),
+          tick(), *SPOKEN * 16),
+    story('an answer that waits to be told and is read on request to the eighth part is not gone on with by itself',
+          voice('session.started'), *TALK, speaks(), owns('rtc-1'), result('rtc-1', text=LONG * 9), tick(),
+          call('read_result', operation_id='rtc-1'), *SPOKEN * 16, wait(6.0), tick(), wait(6.0), tick(),
+          call('read_result', operation_id='rtc-1')),
+    story("the contact's answer known only beyond the newest five hundred is told again once, under its next alias",
+          voice('session.started'), *TALK, speaks(), owns('rtc-2', 'rtc-3'),
+          result('rtc-2', text='The pump ran dry.', result_message_id='r-rtc-1'),
+          result('rtc-3', text='The pump ran dry.', result_message_id='r-rtc-1'),
+          wait(6.0), tick(), wait(6.0), tick(), wait(6.0), tick(),
+          saved={'revision': 1, 'fragments': [], 'results_sent': [], 'call_active_ms': -5000, 'call_work': [],
+                 'forwarded_findings': {f'finding-{n:03}': f'rtc-old-{n}' for n in range(500)}},
+          strategy='direct_contact'),
 ]
 
 
@@ -796,8 +875,13 @@ def run() -> dict:
             ctx = types.SimpleNamespace(media_dir=str(media))
 
             def results(self):
-                return [copy.deepcopy(rows[ident]) for ident in sorted(self.delegations)
-                        if ident in rows and rows[ident]['status'] in oracle_delegations.TERMINAL]
+                found = [copy.deepcopy(rows[ident]) for ident in sorted(self.delegations)
+                         if ident in rows and rows[ident]['status'] in oracle_delegations.TERMINAL]
+                # A result that is to land between this read and what is done with it.
+                landing = script.pop('lands', None)
+                if landing:
+                    rows[landing['delegation_id']] = copy.deepcopy(landing)
+                return found
 
             def resolve(self, name):
                 if name in opened.get('gone', ()):
@@ -1009,6 +1093,8 @@ def run() -> dict:
                     more['looked'].append(watched.get('looks', 0) > before)
             elif kind == 'result':
                 rows[step['row']['delegation_id']] = copy.deepcopy(step['row'])
+            elif kind == 'lands':
+                script['lands'] = copy.deepcopy(step['row'])
             elif kind == 'owns':
                 with tools.lock:
                     tools.delegations.update(step['ids'])

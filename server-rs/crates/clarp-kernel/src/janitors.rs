@@ -128,6 +128,12 @@ pub fn tool_named(name: &str) -> Option<&'static str> {
     catalogue().names.get(name).and_then(Value::as_str)
 }
 
+/// Whether a tool, by any name it goes by, can run a janitor shut off from everything.
+pub fn isolates(backend: &str) -> bool {
+    let tool = tool_named(backend).unwrap_or(backend);
+    catalogue().isolating.iter().any(|id| id == tool)
+}
+
 /// The jobs a janitor can be given.
 pub fn templates() -> &'static [Value] {
     &catalogue().templates

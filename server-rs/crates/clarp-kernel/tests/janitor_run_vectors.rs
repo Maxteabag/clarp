@@ -261,16 +261,13 @@ fn a_scheduled_task_is_run_look_by_look_as_the_python_host_runs_it() {
     let mut host = Host::of(&vectors);
     let mut book = Book::default();
     let stories = vectors["stories"].as_array().unwrap();
-    let (mut steps, mut looks, mut handed_over, mut lost_stories) = (0, 0, 0, Vec::new());
+    let (mut steps, mut looks, mut handed_over) = (0, 0, 0);
     for story in stories {
-        // A story of a task that keeps its pace, in which the Python Host passed over times the
-        // schedule names: this Host runs at each of them, and is held to that instead.
-        let (named, ran) = (
-            story["named"].as_i64().unwrap(),
-            story["ran"].as_i64().unwrap(),
-        );
-        let loses = story["paced"] == true && ran < named;
-        let mut ours_ran = 0;
+        // A task that keeps its pace runs at every time its schedule names (R31, mended by the
+        // Python Host's PR 425).
+        if story["paced"] == true {
+            assert_eq!(story["ran"], story["named"], "{}", story["name"]);
+        }
         for step in story["steps"].as_array().unwrap() {
             let what = format!("{}: {}", story["name"], step["what"]);
             let now = step["now"].as_i64().unwrap();
@@ -284,19 +281,11 @@ fn a_scheduled_task_is_run_look_by_look_as_the_python_host_runs_it() {
                 let (handed, taken) = looked(&mut book, &host, &step["given"], now);
                 looks += 1;
                 handed_over += handed.len();
-                if loses {
-                    // At a time the schedule names, one run; at any other look, none.
-                    let due = step["given"]["named"] == true;
-                    assert_eq!(handed.len(), usize::from(due), "{what}");
-                    ours_ran += i64::from(due);
-                } else {
-                    assert_eq!(json!(handed), step["handed"], "{what}");
-                    assert_eq!(taken, step["count"], "{what}");
-                }
+                assert_eq!(json!(handed), step["handed"], "{what}");
+                assert_eq!(taken, step["count"], "{what}");
             } else {
                 let done = asked(&mut book, &mut host, step, now);
                 match (done, step.get("taken"), step.get("refused")) {
-                    (Ok(_), Some(_), _) if loses => {}
                     (Ok(ours), Some(theirs), _) => assert_eq!(&ours, theirs, "{what}"),
                     (Err(ours), _, Some(theirs)) => assert_eq!(&told(&ours), theirs, "{what}"),
                     (ours, theirs, refused) => {
@@ -304,41 +293,16 @@ fn a_scheduled_task_is_run_look_by_look_as_the_python_host_runs_it() {
                     }
                 }
             }
-            if !loses {
-                let ours = kept(&book, &host, &sessions, now);
-                let theirs = theirs(&step["after"], &book, &host, &sessions);
-                for part in ["progress", "runs", "janitors"] {
-                    assert_eq!(ours[part], theirs[part], "{what}: {part}");
-                }
+            let ours = kept(&book, &host, &sessions, now);
+            let theirs = theirs(&step["after"], &book, &host, &sessions);
+            for part in ["progress", "runs", "janitors"] {
+                assert_eq!(ours[part], theirs[part], "{what}: {part}");
             }
             steps += 1;
         }
-        if loses {
-            assert_eq!(ours_ran, named, "{}", story["name"]);
-            lost_stories.push((story["name"].as_str().unwrap(), ran, named));
-        }
     }
     assert_eq!((stories.len(), steps, looks), (6, 155, 102));
-    // The Python Host handed over 34 runs; this Host the 8 more that it passed over.
-    assert_eq!(handed_over, 34 + 8);
-    // Where the Python Host lost runs (R31). When it loses none any more, these stories are
-    // held like the others, and this says so.
-    assert_eq!(
-        lost_stories,
-        [
-            (
-                "every morning at nine, over the night the clocks are put forward",
-                6,
-                7
-            ),
-            (
-                "every morning at nine, over the night the clocks are put back",
-                4,
-                7
-            ),
-            ("nine on working days, first run on a Thursday", 4, 8),
-        ]
-    );
+    assert_eq!(handed_over, 42);
     // What is kept can be written down and read back as it was.
     let written = serde_json::to_string(&book).unwrap();
     let read: Book = serde_json::from_str(&written).unwrap();
@@ -350,9 +314,7 @@ fn a_run_is_read_whole_as_the_python_host_reads_it() {
     let vectors = vectors();
     let mut host = Host::of(&vectors);
     let mut book = Book::default();
-    let mut lost = BTreeSet::new();
     for story in vectors["stories"].as_array().unwrap() {
-        let loses = story["paced"] == true && story["ran"].as_i64() < story["named"].as_i64();
         for step in story["steps"].as_array().unwrap() {
             let now = step["now"].as_i64().unwrap();
             if step["ask"] == "tick" {
@@ -360,27 +322,15 @@ fn a_run_is_read_whole_as_the_python_host_reads_it() {
             } else {
                 let _ = asked(&mut book, &mut host, step, now);
             }
-            if loses {
-                lost.extend(
-                    step["after"]["janitors"]
-                        .as_object()
-                        .unwrap()
-                        .keys()
-                        .cloned(),
-                );
-            }
         }
     }
     let mut read = 0;
     for run in vectors["runs"].as_array().unwrap() {
-        if lost.contains(run["session"].as_str().unwrap()) {
-            continue;
-        }
         let ours = &book.runs[run["run_id"].as_str().unwrap()];
         assert_eq!(&ours.shown(), run, "{}", run["run_id"]);
         read += 1;
     }
-    assert_eq!((vectors["runs"].as_array().unwrap().len(), read), (32, 18));
+    assert_eq!((vectors["runs"].as_array().unwrap().len(), read), (40, 40));
 }
 
 #[test]

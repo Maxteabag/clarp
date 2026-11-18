@@ -13,6 +13,17 @@ RUNS = {
     'ring': ['test', '--test', 'host', '--', 'a_ring_is_held'],
 }
 # NOT PLANTED, each with its reason:
+#   that a call whose thread is another call's now ends when it keeps its talk (`Ok(Err(threads::STALE)) => return
+#     false`; taken off after its first run, MISSED): a later call of the same phone ends the older as replaced
+#     before that one keeps anything again, so only a race reaches the branch.
+#   that a talk that could not be kept is said once on the Host's stderr (`eprintln!` in `keeps`): no test reads
+#     the Host's stderr.
+#   that the store's own failure ends no call (`Err(_) => ...` in `keeps`): no stand-in of the tests makes the
+#     store fail; a talk too long to keep, which goes the same way, is planted.
+#   that a stop is handed the call's work as the book has it (`supersede(session, &rows, now)`; taken off after its
+#     first run, MISSED): the work a stop silences beyond what waits to be told is a result that is over and not yet
+#     seen, which at this Host lasts less than one tick (250 ms) and no test can place a stop into; the kernel's
+#     story "what a stop silenced is not told, and what landed after the stop's read is told once" holds it.
 #   where the router is asked (router.rs, `"" => ROUTER_URL`) and where the voice is reached (calls/live.rs): a
 #     wrong rule there would make a test reach a provider outside this machine, with a key that is none. No test
 #     reaches an engine outside, and no planted rule may make one.
@@ -131,7 +142,7 @@ PLANTS = [
     (C, 'call', 'the router is asked the question bare', '                    let answer = router::asked(&app, &key, routing::request(&question)).await;', '                    let answer = router::asked(&app, &key, question.clone()).await;'),
     (C, 'refused', 'a request whose file was not written is handed on', '            Came::Written(Some(path)) => self.routed(Fed::Written(&path)).await,\n            Came::Answer(None) | Came::Written(None) => self.routed(Fed::Failed).await,', '            Came::Written(path) => {\n                let path = path.unwrap_or_default();\n                self.routed(Fed::Written(&path)).await;\n            }\n            Came::Answer(None) => self.routed(Fed::Failed).await,'),
     (C, 'refused', 'a router that does not answer is waited for without end', '            Came::Answer(None) | Came::Written(None) => self.routed(Fed::Failed).await,', '            Came::Answer(None) | Came::Written(None) => {}'),
-    (C, 'call', 'what an agent was told to leave is still told', '                if let Some(session) = &done.left {\n                    self.machine.supersede(session);\n                }\n', ''),
+    (C, 'call', 'what an agent was told to leave is still told', '                if let Some(session) = &done.left {\n                    let rows = self.rows().await;\n                    let now = self.now();\n                    self.machine.supersede(session, &rows, now);\n                }\n', ''),
     (C, 'refused', 'a tool that refused is taken to have answered', '                let (Some(place), Some(receipt)) = (place, done.receipt) else {\n                    return self.routed(Fed::Failed).await;\n                };', '                let Some(place) = place else {\n                    return self.routed(Fed::Failed).await;\n                };\n                let receipt = done.receipt.unwrap_or_else(|| json!({}));'),
     (C, 'call', 'nobody is known to own work', '                        found.map(|row| row.owner_principal.clone())', '                        found.and_then(|_| None::<String>)'),
     (C, 'call', 'an action is done for the folder of the data itself', '                let folder = app.config.data_dir.join("media").join(HANDOFF_FILES);', '                let folder = app.config.data_dir.join(HANDOFF_FILES);'),
@@ -144,6 +155,7 @@ PLANTS = [
     (C, 'call', 'the folder of the files is open to all', '    made.recursive(true).mode(0o700).create(folder).ok()?;', '    made.recursive(true).mode(0o755).create(folder).ok()?;'),
     (C, 'call', 'a file of where a request came from is open to all', '        .mode(0o600)', '        .mode(0o644)'),
     (C, 'call', 'a file of where a request came from is written in ASCII', '    open.write_all(python::dumps(provenance).as_bytes()).ok()?;', '    open.write_all(python::dumps_ascii(provenance).as_bytes()).ok()?;'),
+    (C, 'refused', 'a talk too long to keep ends the call', '            Ok(Err(why)) => why,', '            Ok(Err(_)) => return false,'),
     # ---- the router as the Host asks it
     (R, 'call', 'the router is asked without a key', '            .header("Authorization", &bearer)\n', ''),
     (R, 'refused', 'a router that answers an error is taken at its word', '        if !(200..300).contains(&response.status().as_u16()) {\n            return None;\n        }\n', ''),

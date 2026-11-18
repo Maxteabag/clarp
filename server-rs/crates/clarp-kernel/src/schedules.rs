@@ -36,14 +36,15 @@ fn shortcut(expression: &str) -> Option<&'static str> {
     })
 }
 
-/// A whole number as a cron field writes one, or why it is none, in Python's words.
+/// A whole number as a cron field writes one: ASCII digits and nothing else (no sign, no
+/// underscore, no blank, no digit of another script), or why it is none, in the Python
+/// Host's words.
 fn number(text: &str) -> Result<i128, String> {
-    python::int(text).ok_or_else(|| {
-        format!(
-            "invalid literal for int() with base 10: {}",
-            python::text(text)
-        )
-    })
+    let digits = !text.is_empty() && text.bytes().all(|sign| sign.is_ascii_digit());
+    digits
+        .then(|| python::int(text))
+        .flatten()
+        .ok_or_else(|| format!("Not a cron number: {}", python::text(text)))
 }
 
 /// The values one field allows: a list of single values, ranges, `*`, and steps over any of

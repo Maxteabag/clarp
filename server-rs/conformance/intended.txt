@@ -236,7 +236,3 @@ d90e2215ebd4  oracle-delegations: the answer to the delegation, before the agent
 # says which change of the reference it is, is dated, and goes with the landing of its port; a line
 # that stands here for more than a few days is a defect of the rebuild's own.
 #
-# The words a cron number that is no plain number is refused in. The Python Host changed them on
-# 18 Nov 2026 (its PR 427, R66: ASCII digits only, in the words of its one refusal); this Host says the
-# older words until the port of that evening's fixes lands (the branch rebuild/oracle-r58).
-cfc48f971d75  schedules: the words of a refused cron number, since the reference's PR 427

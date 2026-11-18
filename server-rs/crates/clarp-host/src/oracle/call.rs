@@ -438,6 +438,8 @@ struct Session<'a> {
     route: Option<Route>,
     doing: Option<(i64, usize)>,
     came: mpsc::UnboundedSender<Came>,
+    /// What was to be kept of the talk could not be, once in this call: said once.
+    unkept: bool,
 }
 
 impl Session<'_> {
@@ -467,14 +469,26 @@ impl Session<'_> {
     }
 
     /// What the conversation said to keep of the talk is kept. `false`: the thread is no
-    /// longer this call's, and the call is over.
+    /// longer this call's, and the call is over. What is too much to keep, or what the store
+    /// could not take, ends nothing: the call goes on, and a call that goes on in its place
+    /// reads what was kept last. That it was not kept is said once a call, and not what.
     async fn keeps(&mut self) -> bool {
         let Some(state) = self.machine.to_keep() else {
             return true;
         };
         let (opened, now_ms) = (self.opened(), self.app.clock.now_ms());
         let kept = with_memory(self.app, |memory| memory.save(opened, &state, now_ms));
-        matches!(kept.await, Ok(Ok(())))
+        let why = match kept.await {
+            Ok(Ok(())) => return true,
+            Ok(Err(threads::STALE)) => return false,
+            Ok(Err(why)) => why,
+            Err(_) => "the store could not take it",
+        };
+        if !self.unkept {
+            self.unkept = true;
+            eprintln!("clarp-host: a call of the Oracle could not keep its talk: {why}");
+        }
+        true
     }
 
     /// The actions the routing began are written down. `acts`: and something is about to be
@@ -589,9 +603,11 @@ impl Session<'_> {
             Came::Answer(None) | Came::Written(None) => self.routed(Fed::Failed).await,
             Came::Done(done) => {
                 // What an agent was told to leave is not told as a result of this call,
-                // whatever else came of the tool.
+                // whatever else came of the tool: of the work as the book has it now.
                 if let Some(session) = &done.left {
-                    self.machine.supersede(session);
+                    let rows = self.rows().await;
+                    let now = self.now();
+                    self.machine.supersede(session, &rows, now);
                 }
                 let place = self.doing.take();
                 let (Some(place), Some(receipt)) = (place, done.receipt) else {
@@ -783,6 +799,7 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
         route: None,
         doing: None,
         came,
+        unkept: false,
     };
     // From here on the call can be put through to an agent, where its phone asked for that:
     // the phone is told which call this is before anything else of it, and before the voice
