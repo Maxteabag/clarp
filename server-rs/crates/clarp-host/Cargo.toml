@@ -25,7 +25,6 @@ http.workspace = true
 nix.workspace = true
 pty-process.workspace = true
 ring.workspace = true
-rusqlite.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
