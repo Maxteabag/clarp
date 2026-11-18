@@ -161,3 +161,11 @@ def test_a_fallback_request_id_of_exactly_128_bytes_is_kept(grant):
     assert out["conversation_mode"] == "classic"
     stored = next(r for r in rings._load() if r.get("_live_call_id") == grant["call_id"])
     assert stored["_live_fallback_request_id"] == "æ" * 64
+
+
+@pytest.mark.parametrize("field", ["owner_nonce", "join_ticket"])
+@pytest.mark.parametrize("value", ["nønce", "\u2603" * 32])
+def test_a_nonce_or_ticket_outside_ascii_is_refused_with_an_error_frame(call, field, value):
+    error = _join_error(_join(call.grant, **{field: value}))
+    assert error["code"] == "live_owner_conflict"
+    assert call.connects == [] and not _ring_of(call.grant).get("_live_join_consumed")

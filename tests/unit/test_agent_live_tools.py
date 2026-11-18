@@ -198,6 +198,7 @@ def _rows(ledger):
     {"callback": {"kind": "http", "url": "http://127.0.0.1:7790/x?y=1"}},
     {"delegate": {"kind": "http", "url": "https://127.0.0.1/x"}},
     {"delegate": {"kind": "http", "url": DIRECTOR, "fallback": "shell"}},
+    {"agents": 7}, {"agents": True}, {"agents": 1.5},  # R54: not a list
 ])
 def test_a_missing_disabled_unsafe_or_impersonating_block_gives_no_tools(block):
     profile = {"profile_id": "p", "agent_session": "rk-sander-0001"}
