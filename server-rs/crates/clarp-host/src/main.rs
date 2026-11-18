@@ -197,6 +197,8 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let app = App {
+        android_chip: Arc::default(),
+        android,
         config: config.clone(),
         hub,
         fleet,
@@ -269,6 +271,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::calls::resume(&app);
     // And the chips of the phones are kept current from now on.
     clarp_host::chip::run(&app, is_limited);
+    tokio::spawn(clarp_host::android_chip::run(app.clone()));
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
     // And a handoff of the Oracle's that a phone does not get on with is not waited for.

@@ -142,6 +142,11 @@ impl Chip {
             .ok_or_else(|| Unavailable("the chip could not be read".to_string()))
     }
 
+    pub async fn present(&self, app:&App) -> Option<Value> {
+        let mut guard = self.held.lock().await;
+        let held = Self::read(&mut guard, app).await.ok()?;
+        Some(held.pacer.now(&roster(app),app.clock.now_ms()))
+    }
     async fn keep_register(app: &App, register: &Register) -> Result<(), Unavailable> {
         let activities: Vec<&Activity> = register.activities().collect();
         let kept = serde_json::to_vec(&activities).unwrap_or_default();
@@ -200,6 +205,7 @@ impl Chip {
 
     /// A state of the chip is to be told: it waits at the gate for every activity there is.
     fn offer(&self, app: &App, held: &mut Held, push: &chip::Push, now_ms: i64) {
+        app.android_chip.offer(&push.state, push.high);
         if !self.pushes() {
             return;
         }
@@ -545,20 +551,6 @@ fn owner(principal: &Principal) -> String {
     }
 }
 
-/// The chip for a phone of another kind is a paired phone's to ask for, for itself; and
-/// this Host does not have it.
-fn of_another_kind(principal: &Principal) -> ApiError {
-    match principal {
-        Principal::Device {
-            scope: Scope::Full, ..
-        } => ApiError::new(
-            StatusCode::NOT_IMPLEMENTED,
-            "The summary of agents working for a phone of this kind is not built on this Host yet",
-        ),
-        _ => ApiError::new(StatusCode::FORBIDDEN, "full device access required"),
-    }
-}
-
 fn unavailable(why: Unavailable) -> Response {
     ApiError::from(why).into_response()
 }
@@ -580,7 +572,7 @@ async fn register(
         return ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response();
     }
     if said["platform"] == "fcm" {
-        return of_another_kind(&principal).into_response();
+        return app.android_chip.registration(&app,&principal,&said["kind"],said["ended"]==true).await;
     }
     let chip = app.chip.clone();
     let (activity_id, token) = (text(&said, "activity_id"), text(&said, "token"));
@@ -629,7 +621,7 @@ async fn unregister(
         }
     };
     if named("platform") == "fcm" {
-        return of_another_kind(&principal).into_response();
+        return app.android_chip.registration(&app,&principal,&Value::Null,true).await;
     }
     let chip = app.chip.clone();
     match chip
