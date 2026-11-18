@@ -149,7 +149,7 @@ fn to_base64(bytes: &[u8]) -> String {
 
 /// Names and values as a form is sent: what is no letter, digit or one of `_.-~` by its
 /// number, a space as a plus.
-fn form_encoded(fields: &[(&str, &str)]) -> String {
+pub(crate) fn form_encoded(fields: &[(&str, &str)]) -> String {
     let encoded = |text: &str| -> String {
         let mut out = String::with_capacity(text.len());
         for byte in text.bytes() {

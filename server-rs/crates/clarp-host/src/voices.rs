@@ -31,7 +31,7 @@ use crate::owner;
 use crate::voice::send_file;
 
 /// The engines that speak which are built into this Host.
-const BUILT: [&str; 2] = [said::CARTESIA, said::GEMINI];
+use crate::voice::BUILT;
 
 /// How many events of speech an app may report at once (the Python Host's `MAX_BATCH`).
 const MOST_EVENTS: usize = 500;

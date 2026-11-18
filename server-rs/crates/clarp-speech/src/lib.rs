@@ -14,6 +14,7 @@
 
 pub mod cartesia;
 pub mod chirp;
+pub mod deepgram_voice;
 pub mod gemini;
 pub mod listen;
 pub mod markup;
