@@ -11,6 +11,7 @@ import base64
 import concurrent.futures
 import json
 import socket
+import sqlite3
 import threading
 import time
 import uuid
@@ -20,7 +21,7 @@ from urllib.request import Request, urlopen
 from . import config, oracle_delegations, ws
 from .http_utils import principal_of, require_full_scope
 from . import oracle_contact
-from .log import log, log_exception
+from .log import log, log_exception, log_fault
 from .oracle_calls_stable import AgentTools, session_config as realtime_config
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
@@ -120,6 +121,9 @@ RESULT_RELEASE_SILENCE_SECONDS = 4.5
 # A relayed part Oracle never started speaking stops blocking newer results
 # after this long; the relay stays continuable.
 RELAY_STALL_SECONDS = 15.0
+# Native findings remembered across calls, so an alias in a later call is not told
+# twice; the newest are kept (the thread's checkpoint must stay bounded).
+FORWARDED_FINDINGS_KEPT = 500
 # An earcon (oracle_earcons) waits until Oracle's audio has been silent this
 # long, so a cue never lands between two chunks of a reply.
 EARCON_QUIET_SECONDS = 0.6
@@ -398,6 +402,7 @@ class Conversation:
         self.seen = set()
         self.results_seen = set()
         self.silenced_results = set()
+        self.checkpoint_failed = False
         # Context notifications are owned by this Oracle thread. Native
         # decisions and unread user-directed completions share one dedup set;
         # the durable table extends ownership across normal reconnects.
@@ -446,16 +451,30 @@ class Conversation:
     def checkpoint(self):
         if self.memory:
             with self.lock:
+                # Only this call's work can be told by itself in a call that resumes it
+                # (everything older is background_work there), so only its ids are kept:
+                # the thread lives for every call with this contact and must not grow.
+                work = self.call_work()
+                kept = set(work)
                 state = {"revision": self.revision, "fragments": self.fragments,
-                    "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
+                    "results_sent": sorted(self.results_sent & kept),
+                    "forwarded_findings": dict(list(self.forwarded_findings.items())[-FORWARDED_FINDINGS_KEPT:]),
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
                     "earcons": self.earcons,
                     "routed_revision": self.routed_revision,
-                    "call_active_ms": wall_ms(), "call_work": self.call_work()}
-                if self.silenced_results:
-                    state["silenced_results"] = sorted(self.silenced_results)
-                self.memory.save(state)
+                    "call_active_ms": wall_ms(), "call_work": work}
+                silenced = self.silenced_results & kept
+                if silenced:
+                    state["silenced_results"] = sorted(silenced)
+                try:
+                    self.memory.save(state)
+                except (oracle_memory.CheckpointTooLarge, sqlite3.Error) as exc:
+                    # The call goes on; a call resuming within thirty seconds reads the
+                    # last checkpoint that was saved. Logged once per call, content-free.
+                    if not self.checkpoint_failed:
+                        self.checkpoint_failed = True
+                        log_fault("oracleCheckpointNotSaved", exc)
 
     def call_work(self):
         """Operations delegated in this call."""
@@ -882,6 +901,8 @@ class Conversation:
             relay.next = start
             relay.auto = 0
             relay.held = False
+            if served:  # read on request: no longer paused or silenced
+                self.silenced_results.discard(relay.key)
         self.send_part(relay, now, served=served, resumed=resumed)
 
     def send_part(self, relay, now=None, *, served=False, resumed=False):
@@ -902,6 +923,10 @@ class Conversation:
             pause_after = relay.auto >= oracle_relay.AUTO_PARTS
         self.append("commentary", relay.part(index, served=served, resumed=resumed, pause_after=pause_after))
         with self.lock:
+            if pause_after and index + 1 < relay.total and relay.key in self.result_findings:
+                # Paused at the part limit: a deliberate pause, not a cut. A later
+                # call does not go on past it by itself; it stays readable on request.
+                self.silenced_results.add(relay.key)
             if index + 1 == relay.total and relay.key in self.result_findings:
                 self.results_sent.add(relay.key)
                 self.results_seen.add(relay.key)

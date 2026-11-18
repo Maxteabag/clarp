@@ -732,3 +732,146 @@ def test_on_request_delivery_also_satisfies_a_matching_native_finding(lab):
     call.conv.tick()
     assert [_body(p) for p in call.parts()] == ["All clear."]
     assert _cues(call) == []
+
+
+def _tell_on(call, rounds):
+    """Let the telling run: each round the voice speaks the part it was given and goes quiet."""
+    for _ in range(rounds):
+        _oracle_says(call, "Reading it out.")
+        call.now[0] += mod.QUIET_AFTER_SECONDS + 1
+        call.conv.tick()
+
+
+def test_a_stop_during_the_stopped_agents_own_telling_sends_no_further_part(lab):
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120}
+    call = lab(rows=[row])
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    ident = row["delegation_id"]
+    relay = call.conv.relays[ident]
+    assert relay.total > 2 and [_body(p) for p in call.parts()] == relay.chunks[:1]
+    call.conv.supersede(row["session"])
+    _tell_on(call, 4)
+    assert [_body(p) for p in call.parts()] == relay.chunks[:1]
+    call.conv.read_result(ident)
+    assert _body(call.parts()[-1]) == relay.chunks[1]
+    assert _cues(call) == ["result"]
+
+
+def test_an_alias_arriving_mid_telling_neither_cues_nor_interrupts_the_first_answer(lab):
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120,
+           "backend_session_id": "thread", "result_message_id": "m"}
+    alias = {**row, "delegation_id": "alias"}
+    call = lab(rows=[row])
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    relay = call.conv.relays[row["delegation_id"]]
+    assert 2 < relay.total <= mod.oracle_relay.AUTO_PARTS
+    call.tools.rows.append(alias)
+    call.tools.delegations.add(alias["delegation_id"])
+    _tell_on(call, relay.total + 2)
+    assert [_body(p) for p in call.parts()] == relay.chunks
+    assert _cues(call) == ["result"]
+    assert {row["delegation_id"], alias["delegation_id"]} <= call.conv.results_sent
+
+
+def test_an_answer_paused_at_the_part_limit_stays_paused_in_the_next_call(lab):
+    """A pause at the limit is deliberate: a call within thirty seconds does not go on past it by itself.
+    Asked for, it continues at part 9; a reading on request that is then cut off continues with its cue."""
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 600}
+    ident = row["delegation_id"]
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    _tell_on(call, mod.oracle_relay.AUTO_PARTS + 3)
+    chunks = call.conv.relays[ident].chunks
+    assert len(chunks) > mod.oracle_relay.AUTO_PARTS + 2
+    assert [_body(p) for p in call.parts()] == chunks[:mod.oracle_relay.AUTO_PARTS]
+
+    _resume_relay_lab(call)
+    _tell_on(call, 3)
+    assert call.parts(-1) == [] and _cues(call) == []
+
+    call.conv.read_result(ident)
+    _tell_on(call, 1)
+    assert [_body(p) for p in call.parts(-1)] == chunks[8:10]
+
+    _resume_relay_lab(call)
+    call.now[0] += 10
+    call.conv.tick()
+    assert [_body(p) for p in call.parts(-1)] == chunks[10:11]
+    assert _cues(call) == ["result"]
+
+
+def test_a_checkpoint_keeps_only_this_calls_work(lab):
+    earlier = {**_theo_row(), "delegation_id": "earlier", "result_text": "An earlier answer."}
+    row = {**_theo_row(), "result_text": "All clear."}
+    call = lab(rows=[row], prior_rows=[earlier])
+    call.conv.memory = FakeMemory()
+    call.conv.read_result("earlier")
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    assert {"earlier", row["delegation_id"]} <= call.conv.results_sent
+    call.conv.forwarded_findings = {f"finding-{i}": f"op-{i}" for i in range(mod.FORWARDED_FINDINGS_KEPT + 100)}
+    call.conv.checkpoint()
+    saved = call.conv.memory.state
+    assert saved["results_sent"] == [row["delegation_id"]]
+    assert list(saved["forwarded_findings"]) == [f"finding-{i}" for i in range(100, mod.FORWARDED_FINDINGS_KEPT + 100)]
+
+
+def test_a_checkpoint_that_cannot_be_saved_does_not_end_the_call(lab, monkeypatch):
+    from lib import oracle_memory
+    faults = []
+    monkeypatch.setattr(mod, "log_fault", lambda code, exc, **kw: faults.append((code, type(exc).__name__)))
+    monkeypatch.setattr(oracle_memory, "CHECKPOINT_MAX_BYTES", 10)
+    store = oracle_memory.open_thread("owner", "theo", connection_id="connection-1")
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120}
+    call = lab(rows=[row])
+    call.conv.memory = store
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    _tell_on(call, 3)
+    assert len(call.parts()) == 4 and not call.conv.stop.is_set()
+    assert faults == [("oracleCheckpointNotSaved", "CheckpointTooLarge")]
+
+
+def test_a_stop_holds_across_three_calls_and_the_answer_stays_readable(lab):
+    row = {**_theo_row(), "result_text": "The old reading."}
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    call.conv.supersede(row["session"])
+    for _ in range(2):
+        _resume_relay_lab(call)
+        call.now[0] += 10
+        call.conv.tick()
+        assert call.parts(-1) == [] and _cues(call) == []
+    call.conv.read_result(row["delegation_id"])
+    assert _body(call.parts(-1)[-1]) == row["result_text"]
+
+
+def test_a_checkpoint_keeps_no_silenced_id_of_earlier_work(lab):
+    earlier = {**_theo_row(), "delegation_id": "earlier", "result_text": "A paragraph about the pump. " * 600}
+    call = lab(prior_rows=[earlier])
+    call.conv.memory = FakeMemory()
+    call.conv.read_result("earlier")
+    _tell_on(call, mod.oracle_relay.AUTO_PARTS + 2)
+    assert "earlier" in call.conv.silenced_results     # paused at the limit while read on request
+    call.conv.checkpoint()
+    assert "silenced_results" not in call.conv.memory.state
+
+
+def test_a_save_refused_because_another_connection_took_the_thread_still_ends_the_call(lab):
+    from lib import oracle_memory
+    store = oracle_memory.open_thread("owner", "theo", connection_id="connection-1")
+    call = lab()
+    call.conv.memory = store
+    call.conv.checkpoint()
+    oracle_memory.open_thread("owner", "theo", connection_id="connection-2")
+    with pytest.raises(ValueError, match="Stale Oracle connection"):
+        call.conv.checkpoint()
