@@ -38,6 +38,7 @@ pub mod live_session;
 pub mod located;
 pub mod media;
 pub mod notify;
+pub mod oracle;
 pub mod personas;
 pub mod portraits;
 pub mod presence;

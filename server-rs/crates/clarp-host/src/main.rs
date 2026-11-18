@@ -209,6 +209,7 @@ async fn serve(config: Config) -> Result<(), String> {
         janitors: Arc::default(),
         router: Arc::default(),
         explain: Arc::default(),
+        oracle: Arc::default(),
         keeper: Arc::default(),
         audio: Arc::default(),
         limits,

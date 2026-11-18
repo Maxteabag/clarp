@@ -16900,21 +16900,30 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         json!({ "ring": null, "settings": { "enabled": true, "show_reason": false } }),
         "nobody rings now"
     );
-    let oracle = read("/oracle/status");
-    assert_eq!(
-        (&oracle["available"], &oracle["v2"]["available"]),
-        (&json!(false), &json!(false))
-    );
-    assert_eq!(
-        oracle["v2"]["podcast"], false,
-        "and it claims nothing it cannot do"
-    );
-    assert_eq!(
-        read("/oracle/contact"),
-        json!({ "persona": "", "session": "", "stale": "" })
-    );
-    assert_eq!(read("/oracle/delegations"), json!({ "delegations": [] }));
-    assert_eq!(read("/oracle/calls/status"), json!({ "delegations": [] }));
+    // The Oracle speaks for its user: a Host that asks nobody who they are answers nothing
+    // of it, read or done, whether or not it has the route.
+    for (method, path) in [
+        ("GET", "/oracle/status"),
+        ("GET", "/oracle/contact"),
+        ("POST", "/oracle/contact"),
+        ("GET", "/oracle/voice-provider"),
+        ("GET", "/oracle/delegations"),
+        ("POST", "/oracle/handoff"),
+        ("GET", "/oracle"),
+        ("GET", "/oracle/nothing-there"),
+    ] {
+        let (status, said) = host.ask(method, path, Some(&json!({})));
+        assert_eq!(
+            (status, said["error"].as_str()),
+            (
+                401,
+                Some("Oracle requires authenticated full-device access")
+            ),
+            "{method} {path}"
+        );
+    }
+    // And what is only named like it is another thing.
+    assert_eq!(host.ask("GET", "/oracles", None).0, 404);
 
     // The tools' logins, read off the tools' own files, and how much of their accounts is
     // used, which this Host does not read.
@@ -17036,9 +17045,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/diagnostics/settings", json!({ "enabled": true })),
         ("/vocab/packs", json!({ "name": "p" })),
         ("/vocab/run", json!({ "session": echo })),
-        ("/oracle/contact", json!({ "session": echo })),
-        ("/oracle/handoff", json!({ "session": echo })),
-        ("/oracle/v2/calls/control", json!({ "action": "end" })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (
@@ -26453,4 +26459,198 @@ fn a_ring_is_pushed_to_a_phone_as_an_incoming_call_with_a_key_of_the_hosts_own()
     taken_back(&rung);
     assert_eq!(alerts().len(), told_before, "a live ring has no alert");
     let _ = phone_id;
+}
+
+#[test]
+fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents_there_are() {
+    let place = Place::new("oracle-contact");
+    // The owner's file names the second voice, and has no key for it yet.
+    let owners = place.root.join("owner.toml");
+    let written = "[oracle]\nvoice_provider = \" Gemini \"\n\n[gemini_tts]\nvoice = \"Charon\"\n";
+    std::fs::write(&owners, written).unwrap();
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let start = || place.start_without("the-token", &args, &[], &["GEMINI_API_KEY"]);
+    let host = start();
+    let nobody = json!({ "session": "", "persona": "", "stale": "" });
+    let choose = |host: &Host, name: Value| {
+        host.ask("POST", "/oracle/contact", Some(&json!({ "session": name })))
+    };
+
+    // A Host that has just begun has no contact, and says that it holds no call of the
+    // Oracle: nothing it cannot do is claimed, and what it has not is refused in words.
+    assert_eq!(host.get("/oracle/contact"), nobody);
+    let status = host.get("/oracle/status");
+    assert_eq!(
+        (&status["available"], &status["v2"]["available"]),
+        (&json!(false), &json!(false))
+    );
+    assert_eq!(status["v2"]["podcast"], false);
+    assert_eq!(
+        host.get("/oracle/delegations"),
+        json!({ "delegations": [] })
+    );
+    assert_eq!(
+        host.get("/oracle/calls/status"),
+        json!({ "delegations": [] })
+    );
+    for (path, body) in [
+        ("/oracle/handoff", json!({ "session": "theo" })),
+        ("/oracle/v2/calls/control", json!({ "action": "end" })),
+        ("/oracle/delegations", json!({})),
+    ] {
+        let (status, said) = host.ask("POST", path, Some(&body));
+        let why = said["error"].as_str().unwrap_or("");
+        assert_eq!(status, 501, "{path}: {said}");
+        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
+    }
+
+    // A contact is chosen by what an agent is called, whatever the case and the blanks
+    // around it, or by its session: what is kept is the session.
+    let theo = host.new_agent("Theo");
+    let mike = host.new_agent("Mike");
+    let is = |session: &str, persona: &str| json!({ "session": session, "persona": persona, "stale": "" });
+    assert_eq!(choose(&host, json!("  THEO ")), (200, is(&theo, "Theo")));
+    assert_eq!(host.get("/oracle/contact"), is(&theo, "Theo"));
+    assert_eq!(choose(&host, json!(mike)), (200, is(&mike, "Mike")));
+    // A name that is nobody's is refused in the Python Host's words, and so is what is no
+    // object at all; what was kept stays.
+    let (status, said) = choose(&host, json!("it's nobody"));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (
+            409,
+            Some("\"it's nobody\" is not a live agent; choose a contact from the roster")
+        )
+    );
+    let (status, said) = choose(&host, json!(5));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (
+            409,
+            Some("'5' is not a live agent; choose a contact from the roster")
+        )
+    );
+    let (status, said) = host.ask("POST", "/oracle/contact", Some(&json!(["mike"])));
+    assert_eq!((status, said["error"].as_str()), (400, Some("bad json")));
+    assert_eq!(host.get("/oracle/contact"), is(&mike, "Mike"));
+    // A janitor is nobody the Oracle hands work to, by its name or by its session.
+    let asked = json!({
+        "name": "Night Sweeper", "backend": "codex", "cwd": place.root.join("work"),
+        "request_id": "request-one", "template_id": "scheduled-prompt",
+        "options": { "instructions": "Sweep." },
+        "attachments": [{
+            "attachment_id": "made-nightly", "trigger_id": "schedule",
+            "config": { "cron": "15 3 * * *", "timezone": "Europe/Oslo" },
+        }],
+    });
+    let (status, made) = host.ask("POST", "/janitors", Some(&asked));
+    assert_eq!(status, 200, "{made}");
+    let sweeper = made["janitor"]["session"].as_str().unwrap().to_string();
+    for name in ["Night Sweeper", sweeper.as_str()] {
+        let (status, said) = choose(&host, json!(name));
+        assert_eq!(status, 409, "{name}: {said}");
+    }
+    assert_eq!(host.get("/oracle/contact"), is(&mike, "Mike"));
+    assert_eq!(choose(&host, json!(theo)), (200, is(&theo, "Theo")));
+
+    // The Host that starts again has it still.
+    host.kill();
+    let host = start();
+    assert_eq!(host.get("/oracle/contact"), is(&theo, "Theo"));
+    // A contact that is put away is no agent any more: it is let go, and said to be stale
+    // once, so that an app can ask its user to choose again.
+    host.post(
+        "/agent-archive",
+        json!({ "session": theo, "archived": true }),
+    );
+    assert_eq!(
+        host.get("/oracle/contact"),
+        json!({ "session": "", "persona": "", "stale": theo })
+    );
+    assert_eq!(host.get("/oracle/contact"), nobody);
+    // One that is taken out again is not the contact for that: it was let go.
+    host.post(
+        "/agent-archive",
+        json!({ "session": theo, "archived": false }),
+    );
+    assert_eq!(host.get("/oracle/contact"), nobody);
+    // And a contact is cleared by choosing nothing.
+    assert_eq!(choose(&host, json!(theo)), (200, is(&theo, "Theo")));
+    assert_eq!(choose(&host, json!("   ")), (200, nobody.clone()));
+    assert_eq!(host.get("/oracle/contact"), nobody);
+
+    // The voice a call of the Oracle runs on. The owner's file chooses the second, for
+    // which this Host has no key: the first speaks, and why is said.
+    let voice = |host: &Host| host.get("/oracle/voice-provider");
+    let pick = |host: &Host, body: Value| host.ask("POST", "/oracle/voice-provider", Some(&body));
+    let needs_key = "Gemini Live needs a Gemini API key on this Host";
+    let told = |provider: &str, selected: &str, available: &[&str], why: Option<&str>| {
+        json!({
+            "provider": provider, "selected": selected, "default": "openai",
+            "available": available, "fallback_reason": why,
+            "gemini": { "model": "gemini-3.8-live", "voice": "Charon" },
+        })
+    };
+    assert_eq!(
+        voice(&host),
+        told("openai", "gemini", &["openai"], Some(needs_key))
+    );
+    // A phone's choice is over the owner's file, whatever the case it is written in.
+    assert_eq!(
+        pick(&host, json!({ "provider": " OpenAI " })),
+        (200, told("openai", "openai", &["openai"], None))
+    );
+    assert_eq!(voice(&host), told("openai", "openai", &["openai"], None));
+    // What is none of the voices is refused in words, and the choice stays.
+    let one_of = "voice provider must be one of: openai, gemini";
+    for body in [
+        json!({ "provider": "gemini live" }),
+        json!({ "provider": 5 }),
+        json!({}),
+    ] {
+        let (status, said) = pick(&host, body.clone());
+        assert_eq!(
+            (status, said["error"].as_str()),
+            (400, Some(one_of)),
+            "{body}"
+        );
+    }
+    let (status, said) = pick(&host, json!("gemini"));
+    assert_eq!((status, said["error"].as_str()), (400, Some("bad json")));
+    assert_eq!(voice(&host), told("openai", "openai", &["openai"], None));
+    assert_eq!(
+        pick(&host, json!({ "provider": "Gemini" })),
+        (200, told("openai", "gemini", &["openai"], Some(needs_key)))
+    );
+    // The owner writes a key for the second voice into his file, and names its model and
+    // the voice of the persona called Oracle: read where it is, the next time it is asked.
+    let written = [
+        "[oracle]\ngemini_model = \" gemini-x-live \"\n\n",
+        "[gemini_tts]\napi_key = \"a-key\"\nvoice = \"Charon\"\n\n",
+        "[gemini_tts.voices]\nORACLE = \"Aoede\"\n",
+    ]
+    .concat();
+    std::fs::write(&owners, written).unwrap();
+    let with_key = |voice: &str| {
+        json!({
+            "provider": "gemini", "selected": "gemini", "default": "openai",
+            "available": ["openai", "gemini"], "fallback_reason": null,
+            "gemini": { "model": "gemini-x-live", "voice": voice },
+        })
+    };
+    assert_eq!(voice(&host), with_key("Aoede"));
+    // A voice the owner names for the Oracle's calls is over the persona's.
+    let named = "[oracle]\ngemini_model = \"gemini-x-live\"\ngemini_voice = \"Puck\"\n\n\
+                 [gemini_tts]\napi_key = \"a-key\"\n\n[gemini_tts.voices]\nOracle = \"Aoede\"\n";
+    std::fs::write(&owners, named).unwrap();
+    assert_eq!(voice(&host), with_key("Puck"));
+    // The Host that starts again has the phone's choice still: the file names none now.
+    host.kill();
+    let host = start();
+    assert_eq!(voice(&host), with_key("Puck"));
+    assert_eq!(
+        pick(&host, json!({ "provider": "openai" })).1["selected"],
+        "openai"
+    );
+    assert_eq!(voice(&host)["provider"], "openai");
 }

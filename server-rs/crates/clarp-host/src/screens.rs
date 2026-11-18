@@ -271,10 +271,6 @@ async fn oracle_status() -> Json<Value> {
     Json(kept("/oracle/status"))
 }
 
-async fn oracle_contact() -> Json<Value> {
-    Json(kept("/oracle/contact"))
-}
-
 async fn oracle_delegations() -> Json<Value> {
     Json(json!({ "delegations": [] }))
 }
@@ -424,7 +420,6 @@ pub fn routes() -> Router<App> {
         .route("/vocab/preview", post(no_vocabulary))
         .route("/vocab/profiles/workspace", post(no_vocabulary))
         .route("/oracle/status", get(oracle_status))
-        .route("/oracle/contact", get(oracle_contact).post(no_oracle))
         .route(
             "/oracle/delegations",
             get(oracle_delegations).post(no_oracle),
