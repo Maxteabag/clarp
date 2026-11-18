@@ -20,13 +20,26 @@
 //!
 //! What the tool says of a Clarp Host's agents it has from the Host it is bridged to, which
 //! on a machine with a Python Host is that one. So of agents this Host says its own word
-//! (`clarp_kernel::desk::of_this_host`).
+//! (`clarp_kernel::desk::of_this_host`): its agents, counted, and those of them whose work
+//! stopped: a turn that failed for a usage limit with none since, a turn that waits for an
+//! account, a queue that is held with turns waiting.
+//!
+//! From the desk an app asks that such work go on (`POST /hotseat/resume`,
+//! `clarp_kernel::resume`): an agent the kept desk lists as stopped is sent one prompt for
+//! that stop, under an id made of the agent and the stop, so that asking twice sends once;
+//! a held queue is let go; and for a session that is no Host's the app is given the command
+//! a person types. A turn that waits for an account is not sent a prompt: it is tried at
+//! once on the account that is there, which is all a person who asks for it can mean.
 
 use std::process::Stdio;
 use std::time::Duration;
 
-use clarp_kernel::desk::{self, Answer, Answers, Asked, Failed, Outcome};
+use clarp_kernel::conversation::Message;
+use clarp_kernel::desk::{self, Answer, Answers, Asked, Cause, Failed, Outcome};
+use clarp_kernel::recovery::Accounts;
+use clarp_kernel::resume::{self, Continued, Delivery, Standing, Wanted};
 use clarp_kernel::seats::Seats;
+use clarp_protocol::requests::SendRequest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::AsyncReadExt as _;
@@ -227,12 +240,200 @@ fn own_word(app: &App, of_desk: &Value, list: Option<&Value>) -> Value {
         .iter()
         .map(|(member, view)| desk::Agent {
             session: &member.record.session,
+            name: name_of(&member.record),
             tool: &member.record.backend,
+            model: &member.record.model,
+            cwd: &member.record.cwd,
             working: view.status.live.is_some(),
             tool_session: view.status.backend_session.as_deref(),
+            stopped: stopped(&view.status),
+            waiting: view.status.waiting.len(),
         })
         .collect();
-    desk::of_this_host(of_desk, list, &agents)
+    desk::of_this_host(of_desk, list, &agents, app.clock.now_ms())
+}
+
+/// What a person calls an agent.
+fn name_of(record: &crate::fleet::AgentRecord) -> &str {
+    if record.persona.is_empty() {
+        &record.session
+    } else {
+        &record.persona
+    }
+}
+
+/// Whether a live turn waits for an account: between two attempts, or before its first.
+fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
+    let parked = live.parked.as_ref();
+    live.held_for_an_account || parked.is_some_and(|parked| parked.wait.is_for_an_account())
+}
+
+/// Why an agent's work stopped and when, where it did and has not gone on since. A turn
+/// that runs has not stopped; one that waits for an account has, since it began to wait. An
+/// agent at rest has stopped where its queue is held with turns waiting, or where its last
+/// turn failed for a usage limit.
+fn stopped(status: &clarp_actor::Status) -> Option<(Cause, i64)> {
+    if let Some(live) = &status.live {
+        let since = match &live.parked {
+            Some(parked) if parked.wait.is_for_an_account() => parked.since_ms,
+            _ => live.started_at_ms,
+        };
+        return waits_for_an_account(live).then_some((Cause::WaitsForAnAccount, since));
+    }
+    let last = status.last.as_ref();
+    if status.paused && !status.waiting.is_empty() {
+        return Some((Cause::QueueHeld, last.map_or(0, |last| last.ended_at_ms)));
+    }
+    let last = last?;
+    let refused = matches!(
+        &last.outcome,
+        clarp_kernel::turn::Outcome::Failed { kind, .. } if kind == clarp_kernel::failures::USAGE_LIMIT
+    );
+    refused.then_some((Cause::UsageLimit, last.ended_at_ms))
+}
+
+/// A text of an asking's body, as the Python Host takes one: nothing where there is none.
+fn said(asked: &Value, key: &str) -> String {
+    match &asked[key] {
+        Value::String(said) => said.clone(),
+        other if clarp_kernel::python::truthy(other) => clarp_kernel::python::repr(other),
+        _ => String::new(),
+    }
+}
+
+/// `POST /hotseat/resume`: work that stopped goes on, a held queue is let go, or the command
+/// of a session that is no Host's is given. The status and the body.
+pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
+    let text = |key: &str| said(asked, key);
+    let wanted = resume::wanted(
+        &text("id"),
+        &text("kind"),
+        &text("backend"),
+        &text("action"),
+    );
+    let (id, lets_go) = match wanted {
+        Wanted::Answered(answer) => return answer,
+        Wanted::Continue(id) => (id, false),
+        Wanted::LetGo(id) => (id, true),
+    };
+    // The agent, by its name or its id: one of the roster or a janitor. (One that was
+    // removed is in neither.)
+    let directory = app.fleet.directory();
+    let Some(member) = directory.named(&id).or_else(|| directory.janitor(&id)) else {
+        return resume::in_the_way(None).unwrap_or((404, Value::Null));
+    };
+    let view = member.agent.view();
+    let live = view.status.live.as_ref();
+    let waits = live.is_some_and(waits_for_an_account);
+    let agent = resume::Agent {
+        session: &member.record.session,
+        agent_id: &member.record.agent_id,
+        name: name_of(&member.record),
+        archived: member.record.archived_at_ms.is_some(),
+        janitor: member.record.is_janitor,
+        held: view.status.paused,
+        // A turn that waits for an account does not work: it is what is to go on.
+        works: live.is_some() && !waits,
+    };
+    if let Some(answer) = resume::in_the_way(Some(&agent)) {
+        return answer;
+    }
+    let unavailable = || {
+        (
+            503,
+            serde_json::json!({ "ok": false, "error": "agent_unavailable" }),
+        )
+    };
+    if lets_go {
+        return match member.agent.resume("user".to_string()).await {
+            Ok((_, queue)) => resume::let_go(agent.session, queue.paused, queue.waiting as u64),
+            Err(_) => unavailable(),
+        };
+    }
+    // Its stop, as the kept desk lists it, and what has happened since.
+    let (stopped_work, observed_at) = {
+        let mut state = app.seats.state.lock().await;
+        match state.kept(app).await {
+            Some(kept) => (kept.desk.stopped_work().cloned(), kept.desk.observed_at()),
+            None => (None, None),
+        }
+    };
+    let stopped_work = stopped_work.unwrap_or(Value::Null);
+    let stop = resume::stop_of(&agent, &stopped_work);
+    let mut already_sent = false;
+    if let Some((_, stopped_at)) = stop {
+        // The prompt of this stop is in the conversation, or waits in the queue.
+        let id = resume::message_id(agent.agent_id, stopped_at);
+        let in_the_conversation = member.agent.row(Message::filed(&id).0).await;
+        already_sent = matches!(in_the_conversation, Ok(Some(_)));
+        if !already_sent && !view.status.waiting.is_empty() {
+            let waiting = member.agent.queue().await;
+            already_sent =
+                waiting.is_ok_and(|(waiting, _)| waiting.iter().any(|one| one.client_id == id));
+        }
+    }
+    let standing = Standing {
+        stop,
+        observed_at,
+        can_send: true,
+        already_sent,
+        completed_at: view.status.completed_at_ms,
+        now: app.clock.now_ms(),
+    };
+    let (text, message_id) = match resume::continued(&agent, &standing) {
+        Continued::Refused(answer) => return answer,
+        Continued::Send { text, message_id } => (text, message_id),
+    };
+    let stopped_at = stop.map_or(0, |(_, at)| at);
+    if waits {
+        // Its turn waits for an account: it is tried now on the account that is there.
+        // Where this Host puts the logins in place itself, its selector takes the turn up.
+        if app.config.accounts == Accounts::Select {
+            let name = agent.name;
+            let why = format!(
+                "{name} waits for an account. This Host's selector takes it up when one serves it."
+            );
+            let body =
+                serde_json::json!({ "ok": false, "error": "waiting_for_account", "message": why });
+            return (409, body);
+        }
+        member.agent.login_changed();
+        let tried = Delivery {
+            ok: true,
+            ..Delivery::default()
+        };
+        return resume::sent(&agent, stopped_at, false, &tried);
+    }
+    let request = SendRequest {
+        session: agent.session.to_string(),
+        text,
+        client_msg_id: Some(message_id),
+        synthesize_audio: Some(false),
+        hands_free: Some(false),
+        force_session: Some(true),
+        // A turn that began between the look above and this send is waited for.
+        queue_if_busy: Some(true),
+        origin: Some("automation".to_string()),
+        ..SendRequest::default()
+    };
+    match crate::edge::send_own(app, request).await {
+        Ok(taken) => {
+            let delivered = Delivery {
+                ok: true,
+                queued: taken.queued == Some(true),
+                ..Delivery::default()
+            };
+            resume::sent(&agent, stopped_at, already_sent, &delivered)
+        }
+        Err(refused) => {
+            let why = format!("{}: {}", refused.status().as_u16(), refused.message());
+            let failed = Delivery {
+                error: &why,
+                ..Delivery::default()
+            };
+            resume::sent(&agent, stopped_at, already_sent, &failed)
+        }
+    }
 }
 
 /// `GET /hotseat/status`: how the account seats stand, as the tool's list last said them.

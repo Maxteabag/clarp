@@ -176,6 +176,22 @@ async fn hotseat_desk(State(app): State<App>, Query(asked): Asked) -> Json<Value
     Json(crate::seats::asked(&app, refresh).await)
 }
 
+/// `POST /hotseat/resume`: work that stopped goes on, or a held queue is let go, or the
+/// command of a session that is no Host's is given (`crate::seats::resume`).
+async fn hotseat_resume(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    let asked: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    if !asked.is_object() {
+        return bad("bad json").into_response();
+    }
+    let (status, said) = crate::seats::resume(&app, &asked).await;
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, Json(said)).into_response()
+}
+
 /// This Host reads the seats and moves none: on a machine with another Host, that Host's
 /// selector does (`docs/differences.md`).
 async fn no_hotseat() -> ApiError {
@@ -370,6 +386,7 @@ pub fn routes() -> Router<App> {
         .route("/janitor-policy", get(janitor_policy).post(no_janitors))
         .route("/hotseat/status", get(hotseat_status))
         .route("/hotseat/desk", get(hotseat_desk))
+        .route("/hotseat/resume", post(hotseat_resume))
         .route("/hotseat/{action}", post(no_hotseat))
         .route("/cartesia-voices", get(cartesia_voices))
         .route("/podcast-history", get(podcasts))

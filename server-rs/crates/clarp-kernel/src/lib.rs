@@ -43,6 +43,7 @@ pub mod python;
 pub mod quota;
 pub mod recovery;
 pub mod requests;
+pub mod resume;
 pub mod rings;
 pub mod roster;
 pub mod router;

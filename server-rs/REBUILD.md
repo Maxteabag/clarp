@@ -1009,7 +1009,45 @@ Three things are this Host's own, each in `docs/differences.md`:
   bridge reaches the Python Host of the machine. So this Host counts its own agents in that place, each on
   the account its tool is on (`desk::of_this_host`); of the work the tool says stopped it leaves a Host's
   own to that Host and shows a session that is no Host's, unless that is the session of one of its own
-  agents. Its own agents that stopped are not listed yet: that comes with continuing them.
+  agents. Its own agents that stopped are listed with what follows.
+
+**The seats: work that stopped goes on from the desk** (18 Nov 2026). From the desk an app asks for one of
+three things (`POST /hotseat/resume`): that an agent the desk lists as stopped continue, that an agent's
+held queue be let go, or, for a session that is no Host's, the command a person types to take it up.
+`clarp-kernel` `resume.rs` is the Python Host's `resume_work` and `resume_prompt`, by that Host's own
+answers: `tools/resume-vectors.py` makes agents in an empty store, puts them away, makes them janitors,
+holds their queues, says that they ended a turn or work, stores a desk with work that stopped as a live
+read stores it, and asks, with a way to send that works, fails before or after it saved the prompt, cannot
+confirm, or says that the prompt waits behind a turn (21 stories, 102 askings, 39 prompts sent, and 30
+prompts for what a row says of why it stopped, what the tool noted, and how old the reading is; the same
+file at every run). With each asking it writes what that Host knew of the agent, so that the port is given
+the same facts. The rules: one stop gets one prompt, under an id made of the agent and the moment it
+stopped, so that asking twice is the same send; an agent continues only while the desk's reading says it
+could, it has not ended a turn since the stop, and it does not work now; an asking about a stop that got
+its prompt is sent again whatever has happened since; a held queue is let go first. The prompt says only
+what the Host knows, and the tool's own note on its reading comes last, announced as data, as one JSON
+text nothing inside it can close. The port matched at its first compile; the cases its planted rules would
+have gone unnoticed for were written before the plants were run (the order of two refusals, a first row
+that counts, a reading from ahead), and all 64 were caught.
+
+What the Host adds is what it knows of its own agents, and that is where it parts from the Python Host
+(`docs/differences.md`). The desk lists this Host's own agents whose work stopped, first, each with why
+and when and with whether it could go on by what the same reading says of the account its tool is on
+(`desk::of_this_host`): a last turn that failed for a usage limit, listed for a week from then, a turn
+that waits for an account, a queue that is held with turns waiting (34 more planted rules of the kernel,
+each caught: its list for the desk is 190). Whether a stop's prompt was sent is asked of the agent's own log (a
+row of that id in the conversation, or a message of that id in the queue), and the send is the Host's own
+send, whose log takes a message once: so "one stop, one prompt" rests on the same rule as every other
+message. A turn that waits for an account is not sent a prompt: it is tried at once on the account that is
+there; a Host that puts the logins in place itself leaves it to its selector and says so. Through the Host,
+with stand-ins for the owner's tool and for Codex and Claude Code: three agents whose turns fail for a
+limit, one stopped with a message waiting, one stopped with none, one whose turn failed for something
+else; one reading that lists them as they are; the queue let go and its message answered; one agent
+continued by one prompt and asked again by name and by id; one that works and is sent nothing, and whose
+prompt, waiting in its queue, counts as sent; one that ended a turn since; a janitor, an agent put away,
+what is no asking; and a turn that waits for an account, in both ways a Host can stand to the logins.
+Of 34 wrong rules planted into the Host's side each is caught. `hotseat_desk_actions` is not listed: switching the account in use is not built, and the
+phone app sends a Host that does not list it none of its three actions.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
