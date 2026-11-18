@@ -1096,8 +1096,23 @@ first would end a shell at once and not for the asking (found by a test, in this
 device of limited scope is kept from an agent's terminal too (`GET /terminal/...`), though that route is
 not built yet. Tested: the line by itself, the door against a real client, the relay's carriage by its frames (seven tests), and a real Host process at its door and through a stand-in relay (three). Of 83 wrong rules planted one at a time (16 into the kernel's reading of a request, 39 into the line, its carriers and the reading of a size, 28 into the terminal through a Host) each is caught.
 
-Not built on it yet, and closed through the relay as sockets that failed: an agent's terminal (turns to
-that agent have to wait while it is open), the stream of speech, a ring's live socket, the Oracle's.
+**An agent's own terminal** (`GET /terminal/<session>`, 18 Nov 2026): the agent's tool, spoken to by hand,
+taken up on the conversation the agent has with it. What each tool is started with is each backend's own
+word in the Python Host (`terminal_argv`), read by the same vectors (`socket.rs`, `terminal_of`: 14 answers
+of seven backends; Claude Code and Antigravity told not to ask before they act, each tool with its own word
+for taking a session up, three tools that have no terminal and say so). It is started as the agent's turns
+are: where the agent works (the home when that is gone), told the agent's name and where its tools find
+their Host, never the Host's own secrets. Refused as there, in plain words: nobody of that name (404), a
+janitor (403), a tool without a terminal (501), a tool that is not on the machine (500); a device of
+limited scope is kept from it. **While a terminal is open on an agent, no turn of that agent is started**:
+two processes on one conversation would spoil it. The Python Host keeps such a message in the agent's
+queue. Here the agent's thread holds the launch of the turn, as it holds one for an account (`agent.rs`,
+`carry_out`): the turn has begun, its tool starts when the last terminal on the agent is closed, however it
+is closed, and a turn stopped meanwhile is over at once. The agent's state machine is not changed for it;
+registered in `docs/differences.md`. Tested through a real Host process with a stand-in for Claude Code that is both the tool of the agent's turns and of its terminal. Of 36 wrong rules planted one at a time (12 into the kernel's word for each tool, 24 into the route and the agent's thread) each is caught. Four more were tried and showed what no test saw: one check got its case, two were redundant and are gone, and one changes nothing that can be seen (the launch a stopped turn left waiting, kept in place of dropped: carried out later, it fails where the turn's message was).
+
+Not built on it yet, and closed through the relay as sockets that failed: the stream of speech, a ring's
+live socket, the Oracle's.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
@@ -2017,9 +2032,9 @@ connection relay under the name the phone is paired with. Each of these is true 
    speech and the Oracle's live sockets are WebSockets, and the terminal is one. Each of these routes is
    built against one port that a socket at the door and the relay's tunnel both carry, and is shown
    through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a gate, not a
-   note"). The port and its two carriers are built, and the Host's own terminal on them (18 Nov 2026,
-   "Sockets" in section 6). Still closed as sockets that failed: an agent's terminal, the stream of
-   speech, a ring's live socket, the Oracle's.
+   note"). The port and its two carriers are built, and on them the Host's own terminal and an agent's
+   (18 Nov 2026, "Sockets" in section 6). Still closed as sockets that failed: the stream of speech, a
+   ring's live socket, the Oracle's.
 2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
    session for a name and closes the older one when another dials: a Python Host that came back would take
    the phones again, and neither Host would report an error, only lose its connection again and again. The

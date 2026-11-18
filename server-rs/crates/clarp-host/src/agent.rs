@@ -299,6 +299,16 @@ pub enum Ask {
     /// The login of the agent's tool has changed: a turn that waits for an account is tried
     /// on the one that is there now.
     LoginChanged,
+    /// A terminal on the agent's own tool is to be opened: what the tool is started with
+    /// there, of what the agent's turns are started with.
+    TerminalFacts {
+        answer: Answer<TerminalFacts>,
+    },
+    /// A terminal on the agent's own tool was opened, or closed. While one is open no
+    /// turn's tool is started: two processes on one conversation would spoil it.
+    Terminal {
+        open: bool,
+    },
     /// From the pool of the tool's accounts: nothing of the agent's turn may run while
     /// another login is put in place.
     AccountStop,
@@ -364,6 +374,17 @@ pub struct Setup {
     /// The pool of the accounts of the agent's tool, on a Host that runs the owner's
     /// selector itself and has one for this tool.
     pub pool: Option<Arc<crate::pool::Service>>,
+}
+
+/// What an agent's tool is started with in a terminal, of what its turns are started with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalFacts {
+    /// The tool's own session the agent's conversation is in, when it has one.
+    pub tool_session: Option<String>,
+    /// Where the agent works.
+    pub cwd: std::path::PathBuf,
+    /// What is set on top of the Host's environment for a turn of the agent.
+    pub env: Vec<(String, String)>,
 }
 
 /// The way to an agent's thread.
@@ -679,6 +700,17 @@ impl AgentHandle {
         let _ = self.tx.send(Ask::LoginChanged);
     }
 
+    /// What a terminal on the agent's own tool is started with.
+    pub async fn terminal_facts(&self) -> Result<TerminalFacts, Unavailable> {
+        self.ask(|answer| Ask::TerminalFacts { answer }).await
+    }
+
+    /// Tells the agent's thread that a terminal on its tool was opened, or closed. Does
+    /// not wait.
+    pub fn terminal(&self, open: bool) {
+        let _ = self.tx.send(Ask::Terminal { open });
+    }
+
     /// Tells the agent's thread that nothing of its tool may run for a while: the account
     /// is out, and another is about to be put in place. Does not wait.
     pub fn stop_for_an_account(&self) {
@@ -758,6 +790,8 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         passed: Vec::new(),
         held: None,
         pooled: None,
+        terminals: 0,
+        behind_terminal: None,
         let_go_by_hand: false,
         reworded: false,
         newest: None,
@@ -798,6 +832,10 @@ struct Worker {
     held: Option<ShimOrder>,
     /// The turn the pool was last told of.
     pooled: Option<TurnId>,
+    /// How many terminals are open on the agent's own tool.
+    terminals: usize,
+    /// The launch of an attempt that waits for those terminals to be closed.
+    behind_terminal: Option<ShimOrder>,
     /// Its user let the mailbox go a moment ago: the clients are told so in a word of its
     /// own. A hold that ended because the last thing it held went to run is told with the
     /// news of that turn.
@@ -1503,6 +1541,10 @@ impl Worker {
                 let _ = taken.send(());
                 return Ok(());
             }
+            Ask::Terminal { open } => {
+                self.terminal(open);
+                return Ok(());
+            }
             Ask::ClaimLine { answer } => {
                 return self.handle_speech(|actor, now| actor.claim_line(now), answer);
             }
@@ -1690,6 +1732,7 @@ impl Worker {
             Ask::Artifact { .. }
             | Ask::Goal { .. }
             | Ask::Amended { .. }
+            | Ask::Terminal { .. }
             | Ask::TakeLibrary { .. }
             | Ask::TakePlans { .. }
             | Ask::ClaimLine { .. }
@@ -1699,6 +1742,23 @@ impl Worker {
             | Ask::LinePlayed { .. } => return Ok(()),
             Ask::SpoolChanged => (actor.spool_changed(now)?, nobody()),
             Ask::LoginChanged => (actor.login_changed(now)?, nobody()),
+            Ask::TerminalFacts { answer } => {
+                let profile = actor.profile();
+                // A turn of the agent is told the agent's name and where its tools find
+                // their Host: so is its tool in a terminal.
+                let named = (
+                    clarp_backend::SESSION_ENV.to_string(),
+                    profile.session.clone(),
+                );
+                let facts = TerminalFacts {
+                    tool_session: actor.status().backend_session,
+                    cwd: profile.cwd.clone(),
+                    env: std::iter::once(named)
+                        .chain(profile.tool_env.iter().cloned())
+                        .collect(),
+                };
+                return read(Ok(facts), answer);
+            }
             Ask::AccountStop => {
                 if self.held.is_some() {
                     // Its launch is held: nothing of it runs.
@@ -1754,6 +1814,20 @@ impl Worker {
         self.after(out);
         owed();
         Ok(())
+    }
+
+    /// A terminal on the agent's own tool was opened, or closed. When one is closed, the
+    /// launch that waited is carried out by the way of any launch: where another terminal
+    /// is still open it waits again.
+    fn terminal(&mut self, open: bool) {
+        if open {
+            self.terminals += 1;
+            return;
+        }
+        self.terminals = self.terminals.saturating_sub(1);
+        if let Some(order) = self.behind_terminal.take() {
+            self.carry_out(Action::Launch(order));
+        }
     }
 
     /// Starts the next attempt of a turn whose wait is over.
@@ -1833,6 +1907,27 @@ impl Worker {
     /// Each turn has a thread of its own for as long as its shim lives. It does the waiting, so
     /// the agent's thread never does.
     fn carry_out(&mut self, action: Action) {
+        let action = match action {
+            // No turn's tool is started while a terminal is open on the same tool: the
+            // launch waits until the terminal is closed.
+            Action::Launch(order) if self.terminals > 0 => {
+                self.behind_terminal = Some(order);
+                return;
+            }
+            // A turn whose launch waits for a terminal has no shim to stop: it is gone at
+            // once.
+            Action::Stop { turn, .. }
+                if self
+                    .behind_terminal
+                    .as_ref()
+                    .is_some_and(|order| order.turn == turn) =>
+            {
+                let attempt = self.behind_terminal.take().map_or(1, |order| order.attempt);
+                tell(&self.tx, turn, attempt, Told::Gone);
+                return;
+            }
+            other => other,
+        };
         let action = match action {
             // An attempt of a turn is about to be launched: the pool of the tool's accounts
             // says whether it has to wait for an account instead. One that does is launched
@@ -2473,6 +2568,7 @@ fn refuse_for(
             Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -2490,6 +2586,7 @@ fn refuse_for(
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
+                | Ask::Terminal { .. }
                 | Ask::AccountStop
                 | Ask::AccountBack
                 | Ask::AccountEnd

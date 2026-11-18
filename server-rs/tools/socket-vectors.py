@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the vectors the Rust Host's reading of a request for a socket is tested against.
+"""Writes the vectors the Rust Host's reading of a request for a socket, and its command for an
+agent's terminal, are tested against.
 
 Some of what an app asks of a Host is a conversation held over a WebSocket: a terminal, a
 stream of speech. Every such route of the Python Host first asks one pure function whether
@@ -10,9 +11,17 @@ what the three headers it looks at may say, and for some requests that say a hea
 or in other letters, and writes what it answered to
 `crates/clarp-kernel/tests/fixtures/socket-vectors.json`.
 
+One of those conversations is a terminal on an agent's own tool, taken up on the conversation
+the agent has with it. What the tool is started with is each backend's own word
+(`server/lib/backend/*.py`, `terminal_argv`): asked here of every backend that Host has, for an
+agent that has a session of its tool and for one that has none yet. A backend that has no way of
+being spoken to in a terminal says so, and its words are written down. Where that Host adds the
+directory of its own plugin for Claude Code, the directory is written as `<plugin>`: it is a path
+of the machine the vectors were made on.
+
     python3 server-rs/tools/socket-vectors.py
 
-Nothing of a Host is touched or started: one pure function is called.
+Nothing of a Host is touched or started: pure functions are called.
 """
 from __future__ import annotations
 
@@ -68,6 +77,22 @@ def main() -> int:
         said = [('Upgrade', upgrade), ('Connection', connection), ('Sec-WebSocket-Key', key)]
         table += '1' if asks([[name, value] for name, value in said if value is not None]) else '0'
     odd = [{'headers': pairs, 'asks': asks(pairs)} for pairs in ODD]
+
+    from lib import backends
+    from lib.backend.base import Unsupported
+    terminals = []
+    for adapter in backends.all_adapters():
+        for session in ('', 'a-session-of-the-tool'):
+            row = {'tool': adapter.id, 'session': session}
+            try:
+                argv = list(adapter.terminal_argv(session))
+            except Unsupported as none:
+                row['none'] = str(none)
+            else:
+                if '--plugin-dir' in argv:
+                    argv[argv.index('--plugin-dir') + 1] = '<plugin>'
+                row['program'], row['args'] = argv[0], argv[1:]
+            terminals.append(row)
     vectors = {
         'what': 'Whether a request asks for a socket, by server/lib/ws.py is_websocket_upgrade. `table` has one '
                 'sign for every combination of what the three headers say, in the order itertools.product goes '
@@ -77,10 +102,12 @@ def main() -> int:
         'key': KEYS,
         'table': table,
         'odd': odd,
+        'terminals': terminals,
     }
     OUT.write_text(json.dumps(vectors, indent=1, ensure_ascii=True) + '\n')
     print(f'{OUT.relative_to(REPO)}: {len(table)} combinations, {table.count("1")} ask for a socket; '
-          f'{len(odd)} odd requests, {sum(1 for case in odd if case["asks"])} ask')
+          f'{len(odd)} odd requests, {sum(1 for case in odd if case["asks"])} ask; '
+          f'{len(terminals)} terminals, {sum(1 for row in terminals if "none" in row)} of tools that have none')
     return 0
 
 

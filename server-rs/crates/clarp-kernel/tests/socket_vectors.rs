@@ -7,7 +7,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use clarp_kernel::socket::asked_for;
+use clarp_kernel::socket::{asked_for, terminal_of};
 use serde_json::Value;
 
 #[test]
@@ -69,4 +69,43 @@ fn a_request_asks_for_a_socket_exactly_when_the_python_host_says_so() {
         asking += usize::from(asks);
     }
     assert_eq!((odd.len(), asking), (14, 8));
+}
+
+#[test]
+fn an_agents_tool_is_started_in_a_terminal_with_what_the_python_host_starts_it_with() {
+    let vectors: Value =
+        serde_json::from_str(include_str!("fixtures/socket-vectors.json")).unwrap();
+    let terminals = vectors["terminals"].as_array().unwrap();
+    let (mut opened, mut none) = (0, 0);
+    for row in terminals {
+        let text = |name: &str| row[name].as_str().unwrap();
+        let (tool, session) = (text("tool"), text("session"));
+        let said = terminal_of(tool, session);
+        if let Some(words) = row["none"].as_str() {
+            assert_eq!(said, Err(words.to_string()), "{row}");
+            none += 1;
+            continue;
+        }
+        // The program is the tool's own name there, and the path of the tool here.
+        assert_eq!(text("program"), tool, "{row}");
+        let mut args: Vec<&str> = row["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|word| word.as_str().unwrap())
+            .collect();
+        // That Host loads a plugin of its own into Claude Code, in its turns and in its
+        // terminal alike. This Host has none, in neither.
+        if let Some(at) = args.iter().position(|word| *word == "--plugin-dir") {
+            assert_eq!((tool, args[at + 1]), ("claude", "<plugin>"));
+            args.drain(at..at + 2);
+        }
+        assert_eq!(said, Ok(to_strings(&args)), "{row}");
+        opened += 1;
+    }
+    assert_eq!((terminals.len(), opened, none), (14, 8, 6));
+}
+
+fn to_strings(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_string()).collect()
 }

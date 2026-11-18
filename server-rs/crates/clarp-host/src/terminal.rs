@@ -15,12 +15,19 @@
 //! A Host has one terminal of its own (`GET /server-terminal`): a login shell in the home
 //! of whoever the Host runs as, for its administrator and for a device of full scope.
 //! Nothing a Host starts is given the Host's own secrets, and neither is that shell.
+//!
+//! And each agent has one (`GET /terminal/<session>`): the agent's own tool, spoken to by
+//! hand, taken up on the conversation the agent has with it and started as the agent's
+//! turns are (where the agent works, told the agent's name and where its tools find their
+//! Host). Two processes on one conversation would spoil it, so while an agent's terminal
+//! is open no turn of that agent is started: its launch waits for the terminal to be
+//! closed (`agent.rs`). Other agents go on as they do.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Path as Named, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -30,6 +37,7 @@ use nix::unistd::Pid;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+use crate::agent::AgentHandle;
 use crate::edge::{ApiError, App};
 use crate::line::{self, ENDED_WELL, Heard, Line, Socket, Told};
 
@@ -44,12 +52,37 @@ const NO_SOCKET: &str = "upgrade required (websocket)";
 /// The shell of a machine that names none.
 const USUAL_SHELL: &str = "/bin/sh";
 
+/// What a janitor's terminal is refused with: the words of every control of a chat that
+/// names one.
+const LOOKED_AT_ONLY: &str = "Janitors are inspection-only. Use their Pause or Configure controls.";
+
 /// What runs in a terminal, and where.
 struct Program {
     /// What the terminal is called in the Host's journal.
     called: String,
     argv: Vec<String>,
     cwd: PathBuf,
+    /// What it is told on top of the Host's environment.
+    env: Vec<(String, String)>,
+    /// The agent whose tool it is, when it is one's: no turn of it is started meanwhile.
+    agent: Option<AgentHandle>,
+}
+
+/// An agent's terminal that is open: its agent is told so, and told again when this goes,
+/// however it goes.
+struct Open(AgentHandle);
+
+impl Open {
+    fn new(agent: AgentHandle) -> Self {
+        agent.terminal(true);
+        Self(agent)
+    }
+}
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        self.0.terminal(false);
+    }
 }
 
 /// A number as Python's `int()` reads a value a client sent: a whole number, the whole
@@ -119,6 +152,9 @@ fn started(program: &Program) -> Option<(pty_process::Pty, tokio::process::Child
     for secret in crate::OWN_SECRETS {
         command = command.env_remove(secret);
     }
+    for (name, value) in &program.env {
+        command = command.env(name, value);
+    }
     let child = command.spawn(programs_end).ok()?;
     Some((terminal, child))
 }
@@ -152,6 +188,8 @@ async fn serve(mut line: Line, program: Program) {
         line.tell(Told::Close(ENDED_WELL, String::new())).await;
         return;
     };
+    // From here to the end of this, no turn of the agent whose tool it is is started.
+    let _open = program.agent.clone().map(Open::new);
     let pid = child.id().and_then(|pid| i32::try_from(pid).ok());
     eprintln!(
         "clarp-host: the terminal {called} started ({}) terminalStart",
@@ -246,12 +284,77 @@ async fn of_the_host(State(app): State<App>, socket: Socket) -> Response {
         called: "server-home".to_string(),
         argv: vec![shell, "-l".to_string()],
         cwd: crate::config::home(),
+        env: Vec::new(),
+        agent: None,
+    };
+    socket.open(move |line| serve(line, program))
+}
+
+/// What an agent's tool is started as in a terminal: its program on this machine, and
+/// what the Python Host starts that tool with. `Err`: the tool has no terminal (501), in
+/// that Host's words, or is not on this machine (500).
+fn command_of(tool: &str, tool_session: &str) -> Result<Vec<String>, (StatusCode, String)> {
+    let started_with = clarp_kernel::socket::terminal_of(tool, tool_session)
+        .map_err(|none| (StatusCode::NOT_IMPLEMENTED, none))?;
+    // A tool this Host does not run has no terminal here, whatever it has elsewhere.
+    let Some(program) = clarp_backend::program(tool) else {
+        let none = format!("no interactive terminal for the {tool} backend");
+        return Err((StatusCode::NOT_IMPLEMENTED, none));
+    };
+    if !runnable(&program) {
+        let none = format!("{program} not on PATH");
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, none));
+    }
+    Ok(std::iter::once(program).chain(started_with).collect())
+}
+
+/// `GET /terminal/<session>`: the agent's own tool in a terminal, taken up on the
+/// conversation the agent has with it.
+async fn of_an_agent(
+    State(app): State<App>,
+    Named(named): Named<String>,
+    socket: Socket,
+) -> Response {
+    if !socket.asked() {
+        return line::refused(StatusCode::UPGRADE_REQUIRED, NO_SOCKET);
+    }
+    let session = named.trim_matches('/');
+    let Some(member) = app.anyone(session) else {
+        return line::refused(StatusCode::NOT_FOUND, "no such agent");
+    };
+    if member.record.is_janitor {
+        return line::refused(StatusCode::FORBIDDEN, LOOKED_AT_ONLY);
+    }
+    let tool = member.record.backend.as_str();
+    let Ok(facts) = member.agent.terminal_facts().await else {
+        let why = "the agent cannot be asked";
+        return line::refused(StatusCode::SERVICE_UNAVAILABLE, why);
+    };
+    let argv = match command_of(tool, facts.tool_session.as_deref().unwrap_or("")) {
+        Ok(argv) => argv,
+        Err((status, none)) => return line::refused(status, &none),
+    };
+    // Where the agent works, when that is still there: else the home, as for the Host's
+    // own terminal.
+    let cwd = if facts.cwd.is_dir() {
+        facts.cwd
+    } else {
+        crate::config::home()
+    };
+    let program = Program {
+        called: session.to_string(),
+        argv,
+        cwd,
+        env: facts.env,
+        agent: Some(member.agent.clone()),
     };
     socket.open(move |line| serve(line, program))
 }
 
 pub fn routes() -> Router<App> {
-    Router::new().route("/server-terminal", get(of_the_host))
+    Router::new()
+        .route("/server-terminal", get(of_the_host))
+        .route("/terminal/{*named}", get(of_an_agent))
 }
 
 #[cfg(test)]
@@ -259,6 +362,23 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    #[test]
+    fn a_tool_this_host_does_not_run_has_no_terminal_here() {
+        // The kernel knows what the Python Host starts it with; this Host has no program
+        // for it, and says what that Host says of a tool without a terminal.
+        assert!(clarp_kernel::socket::terminal_of("muse", "").is_ok());
+        let none = (
+            StatusCode::NOT_IMPLEMENTED,
+            "no interactive terminal for the muse backend".to_string(),
+        );
+        assert_eq!(command_of("muse", ""), Err(none));
+        let none = (
+            StatusCode::NOT_IMPLEMENTED,
+            "no interactive terminal for the scripted backend".to_string(),
+        );
+        assert_eq!(command_of("scripted", "a-session"), Err(none));
+    }
 
     #[test]
     fn a_size_is_read_as_the_python_host_reads_one_and_what_is_none_is_passed_over() {

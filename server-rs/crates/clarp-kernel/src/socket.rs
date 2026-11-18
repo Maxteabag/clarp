@@ -1,9 +1,14 @@
-//! Whether a request asks for a socket.
+//! Whether a request asks for a socket, and what an agent's tool is started with in a
+//! terminal.
 //!
 //! Some of what an app asks of a Host is a conversation held over a WebSocket: a terminal,
 //! a stream of speech. Every such route of the Python Host first asks one question of the
 //! request's headers (`server/lib/ws.py`, `is_websocket_upgrade`), and refuses in its own
 //! words what does not ask for a socket. The question is asked here as it is asked there.
+//!
+//! One of those conversations is a terminal on an agent's own tool. What the tool is
+//! started with there is each backend's word in the Python Host (`terminal_argv`), and the
+//! same word here.
 
 use crate::python;
 
@@ -28,4 +33,23 @@ pub fn asked_for(headers: &[(String, String)]) -> bool {
         return false;
     }
     !python::strip(said("sec-websocket-key")).is_empty()
+}
+
+/// What an agent's tool is started with in a terminal, after its program: taken up on the
+/// conversation the agent has with it (`session`), or anew where it has none yet. A tool
+/// that asks before it acts is told not to, as in the agent's own turns. `Err`: the tool
+/// has no way of being spoken to in a terminal, in the Python Host's words for that.
+pub fn terminal_of(tool: &str, session: &str) -> Result<Vec<String>, String> {
+    let (always, taken_up_with): (&[&str], &str) = match tool {
+        "claude" => (&["--dangerously-skip-permissions"], "--resume"),
+        "codex" => (&[], "resume"),
+        "agy" => (&["--dangerously-skip-permissions"], "--conversation"),
+        "muse" => (&["--yolo"], "resume"),
+        _ => return Err(format!("no interactive terminal for the {tool} backend")),
+    };
+    let mut started_with: Vec<String> = always.iter().map(|word| (*word).to_string()).collect();
+    if !session.is_empty() {
+        started_with.extend([taken_up_with.to_string(), session.to_string()]);
+    }
+    Ok(started_with)
 }
