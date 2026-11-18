@@ -139,7 +139,9 @@ impl Session {
         }
     }
 
-    pub fn accepts_tool_note(&self)->bool {self.drained && !self.over}
+    pub fn accepts_tool_note(&self) -> bool {
+        self.drained && !self.over
+    }
 
     pub fn is_over(&self) -> bool {
         self.over
