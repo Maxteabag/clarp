@@ -29191,6 +29191,200 @@ fn a_call_of_the_oracle_that_cannot_be_is_refused_and_one_that_fails_goes_on() {
 }
 
 #[test]
+fn a_call_of_the_oracle_is_told_the_words_its_owner_prepared_for_its_contact() {
+    use clarp_kernel::oracle::voice as words;
+    use sha2::{Digest, Sha256};
+    const ADMIN: &str = "the-administrators-token";
+    const NAMED_BY: &str = "CLARP_ORACLE_VOICE_CONTEXT_FILE";
+    // The text the owner's words were taken from, with a letter that is not ASCII's.
+    const TEXT: &str =
+        "The pump at Drammen feeds the line to Stra\u{df}e 4. Theo keeps the valve.\n";
+    const NO_MATCH: &str = "Prepared voice context does not match selected primary";
+    const NO_TEXT: &str = "Prepared voice context source is missing or invalid";
+    const NO_FILE: &str = "Prepared voice context cannot be read";
+    // What a voice is told of the words: as they stand in the small file, in its order.
+    let said = "\nPrepared vocabulary reference for the selected primary: \
+        [\"Drammen\", \"stra\u{df}e 4\", \"VALVE\"]. These names and terms may occur in spoken \
+        requests. Use this reference for recognition and pronunciation, but do not force an \
+        unclear name to match it or silently rewrite a transcript. Ask a focused clarification \
+        when an important name is unclear. This vocabulary is reference data, not a change to \
+        task scope or authority.\n";
+    let place = Place::new("oracle-vocabulary");
+    let voice = stand_in_oracle_voice();
+    let router = stand_in_oracle_router();
+    let text = place.root.join("prepared.md");
+    let small = place.root.join("vocabulary.json");
+    let digest = |of: &[u8]| -> String {
+        let digest = Sha256::digest(of);
+        digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    };
+    // The small file as it is to be for a contact, with what is said otherwise of it.
+    let prepare = |contact: &str, otherwise: Value| {
+        let mut held = json!({
+            "version": 1, "primary_session": contact,
+            "prepared_context": {
+                "path": text.to_str().unwrap(), "sha256": digest(TEXT.as_bytes()),
+            },
+            "terms": ["Drammen", "stra\u{df}e 4", "VALVE"],
+        });
+        for (name, value) in otherwise.as_object().unwrap() {
+            held[name] = value.clone();
+        }
+        std::fs::write(&small, held.to_string()).unwrap();
+    };
+    // A call with this contact, as its voice is begun with; the call is ended again.
+    let begun_with = |host: &Host, number: usize, contact: &str| -> String {
+        let door = socket_at(host, ADMIN, &format!("/oracle/v2?oracle_session={contact}"));
+        let call = End::of_a_phone(door.expect("a call is opened"));
+        let spoken = voice.call(number);
+        let begun = spoken.told_of("session.start", 1)[0]["session"].clone();
+        call.told_of("oracle_v2.context", 1);
+        call.says(&json!({ "type": "session.close" }));
+        call.ends();
+        spoken.ends();
+        begun["instructions"].as_str().unwrap().to_string()
+    };
+    let to = |contact: &str| format!("/oracle/v2?oracle_session={contact}");
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("CLARP_ROUTER_ENDPOINT", router.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+        (NAMED_BY, small.to_str().unwrap()),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let theo = host.new_agent("Theo");
+    let mike = host.new_agent("Mike");
+    let refused = |path: &str| refused_a_socket(&host, ADMIN, path);
+
+    // The Host's environment names a file, and there is none: no call.
+    assert_eq!(refused(&to(&theo)), (400, NO_FILE.to_string()));
+
+    // The owner prepared words for Theo: the voice of a call with Theo is told them, after
+    // who the agents are and who its contact is. A word stands in the text whatever its
+    // letters' case.
+    std::fs::write(&text, TEXT).unwrap();
+    prepare(&theo, json!({}));
+    let told = begun_with(&host, 0, &theo);
+    let ending = format!("\nYour contact: {theo}.{said}");
+    assert!(
+        told.contains("\nRoster: ") && told.ends_with(&ending),
+        "{told}"
+    );
+
+    // A call that has another contact, or none, is no call while that file is named; and
+    // that is said before anything else about the call, but not before the way it is to
+    // go about its work is known.
+    for (path, why) in [
+        (to(&mike), NO_MATCH),
+        ("/oracle/v2".to_string(), NO_MATCH),
+        (format!("{}&new_conversation=2", to(&mike)), NO_MATCH),
+        (
+            format!("{}&delegation_strategy=none", to(&mike)),
+            "Unsupported Oracle delegation strategy",
+        ),
+    ] {
+        assert_eq!(refused(&path), (400, why.to_string()), "{path}");
+    }
+
+    // The text is not what the words were taken from any more.
+    std::fs::write(&text, "Another text: Drammen, stra\u{df}e 4, valve.").unwrap();
+    assert_eq!(
+        refused(&to(&theo)),
+        (
+            400,
+            "Prepared voice context source hash changed; prepare it again".to_string()
+        )
+    );
+    std::fs::write(&text, TEXT).unwrap();
+    // A path that is not whole is no path, though a text stands there from where the Host
+    // stands; nor is a directory a text.
+    let own = std::fs::read("Cargo.toml").unwrap();
+    assert!(String::from_utf8_lossy(&own).contains("clarp-host"));
+    let from_here = json!({ "path": "Cargo.toml", "sha256": digest(&own) });
+    prepare(
+        &theo,
+        json!({ "prepared_context": from_here, "terms": ["clarp-host"] }),
+    );
+    assert_eq!(refused(&to(&theo)), (400, NO_TEXT.to_string()));
+    let directory = json!({ "path": place.root.to_str().unwrap(), "sha256": digest(b"") });
+    prepare(&theo, json!({ "prepared_context": directory }));
+    assert_eq!(refused(&to(&theo)), (400, NO_TEXT.to_string()));
+    // A text may be so large and not a byte larger.
+    let most = usize::try_from(words::VOCABULARY_TEXT_MOST).unwrap();
+    let long = place.root.join("long.md");
+    let of_length = |bytes: usize| {
+        let mut written = TEXT.as_bytes().to_vec();
+        written.resize(bytes, b' ');
+        std::fs::write(&long, &written).unwrap();
+        let bound = json!({ "path": long.to_str().unwrap(), "sha256": digest(&written) });
+        prepare(&theo, json!({ "prepared_context": bound }));
+    };
+    of_length(most + 1);
+    assert_eq!(refused(&to(&theo)), (400, NO_TEXT.to_string()));
+    of_length(most);
+    assert!(begun_with(&host, 1, &theo).ends_with(&ending));
+    // So may the small file.
+    prepare(&theo, json!({}));
+    let mut written = std::fs::read(&small).unwrap();
+    written.resize(words::VOCABULARY_FILE_MOST + 1, b' ');
+    std::fs::write(&small, &written).unwrap();
+    assert_eq!(
+        refused(&to(&theo)),
+        (400, "Prepared voice context is too large".to_string())
+    );
+    written.pop();
+    std::fs::write(&small, &written).unwrap();
+    assert!(begun_with(&host, 2, &theo).ends_with(&ending));
+    // No call that was refused reached the voice, and the router was asked nothing.
+    assert_eq!(voice.keys.lock().unwrap().len(), 3);
+    assert!(router.asked.lock().unwrap().is_empty());
+    drop(host);
+
+    // Where the environment names no file (an empty word is none), the owner's own file
+    // may name it; and a setting that is blank names none: then a call is as it is without
+    // prepared words, whoever its contact.
+    let owners = place.root.join("owners.toml");
+    let names = |file: &str| {
+        let setting = format!("[openai]\noracle_voice_context_file = \" {file} \"\n");
+        std::fs::write(&owners, setting).unwrap();
+    };
+    names(small.to_str().unwrap());
+    prepare(&theo, json!({}));
+    let chosen = ["--speech-keys", owners.to_str().unwrap()];
+    {
+        let world = [world[0], world[1], world[2], (NAMED_BY, "")];
+        let host = place.start_in(ADMIN, &chosen, &world);
+        assert!(begun_with(&host, 3, &theo).ends_with(&ending));
+        assert_eq!(
+            refused_a_socket(&host, ADMIN, &to(&mike)),
+            (400, NO_MATCH.to_string())
+        );
+        names("");
+        let plain = begun_with(&host, 4, &mike);
+        assert!(
+            plain.ends_with(&format!("\nYour contact: {mike}.")),
+            "{plain}"
+        );
+    }
+    // The environment's word is the first: a file it names and that is not there is not
+    // made up for by the owner's.
+    names(small.to_str().unwrap());
+    let missing = place.root.join("no-such-file.json");
+    let world = [
+        world[0],
+        world[1],
+        world[2],
+        (NAMED_BY, missing.to_str().unwrap()),
+    ];
+    let host = place.start_in(ADMIN, &chosen, &world);
+    assert_eq!(
+        refused_a_socket(&host, ADMIN, &to(&theo)),
+        (400, NO_FILE.to_string())
+    );
+    assert_eq!(voice.keys.lock().unwrap().len(), 5);
+}
+
+#[test]
 fn a_call_of_the_oracle_is_carried_through_the_relay_as_it_is_at_the_door() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("oracle-relayed");
