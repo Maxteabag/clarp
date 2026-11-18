@@ -2313,14 +2313,42 @@ turns it on.
   routed in, a message sent again), `answered` (what is made of an answer, and the second asking), `apply`
   (what is done: a message given to an agent, a word aloud, a message held while its user is asked, an agent
   opened, stopped or started) and `finish` (what is kept: the decision, the receipt of the run, what the apps
-  are told). `tools/router-flow-vectors.py` drives the Python Host's `OrchestratorService` through 53
-  messages in six stories with a model that answers what each story says and a Host around it that writes
+  are told). `tools/router-flow-vectors.py` drives the Python Host's `OrchestratorService` through 101
+  messages in eight stories with a model that answers what each story says and a Host around it that writes
   down what it is asked to do; `tests/router_flow_vectors.rs` holds this router to it message by message:
-  the 73 packets as text, what was given, said and held, the decisions as rows, the runs with their receipts.
-- **Three things it does otherwise, on purpose**, each named in that test with what the Python Host did, and
-  each a finding in that Host (R32 to R34 in `docs/reference-defects.md`): a held message keeps its own words
-  when its user is asked a second time; no agent is made of a name alone; and nobody's status is told as
-  another's.
+  the 162 packets as text, what was given, said, held and played again, the decisions as rows, the runs with
+  their receipts. A story may make agents as it begins (one known by a name that is not its session, two of
+  one name of which one is put away, one whose name folds to more letters, one with no name).
+- **Holds, commands and names, as the Python Host has them since its PR 436** (18 Nov 2026; until then this
+  router did three things otherwise on purpose, the Python Host's R32 to R34, which that PR fixed):
+  - A command is never held. It is carried out only where it is as sure as a message has to be; a fork is
+    said in the app; a new agent acts on none there is; any other acts on the agent it names and on no
+    other, and only on one the model was shown (in a call, one of the call). Refused, it becomes a question
+    in its sentence ("I do not have an agent by that name.", "Which agent did you mean?", "That agent does
+    not accept voice commands.", "I cannot do that for that agent from here.", "I am not sure what you wanted
+    me to do.", "Please fork agents from the app."), said as the agent the message was said to unless an app
+    asked, and nothing is held: a later "yes" must not give a command's words to an agent as a message. A
+    refused command keeps the phrase key its model gave, which is none: the Python Host gives those sentences
+    no key of their own until its R76 does, and the place is `command_check` and its caller in `flow.rs`.
+  - A held message belongs to the session it was made in. The packet shows only the holds of the agent the
+    message was said to; a confirmation claims only such a hold, and one that confirms a hold that is not
+    there (its time is up, it was given, it was made while speaking to another agent) gives nothing and says
+    "That message is no longer waiting. Please say it again.", also where an app asked. Asked about again in
+    its own session while its time is not up, a held message keeps its words, its id, its trace, its time and
+    the way it came in; whom it may be for, why it is asked and until when are the new question's, whom
+    even where it names nobody. Anything else is held anew under an id of its own.
+  - A name given in `target_session`, or of a command for an agent in the payload's `name` (a text), is the
+    target; the agent the message was said to is the target only where no name is given. Names that
+    disagree are asked about, and a name nobody has makes no agent. A command carried out is told and kept
+    for the session it acted on.
+  - Names are resolved as voice names: the agent of that session or id where there is one, else every agent
+    whose session or name it is with case folded as Python folds it and accents taken off (the compatibility
+    decomposition without the signs that combine), agents that were put away and janitors counted, so that
+    one out of reach is told apart from one there is not. A question how an agent is doing follows the
+    same: of a name nobody has, two have, or one out of reach (put away, of no call, a janitor), the router
+    says so in its own voice and tells nobody's status.
+  The Host only hands the kernel the session a message was said to and every agent it has; whom a hold
+  belongs to is the kernel's rule. The wrong rules `tools/plants/router-436.py` hold all of it.
 - **The Host's side** (`clarp-host` `router.rs`). The router's book (its decisions, the newest two hundred;
   what it holds; what it gave each agent) is kept with the fleet, and changed together with the janitors'
   book in which its runs are. A dictated message is shown to it before it goes on (`edge.rs`, `sent_from`):
