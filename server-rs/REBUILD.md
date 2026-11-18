@@ -2533,18 +2533,35 @@ connection relay under the name the phone is paired with. Each of these is true 
 
 | Role | Session | Owns |
 |---|---|---|
-| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions, sign-offs |
+| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions; the split of what is left, the briefs, review, integration, the gates, landings and the installed Host |
+| Builders | helper agents of the lead, one for each piece | their piece, on a branch and in a worktree of their own, to the lead's brief |
 
-**Stage 1 is built by the lead alone** (Peter's decision of 15 Nov 2026, from three options: "Maximus alone
-through stage 1"). Builders and reviewers are staffed for stage 2, on the models and accounts Peter decides then.
-The one exception to "alone" is the proof that the conformance suite can fail: its plants must also come from a
-reviewer who did not write the suite, so that review is requested from Peter when stage 1 reaches its gate.
-Reviewers use a different model family from the authors and never edit sources.
+Stage 1 was built by the lead alone (Peter's decision of 15 Nov 2026), and so was most of what followed.
+**Since 18 Nov 2026 the lead builds nothing himself** (Peter, 16:47 that day, through his front desk: "spawn
+Astra 6.2 agents on high to work in parallel to speed up. He is now just coordinator"). What is left is split
+into pieces. Each is built by a helper on Codex (`gpt-6.2-astra`, effort high), started through
+`clarp-sub-agents` as a Clarp helper agent of the lead's with a worktree of its own
+(`~/GIT/clarp-worktrees/<piece>`, branch `rebuild/<piece>`). The lead writes the brief, reviews what comes
+back, puts the pieces together, runs the gates, lands and installs. A helper pushes its own branch and nothing
+else, installs nothing, messages nobody but the lead, and asks him when its brief does not say. The helpers'
+guide (what the method is, where to compile, the limits) is `/var/tmp/maximus/helpers/GUIDE.md` on elitebook;
+where it and this document differ, the guide is the newer.
+
+Out of scope by the owner's word of the same day: dreaming ("discard dreaming. It's an old feature"). In
+scope by his word of 17 Nov 2026: every backend the Python Host offers, not only Claude Code, Codex and
+Antigravity ("we need all the backends"), and asking a provider how much of an account is left, with his
+logins ("Of course Max can ask how much it is left").
+
+Reviewers use a different model family from the authors and never edit sources; the owner decides when they
+come ("We will wait with reviewers", 16 Nov 2026).
 
 ## 9. How to work
 
 - One worktree per agent under `~/GIT/clarp-worktrees/`, one branch per slice. Commit after every meaningful step.
-- Your compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
+- A helper's compiler is `server-rs/tools/build check`, `clippy` and `fmt`, and its tests run in GitHub Actions on
+  its branch: the build machine has one slot and a small disk, and a test build of every helper's checkout does
+  not fit on it (18 Nov 2026: 99 percent full; one checkout's test build had grown to 82 GB). The lead's
+  compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
   who holds the queue. It works from any checkout on elitebook or laptopstudio and runs on the XPS 15. Write the
   crate first (D13); a queue with one slot is fast only if nobody compiles after every function.
 - The merge gate is the `Server (Rust)` workflow, and it never starts by itself: Peter does not want tests that
