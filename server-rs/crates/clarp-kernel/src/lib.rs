@@ -9,6 +9,7 @@ pub mod accounts;
 pub mod activity;
 pub mod addressed;
 pub mod agent;
+pub mod alert_routes;
 pub mod artifacts;
 pub mod calendar;
 pub mod calls;
