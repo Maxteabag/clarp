@@ -277,3 +277,37 @@ def test_a_failed_status_update_leaves_no_submission(tmp_path, form):
     assert con.execute("SELECT count(*) FROM form_submissions WHERE artifact_id=?", (ident,)).fetchone()[0] == 0
     assert con.execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()[0] == "ready"
     assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True
+
+
+def test_a_failure_after_the_completion_leaves_no_submission_and_the_spec_open(tmp_path, form, monkeypatch):
+    """The second kill point: both writes done, the transaction not yet committed."""
+    from lib import agents, artifacts, db, html_forms, render_spec_store
+    agents.create_agent(persona="Synthetic", session="build", voice_id="v", cwd=str(tmp_path))
+    ident = artifacts.create(type="render_spec", session="build", title="Build", payload=form)["artifact_id"]
+
+    def killed(_row):
+        raise RuntimeError("killed after the status update")
+    monkeypatch.setattr(html_forms, "receipt", killed)
+    with pytest.raises(RuntimeError, match="killed after the status update"):
+        render_spec_store.submit(ident, _answer(), capable=True)
+    monkeypatch.undo()
+    con = db.conn()
+    assert con.execute("SELECT count(*) FROM form_submissions WHERE artifact_id=?", (ident,)).fetchone()[0] == 0
+    assert con.execute("SELECT status FROM artifacts WHERE artifact_id=?", (ident,)).fetchone()[0] == "ready"
+    assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True
+    assert render_spec_store.submit(ident, _answer(), capable=True)["accepted"] is True   # the retry's receipt
+
+
+def test_the_owner_functions_refuse_to_run_outside_a_transaction():
+    from lib import artifacts, db, html_forms
+    con = db.conn()
+    assert not con.in_transaction
+    for call in (lambda: artifacts.complete_in(con, "x", now=1, updated_at=1),
+                 lambda: artifacts.replace_render_spec_in(con, "x", title="t", summary="", status="ready",
+                                                          reference="", payload_json="{}", now=1),
+                 lambda: html_forms.record_submission_in(con, submission_id="s", artifact_id="x", version="v",
+                                                         session="s", answers_json="{}", payload_hash="h",
+                                                         prompt="p", created_at=1, synthesize_audio=1)):
+        with pytest.raises(RuntimeError, match="inside the caller's transaction"):
+            call()
+    assert con.execute("SELECT count(*) FROM form_submissions").fetchone()[0] == 0
