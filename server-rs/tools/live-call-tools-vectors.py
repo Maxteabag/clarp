@@ -60,7 +60,7 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools)}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools)}
 
 
 def calls(root, tools):
@@ -111,13 +111,63 @@ def calls(root, tools):
     return scenarios
 
 
+def callbacks(root, tools):
+    from unittest.mock import patch
+    from types import SimpleNamespace
+
+    scenarios = []
+    member = {'session':'member','name':'Theo'}
+    cfg = tools.frozen_config({'agent_session':'guard','live_tools':{'enabled':True,'agents':[member],
+                              'callback':{'kind':'http','url':'http://127.0.0.1:17001/callback'}}},'user_call')
+    snapshot = {'live_tools':cfg,'agent':{'session':'guard'},'profile':{'display_name':'Guard'},'host_id':'host-test'}
+    kinds = ('scheduled','already_scheduled','not-eligible','cancelled','nothing_pending','off','uncertain',
+             'uncertain-once','mismatch','refused','invalid','unexpected-status','legacy-replace','superseded','fired','firing','unclear-fired','cancelled-before','not-placed','failed','unknown','server-error')
+    for i,kind in enumerate(kinds):
+        path=root / ('cb-'+str(i)) / 'ledger.json'
+        writes=[]
+        record_cfg={**cfg,'callback':{'kind':'none'} if kind=='off' else cfg['callback']}
+        def post(url, body, timeout):
+            writes.append(dict(body))
+            if kind=='uncertain' or (kind=='uncertain-once' and len(writes)==1):
+                raise tools.Unconfirmed('unknown')
+            if kind=='mismatch' and len(writes)==1:
+                raise tools.Refused('mismatch',409,{'error':'supersedes_mismatch','pending':'other-call'})
+            if kind=='server-error': raise tools.Refused('uncertain',500,{'error':'other'})
+            if kind=='refused': raise tools.Refused('no',400,{'reason':'disabled'})
+            if kind=='invalid': return {'ok':False,'result':'scheduled'}
+            result='cancelled' if body['action']=='cancel' else 'scheduled'
+            if kind in ('already_scheduled','nothing_pending','unexpected-status'): result=kind
+            if kind=='legacy-replace' and body.get('explicit'):
+                result='already_scheduled'
+            status={'fired':'fyrt','firing':'fyrer','unclear-fired':'fyrt_usikker','cancelled-before':'avlyst',
+                    'not-placed':'ikke_plassert','failed':'feil','unknown':None}.get(kind,'venter')
+            return {'ok':True,'result':result,'operation_id':body['operation_id'],'due':3600,'status':status,
+                    **({'superseded':'earlier'} if kind=='superseded' and body.get('explicit') else {})}
+        effects=SimpleNamespace(post=post,recipient_ok=lambda _:kind!='not-eligible')
+        with patch.object(tools.time,'time',return_value=100), patch.object(tools,'log'), patch.object(tools,'log_exception'):
+            call=tools.CallTools(dict(snapshot,live_tools=record_cfg),'call-one',lambda *_:False,
+                                 effects=effects,principal='phone-one',ledger=tools.Ledger(path))
+            steps=[]
+            for args in ({},{'minutes':False,'reason':'  '},{'minutes':0},{'minutes':1},{'minutes':30},
+                         {'minutes':31,'reason':' one    two '},{'minutes':2.0},{'minutes':'3'},{'minutes':5}):
+                writes.clear()
+                receipt=call.execute('schedule_callback',args)
+                steps.append(dict(tool='schedule_callback',args=args,receipt=receipt,effects=writes.copy()))
+            writes.clear()
+            receipt=call.execute('cancel_callback',{})
+            steps.append(dict(tool='cancel_callback',args={},receipt=receipt,effects=writes.copy()))
+            scenarios.append(dict(kind=kind,steps=steps))
+            call.close()
+    return scenarios
+
+
 if __name__ == '__main__':
     if '--record' in sys.argv:
         with tempfile.TemporaryDirectory() as tmp:
             print(json.dumps(record(Path(tmp))))
     else:
         raw = subprocess.check_output([sys.executable,'-I',__file__,'--record'],
-                                     env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})
+                                     env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'})
         rows=json.loads(raw)
         written = ',\n'.join(' "'+name+'":[\n'+',\n'.join(json.dumps(r, ensure_ascii=True)
                             for r in values)+'\n]' for name,values in rows.items())
