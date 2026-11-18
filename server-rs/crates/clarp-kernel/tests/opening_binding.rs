@@ -55,6 +55,14 @@ fn a_clip_belongs_to_the_admitted_agent_and_turn_even_when_traces_repeat() {
     assert!(!index.contains_key(&key("alice", 2).unwrap()));
     assert_eq!(key("alice", 0), None);
     assert_eq!(key("", 1), None);
+    for state in ["unknown","cancelled"] {
+        second["intent"]["state"]=json!(state);
+        assert_eq!(initiative.audio(&second)["skip"],true);
+    }
+    second["intent"]["state"]=json!("started");
+    second["late_greeting"]=json!({"client_msg_id":"late"});
+    assert_eq!(initiative.audio(&second)["skip"],true);
+    second["late_greeting"]=Value::Null;
     second["intent"]["admission_id"] = json!("replacement");
     assert_eq!(initiative.audio(&second)["skip"], true);
     assert_eq!(first["clip_bindings"].as_array().unwrap().len(), 1);
