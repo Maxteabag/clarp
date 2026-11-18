@@ -69,6 +69,12 @@ fn refused(why: Refused, catalog: Result<&Catalog, Unavailable>) -> ApiError {
     }
 }
 
+/// A refusal of the rules of artifacts, said as the Python Host says it.
+pub(crate) fn said(why: Refused) -> ApiError {
+    let catalog = Catalog::embedded();
+    refused(why, catalog.as_ref().map_err(|e| *e))
+}
+
 fn no(code: &'static str, path: &str, catalog: Result<&Catalog, Unavailable>) -> ApiError {
     answer(&Refusal::new(code, path), catalog)
 }
