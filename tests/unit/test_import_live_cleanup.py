@@ -1,6 +1,7 @@
 """Leftover-live cleanup is scoped by the turns this import can delete."""
 from lib import db, message_writes
 from lib.message_import_writer import _ImportWriter
+from lib.message_import_rows import _FinalRows
 
 
 def _row(ident, trace, *, agent='a', session='b', role='assistant',
@@ -30,13 +31,14 @@ def _cleanup(finals, total=1000):
         result=message_writes._finish_import(
             writer,'a','b',source_file='/fixture.jsonl',batch_finals=finals,
             total_turns=total,skipped_slot_removed=False,latest_revision=100000,
-            authority_tools={})
+            authority_tools={}, final_rows=_FinalRows(writer, 'a', 'b'))
         writer.finish()
     finally:
         con.set_trace_callback(None)
         if con.in_transaction:con.execute('ROLLBACK')
-    selects=[sql for sql in statements if 'SELECT message_id, text, trace_id FROM messages'
-             in ' '.join(sql.split())]
+    selects=[sql for sql in statements
+             if ' '.join(sql.split()).startswith('SELECT message_id, text, trace_id')
+             and "source_file LIKE 'live:%'" in sql]
     return result,selects
 
 
@@ -106,3 +108,8 @@ def test_full_import_with_hundreds_of_traces_keeps_the_cheaper_single_walk():
     steps,plans=_query_work(selects)
     assert steps<6500,steps
     assert any('idx_messages_agent_revision' in plan for plan in plans),plans
+
+
+def test_cleanup_at_trace_threshold_equality_keeps_the_point_lookup():
+    _, selects = _cleanup([('t1', 'answer'), ('t2', 'answer')], total=10)
+    assert len(selects) == 1 and 'INDEXED BY idx_messages_trace' in selects[0]

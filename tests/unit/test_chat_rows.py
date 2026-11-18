@@ -366,9 +366,8 @@ def test_words_sent_twice_and_run_twice_are_still_linked_in_order(tmp_path):
 
 def test_a_reply_already_stored_beside_its_live_row_is_put_right_by_the_next_import(
         tmp_path, monkeypatch):
-    """What 12 November left: the reply as a ``msg-`` row, the ``live-`` row
-    still there. The next import from the start knows the live row for the
-    same reply and removes it; the row the chat was already served stays."""
+    """Keep a last reply's lagging stream until its provider message ends;
+    then its live identity replaces the already-served placeholder."""
     agent_id, ran, live, turns = _the_morning(tmp_path)
     with monkeypatch.context() as old:
         # As before the fix: the oldest row, and its trace for the reply.
@@ -382,7 +381,15 @@ def test_a_reply_already_stored_beside_its_live_row_is_put_right_by_the_next_imp
     _import(agent_id, turns)
 
     replies = [m for m in _visible(agent_id) if m["role"] == "assistant"]
-    assert [(m["id"], m["text"]) for m in replies] == [(durable["id"], REPLY)]
+    assert {m["id"] for m in replies} == {durable["id"], live["id"]}
+    assert {m["trace_id"] for m in replies} == {"trace-ran"}
+    assert next(m for m in replies if m["id"] == live["id"])["kind"] == "live"
+
+    assert agents_db.mark_live_message_final(
+        agent_id=agent_id, backend_session_id=BSID, trace_id="trace-ran")
+    _import(agent_id, turns)
+    replies = [m for m in _visible(agent_id) if m["role"] == "assistant"]
+    assert [(m["id"], m["text"]) for m in replies] == [(live["id"], REPLY)]
     assert replies[0]["trace_id"] == "trace-ran"
 
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
-from typing import Any
+from typing import Any, NamedTuple
 
 def _message_id(agent_id: str, backend_session_id: str, source_file: str,
                 seq: int) -> str:
@@ -134,8 +134,9 @@ def _session_parts(rows, backend_session_id):
     latest = max(users, key=lambda row: (_sqlite_order(row["updated_at"]),
                                          _sqlite_order(row["revision"]),
                                          _sqlite_order(row["seq"]))) if users else None
-    return ([(row["message_id"], row["text"], row["origin"], row["sender_agent_id"],
-              row["timestamp"]) for row in sends], _user_provenance(latest))
+    return ([_ClientProvenanceRow(row["message_id"], row["text"], row["origin"],
+              row["sender_agent_id"], row["timestamp"], row["trace_id"])
+             for row in sends], _user_provenance(latest))
 
 
 _FINAL_TWIN_WINDOW_S = 600
@@ -166,11 +167,20 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
 _PARKED_SEQ_BASE = 10 ** 12
 
 
-def _client_provenance_rows(database, agent_id, backend_session_id) -> list[tuple]:
+class _ClientProvenanceRow(NamedTuple):
+    message_id: Any
+    text: Any
+    origin: Any
+    sender_agent_id: Any
+    timestamp: Any
+    trace_id: Any
+
+
+def _client_provenance_rows(database, agent_id, backend_session_id) -> list[_ClientProvenanceRow]:
     """The /send rows of a session in the order they were written, as plain
-    tuples (message_id, text, origin, sender_agent_id, timestamp)."""
-    return [tuple(row) for row in database.execute(
-        """SELECT message_id, text, origin, sender_agent_id, timestamp FROM messages
+    named tuples: the original five positions, then trace_id."""
+    return [_ClientProvenanceRow(*row) for row in database.execute(
+        """SELECT message_id, text, origin, sender_agent_id, timestamp, trace_id FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
               AND source_file LIKE 'client:%'
             ORDER BY updated_at ASC, seq ASC""",
@@ -179,7 +189,10 @@ def _client_provenance_rows(database, agent_id, backend_session_id) -> list[tupl
 
 def _client_provenance(rows) -> dict[str, list[tuple[str, str, str, str]]]:
     provenance: dict[str, list[tuple[str, str, str, str]]] = {}
-    for message_id, text, origin, sender_agent_id, timestamp in rows:
+    for row in rows:
+        # Preserve the normalizer's four-field output and the original five
+        # input positions; matching alone consumes the appended named trace.
+        message_id, text, origin, sender_agent_id, timestamp = row[:5]
         key = _norm_text(text)
         provenance.setdefault(key, []).append((
             message_id, origin or "user", sender_agent_id or "", timestamp))
