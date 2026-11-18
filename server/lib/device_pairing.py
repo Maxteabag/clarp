@@ -155,6 +155,12 @@ def revoke(device_id: str) -> bool:
         except Exception as exc:  # noqa: BLE001 - the revoke stands; sends also skip a revoked owner
             from .log import log_exception
             log_exception("devicePairingLiveActivityForgetFail", exc, device_id.strip())
+        try:
+            from . import agent_rings
+            agent_rings.register_voip_token(device_id.strip(), "")
+        except Exception as exc:  # noqa: BLE001 - delivery rechecks the pairing
+            from .log import log_exception
+            log_exception("devicePairingVoipForgetFail", exc, device_id.strip())
         # A listen-first opening answered on this device loses its authority.
         try:
             from . import agent_rings

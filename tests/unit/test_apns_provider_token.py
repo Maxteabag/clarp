@@ -95,7 +95,11 @@ def test_voip_retries_a_rejected_provider_token(tmp_path, real_clients, monkeypa
     monkeypatch.setattr(config, "load", lambda:cfg)
     monkeypatch.setattr(apns, "_server_instance_id", lambda:"test-host")
     responses.extend([httpx.Response(403, json={"reason":"ExpiredProviderToken"}), httpx.Response(200)])
-    result = apns.send_agent_ring_voip({"ring_id":"test-ring","session":"mike","expires_at":1234567890000}, [{"token":TOKEN,"environment":"production"}])
+    from lib import device_pairing
+    phone = device_pairing.exchange(device_pairing.issue()["code"])["device_id"]
+    result = apns.send_agent_ring_voip(
+        {"ring_id":"test-ring","session":"mike","expires_at":1234567890000},
+        [{"token":TOKEN,"environment":"production","principal":phone}])
     assert result["sent"] == 1 and result["failed"] == 0
     assert len(requests) == 2
     assert all(request.headers["apns-push-type"] == "voip" for request in requests)

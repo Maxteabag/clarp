@@ -2161,7 +2161,7 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None, tokens: list[dic
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
 
 
-def agent_ring_voip_payload(ring: dict, *, server_instance_id: str = "") -> dict:
+def agent_ring_voip_payload(ring: dict, *, server_instance_id: str = "", show_reason: bool = False) -> dict:
     """The VoIP push for a live ring: no alert, only what CallKit needs to
     report the incoming call at once (docs/agent-rings.md "CallKit")."""
     payload = {
@@ -2170,9 +2170,10 @@ def agent_ring_voip_payload(ring: dict, *, server_instance_id: str = "") -> dict
         "ring_state": "ringing",
         "session": str(ring.get("session") or ""),
         "persona": str(ring.get("persona") or "").strip() or "Clarp",
-        "reason": str(ring.get("reason") or ""),
         "expires_at": ring.get("expires_at"),
     }
+    if show_reason:
+        payload["reason"] = str(ring.get("reason") or "")
     if ring.get("conversation_mode"):           # an agent-live ring only; classic is unchanged
         payload["conversation_mode"] = str(ring["conversation_mode"])
     if server_instance_id:
@@ -2186,19 +2187,27 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
     The Audio Central relay carries no VoIP pushes, so without a direct key
     nothing is sent and the caller falls back to the alert. Never raises.
     """
-    from . import config
+    from . import config, agent_rings
+    from .agent_ring_live import device_ok
     cfg = config.load()
     if not tokens or not cfg.apns_direct_ready():
         return {"enabled": bool(tokens) and cfg.apns_direct_ready(), "sent": 0, "failed": 0}
     sent = failed = 0
     expiration = int((ring.get("expires_at") or 0) // 1000) or None
-    payload = agent_ring_voip_payload(ring, server_instance_id=_server_instance_id())
+    payload = agent_ring_voip_payload(ring, server_instance_id=_server_instance_id(),
+                                     show_reason=agent_rings.settings()["show_reason"])
+    attempted = set()
     try:
         transport = _DirectTransport(cfg)
         for row in tokens:
+            principal = row.get("principal") or ""
+            token = canonical_token(row.get("token"))
+            if not token or token in attempted or not principal.startswith("device_") or not device_ok(principal):
+                continue
+            attempted.add(token)
             try:
                 status, reason, _apns_id = transport.send(
-                    row["token"], row.get("environment") or cfg.apns_environment, payload,
+                    token, row.get("environment") or cfg.apns_environment, payload,
                     push_type="voip", priority="10",
                     collapse_id=agent_ring_collapse_id(ring), expiration=expiration)
             except Exception as e:  # noqa: BLE001
