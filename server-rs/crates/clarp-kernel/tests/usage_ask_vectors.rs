@@ -66,11 +66,44 @@ fn asks_when_the_reference_does_and_shows_every_model_group_bucket() {
         assert_eq!(json!(read), case["projected"]);
         count += 1;
     }
-    assert_eq!(
-        count,
-        fixture["ages"].as_array().unwrap().len()
-            + fixture["cases"].as_array().unwrap().len()
-            + fixture["agy"].as_array().unwrap().len()
-    );
+    let tool = Tool {
+        provider: "codex",
+        instance: "another-host:codex",
+    };
+    let mut kept = Kept::default();
+    let mut next = 0;
+    let mut id = |prefix: &str| {
+        next += 1;
+        format!("{prefix}00000000-0000-0000-0000-{next:012x}")
+    };
+    for case in fixture["authoritative"].as_array().unwrap() {
+        let now = case["now"].as_i64().unwrap();
+        let action = case["action"].as_str().unwrap();
+        let events = match action {
+            "read" => kept.seen(tool, login, &case["snapshot"], "/wham/usage", now, &mut id),
+            "refused" => kept.refused(tool, Some(login), now, &mut id),
+            "failure" => {
+                kept.refresh_failed(now);
+                Vec::new()
+            }
+            "ask" => Vec::new(),
+            _ => panic!("unknown vector step {action}"),
+        };
+        assert_eq!(json!(events), case["events"], "events at {now}");
+        let shown = kept.asked(tool, Some(login), now, &mut id);
+        assert_eq!(shown.row, case["row"], "row at {now}");
+        assert_eq!(shown.provider, case["provider"], "provider at {now}");
+        assert_eq!(
+            json!(kept.used_up(tool, Some(login), now)),
+            case["used_up"],
+            "exhaustion at {now}"
+        );
+        assert_eq!(
+            json!(kept.refresh_due(Some(login), now)),
+            case["due"],
+            "refresh at {now}"
+        );
+        count += 1;
+    }
     println!("{count} projection and refresh steps");
 }
