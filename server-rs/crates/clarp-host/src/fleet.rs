@@ -422,6 +422,7 @@ pub enum Pushed {
 
 /// What every agent of a Host is given.
 pub struct Works {
+    pub opening_gate: crate::calls::opening_launch::Gate,
     pub config: Arc<Config>,
     pub engine: Arc<dyn LogEngine>,
     pub codecs: CodecSet,
@@ -571,6 +572,10 @@ enum Ask {
         kind: &'static str,
         key: String,
         value: Option<Vec<u8>>,
+        answer: Answer<Result<(), Unavailable>>,
+    },
+    KeepTogether {
+        writes: Vec<(String, String, Vec<u8>)>,
         answer: Answer<Result<(), Unavailable>>,
     },
     /// What was left of a kind: under one key, or all of it, ordered by key.
@@ -912,6 +917,21 @@ impl FleetHandle {
         .await?
     }
 
+    pub async fn keep_together(
+        &self,
+        rows: Vec<(&'static str, String, Vec<u8>)>,
+    ) -> Result<(), Unavailable> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let writes = rows
+            .into_iter()
+            .map(|(kind, key, value)| (shelf(kind), key, value))
+            .collect();
+        self.ask(|answer| Ask::KeepTogether { writes, answer })
+            .await?
+    }
+
     /// What was left of a kind under a key.
     pub async fn kept(
         &self,
@@ -1004,6 +1024,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         epoch: works.hub.epoch().to_string(),
     };
     Ok(Setup {
+        opening_gate: works.opening_gate.clone(),
         record: record.clone(),
         profile,
         backend,
@@ -1290,6 +1311,13 @@ impl Fleet {
                     answer,
                 } => {
                     let _ = answer.send(Ok(self.keep(kind, &key, value)));
+                }
+                Ask::KeepTogether { writes, answer } => {
+                    let result = self
+                        .store
+                        .put_together(&writes)
+                        .map_err(|e| Unavailable(e.to_string()));
+                    let _ = answer.send(Ok(result));
                 }
                 Ask::Kept { kind, key, answer } => {
                     let _ = answer.send(Ok(self.kept(kind, key.as_deref())));

@@ -4139,10 +4139,10 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         ),
         (403, json!({ "ok": false, "error": "ring_device_required" }))
     );
-    // And what this Host does not have of rings is said in words: one that listens first.
+    // An empty listen-first claim is rejected before token lookup.
     assert_eq!(
-        host.ask("POST", "/calls/ring/opening", Some(&json!({}))).0,
-        501
+        host.ask("POST", "/calls/ring/opening", Some(&json!({}))),
+        (400, json!({"ok":false,"error":"bad claim"}))
     );
 
     // The phone answers: a call starts with the agent on the floor, and the answer hands
@@ -30127,6 +30127,537 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
             .any(|r| r["status"] == "not_done" && r["error"] == "call ended before the request")
     );
     assert!(upstream.of_kind("session.commentary.append").is_empty());
+    // A listen-first ring still voices its fallback when placed. The capable
+    // phone receives its own opening token; ordinary reads contain no secrets.
+    let place = Place::new("listen-first");
+    let speaker = cartesia_stand_in(vec![7; 5000]);
+    let settings = place.root.join("speech.toml");
+    std::fs::write(&settings,"[tts]\nprovider='cartesia'\n[cartesia]\napi_key='fixture'\n[cartesia.voices]\nAlma='fixture'\n").unwrap();
+    // Keep this fixture's shim records so the test can count successful
+    // invocations after the actor has filed the recovered turn's final reply.
+    let args = ["--speech-keys", settings.to_str().unwrap(), "--keep-spools"];
+    let env = [
+        ("CLARP_CARTESIA_ENDPOINT", speaker.address.as_str()),
+        ("OPENAI_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+    ];
+    let host = place.start_in("test-only", &args, &env);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["agent_ring_listen_first"],
+        74
+    );
+    let (phone, _) = pair(&host, "Phone", "full");
+    let (other, _) = pair(&host, "Other", "full");
+    // An unknown ring action takes the same missing-route path as other calls.
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/ring/missing-action",
+            Some(&json!({}))
+        )
+        .0,
+        404
+    );
+    let alma = host.new_agent("Alma");
+    let ring = |host: &Host, agent: &str| {
+        host.post("/calls/ring",json!({"agent":agent,"opening_mode":"listen_first","reason":"Water","opening_line":"Hello?"}))["ring"].clone()
+    };
+    let answer = |host: &Host, r: &Value, capable: bool| {
+        let mut body = json!({"ring_id":r["ring_id"]});
+        if capable {
+            body["opening_mode"] = json!("listen_first");
+        }
+        host.ask_as(&phone, "POST", "/calls/ring/answer", Some(&body))
+    };
+    let claim = |host: &Host, caller: &str, op: &Value, kind: &str, id: &str, extra: Value| {
+        let mut body =
+            json!({"claim":kind,"request_id":id,"epoch":op["epoch"],"token":op["token"]});
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        host.ask_as(caller, "POST", "/calls/ring/opening", Some(&body))
+    };
+    let r = ring(&host, &alma);
+    assert_eq!(r["opening_mode"], "listen_first");
+    let (status, taken) = answer(&host, &r, true);
+    assert_eq!(status, 200, "{taken}");
+    let op = taken["opening"].clone();
+    assert_eq!(op["state"], "pending");
+    assert_eq!(op["silence_ms"], 1250);
+    assert_eq!(op["token"].as_str().unwrap().len(), 36);
+    assert_eq!(op["owner_nonce"].as_str().unwrap().len(), 36);
+    assert!(op.get("text").is_none() && op.get("audio_url").is_none());
+    let show = |host: &Host, id: &Value| {
+        host.ask_as(
+            &phone,
+            "GET",
+            &format!("/calls/ring?ring_id={}", id.as_str().unwrap()),
+            None,
+        )
+        .1["ring"]
+            .clone()
+    };
+    let seen = show(&host, &r["ring_id"]);
+    assert!(seen["opening"].get("token").is_none() && seen["opening"].get("owner_nonce").is_none());
+    assert_eq!(seen["opening"]["epoch"], 1);
+    let denied = claim(&host, &other, &op, "speech_started", "other", json!({}));
+    assert_eq!(denied.0, 403);
+    assert!(denied.1["opening"].get("token").is_none());
+    let ready = claim(
+        &host,
+        &phone,
+        &op,
+        "listening",
+        "ready",
+        json!({"capture_gen":4,"at_ms":900}),
+    );
+    assert_eq!(ready.1["opening"]["state"], "listening");
+    let onset = claim(&host, &phone, &op, "speech_started", "onset", json!({}));
+    assert_eq!(onset.1["opening"]["state"], "speech_latched");
+    assert_eq!(
+        claim(
+            &host,
+            &phone,
+            &op,
+            "silence",
+            "no",
+            json!({"at_ms":1251,"watermark_ms":1251})
+        )
+        .0,
+        409
+    );
+    let renewal = json!({"owner_nonce":op["owner_nonce"],"expected_epoch":1});
+    let renewed = claim(&host, &phone, &op, "renew", "renew", renewal.clone()).1["opening"].clone();
+    assert_eq!(renewed["epoch"], 2);
+    assert_ne!(renewed["owner_nonce"], op["owner_nonce"]);
+    assert_eq!(
+        claim(&host, &phone, &op, "renew", "renew", renewal).1["opening"],
+        renewed
+    );
+    assert_eq!(
+        claim(&host, &phone, &op, "listening", "old", json!({})).0,
+        409
+    );
+
+    // The captured speech goes to the agent that rang, bypassing hands-free
+    // selection. Replaying that client message leaves a single greeting.
+    let body = json!({"session":alma,"text":"<speak>Hello from the user.</speak>","trace_id":"test-greeting","client_msg_id":"greet-1",
+        "hands_free":true,"call_id":op["call_id"],"call_opening":{"token":op["token"],"epoch":2}});
+    let (status, greeted) = host.ask_as(&phone, "POST", "/send", Some(&body));
+    assert_eq!(status, 200, "{greeted}");
+    assert_eq!(greeted["opening"]["state"], "greeting");
+    assert_eq!(greeted["session"], alma);
+    assert_eq!(host.ask_as(&phone, "POST", "/send", Some(&body)).0, 200);
+    wait_for("one greeting reaches the scripted agent", || {
+        host.conversation(&alma)
+            .iter()
+            .filter(|(role, text)| role == "user" && text == "<speak>Hello from the user.</speak>")
+            .count()
+            == 1
+    });
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let rings: Vec<Value> =
+        serde_json::from_slice(&db.get("kept.ring", "rings").unwrap().unwrap()).unwrap();
+    let stored = &rings
+        .iter()
+        .find(|row| row["ring_id"] == r["ring_id"])
+        .unwrap()["_opening"];
+    assert_eq!(stored["greeting"]["admission"], "confirmed");
+    assert_eq!(
+        stored["fence"]["auth"]["token_hash"],
+        clarp_host::pairing::digest(&phone)
+    );
+    drop(db);
+    // The scripted answer repeats the marked speech. The recovered audio
+    // event must identify this greeting, its epoch and its client admission.
+    let clip = || {
+        host.get(&format!("/clips/recoverable?session={alma}"))["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["trace_id"] == "test-greeting")
+            .cloned()
+    };
+    wait_for("the greeting reply has a recoverable tagged clip", || {
+        clip().is_some()
+    });
+    let clip = clip().unwrap();
+    assert_eq!(clip["call_id"], op["call_id"]);
+    assert_eq!(
+        clip["opening"],
+        json!({"ring_id":r["ring_id"],"token":op["token"],"epoch":2,"kind":"greeting_reply","admission_id":"greet-1"})
+    );
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["retired"],
+        "call_ended"
+    );
+    assert_eq!(answer(&host, &r, true).0, 409);
+
+    // The microphone's deadline requires both watermarks. Make the scripted
+    // backend's working directory unavailable before its first spawn.
+    let second_cwd = place.root.join("second-work");
+    std::fs::create_dir(&second_cwd).unwrap();
+    let made = host.post(
+        "/agents",
+        json!({"name":"Second","backend":"scripted","cwd":second_cwd}),
+    );
+    let another = made["session"].as_str().unwrap().to_string();
+    let spool = place
+        .root
+        .join("data/agents")
+        .join(made["agent"]["agent_id"].as_str().unwrap())
+        .join("spool");
+    let r = ring(&host, &another);
+    let op = answer(&host, &r, true).1["opening"].clone();
+    let short = claim(
+        &host,
+        &phone,
+        &op,
+        "silence",
+        "short",
+        json!({"at_ms":1250,"watermark_ms":1249}),
+    );
+    assert_eq!(short.0, 400);
+    let silence = json!({"at_ms":1250,"watermark_ms":1250});
+    std::fs::remove_dir(&second_cwd).unwrap();
+    let silent = claim(&host, &phone, &op, "silence", "silence", silence.clone());
+    assert_eq!(silent.0, 200, "{:?}", silent.1);
+    assert_eq!(silent.1["opening"]["intent"]["gen"], 1);
+    assert_eq!(
+        claim(&host, &phone, &op, "silence", "silence", silence).1["changed"],
+        false
+    );
+    // The shim recorded a pre-invocation failure. Restart the Host before
+    // restoring the directory. The same admission must run successfully once.
+    let spawn_records = || {
+        let mut records = Vec::new();
+        for path in std::fs::read_dir(&spool)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|f| f.path())
+        {
+            if path.extension().is_some_and(|ext| ext == "jsonl") {
+                let text = std::fs::read_to_string(path).unwrap();
+                for row in text
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                {
+                    if row["s"] == "shim"
+                        && let Some(event) = row["d"]["event"].as_str()
+                    {
+                        records.push(event.to_owned());
+                    }
+                }
+            }
+        }
+        records
+    };
+    wait_for(
+        "the shim has durable proof it never invoked the tool",
+        || spawn_records().iter().any(|event| event == "spawn-failed"),
+    );
+    drop(host);
+    std::fs::create_dir(&second_cwd).unwrap();
+    let host = place.start_in("test-only", &args, &env);
+    wait_for("the recovered initiative completes", || {
+        host.state(&another) == "done"
+            && host
+                .conversation(&another)
+                .iter()
+                .any(|(role, _)| role == "assistant")
+    });
+    assert_eq!(
+        spawn_records()
+            .iter()
+            .filter(|event| event.as_str() == "spawned")
+            .count(),
+        1
+    );
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["state"],
+        "initiative_started"
+    );
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+
+    // A phone without the capability gets the already voiced opening line.
+    let legacy = host.new_agent("Third");
+    let r = ring(&host, &legacy);
+    let fallback = answer(&host, &r, false);
+    assert_eq!(fallback.0, 200);
+    assert_eq!(fallback.1["opening"]["text"], "Hello?");
+    assert!(fallback.1["opening"].get("token").is_none());
+    assert_eq!(fallback.1["ring"]["opening"]["state"], "fallback");
+    // An answer may cross an old pause, but a second Stop, even on the
+    // already-paused queue, invalidates its authority.
+    let stopped = host.new_agent("Held");
+    host.post("/stop", json!({"session":stopped}));
+    let r = ring(&host, &stopped);
+    let op = answer(&host, &r, true).1["opening"].clone();
+    host.post("/stop", json!({"session":stopped}));
+    let refused = claim(&host, &phone, &op, "no_mic", "after-stop", json!({}));
+    assert_eq!(refused.0, 409);
+    assert_eq!(refused.1["reason"], "stopped_after_answer");
+    assert_eq!(refused.1["opening"]["retired"], "stopped_after_answer");
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+
+    // Restoring the database under another instance cannot disclose a
+    // secret reply from the older instance, including a saved renewal.
+    let restored = host.new_agent("Restored");
+    let r = ring(&host, &restored);
+    let op = answer(&host, &r, true).1["opening"].clone();
+    let renew = json!({"owner_nonce":op["owner_nonce"],"expected_epoch":1});
+    assert_eq!(
+        claim(&host, &phone, &op, "renew", "saved", renew.clone()).0,
+        200
+    );
+    let token_file = place.root.join("data/backups/instance.generation");
+    let old_generation = std::fs::read(&token_file).unwrap();
+    std::fs::write(&token_file, "11111111-2222-4333-a444-555555555555\n").unwrap();
+    let denied = claim(&host, &phone, &op, "renew", "saved", renew);
+    assert_eq!(denied.0, 409);
+    assert_eq!(denied.1["reason"], "db_restored");
+    assert_eq!(denied.1["opening"]["state"], "unknown");
+    assert!(denied.1["opening"].get("owner_nonce").is_none());
+    assert_eq!(answer(&host, &r, true).0, 409);
+    std::fs::write(&token_file, &old_generation).unwrap();
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+
+    // A corrupt existing token is never repaired by read or bootstrap.
+    // The fallback for older phones is still available on an ordinary ring.
+    let unproven = host.new_agent("Unprovable");
+    std::fs::write(&token_file, "invalid").unwrap();
+    let (status,denied)=host.ask("POST","/calls/ring",Some(&json!({"agent":unproven,"reason":"Water","opening_line":"Hello?","opening_mode":"listen_first"})));
+    assert_eq!(status, 409);
+    assert_eq!(
+        denied["error"],
+        "listen-first opening is unavailable: host identity unprovable; ring with opening_mode say"
+    );
+    assert_eq!(std::fs::read_to_string(&token_file).unwrap(), "invalid");
+    std::fs::write(&token_file, &old_generation).unwrap();
+
+    // Crash between the resolve and admission commits: the durable intent
+    // remains. Restart recovers its exact id; a second restart never reruns it.
+    let recovered = host.new_agent("Recovered");
+    let r = ring(&host, &recovered);
+    let op = answer(&host, &r, true).1["opening"].clone();
+    let id = format!("call-open:{}:1", r["ring_id"].as_str().unwrap());
+    drop(host);
+    {
+        let mut db = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap();
+        let bytes = db.get("kept.ring", "rings").unwrap().unwrap();
+        let mut rings: Value = serde_json::from_slice(&bytes).unwrap();
+        let row = rings
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|row| row["ring_id"] == r["ring_id"])
+            .unwrap();
+        let opening = &mut row["_opening"];
+        assert_eq!(opening["token"], op["token"]);
+        opening["state"] = json!("initiative_queued");
+        opening["intent"] = json!({"kind":"initiative","admission_id":id,"gen":1,"state":"intended","cause":"no_mic","trace_id":"callopen-test-recovery"});
+        db.put("kept.ring", "rings", &serde_json::to_vec(&rings).unwrap())
+            .unwrap();
+    }
+    let host = place.start_in("test-only", &args, &env);
+    wait_for("the recovered intent passes the gate", || {
+        show(&host, &r["ring_id"])["opening"]["intent"]["state"] == "started"
+    });
+    wait_for("the recovered opening turn finishes", || {
+        host.state(&recovered) == "done"
+    });
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["intent"]["admission_id"],
+        id
+    );
+    let before = host.turns(&recovered);
+    drop(host);
+    let host = place.start_in("test-only", &args, &env);
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["intent"]["state"],
+        "started"
+    );
+    assert_eq!(host.turns(&recovered), before);
+    // A client message may already own an initiative's proposed admission id.
+    // Keep that message and its provenance. The Host records an unknown intent.
+    let (retiring, device_id) = pair(&host, "Retiring", "full");
+    let fourth = host.new_agent("Fourth");
+    let fourth_ring = ring(&host, &fourth);
+    let (status, answered) = host.ask_as(
+        &retiring,
+        "POST",
+        "/calls/ring/answer",
+        Some(&json!({"ring_id":fourth_ring["ring_id"],"opening_mode":"listen_first"})),
+    );
+    assert_eq!(status, 200, "{answered}");
+    let fourth_op = answered["opening"].clone();
+    let foreign_id = format!("call-open:{}:1", fourth_ring["ring_id"].as_str().unwrap());
+    host.send(&fourth, "Fixture client message", &foreign_id);
+    let (status, collision) = claim(
+        &host,
+        &retiring,
+        &fourth_op,
+        "no_mic",
+        "collision",
+        json!({}),
+    );
+    assert_eq!(status, 200, "{collision}");
+    assert_eq!(collision["opening"]["intent"]["state"], "unknown");
+    wait_for(
+        "the scripted agent handles the client's original message",
+        || {
+            host.conversation(&fourth)
+                .iter()
+                .any(|(role, text)| role == "assistant" && text == "Fixture client message")
+        },
+    );
+
+    // Fill the history with old rings while both real calls remain live.
+    // Their openings must survive eviction for their respective devices.
+    drop(host);
+    {
+        let mut db = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap();
+        let current: Vec<Value> =
+            serde_json::from_slice(&db.get("kept.ring", "rings").unwrap().unwrap()).unwrap();
+        let saved = current
+            .iter()
+            .find(|v| v["ring_id"] == r["ring_id"])
+            .unwrap()
+            .clone();
+        let fourth_saved = current
+            .iter()
+            .find(|v| v["ring_id"] == fourth_ring["ring_id"])
+            .unwrap()
+            .clone();
+        let mut history = vec![saved.clone(), fourth_saved];
+        for n in 2..50 {
+            let mut older = saved.clone();
+            for k in ["_opening", "opening_mode", "_host_gen"] {
+                older.as_object_mut().unwrap().remove(k);
+            }
+            older["created_at"] = json!(n);
+            older["expires_at"] = json!(n + 45_000);
+            older["ended_at"] = json!(n + 1);
+            older["state"] = json!("cancelled");
+            older["ring_id"] = json!(format!("archived-{n}"));
+            history.push(older);
+        }
+        db.put("kept.ring", "rings", &serde_json::to_vec(&history).unwrap())
+            .unwrap();
+    }
+    let host = place.start_in("test-only", &args, &env);
+    for name in ["Archive One", "Archive Two"] {
+        let evictor = host.new_agent(name);
+        let fresh = ring(&host, &evictor);
+        host.post("/calls/ring/cancel", json!({"ring_id":fresh["ring_id"]}));
+    }
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "GET",
+            &format!("/calls/ring?ring_id={}", r["ring_id"].as_str().unwrap()),
+            None
+        )
+        .0,
+        404
+    );
+    // The late greeting takes the ordinary route to this exact participant
+    // and prevents any later initiative audio before the call closes.
+    let late = json!({"session":recovered,"text":"Hello after eviction","client_msg_id":"archived-hello",
+        "trace_id":"test-archive-greeting","call_id":op["call_id"],"call_opening":{"token":op["token"],"epoch":op["epoch"]}});
+    let (status, answered) = host.ask_as(&phone, "POST", "/send", Some(&late));
+    assert_eq!(status, 200, "{answered}");
+    assert_eq!(answered["opening"]["greeting"], "ordinary");
+    assert_eq!(answered["session"], recovered);
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let tagged: Value = serde_json::from_slice(
+        &db.get("kept.opening_audio", "callopen-test-recovery")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tagged["skip"], true);
+    drop(db);
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/end",
+            Some(&json!({"call_id":op["call_id"]}))
+        )
+        .0,
+        200
+    );
+    let archived = claim(
+        &host,
+        &phone,
+        &op,
+        "renew",
+        "archived",
+        json!({"expected_epoch":op["epoch"],"owner_nonce":op["owner_nonce"]}),
+    );
+    assert_eq!(archived.0, 409);
+    assert_eq!(archived.1["reason"], "call_ended");
+    assert_eq!(
+        claim(&host, &other, &op, "no_mic", "archive-other", json!({})).0,
+        403
+    );
+
+    // Revocation retires the other archived opening. Only its former owner
+    // loses the pairing. The surviving phone cannot retrieve its private token.
+    host.post("/paired-devices/revoke", json!({"device_id":device_id}));
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let archived: Value = serde_json::from_slice(
+        &db.get(
+            "kept.opening_history",
+            fourth_ring["ring_id"].as_str().unwrap(),
+        )
+        .unwrap()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(archived["_opening"]["retired"]["reason"], "auth_revoked");
+    assert_eq!(
+        claim(&host, &retiring, &fourth_op, "no_mic", "revoked", json!({})).0,
+        401
+    );
+    let (status, forbidden) = claim(&host, &other, &fourth_op, "no_mic", "other", json!({}));
+    assert_eq!(status, 403);
+    assert!(forbidden["opening"].get("token").is_none());
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its

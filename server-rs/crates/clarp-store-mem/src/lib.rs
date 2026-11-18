@@ -189,6 +189,14 @@ impl KeyValue for MemTables {
         Ok(())
     }
 
+    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError> {
+        let mut tables = self.tables.lock().map_err(|_| lost())?;
+        for (table, key, value) in writes {
+            tables.insert((table.clone(), key.clone()), value.clone());
+        }
+        Ok(())
+    }
+
     fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError> {
         let mut tables = self.tables.lock().map_err(|_| lost())?;
         Ok(tables
