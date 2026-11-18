@@ -11,6 +11,7 @@ import base64
 import concurrent.futures
 import json
 import socket
+import sqlite3
 import threading
 import time
 import uuid
@@ -20,7 +21,7 @@ from urllib.request import Request, urlopen
 from . import config, oracle_delegations, ws
 from .http_utils import principal_of, require_full_scope
 from . import oracle_contact
-from .log import log, log_exception
+from .log import log, log_exception, log_fault
 from .oracle_calls_stable import AgentTools, session_config as realtime_config
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
@@ -401,6 +402,7 @@ class Conversation:
         self.seen = set()
         self.results_seen = set()
         self.silenced_results = set()
+        self.checkpoint_failed = False
         # Context notifications are owned by this Oracle thread. Native
         # decisions and unread user-directed completions share one dedup set;
         # the durable table extends ownership across normal reconnects.
@@ -465,7 +467,14 @@ class Conversation:
                 silenced = self.silenced_results & kept
                 if silenced:
                     state["silenced_results"] = sorted(silenced)
-                self.memory.save(state)
+                try:
+                    self.memory.save(state)
+                except (oracle_memory.CheckpointTooLarge, sqlite3.Error) as exc:
+                    # The call goes on; a call resuming within thirty seconds reads the
+                    # last checkpoint that was saved. Logged once per call, content-free.
+                    if not self.checkpoint_failed:
+                        self.checkpoint_failed = True
+                        log_fault("oracleCheckpointNotSaved", exc)
 
     def call_work(self):
         """Operations delegated in this call."""
