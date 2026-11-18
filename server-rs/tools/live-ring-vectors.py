@@ -160,6 +160,11 @@ def fallback(principal, at=-1, request='fallback-1', stopped=True, meanwhile=Non
     return step
 
 
+def restart():
+    """The Host starts again: no call of the Host before it has a session any more."""
+    return {'do': 'restart'}
+
+
 def session(what, at=-1):
     """What the session of a call records on its ring: `opening` (it is said once), `active` (the voice took it),
     `audio` (the user's sound went to the voice); or `unsettled`: a session that does not end when it is told to."""
@@ -320,6 +325,25 @@ SCRIPTS = [
                fallback(A, meanwhile=('user_hangup', 'close-m', 1)), call(A), fallback(A),
                tick(61 * SECOND), live_ring(event_id='evt-4'), live_answer(A, request='answer-4'),
                fallback(A, stopped=False, meanwhile=('user_hangup', 'close-m', 1)), look(A, 3)]},
+    {'name': 'a Host that starts again ends the live calls it finds joined, and no others',
+     'steps': [PHONE_A, voip(B, TOKEN_B, [LIVE]), restart(), live_ring(), restart(), look(A, 0), live_answer(A), restart(),
+               look(A, 0), join(A), restart(), restart(), look(A, 0), call(A), fallback(A), join(A), close(A, reason='transport_lost'),
+               close(A, reason='transport_lost'), close(A, request='close-2'), fallback(A),
+               tick(61 * SECOND), live_ring(event_id='evt-2'), live_answer(A, request='answer-2'), join(A), session('opening'),
+               restart(), look(A, 1), session('active'), fallback(A), fallback(A, expected_epoch=2), close(A), fallback(A),
+               tick(61 * SECOND), live_ring(event_id='evt-3'), live_answer(A, request='answer-3'), join(A), session('opening'),
+               session('active'), session('audio'), restart(), look(A, 2), session('audio'), fallback(A), restart(),
+               tick(61 * SECOND), live_ring(event_id='evt-4'), live_answer(A, request='answer-4'), fallback(A), restart(),
+               fallback(A), look(A, 3), close(A),
+               tick(61 * SECOND), live_ring(event_id='evt-5'), live_answer(A, request='answer-5'), join(A),
+               close(A, reason='transport_lost'), restart(), fallback(A), look(A, 4),
+               tick(61 * SECOND), live_ring(event_id='evt-6'), live_answer(A, request='answer-6'), tick(59 * SECOND), restart(),
+               join(A), restart(), tick(2 * SECOND), look(A, 5)]},
+    {'name': 'a call the user began is ended by a Host that starts again, and the user may call anew at once',
+     'steps': [taking(), PHONE_A, voip(B, TOKEN_B, [LIVE]), user_call(B), restart(), look(B, 0), user_call(B, request='call-2'),
+               join(B), restart(), look(B, 1), user_call(B, request='call-2'), user_call(B, request='call-3'), fallback(B, 1),
+               close(B, 1), join(B), session('opening'), session('active'), restart(), user_call(B, request='call-4'),
+               look(B), close(B)]},
     {'name': 'the user calls an agent that takes calls live',
      'steps': [taking(), user_call(A), PHONE_A, voip(B, TOKEN_B, [LIVE]), user_call(A), look(A), look(B), look(A, 0), look(B, 0),
                look(ADMIN, 0), call(A), user_call(A), user_call(A, nonce='nonce-2'), user_call(A, agent='a-mike'),
@@ -678,6 +702,12 @@ def run() -> dict:
                     return live.fallback(step['principal'], said)
                 finally:
                     agent_rings._voice = voice
+            if do == 'restart':
+                # A Host that starts has no session of a call and has retired none: both are of the process.
+                live._SESSIONS.clear()
+                with live._RETIRED_LOCK:
+                    live._RETIRED.clear()
+                return {'retired': agent_rings.recover_joined_live_calls()}
             if do == 'session':
                 call_id, what = kept.get('_live_call_id', ''), step['what']
                 if what == 'unsettled':

@@ -581,6 +581,11 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                         }
                     }
                 }
+                // The Host starts again: no call of the Host before it has a session.
+                "restart" => {
+                    unsettled.clear();
+                    Ok(json!({ "retired": rings.orphaned(&mut out).len() }))
+                }
                 "session" => {
                     let (call_id, epoch) = of_ring(&rings);
                     let call = (call_id.as_str(), epoch);
