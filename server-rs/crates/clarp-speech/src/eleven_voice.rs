@@ -1,10 +1,9 @@
 //! ElevenLabs accepts three text frames, then streams base64 MP3 until its final frame.
-use std::net::{TcpStream, ToSocketAddrs};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
-use tungstenite::{Message, client_tls};
+use tungstenite::Message;
 
 use crate::{
     scribe::Key,
@@ -51,32 +50,8 @@ impl Speaker for ElevenVoice {
             why: why.into(),
             begun,
         };
-        let uri = base
-            .parse::<tungstenite::http::Uri>()
-            .map_err(|_| failed("invalid ElevenLabs endpoint", false))?;
-        let host = uri
-            .host()
-            .ok_or_else(|| failed("missing ElevenLabs endpoint host", false))?
-            .trim_matches(['[', ']']);
-        let port = uri.port_u16().unwrap_or(443);
-        let timeout = Duration::from_secs(30);
-        let until = Instant::now() + timeout;
-        let socket = (host, port)
-            .to_socket_addrs()
-            .ok()
-            .into_iter()
-            .flatten()
-            .find_map(|addr| {
-                TcpStream::connect_timeout(&addr, until.saturating_duration_since(Instant::now()))
-                    .ok()
-            })
-            .ok_or_else(|| failed("WS connect failed", false))?;
-        socket
-            .set_read_timeout(Some(timeout))
-            .and_then(|()| socket.set_write_timeout(Some(timeout)))
-            .map_err(|_| failed("WS timeout configuration failed", false))?;
-        let (mut ws, _) =
-            client_tls(url.as_str(), socket).map_err(|_| failed("WS connect failed", false))?;
+        let request=tungstenite::client::IntoClientRequest::into_client_request(url.as_str()).map_err(|_|failed("invalid ElevenLabs endpoint",false))?;
+        let mut ws=crate::speech_socket::open(request,Duration::from_secs(30)).map_err(|why|failed(why,false))?;
         for frame in frames(line.text, &key, self.speed) {
             ws.send(Message::Text(frame.to_string().into()))
                 .map_err(|_| failed("WS send failed", false))?;

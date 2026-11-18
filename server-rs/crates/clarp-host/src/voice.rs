@@ -191,6 +191,7 @@ pub struct Mouth {
     cartesia_voices: Mutex<Option<(std::time::Instant, Arc<Vec<Value>>)>>,
     /// Where the previews of voices are kept: `<data>/voice-previews`.
     previews: PathBuf,
+    preview_locks: [tokio::sync::Mutex<()>; 16],
     /// The herald: what is held for agents whose user is with another, and whose hand is
     /// up ([`clarp_kernel::herald`]). One thing at a time happens to it: whoever asks it
     /// keeps it until what it said is told to the apps and written, so that a clip is
@@ -204,7 +205,15 @@ const LIST_KEPT: Duration = Duration::from_secs(15 * 60);
 impl Mouth {
     /// The owner's file as it is now. Nothing named, or nothing readable: an empty one.
     pub(crate) fn owners(&self) -> Table {
-        self.owner.read().unwrap_or_default()
+        let mut file=self.owner.read().unwrap_or_default();
+        let directory=self.fleet.directory();
+        for (section,key,setting) in [("tts","provider","speech.provider"),("tts","fallback","speech.fallback"),("local_tts","voice","speech.local_voice")] {
+            if let Some(value)=directory.setting(setting) {
+                let table=file.entry(section).or_insert_with(||toml::Value::Table(Table::new()));
+                if let Some(table)=table.as_table_mut(){table.insert(key.into(),toml::Value::String(value.into()));}
+            }
+        }
+        file
     }
 
     /// Whether an engine that speaks has its key.
@@ -232,6 +241,10 @@ impl Mouth {
     /// Cartesia's own list of voices: the one fetched within the last quarter of an hour,
     /// or a new one. Without a key, or when Cartesia does not answer, there is none.
     pub(crate) async fn cartesia_list(self: &Arc<Self>) -> Arc<Vec<Value>> {
+        self.cartesia_rows(false,false).await.unwrap_or_default()
+    }
+
+    pub(crate) async fn cartesia_rows(&self, force:bool, cached_preview:bool)->Result<Arc<Vec<Value>>,String> {
         let kept = |mouth: &Self| {
             let kept = mouth
                 .cartesia_voices
@@ -240,12 +253,12 @@ impl Mouth {
             kept.clone()
         };
         if let Some((at, voices)) = kept(self)
-            && at.elapsed() < LIST_KEPT
+            && !force && (cached_preview || at.elapsed() < LIST_KEPT)
         {
-            return voices;
+            return Ok(voices);
         }
         let Some(key) = self.owner.key("cartesia") else {
-            return Arc::default();
+            return Ok(Arc::default());
         };
         let list_at = match self.cartesia_at.as_str() {
             "" => clarp_speech::cartesia::VOICES.to_string(),
@@ -262,75 +275,105 @@ impl Mouth {
                     .cartesia_voices
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner) = Some(now);
-                voices
+                Ok(voices)
             }
-            Ok(Err(why)) => {
-                eprintln!("clarp-host: Cartesia's voices could not be listed: {why}");
-                Arc::default()
-            }
-            Err(_) => Arc::default(),
+            Ok(Err(why)) => Err(why),
+            Err(_) => Err("Cartesia catalogue thread ended".into()),
         }
     }
 
-    /// A preview of a voice, in a file: the one that was made before, or a new one said by
-    /// that engine alone. `Err` is why there is none.
-    pub(crate) async fn preview(
-        self: &Arc<Self>,
-        provider: &str,
-        voice: &str,
-        said: &str,
-        name: &str,
-    ) -> Result<PathBuf, String> {
-        let file = self.previews.join(format!("{name}.mp3"));
-        if file.is_file() {
-            return Ok(file);
-        }
-        let owners = self.owners();
-        let engine = self.engine(&owners, provider, true);
-        let engine = engine.ok_or_else(|| format!("no engine named {provider} is built"))?;
-        // A voice of Gemini's is asked for as the door the request goes through knows it.
-        let voice = match provider {
-            said::GEMINI => {
-                let vertex = owner::gemini(&owners).vertex;
-                owner::voices(&owners).gemini_voice_at(voice, vertex)
+    pub(crate) async fn legacy_preview(&self, session:&str,voice:&str,text:&str)->Result<String,String>{
+        let owners=self.owners();
+        let provider=owner::voices(&owners).provider;
+        if provider=="none" {return Err("server audio is disabled: no voice provider".into());}
+        // A text preview is an audio event, with a fresh name even on a cache hit.
+        let stamp=crate::ids::hex(16);
+        let preview=self.preview(&provider,voice,text,&stamp).await?;
+        let (_,name,path,mut clip)=self.new_clip(session).map_err(|e|e.to_string())?;
+        let write=match preview {
+            Preview::Cached(source)=>{
+                let copied=std::fs::File::open(&source).and_then(|mut src|std::io::copy(&mut src,&mut clip).map(|_|()));
+                let _=std::fs::remove_file(source);
+                copied
             }
-            _ => voice.to_string(),
+            Preview::Temporary(bytes)=>clip.write_all(&bytes),
         };
-        let (previews, said) = (self.previews.clone(), said.to_string());
-        let part = file.with_extension(format!("{}.part", crate::ids::hex(4)));
-        let (being_made, whole) = (part.clone(), file.clone());
-        let _slot = self.at_once.acquire().await;
-        let made = tokio::task::spawn_blocking(move || -> Result<(), String> {
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&previews)
-                .map_err(|error| error.to_string())?;
-            let mut sound = Vec::new();
-            let line = clarp_speech::speak::Line {
-                text: &said,
-                voice: &voice,
+        if let Err(error)=write {let _=std::fs::remove_file(path);return Err(error.to_string());}
+        self.hub.publish(json!({"type":"audio","url":format!("/audio/{name}"),"name":name,"session":session,"preview":true}),self.now_ms());
+        Ok(name)
+    }
+    /// Only the requested voice can populate its cache. When another voice
+    /// answers we return the bytes to the requesting client for this play.
+    pub(crate) async fn preview(&self, provider:&str, voice:&str, text:&str, name:&str) -> Result<Preview,String> {
+        let file=self.previews.join(format!("{name}.mp3"));
+        let bucket=name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
+        let _same=self.preview_locks[bucket].lock().await;
+        if file.symlink_metadata().is_ok_and(|m|m.is_file()) {return Ok(Preview::Cached(file));}
+        let owners=self.owners();
+        let primary=self.engine(&owners,provider,true).ok_or_else(||format!("no engine named {provider} is built"))?;
+        let voices=owner::voices(&owners);
+        let route=said::Route{provider:provider.into(),voice:Some(voice.into()),fallback:voices.fallback.clone()};
+        let fallback=route.fallback.as_str();
+        let fallback=if fallback!=provider && fallback!="none" && !fallback.is_empty() && self.has_key(fallback,&owners) {
+            let clip=voices.for_clip(Some(voice), Who{name:"",persona:"",session:""}, &route);
+            let chosen=match fallback {
+                said::CARTESIA=>clip.cartesia,
+                said::ELEVENLABS=>clip.elevenlabs,
+                said::GEMINI=>clip.gemini.map(|v|voices.gemini_voice_at(&v,owner::gemini(&owners).vertex)),
+                "deepgram"=>Some(owner::text_at(&owners,&["deepgram","model"]).unwrap_or_else(||"flux-haley-en".into())),
+                "google"=>Some("nb-NO-Chirp3-HD-Kore".into()), _=>None,
             };
-            let spoken = engine.speak(line, &mut |piece| sound.extend_from_slice(piece));
-            spoken.map_err(|mute| match mute {
-                Mute::Unavailable(why) | Mute::Failed { why, .. } => why,
-            })?;
-            let mut made = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&being_made)
-                .map_err(|error| error.to_string())?;
-            made.write_all(&sound).map_err(|error| error.to_string())?;
-            std::fs::rename(&being_made, &whole).map_err(|error| error.to_string())
-        });
-        match made.await {
-            Ok(Ok(())) => Ok(file),
-            Ok(Err(why)) => {
-                let _ = std::fs::remove_file(&part);
-                Err(why)
+            self.engine(&owners,fallback,false).zip(chosen)
+        }else{None};
+        let voice=if provider==said::GEMINI {voices.gemini_voice_at(voice,owner::gemini(&owners).vertex)}else{voice.to_string()};
+        let text=text.to_string();
+        let dir=self.previews.clone();
+        let _slot=self.at_once.acquire().await;
+        tokio::task::spawn_blocking(move || {
+            let mut bytes=Vec::new();
+            if let Err(error)=primary.speak(clarp_speech::speak::Line{text:&text,voice:&voice},&mut |part|bytes.extend_from_slice(part)) {
+                let why=match error {Mute::Unavailable(why)|Mute::Failed{why,..}=>why};
+                if why!="voice_unavailable" && let Some((engine,voice))=fallback {
+                    bytes.clear();
+                    if engine.speak(clarp_speech::speak::Line{text:&text,voice:&voice},&mut |part|bytes.extend_from_slice(part)).is_ok(){
+                        return Ok(Preview::Temporary(Bytes::from(bytes)));
+                    }
+                }
+                return Err(why);
             }
-            Err(_) => Err("the engine's thread ended".to_string()),
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(|e|e.to_string())?;
+            let part=file.with_extension(format!("{}.part",crate::ids::hex(4)));
+            let mut made=std::fs::OpenOptions::new().mode(0o600).create_new(true).write(true).open(&part).map_err(|e|e.to_string())?;
+            if let Err(e)=made.write_all(&bytes).and_then(|()|std::fs::rename(&part,&file)){
+                let _=std::fs::remove_file(part); return Err(e.to_string());
+            }
+            Ok(Preview::Cached(file))
+        }).await.map_err(|_|"speech engine thread ended".to_string())?
+    }
+
+}
+
+pub(crate) enum Preview { Cached(PathBuf), Temporary(Bytes) }
+
+impl Preview {
+    pub fn send(self, range:&str)->Response {
+        match self {
+            Self::Cached(path)=>send_file(path,range),
+            Self::Temporary(bytes)=>{
+                let total=bytes.len() as u64;
+                let part=media::byte_range(range,total);
+                let mut headers=vec![(header::CONTENT_TYPE,"audio/mpeg".into()),(header::ACCEPT_RANGES,"bytes".into())];
+                let (status,body)=match part {
+                    Part::Missing=>return no_such_part(&total.to_string(),true),
+                    Part::Whole=>(StatusCode::OK,bytes),
+                    Part::Bytes{first,last}=>{
+                        headers.push((header::CONTENT_RANGE,format!("bytes {first}-{last}/{total}")));
+                        (StatusCode::PARTIAL_CONTENT,bytes.slice(first as usize..=last as usize))
+                    }
+                };
+                headers.push((header::CONTENT_LENGTH,body.len().to_string()));
+                answer(status,headers,Body::from(body))
+            }
         }
     }
 }
@@ -356,6 +399,7 @@ impl Waiting {
             hub: works.hub,
             clock: works.clock,
             cartesia_voices: Mutex::default(),
+            preview_locks: Default::default(),
             previews: works.config.data_dir.join("voice-previews"),
             herald: tokio::sync::Mutex::default(),
         });
@@ -673,14 +717,17 @@ impl Mouth {
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
-        let owners = self.owner.read().unwrap_or_default();
+        let owners = self.owners();
         let has_key = |provider: &str| self.has_key(provider, &owners);
-        let by = match chosen(&owners, record, &has_key) {
+        let (by, unavailable) = match chosen(&owners, record, &has_key) {
             Chosen::Silent => return self.unsaid(member, &line, None, SPEECH_OFF, false).await,
             Chosen::Nobody { why, told } => {
-                return self.unsaid(member, &line, None, &why, told).await;
+                let voices=owner::voices(&owners);
+                let route=voices.route(Who{name:&record.persona,persona:&record.persona,session:&record.session});
+                if route.fallback.is_empty(){return self.unsaid(member,&line,None,&why,told).await;}
+                (vec![(route.provider,route.voice.unwrap_or_default())],Some(why))
             }
-            Chosen::By(by) => by,
+            Chosen::By(by) => (by,None),
         };
         let engines: Vec<(Box<dyn Speaker>, String, String)> = by
             .iter()
@@ -755,6 +802,7 @@ impl Mouth {
         }
         let sink = growing.clone();
         let made = tokio::task::spawn_blocking(move || {
+            if let Some(why)=unavailable {return (Err(why),0);}
             let listed: Vec<(&dyn Speaker, &str)> = engines
                 .iter()
                 .map(|(engine, voice, _)| (engine.as_ref(), voice.as_str()))
@@ -1609,15 +1657,12 @@ mod tests {
         let with_both = record("Maximus", "{\"elevenlabs\": \"e-own\"}");
         assert_eq!(
             chosen(&elsewhere, &with_both, &all),
-            by(&[("cartesia", "c-maximus")])
+            by(&[("elevenlabs","e-own"),("cartesia", "c-maximus")])
         );
         let alone = file("[tts]\nprovider = \"elevenlabs\"\n");
         assert_eq!(
             chosen(&alone, &with_both, &all),
-            Chosen::Nobody {
-                why: "the engine elevenlabs is not built into this Host".to_string(),
-                told: true
-            }
+            by(&[("elevenlabs","e-own")])
         );
         // One agent moved to another engine on purpose.
         let moved = file(
