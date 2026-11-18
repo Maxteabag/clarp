@@ -882,6 +882,8 @@ class Conversation:
             relay.next = start
             relay.auto = 0
             relay.held = False
+            if served:  # read on request: no longer paused or silenced
+                self.silenced_results.discard(relay.key)
         self.send_part(relay, now, served=served, resumed=resumed)
 
     def send_part(self, relay, now=None, *, served=False, resumed=False):
@@ -902,6 +904,10 @@ class Conversation:
             pause_after = relay.auto >= oracle_relay.AUTO_PARTS
         self.append("commentary", relay.part(index, served=served, resumed=resumed, pause_after=pause_after))
         with self.lock:
+            if pause_after and index + 1 < relay.total and relay.key in self.result_findings:
+                # Paused at the part limit: a deliberate pause, not a cut. A later
+                # call does not go on past it by itself; it stays readable on request.
+                self.silenced_results.add(relay.key)
             if index + 1 == relay.total and relay.key in self.result_findings:
                 self.results_sent.add(relay.key)
                 self.results_seen.add(relay.key)
