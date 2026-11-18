@@ -135,7 +135,9 @@ async fn serve(config: Config) -> Result<(), String> {
         } else {
             Vec::new()
         };
+    let (opening_gate, opening_requests) = clarp_host::calls::opening_launch::channel();
     let works = Works {
+        opening_gate,
         config: config.clone(),
         engine,
         codecs,
@@ -290,6 +292,10 @@ async fn serve(config: Config) -> Result<(), String> {
     // and its agent are told without anybody having to ask first.
     clarp_host::calls::resume(&app);
     // And the chips of the phones are kept current from now on.
+    tokio::spawn(clarp_host::calls::opening_launch::run(
+        app.clone(),
+        opening_requests,
+    ));
     clarp_host::chip::run(&app, is_limited);
     tokio::spawn(clarp_host::android_chip::run(app.clone()));
     // And what is due of the schedules is sent.

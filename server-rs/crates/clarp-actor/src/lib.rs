@@ -148,6 +148,9 @@ fn attempt_name(turn: TurnId, attempt: u32) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimOrder {
     pub before_stop: Option<(&'static str, u64)>,
+    /// An initiative admitted by the Host. A user can reuse a name but cannot
+    /// manufacture this provenance; the gate never intercepts a foreign turn.
+    pub opening: Option<(String, String)>,
     pub turn: TurnId,
     /// Which attempt of the turn the shim runs, from 1.
     pub attempt: u32,
@@ -1445,6 +1448,32 @@ impl Actor {
         }
     }
 
+    pub fn opening_row(&self, id: &str) -> Result<serde_json::Value, ActorError> {
+        use serde_json::{Value, json};
+        let (filed, _) = Message::filed(id);
+        let Some(item) = self.recorder.log().find(&filed)? else {
+            return Ok(Value::Null);
+        };
+        let Some(turn) = item.turn else {
+            return Ok(Value::Null);
+        };
+        let message = self.message_at(item.seq)?;
+        let foreign = !message.unminted
+            || !matches!(&message.origin,Origin::Trigger{name} if name=="automation");
+        let status = match self.fate_of(&filed)? {
+            TurnFate::Unknown => return Ok(Value::Null),
+            TurnFate::Waits => "queued",
+            // The Host can have selected the turn while its launch gate is
+            // still waiting. Only an opening marked started owns that launch.
+            TurnFate::Runs => "claimed",
+            TurnFate::Ended { .. } => "ended",
+            TurnFate::Gone => "withdrawn",
+        };
+        Ok(
+            json!({"status":status,"trace_id":message.trace_id,"foreign":foreign,"turn":turn,"claimed_at":Value::Null}),
+        )
+    }
+
     /// What became of the turn that answers the message with this id: for whoever handed
     /// the agent that message and follows what comes of it.
     pub fn fate_of(&self, message_id: &str) -> Result<TurnFate, ActorError> {
@@ -2590,6 +2619,18 @@ impl Actor {
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
+        let opening = if message.unminted
+            && message.client_id().starts_with("call-open:")
+            && matches!(&message.origin,Origin::Trigger{name} if name=="automation")
+        {
+            message
+                .trace_id
+                .as_deref()
+                .filter(|trace| trace.starts_with("callopen-"))
+                .map(|trace| (message.client_id().into(), trace.into()))
+        } else {
+            None
+        };
         let client_id = message.told_id().to_string();
         // Whatever an attempt before it waited for, this one begins.
         self.for_its_model = false;
@@ -2728,6 +2769,7 @@ impl Actor {
             for_account: false,
         });
         out.actions.push(Action::Launch(ShimOrder {
+            opening,
             turn,
             attempt,
             spool: self.profile.spool_path_of(turn, attempt),

@@ -508,45 +508,102 @@ pub fn record(new: Record<'_>, proof: &dyn Proof) -> Value {
 
 /// Validate the older admission and current session without leaking a nonce
 /// in a denial. The newer Stop wins even if the mailbox was already paused.
-pub fn fence(ring:&super::Ring, calls:&crate::calls::Calls, host:&str, proof:&dyn Proof)->Option<&'static str>{
-    let op=&ring.opening;
-    if op["server_id"]!=host{return Some("host_changed");}
-    let owner=op["principal"].as_str().unwrap_or("");
-    if ring.state!="answered" || ring.answered_by!=owner || op["call_id"]!=ring.call_id{return Some("ring_changed");}
-    if !calls.of(owner).iter().any(|c|c.call_id==ring.call_id && c.state=="live"){return Some("call_ended");}
-    let saved=&op["fence"]["auth"];
-    if !saved.is_null(){
-        let current=proof.auth(owner);
-        if current.is_null(){return Some("auth_revoked");}
-        if &current!=saved{return Some("auth_changed");}
+pub fn fence(
+    ring: &super::Ring,
+    calls: &crate::calls::Calls,
+    host: &str,
+    proof: &dyn Proof,
+) -> Option<&'static str> {
+    let op = &ring.opening;
+    if op["server_id"] != host {
+        return Some("host_changed");
     }
-    if let Some(stop)=op["fence"]["stop_generation"].as_u64() && proof.stop(&ring.agent_id).0!=stop{return Some("stopped_after_answer");}
+    let owner = op["principal"].as_str().unwrap_or("");
+    if ring.state != "answered" || ring.answered_by != owner || op["call_id"] != ring.call_id {
+        return Some("ring_changed");
+    }
+    if !calls
+        .of(owner)
+        .iter()
+        .any(|c| c.call_id == ring.call_id && c.state == "live")
+    {
+        return Some("call_ended");
+    }
+    let saved = &op["fence"]["auth"];
+    if !saved.is_null() {
+        let current = proof.auth(owner);
+        if current.is_null() {
+            return Some("auth_revoked");
+        }
+        if &current != saved {
+            return Some("auth_changed");
+        }
+    }
+    if let Some(stop) = op["fence"]["stop_generation"].as_u64()
+        && proof.stop(&ring.agent_id).0 != stop
+    {
+        return Some("stopped_after_answer");
+    }
     None
 }
 
-impl super::Rings{
-    pub fn opening(&self,token:&Value)->Option<&super::Ring>{
-        let token=token.as_str().filter(|s|s.starts_with("opn_"))?;
-        self.rings.iter().find(|r|r.opening["token"]==token)
+impl super::Rings {
+    pub fn opening(&self, token: &Value) -> Option<&super::Ring> {
+        let token = token.as_str().filter(|s| s.starts_with("opn_"))?;
+        self.rings.iter().find(|r| r.opening["token"] == token)
     }
 
     /// A refusal may itself change the opening (e.g. an identity breach).
     /// Apply and persist those changes before returning the refusal.
-    pub fn change_opening<T>(&mut self,id:&str,now:i64,out:&mut super::Effects,apply:impl FnOnce(&mut super::Ring,&mut Effects)->T)->Option<(T,Effects)>{
-        let ring=self.rings.iter_mut().find(|r|r.ring_id==id && !r.opening.is_null())?;
-        let mut changed=Effects::default();
-        let answer=apply(ring,&mut changed);
-        if changed.dirty{
-            ring.opening["updated_at"]=json!(now);
-            out.changed.rings=true;
+    pub fn change_opening<T>(
+        &mut self,
+        id: &str,
+        now: i64,
+        out: &mut super::Effects,
+        apply: impl FnOnce(&mut super::Ring, &mut Effects) -> T,
+    ) -> Option<(T, Effects)> {
+        let ring = self
+            .rings
+            .iter_mut()
+            .find(|r| r.ring_id == id && !r.opening.is_null())?;
+        let mut changed = Effects::default();
+        let answer = apply(ring, &mut changed);
+        if changed.dirty {
+            ring.opening["updated_at"] = json!(now);
+            out.changed.rings = true;
         }
-        if changed.announce {out.events.push(ring.event(now));}
-        Some((answer,changed))
+        if changed.announce {
+            out.events.push(ring.event(now));
+        }
+        Some((answer, changed))
     }
 
-    pub fn opening_audit(&mut self,id:&str,claim:&str,principal:&str,route:Option<&str>,now:i64,out:&mut super::Effects){
-        let mut event=json!({"outcome":"opening","ring_id":id,"claim":claim,"by":principal});
-        if let Some(route)=route{event["route"]=json!(route);}
-        self.write(event,now,out);
+    pub fn opening_audit(
+        &mut self,
+        id: &str,
+        claim: &str,
+        principal: &str,
+        route: Option<&str>,
+        now: i64,
+        out: &mut super::Effects,
+    ) {
+        let mut event = json!({"outcome":"opening","ring_id":id,"claim":claim,"by":principal});
+        if let Some(route) = route {
+            event["route"] = json!(route);
+        }
+        self.write(event, now, out);
     }
+}
+
+pub fn header(op: &Value) -> String {
+    let cause=match op["intent"]["cause"].as_str(){
+        Some("silence")=>format!("They answered and have not spoken within about {} seconds of listening.",op["silence_ms"].as_i64().unwrap_or(1250) as f64/1000.0),
+        Some("no_mic")=>"They answered, but their microphone is unavailable, so they cannot speak to you yet; they may reply by text.".into(),
+        Some("not_ready")=>"They answered, but their microphone could not start.".into(),
+        _=>"They answered and started to speak, but nothing usable was captured.".into()
+    };
+    format!(
+        "<clarp-call-opening>\n[Group call] You called the user about: {}.\n{cause}\nOpen the conversation briefly in your own words; do not assume what they said.\n</clarp-call-opening>",
+        op["reason"].as_str().unwrap_or("")
+    )
 }

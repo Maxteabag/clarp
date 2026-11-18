@@ -119,6 +119,10 @@ pub enum Ask {
         answer: Answer<(Vec<Waiting>, QueueState)>,
     },
     /// What became of the turn that answers a message, by the message's id.
+    OpeningRow {
+        id: String,
+        answer: Answer<Value>,
+    },
     Fate {
         message_id: String,
         answer: Answer<TurnFate>,
@@ -360,6 +364,7 @@ pub struct View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub opening_gate: crate::calls::opening_launch::Gate,
     pub record: AgentRecord,
     pub profile: Profile,
     pub backend: Arc<dyn Backend>,
@@ -453,6 +458,14 @@ impl AgentHandle {
 
     /// What became of the turn that answers the message with this id: asked by whoever
     /// handed the agent that message and follows what comes of it.
+    pub async fn opening_row(&self, id: &str) -> Result<Value, Unavailable> {
+        self.ask(|answer| Ask::OpeningRow {
+            id: id.into(),
+            answer,
+        })
+        .await
+    }
+
     pub async fn fate(&self, message_id: String) -> Result<TurnFate, Unavailable> {
         self.ask(|answer| Ask::Fate { message_id, answer }).await
     }
@@ -1703,6 +1716,7 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
@@ -2031,10 +2045,22 @@ impl Worker {
                     pool.guard_turn(&mut order);
                 }
                 let launcher = self.setup.launcher.clone();
+                let opening_gate = self.setup.opening_gate.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        if let Some((id, trace)) = &order.opening
+                            && !opening_gate.allowed(id, trace)
+                        {
+                            tell(
+                                &tx,
+                                turn,
+                                attempt,
+                                Told::Failed("call opening is no longer authorized".into()),
+                            );
+                            return;
+                        }
                         launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told))
                     })
             }
@@ -2621,6 +2647,7 @@ fn refuse_for(
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
