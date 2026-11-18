@@ -1759,7 +1759,7 @@ contact, a thread or a handoff that is asked for wrongly, a phone that has a voi
 reached). The status says what this Host holds: calls of this kind where the owner's key is there, in the
 thread of their owner and contact or anew, also to the contact alone; and nothing of what is not built.
 The features are listed (`oracle`, `oracle_contact`, `oracle_direct_contact`, `oracle_context_memory`,
-`oracle_earcons`). Not built yet, and said so: a call put through to an agent (`oracle_handoff`), the
+`oracle_earcons`, and since the section on it below `oracle_handoff`). Not built yet, and said so: the
 second voice, podcast detours, the words a contact's vocabulary was prepared in, the first kind of call
 and WebRTC.
 Tested through a real Host process, with a voice and a router that stand in on the test's own machine (no
@@ -1806,6 +1806,35 @@ conversation that was started again, each of which ended later and would have be
 later call of the thread told only of what the call before had not told: what an agent had finished
 before the user wrote to it again, once he took those words back.
 
+**The Oracle: a call put through to an agent, and back** (18 Nov 2026; `POST /oracle/connect`, `GET
+/oracle/handoff`, `POST /oracle/handoffs/ack`, the feature `oracle_handoff`; the contract with the phone is
+`docs/oracle-handoff.md`). The user asks the Oracle for an agent and the phone leaves the call for a talk
+with that agent, hands free; later it comes back. The phone owns the sound and the Host owns the record: a
+handoff is offered, prepared, activated and made, each step acknowledged by the phone under the number the
+handoff has, and each with a time after which the Host acts by itself. The record and every rule of it are
+the kernel's (`oracle/handoffs.rs`): who is offered what, the steps and which of them is one from where a
+handoff stands, what is said twice and taken once, the deadlines, what is over and what of it is kept,
+what the call of the Oracle is while its phone is away, and what a call that is open, the apps and the
+Host's focus are told, in its order. It is the Python Host's module (`oracle_handoffs.py`), run as it is
+with a clock, timers, names and calls of the generator's own (`tools/oracle-handoff-vectors.py`: 15
+stories, 568 steps, 71 of them refused, 923 things told, 15 deadlines), and at every step the test shows
+besides that a deadline which is not the handoff's changes nothing. Three conditions of that module that
+nothing can reach are not in the kernel, each found by a wrong rule the vectors could not catch. The Host
+(`clarp-host` `oracle/handoffs.rs`) keeps a book for each phone with the fleet, has one request at the desk
+at a time, tells what the desk says to tell before the next has it, and runs the deadlines from one task,
+from its start. A call registers with the desk when it is carried, before its phone or its voice is told
+anything else, and a phone that asked for handoffs is told first which call this is (`oracle_v2.session`);
+what the desk says to a call comes to the call's own task, which tells its conversation (the chime of the
+agent, the handoff as the phone sees it on the call's socket, hold, feed again, a failure, the user back).
+Whoever asks for a handoff is kept until the phone has settled it, or for every step's time and a little
+more. An agent asks with its own tool (`clarp-admin oracle connect`). Tested through a real Host process
+with the stand-ins of a call: a phone that did not ask is offered none; one that did is told which call
+this is, put through step by step (the offer on the call's socket and to the apps, the chime, a stale
+number and a step that is none refused, nothing else offered meanwhile, the same said twice), the focus
+following; the way back by a call that names it, with its cue and the word to the voice; an offer nobody
+answers failing in ten seconds, asked for with the agent's tool; and the tool's own words where it is
+asked wrongly.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
@@ -1823,7 +1852,13 @@ finished (the next landing) came a list of its own, 78 of 78 caught on the commi
 lists whose code that landing touched were run again there, whole: the call 93 of 93, the conversation 475
 of 475, the delegations 165 of 165. Its first run missed two: a turn that was stopped had no case and got
 one, and a moment at which the worker read anew for an agent that was started again was code nothing
-could observe, since such an agent is opened anew, and went.
+could observe, since such an agent is opened anew, and went. With handoffs came a list of 173 (142 for the
+kernel's record, 31 for the Host's part), every one caught on the commit that landed, with the call's 93
+and the 78 of what agents finished run again there. Its first runs missed ten: three conditions of the
+Python Host's module that nothing can reach are not in the kernel, four cases got stories (a phone that
+rolls back while it prepares, one that says it is ready too early, two talks with agents at once, an older
+talk given up at its older number), and three got a place in the Host's test (a held call routes nothing,
+a plain failure tells the voice no word, the first frames of a call that goes to the contact alone).
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and

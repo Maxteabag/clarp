@@ -663,6 +663,42 @@ async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
     }
 }
 
+/// `clarp-admin oracle connect AGENT [--principal PRINCIPAL]`: an agent puts the user's call
+/// of the Oracle through to an agent, or back to the Oracle (`docs/oracle-handoff.md`). It is
+/// answered once the phone has settled the handoff, and printed as the Python tool prints
+/// it: the Host's answer as JSON, and exit 1 where the Host refuses.
+async fn oracle(app: &App, args: &[String]) -> ToolAnswer {
+    let usage = |of: &str, line: &str, why: &str| {
+        let said = format!("usage: clarp-admin {of} [-h] {line}\nclarp-admin {of}: error: {why}");
+        ToolAnswer::said(2, said)
+    };
+    let Some((command, rest)) = args.split_first() else {
+        let why = "the following arguments are required: oracle_command";
+        return usage("oracle", "{connect} ...", why);
+    };
+    if command != "connect" {
+        let said = python::text(command);
+        let why =
+            format!("argument oracle_command: invalid choice: {said} (choose from 'connect')");
+        return usage("oracle", "{connect} ...", &why);
+    }
+    let parsed = match parse(rest, &["--principal"], &[], &["agent"]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage("oracle connect", "[--principal PRINCIPAL] agent", &why),
+    };
+    let agent = json!(parsed.positional[0]);
+    let phone = json!(parsed.option("--principal").unwrap_or(""));
+    let administrator = clarp_kernel::oracle::handoffs::ADMINISTRATOR;
+    match crate::oracle::put_through(app, administrator, &agent, &phone).await {
+        Ok(Ok(answer)) => shown(&answer),
+        Ok(Err(refused)) => match serde_json::to_string_pretty(&refused.body()) {
+            Ok(body) => ToolAnswer::printed(1, body),
+            Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
+        },
+        Err(error) => ToolAnswer::said(1, format!("clarp-admin oracle: {}", error.message())),
+    }
+}
+
 /// What the Host answered a request about a ring, as the Python tool prints it: the answer
 /// or the refusal as JSON, and exit 1 for a refusal.
 fn ring_said(asked: Result<Result<Value, Refused>, Unavailable>) -> ToolAnswer {
@@ -1690,6 +1726,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
         Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
         Some((command, rest)) if command == "call" => self::call(app, call, rest).await,
+        Some((command, rest)) if command == "oracle" => oracle(app, rest).await,
         Some((command, rest)) if command == "schedule" => schedule(app, rest).await,
         Some((command, rest)) if command == "janitor" => janitor(app, call, rest).await,
         Some((command, rest)) if command == "trigger" => trigger(app, rest).await,

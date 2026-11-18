@@ -28,6 +28,7 @@ use crate::personas::object;
 
 mod call;
 mod delegations;
+mod handoffs;
 mod memory;
 mod router;
 mod tools;
@@ -47,7 +48,16 @@ pub struct Desk {
     threads: Mutex<Option<clarp_kernel::oracle::threads::Memory>>,
     /// The calls that are open, by the phone each is of.
     calls: call::Calls,
+    /// The handoffs: calls put through to agents, and back.
+    handoffs: handoffs::Handoffs,
 }
+
+/// What of the Oracle runs by itself from the start of the Host: the deadlines of handoffs.
+pub fn run(app: &App) {
+    handoffs::run(app);
+}
+
+pub(crate) use handoffs::put_through;
 
 /// The agents of this Host, as a contact is held against them. Its janitors are apart from
 /// its roster and are not among them: a janitor is no agent a contact names.
@@ -213,5 +223,6 @@ pub fn routes() -> Router<App> {
         .route("/oracle/contact", get(contact).post(choose_contact))
         .route("/oracle/voice-provider", get(voice).post(choose_voice))
         .merge(delegations::routes())
+        .merge(handoffs::routes())
         .merge(call::routes())
 }

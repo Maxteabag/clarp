@@ -20,6 +20,7 @@ pub mod attention;
 pub mod conversation;
 pub mod delegations;
 pub mod earcons;
+pub mod handoffs;
 pub mod phone;
 pub mod relay;
 pub mod routing;

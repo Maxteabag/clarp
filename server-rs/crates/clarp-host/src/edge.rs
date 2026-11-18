@@ -117,14 +117,15 @@ pub const FEATURES: &[(&str, u64)] = &[
     // to agents (`/oracle/delegations`); who its contact is (`/oracle/contact`); a call in
     // which everything goes to the contact; a call that goes on in the thread of its owner
     // and contact, or begins anew; and the cues of sound a call plays. Its calls of the
-    // first kind are not built, and the status says so. Not listed, because not built: a
-    // call put through to an agent (`oracle_handoff`) and the second voice
-    // (`oracle_gemini_voice`).
+    // first kind are not built, and the status says so. A call is put through to an agent
+    // and back (`oracle_handoff`; `docs/oracle-handoff.md`). Not listed, because not built:
+    // the second voice (`oracle_gemini_voice`).
     ("oracle", 1),
     ("oracle_contact", 7),
     ("oracle_direct_contact", 8),
     ("oracle_context_memory", 9),
     ("oracle_earcons", 15),
+    ("oracle_handoff", 22),
     // The chip a phone shows of the fleet on its lock screen is kept current by pushes
     // (`POST /devices/live-activity`; `docs/live-items.md` §8). Listed only by a Host that
     // can reach an activity: one with a relay and an account of its own there.
