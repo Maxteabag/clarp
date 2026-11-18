@@ -80,7 +80,7 @@ pub async fn ask(
 }
 
 /// A directory of the Host's own for one question, that nobody else may look into.
-fn a_place(what: &str) -> Result<PathBuf, Unanswered> {
+pub(crate) fn a_place(what: &str) -> Result<PathBuf, Unanswered> {
     use std::os::unix::fs::DirBuilderExt as _;
     let place = std::env::temp_dir().join(format!("clarp-{what}-{}", crate::ids::hex(8)));
     let made = std::fs::DirBuilder::new().mode(0o700).create(&place);
@@ -91,7 +91,7 @@ fn a_place(what: &str) -> Result<PathBuf, Unanswered> {
 /// Makes a tool's own home in `place` (`home`), with what it is given of its user's: the
 /// login linked, the settings copied, and beside it an empty directory to work in
 /// (`work`). What its user has not got is left out. Answers the home.
-fn own_home(place: &Path, given: &OwnHome) -> Result<String, Unanswered> {
+pub(crate) fn own_home(place: &Path, given: &OwnHome) -> Result<String, Unanswered> {
     let failed = |error: std::io::Error| Unanswered::NotStarted(error.to_string());
     let users = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
     let home = place.join("home");
