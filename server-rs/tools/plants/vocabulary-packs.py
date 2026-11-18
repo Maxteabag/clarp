@@ -194,6 +194,7 @@ for why,old,new in [
         ('finish does not update the spoken index','save(fleet, SESSIONS, r.session.clone(), &session).await?;', 'let _ = &session;'),
         ('the clip loads every audit to allocate a number','let id = last.checked_add','let _ = fleet.kept_all(RUNS).await; let id = last.checked_add'),
         ('an interrupted run consumes a listing slot','for id in ids {','for id in ids.into_iter().take(limit) {'),
+        ('an interrupted finish contributes empty recent speech','&& !r.transcript.is_empty()', '&& r.latency >= 0'),
         ('a dangling trace leaks a storage error','run(fleet, id).await?.ok_or_else(missing)?','run(fleet, id).await?.ok_or_else(unavailable)?'),
         ('the audit becomes durable before its lookups','save(fleet, SESSIONS, record.session.clone(), &session).await?;', 'save(fleet,RUNS,id.to_string(),&record).await?; save(fleet, SESSIONS, record.session.clone(), &session).await?;')]:
     change(T,'index',why,old,new)

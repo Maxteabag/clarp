@@ -255,4 +255,5 @@ impl Desk {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests;
