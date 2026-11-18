@@ -26496,7 +26496,6 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
     for (path, body) in [
         ("/oracle/handoff", json!({ "session": "theo" })),
         ("/oracle/v2/calls/control", json!({ "action": "end" })),
-        ("/oracle/delegations", json!({})),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
         let why = said["error"].as_str().unwrap_or("");
@@ -26653,4 +26652,386 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
         "openai"
     );
     assert_eq!(voice(&host)["provider"], "openai");
+}
+
+#[test]
+fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("oracle-delegations");
+    let host = place.start_with_token(ADMIN);
+    let theo = host.new_agent("Theo");
+    let asked = |id: &str, request: &str| json!({ "delegation_id": id, "session": theo, "request": request });
+    let hand = |host: &Host, body: Value| host.ask("POST", "/oracle/delegations", Some(&body));
+    let listed = |host: &Host, query: &str| -> Vec<Value> {
+        let said = host.get(&format!("/oracle/delegations{query}"));
+        said["delegations"].as_array().unwrap().clone()
+    };
+    let of = |host: &Host, id: &str| -> Value {
+        let all = listed(host, "?all=1");
+        let found = all.iter().find(|row| row["delegation_id"] == id);
+        found.cloned().unwrap_or(Value::Null)
+    };
+    let refused = |host: &Host, body: Value| {
+        let (status, said) = hand(host, body);
+        (status, said["error"].as_str().unwrap_or("").to_string())
+    };
+    assert!(listed(&host, "").is_empty() && listed(&host, "?all=1").is_empty());
+
+    // What cannot be handed on is refused in the Python Host's words, and nothing is kept.
+    let invalid = (400, "invalid delegation_id".to_string());
+    assert_eq!(refused(&host, asked("a b", "Look.")), invalid);
+    assert_eq!(
+        refused(&host, json!({ "session": theo, "request": "Look." })),
+        invalid
+    );
+    let both = (400, "session and request are required".to_string());
+    assert_eq!(
+        refused(&host, json!({ "delegation_id": "d-0", "session": theo })),
+        both
+    );
+    assert_eq!(
+        refused(&host, json!({ "delegation_id": "d-0", "request": "Look." })),
+        both
+    );
+    let nobody = json!({ "delegation_id": "d-0", "session": "nobody", "request": "Look." });
+    assert_eq!(refused(&host, nobody), (404, "unknown agent".to_string()));
+    let (status, said) = host.ask("POST", "/oracle/delegations", Some(&json!(["d-0"])));
+    assert_eq!((status, said["error"].as_str()), (400, Some("bad json")));
+    let sweeper = json!({
+        "name": "Night Sweeper", "backend": "codex", "cwd": place.root.join("work"),
+        "request_id": "request-one", "template_id": "scheduled-prompt",
+        "options": { "instructions": "Sweep." },
+        "attachments": [{
+            "attachment_id": "made-nightly", "trigger_id": "schedule",
+            "config": { "cron": "15 3 * * *", "timezone": "Europe/Oslo" },
+        }],
+    });
+    let (status, made) = host.ask("POST", "/janitors", Some(&sweeper));
+    assert_eq!(status, 200, "{made}");
+    let to_a_janitor = json!({
+        "delegation_id": "d-0", "session": made["janitor"]["session"], "request": "Look.",
+    });
+    assert_eq!(
+        refused(&host, to_a_janitor),
+        (
+            400,
+            "Janitors cannot receive Oracle delegations".to_string()
+        )
+    );
+    assert!(listed(&host, "?all=1").is_empty());
+
+    // Work is handed on: a turn of the agent's, sent as the Oracle's under the delegation's
+    // own ids, and its answer is the result.
+    let (status, taken) = hand(&host, asked(" d-1 ", "  Look into the pump.  "));
+    assert_eq!(status, 200, "{taken}");
+    let row = &taken["delegation"];
+    assert_eq!(
+        json!([
+            row["delegation_id"],
+            row["owner_principal"],
+            row["trace_id"],
+            row["client_msg_id"],
+            row["session"],
+            row["request_text"],
+            row["status"],
+            row["delivered"],
+            row["delivered_at"],
+            row["completion_trace_id"],
+        ]),
+        json!([
+            "d-1",
+            "administrator",
+            "oracle-d-1",
+            "oracle-d-1",
+            theo,
+            "Look into the pump.",
+            "accepted",
+            false,
+            null,
+            "",
+        ])
+    );
+    wait_for("the answer to be the result", || {
+        of(&host, "d-1")["status"] == "completed"
+    });
+    let done = of(&host, "d-1");
+    assert_eq!(
+        (&done["result_text"], &done["error"], &done["delivered"]),
+        (&json!("Look into the pump."), &json!(""), &json!(false))
+    );
+    let turns = host.turns(&theo);
+    assert_eq!(
+        (&turns[0]["id"], &turns[0]["text"], &turns[0]["origin"]),
+        (
+            &json!("u-oracle-d-1"),
+            &json!("Look into the pump."),
+            &json!("oracle")
+        )
+    );
+    // The result is the row the agent answered with.
+    assert_eq!(done["result_message_id"], turns[1]["id"]);
+    assert_eq!(listed(&host, ""), vec![done.clone()]);
+
+    // Asked again, it is told as it is, and no second turn runs; the same id with other
+    // work is refused.
+    let (status, again) = hand(&host, asked("d-1", "Look into the pump."));
+    assert_eq!((status, &again["delegation"]), (200, &done));
+    assert_eq!(
+        refused(&host, asked("d-1", "Look into the other pump.")),
+        (
+            409,
+            "delegation_id was already used for different work".to_string()
+        )
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(host.turns(&theo).len(), 2);
+
+    // The phone says it has the result: it is not shown again, and it is kept.
+    let ack = |host: &Host, id: Value| {
+        host.ask(
+            "POST",
+            "/oracle/delegations/ack",
+            Some(&json!({ "delegation_id": id })),
+        )
+    };
+    let (status, said) = ack(&host, json!("d-9"));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (404, Some("terminal delegation not found"))
+    );
+    let (status, said) = ack(&host, json!("a b"));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (400, Some("invalid delegation_id"))
+    );
+    assert_eq!(ack(&host, json!("d-1")), (200, json!({ "ok": true })));
+    assert!(listed(&host, "").is_empty());
+    let kept = of(&host, "d-1");
+    assert_eq!(kept["delivered"], true);
+    assert!(kept["delivered_at"].as_i64().unwrap() >= done["updated_at"].as_i64().unwrap());
+
+    // A turn that fails: the delegation failed, in the tool's own words. One that ends
+    // with nothing said failed too, and says so.
+    let (status, _) = hand(&host, asked("d-2", r#"{"fail": "the tool gave up"}"#));
+    assert_eq!(status, 200);
+    wait_for("the failure", || of(&host, "d-2")["status"] == "failed");
+    let failed = of(&host, "d-2");
+    assert!(
+        failed["error"]
+            .as_str()
+            .unwrap()
+            .contains("the tool gave up"),
+        "{failed}"
+    );
+    assert_eq!(
+        (&failed["result_text"], &failed["result_message_id"]),
+        (&json!(""), &Value::Null)
+    );
+    let (status, _) = hand(&host, asked("d-3", r#"{"activity": "thinking"}"#));
+    assert_eq!(status, 200);
+    wait_for("the end with nothing said", || {
+        of(&host, "d-3")["status"] == "failed"
+    });
+    assert_eq!(
+        of(&host, "d-3")["error"],
+        "Agent completed without a text result"
+    );
+    // What is still to be told, the result that came first first; and all of it, the
+    // newest first.
+    let ids = |rows: &[Value]| -> Vec<String> {
+        let ids = rows
+            .iter()
+            .map(|row| row["delegation_id"].as_str().unwrap().to_string());
+        ids.collect()
+    };
+    assert_eq!(ids(&listed(&host, "")), ["d-2", "d-3"]);
+    assert_eq!(ids(&listed(&host, "?limit=1")), ["d-2"]);
+    assert_eq!(ids(&listed(&host, "?all=yes&limit=2")), ["d-3", "d-2"]);
+    assert_eq!(
+        ids(&listed(&host, "?all=1&limit=many")),
+        ["d-3", "d-2", "d-1"]
+    );
+
+    // Work for an agent that is busy waits in its queue. It is not called off by its id
+    // while it is not over: that is the agent's to stop.
+    host.send(&theo, "sleep 60", "m-busy");
+    wait_for("the agent to be busy", || host.state(&theo) == "thinking");
+    let (status, taken) = hand(&host, asked("d-4", "Look into the valve."));
+    assert_eq!(
+        (status, &taken["delegation"]["status"]),
+        (200, &json!("queued"))
+    );
+    let queue = || host.get(&format!("/turn-queue?session={theo}"));
+    assert_eq!(queue()["items"][0]["id"], "oracle-d-4");
+    let cancel =
+        |host: &Host, body: Value| host.ask("POST", "/oracle/delegations/cancel", Some(&body));
+    let (status, said) = cancel(&host, json!({ "delegation_id": "d-4" }));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (
+            409,
+            Some("nonterminal delegation requires agent cancellation")
+        )
+    );
+    let (status, said) = cancel(&host, json!({ "delegation_id": "d-9" }));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (404, Some("delegation not found"))
+    );
+    let (status, said) = cancel(&host, json!({}));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (400, Some("invalid delegation_id"))
+    );
+    // One that is over is told as it is.
+    let (status, said) = cancel(&host, json!({ "delegation_id": "d-2" }));
+    assert_eq!((status, &said["delegation"]), (200, &failed));
+
+    // A stop of the agent calls off what the Oracle handed it: the turn that runs is ended,
+    // what waited is taken out of the queue, and the delegation is called off.
+    let (status, said) = cancel(&host, json!({ "session": format!(" {theo} ") }));
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["cancelled_count"], 1);
+    assert_eq!(
+        (
+            &said["delegations"][0]["delegation_id"],
+            &said["delegations"][0]["status"]
+        ),
+        (&json!("d-4"), &json!("cancelled"))
+    );
+    wait_for("the turn that ran to be over", || {
+        host.state(&theo) == "interrupted"
+    });
+    assert_eq!(queue()["items"], json!([]));
+    assert_eq!(of(&host, "d-4")["status"], "cancelled");
+    // A stop of an agent nobody handed anything is a stop, and calls nothing off.
+    assert_eq!(
+        cancel(&host, json!({ "session": theo })),
+        (200, json!({ "cancelled_count": 0, "delegations": [] }))
+    );
+    assert_eq!(
+        cancel(&host, json!({ "session": "nobody" })),
+        (200, json!({ "cancelled_count": 0, "delegations": [] }))
+    );
+    host.post("/turn-queue/resume", json!({ "session": theo }));
+
+    // A delegation whose turn runs is called off by the stop that ends the turn.
+    let (status, taken) = hand(&host, asked("d-5", "sleep 60"));
+    assert_eq!(
+        (status, &taken["delegation"]["status"]),
+        (200, &json!("accepted"))
+    );
+    wait_for("the delegated turn to run", || {
+        host.state(&theo) == "thinking"
+    });
+    let (status, said) = cancel(&host, json!({ "session": theo }));
+    assert_eq!(
+        (status, &said["cancelled_count"]),
+        (200, &json!(1)),
+        "{said}"
+    );
+    assert_eq!(said["delegations"][0]["status"], "cancelled");
+    wait_for("the delegated turn to be over", || {
+        host.state(&theo) == "interrupted"
+    });
+    assert_eq!(of(&host, "d-5")["status"], "cancelled");
+    host.post("/turn-queue/resume", json!({ "session": theo }));
+
+    // What a phone hands on is its own: nobody else is shown it, or may say they have it.
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let body = asked("p-1", "Look into the tank.");
+    let (status, taken) = host.ask_as(&phone, "POST", "/oracle/delegations", Some(&body));
+    assert_eq!(
+        (status, &taken["delegation"]["owner_principal"]),
+        (200, &json!(phone_id))
+    );
+    wait_for("the phone's result", || {
+        let said = host.ask_as(&phone, "GET", "/oracle/delegations", None).1;
+        said["delegations"][0]["status"] == "completed"
+    });
+    assert_eq!(of(&host, "p-1"), Value::Null);
+    assert_eq!(ack(&host, json!("p-1")).0, 404);
+    let mine = json!({ "delegation_id": "p-1" });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/oracle/delegations/ack", Some(&mine))
+            .0,
+        200
+    );
+
+    // Work that waits and is taken back by the user will never run: its delegation failed,
+    // so that whoever waits for its result is told.
+    host.send(&theo, "sleep 60", "m-busy-again");
+    wait_for("the agent to be busy again", || host.state(&theo) == "thinking");
+    let (_, taken) = hand(&host, asked("d-back", "Look into the tank again."));
+    assert_eq!(taken["delegation"]["status"], "queued");
+    let (status, said) = host.ask("DELETE", "/turn-queue/oracle-d-back", None);
+    assert_eq!(status, 200, "{said}");
+    let gone = of(&host, "d-back");
+    assert_eq!(
+        (&gone["status"], &gone["error"]),
+        (
+            &json!("failed"),
+            &json!("Agent turn was interrupted before a durable result; delegate it again")
+        )
+    );
+    host.post("/stop", json!({ "session": theo }));
+    wait_for("the busy turn to be over", || host.state(&theo) == "interrupted");
+    host.post("/turn-queue/resume", json!({ "session": theo }));
+
+    // Two results that came while nobody read the book are told in the order they came,
+    // each at the moment its turn ended.
+    let (_, first) = hand(&host, asked("z-first", "sleep 1"));
+    let (_, second) = hand(&host, asked("a-second", "Look again."));
+    assert_eq!(
+        (
+            &first["delegation"]["status"],
+            &second["delegation"]["status"]
+        ),
+        (&json!("accepted"), &json!("queued"))
+    );
+    wait_for("both answers", || {
+        let turns = host.turns(&theo);
+        let answers = turns.iter().filter(|row| row["role"] == "assistant");
+        answers
+            .filter(|row| row["text"] == "sleep 1" || row["text"] == "Look again.")
+            .count()
+            == 2
+    });
+    wait_for("the agent to rest", || host.state(&theo) == "done");
+    let told = listed(&host, "");
+    let ended: Vec<(&str, i64)> = told
+        .iter()
+        .filter(|row| row["delegation_id"] == "z-first" || row["delegation_id"] == "a-second")
+        .map(|row| {
+            (
+                row["delegation_id"].as_str().unwrap(),
+                row["updated_at"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        (ended[0].0, ended[1].0),
+        ("z-first", "a-second"),
+        "{ended:?}"
+    );
+    assert!(ended[0].1 < ended[1].1, "{ended:?}");
+
+    // A turn that runs when the Host is killed is the agent's to finish when the Host
+    // comes back, and so its delegation ends with its answer; and everything else is as
+    // it was kept.
+    let before = listed(&host, "?all=1");
+    let (status, _) = hand(&host, asked("d-6", "sleep 3"));
+    assert_eq!(status, 200);
+    wait_for("the last delegated turn to run", || {
+        host.state(&theo) == "thinking"
+    });
+    host.kill();
+    let host = place.start_with_token(ADMIN);
+    wait_for("the delegation of the turn that was cut off", || {
+        of(&host, "d-6")["status"] == "completed"
+    });
+    assert_eq!(of(&host, "d-6")["result_text"], "sleep 3");
+    for row in &before {
+        assert_eq!(&of(&host, row["delegation_id"].as_str().unwrap()), row);
+    }
 }

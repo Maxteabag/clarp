@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use clarp_actor::conversation::{Page, Versioned, Which};
 use clarp_actor::{
     Action, Actor, ActorError, ByHand, Changed, ImportedRow, Kept, Outputs, Profile, QueueState,
-    Sent, ShimOrder, Status, Waiting,
+    Sent, ShimOrder, Status, TurnFate, Waiting,
 };
 use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
@@ -116,6 +116,11 @@ pub enum Ask {
     /// What waits, in the order it will run.
     Queue {
         answer: Answer<(Vec<Waiting>, QueueState)>,
+    },
+    /// What became of the turn that answers a message, by the message's id.
+    Fate {
+        message_id: String,
+        answer: Answer<TurnFate>,
     },
     /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
     Shown {
@@ -431,6 +436,12 @@ impl AgentHandle {
 
     pub async fn queue(&self) -> Result<(Vec<Waiting>, QueueState), Unavailable> {
         self.ask(|answer| Ask::Queue { answer }).await
+    }
+
+    /// What became of the turn that answers the message with this id: asked by whoever
+    /// handed the agent that message and follows what comes of it.
+    pub async fn fate(&self, message_id: String) -> Result<TurnFate, Unavailable> {
+        self.ask(|answer| Ask::Fate { message_id, answer }).await
     }
 
     /// Everything that is shown of the agent's turn as it runs.
@@ -1668,6 +1679,7 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
@@ -2550,6 +2562,7 @@ fn refuse_for(
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));

@@ -1636,6 +1636,35 @@ once, and the voice with a file that names the second voice without a key, a pho
 file, a key written into the file while the Host runs, the voice the owner names, and the choice kept
 over a restart; and a Host without a token refuses each of the Oracle's routes.
 
+**The Oracle: what it hands to agents** (18 Nov 2026). What the Oracle is asked to look into it hands to an
+agent as a turn of that agent's, and the Host keeps a record of each such delegation from the moment it is
+taken until its result was delivered (`POST /oracle/delegations`, `GET /oracle/delegations`, `POST
+/oracle/delegations/ack`, `/cancel`). The owner's main Host has several hundred of them. The record is the
+kernel's book (`oracle/delegations.rs`, by the Python Host's `oracle_delegations.py` itself, run as it is on
+a database of the generator's own with a stand-in for what admits a turn; `tools/oracle-delegation-vectors.py`:
+11 stories of 181 steps, and after every step the whole book must be what that Host's table was): a
+delegation is taken once however often it is asked, and refused where the same id comes with other work;
+it waits in the agent's queue or is under way; it ends with the turn's answer, with its failure, or with a
+stop of the agent, which also calls off one that failed while it was being stopped and leaves one that
+ended with an answer meanwhile; it is shown to the one who asked, and to nobody else, until they say they
+have it; and what an agent's live call asked is shown to no phone. The Host's part (`clarp-host`
+`oracle/delegations.rs`): the book is kept with the Host row by row and written before anybody is told; a
+delegation's turn is a message like any other, sent as the Oracle's under the delegation's own ids, without
+speech, waiting where the agent is busy; and what became of that turn is asked of the agent it was handed
+to, by the id of the message that began it, each time the book is read (`Actor::fate_of`: it waits, it
+runs, it ended and how, with what it left and when). An agent's conversation is the one record of its
+turns and is there after a restart, so no delegation is ended by a guess: a turn that ran when the Host
+was killed is the agent's to finish when the Host comes back, and its delegation ends with its answer,
+stamped with the moment the turn ended. A stop for the Oracle stops the agent first and calls off only
+then, so that a stop that fails leaves every delegation as it was; what waited is taken out of the queue.
+Tested: the kernel by its vectors; and through a real Host process: every refusal in its words, work
+handed on and answered, asked again and told as it is, the same id with other work, the phone's word that
+it has a result, a turn that fails (in the tool's words) and one that ends with nothing said, the two
+listings and their order, work that waits behind a busy agent, a stop that calls off what waited and one
+that ends the delegated turn, a phone's own delegations that nobody else is shown, two results that came
+unread told in the order their turns ended, and a turn cut off by a kill of the Host whose delegation
+ends with its answer after the Host is back, with every other row as it was kept.
+
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
 on, changes and removes it, and a runner looks every fifteen seconds for what is due, moves each schedule
