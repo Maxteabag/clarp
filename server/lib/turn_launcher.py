@@ -282,7 +282,20 @@ class LauncherMixin:
                     self._handle_failure(spec, attempt, state, category,
                                          _result_error_text(event))
                     return
+                from . import turn_usage
                 detail = _result_detail(event, trace_id=trace_id)
+                raw_cost = {}
+                if turn_usage.reports_session_cost(spec.backend or backends.CLAUDE):
+                    total = detail.get("cost_usd")
+                    native = (event.get("session_id") or state.get("backend_session_id")
+                              or spec.backend_session_id)
+                    fresh = spec.is_new_session and native == spec.backend_session_id
+                    try:
+                        detail["cost_usd"] = turn_usage.claude_cost_delta(native, total, fresh=fresh)
+                    except Exception:  # noqa: BLE001 - accounting failure must not suppress DONE
+                        detail["cost_usd"] = None
+                        log("claudeTurnCostUnknown", "reason=cursor_unavailable")
+                    raw_cost["raw_total_cost_usd"] = total
                 # DONE is the durable completion signal consumed by the
                 # user-facing push and unread/badge policy. It is non-busy,
                 # just like IDLE, but preserves the completion edge.
@@ -292,10 +305,10 @@ class LauncherMixin:
                 # dispatch mode — this is what feeds /backend-usage now that
                 # the statusline source is gone (it never ran under `-p`).
                 try:
-                    from . import turn_usage
                     turn_usage.record(
                         backend=spec.backend or backends.CLAUDE,
-                        agent_id=agent_id, detail=detail, trace_id=trace_id)
+                        agent_id=agent_id, detail=detail, trace_id=trace_id,
+                        reported_cost=event.get("total_cost_usd") is not None)
                 except Exception as e:  # noqa: BLE001
                     log_exception("turnUsageRecordFail", e, detail=trace_id)
                 if spec.origin == "dreaming":
@@ -323,6 +336,7 @@ class LauncherMixin:
                                   "tokens_out": detail.get("tokens_out"),
                                   "cost_usd": detail.get("cost_usd"),
                                   "duration_ms": detail.get("duration_ms"),
+                                  **raw_cost,
                               })
                 # Terminal: clean completion — run whatever queued behind it.
                 self._finish_turn(spec)

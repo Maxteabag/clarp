@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import backend_catalogue
 from .db import conn, now_ms
 
 # Rolling windows the usage view reports on. Named after the provider windows
@@ -29,21 +30,66 @@ WINDOWS: dict[str, int] = {
 }
 
 
+def reports_session_cost(backend: str) -> bool:
+    definition = backend_catalogue.get(backend)
+    return bool(definition and definition.reports_session_cost)
+
+
+def claude_cost_delta(session: str, total: float | None, *, fresh: bool) -> float | None:
+    """Commit the provider cursor before its delta can reach any consumer."""
+    from .log import log
+
+    reason = ""
+    delta = None
+    if total is None:
+        reason = "missing_total"
+    elif not session:
+        reason = "missing_session"
+    else:
+        database = conn()
+        database.execute("BEGIN IMMEDIATE")
+        try:
+            previous = database.execute(
+                "SELECT last_total FROM usage_cursors WHERE backend='claude' "
+                "AND native_session_id=? AND metric='cost_usd'", (session,)).fetchone()
+            if previous is None:
+                if fresh:
+                    delta = total
+                else:
+                    reason = "missing_baseline"
+            elif total < previous[0]:
+                reason = "decreased_total"
+            else:
+                delta = total - previous[0]
+            database.execute(
+                "INSERT INTO usage_cursors(backend,native_session_id,metric,last_total) "
+                "VALUES ('claude',?,'cost_usd',?) ON CONFLICT(backend,native_session_id,metric) "
+                "DO UPDATE SET last_total=excluded.last_total", (session, total))
+            database.execute("COMMIT")
+        except BaseException:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+    if reason:
+        log("claudeTurnCostUnknown", f"reason={reason}")
+    return delta
+
+
 def record(*, backend: str, agent_id: str, detail: dict[str, Any],
-           trace_id: str = "") -> None:
-    """Persist one turn's usage. Silently ignores a turn that reported none —
-    agy sends an empty usage dict, and a failed turn may send nothing.
+           trace_id: str = "", reported_cost: bool = False) -> None:
+    """Persist a row if the result supplied tokens or a cost. A session total
+    can be present even when the derived turn cost is unknown.
     """
     tokens_in = detail.get("tokens_in")
     tokens_out = detail.get("tokens_out")
     cost = detail.get("cost_usd")
-    if tokens_in is None and tokens_out is None and cost is None:
+    if tokens_in is None and tokens_out is None and cost is None and not reported_cost:
         return
     conn().execute(
         """INSERT INTO turn_usage
                (backend, agent_id, trace_id, tokens_in, tokens_out,
-                cost_usd, duration_ms, at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                cost_usd, duration_ms, at, cost_kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'per_turn')""",
         (backend, agent_id, trace_id or detail.get("trace_id") or "",
          int(tokens_in or 0), int(tokens_out or 0),
          float(cost) if cost is not None else None,
@@ -60,15 +106,19 @@ def totals(backend: str, *, now: int | None = None) -> dict[str, Any]:
     """
     now = now_ms() if now is None else now
     out: dict[str, Any] = {"windows": {}, "last_turn_at": None}
+    session_cost = reports_session_cost(backend)
+    if session_cost:
+        out["cost_activation_ms"] = int(conn().execute(
+            "SELECT value FROM settings WHERE key='usage.claude_cost_activation_ms'").fetchone()[0])
     for name, span_ms in WINDOWS.items():
         row = conn().execute(
             """SELECT COUNT(*) AS turns,
                       COALESCE(SUM(tokens_in), 0)  AS tokens_in,
                       COALESCE(SUM(tokens_out), 0) AS tokens_out,
-                      SUM(cost_usd)                AS cost_usd
+                      SUM(CASE WHEN NOT ? OR cost_kind='per_turn' THEN cost_usd END) AS cost_usd
                  FROM turn_usage
                 WHERE backend = ? AND at > ?""",
-            (backend, now - span_ms),
+            (session_cost, backend, now - span_ms),
         ).fetchone()
         out["windows"][name] = {
             "turns": int(row["turns"] or 0),
