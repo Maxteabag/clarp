@@ -52,17 +52,8 @@ async fn load<T: DeserializeOwned>(
         .transpose()
 }
 
-async fn save(
-    fleet: &FleetHandle,
-    kind: &'static str,
-    key: String,
-    value: &impl Serialize,
-) -> Result<()> {
-    let bytes = serde_json::to_vec(value).map_err(|_| unavailable())?;
-    fleet
-        .keep(kind, key, Some(bytes))
-        .await
-        .map_err(|_| unavailable())
+fn encode(value: &impl Serialize) -> Result<Vec<u8>> {
+    serde_json::to_vec(value).map_err(|_| unavailable())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,8 +102,8 @@ pub(crate) struct Desk {
     guard: Arc<tokio::sync::Mutex<()>>,
 }
 
-async fn run(fleet: &FleetHandle, id: i64) -> Result<Option<Run>> {
-    load(fleet, RUNS, &id.to_string()).await
+async fn run(fleet: &FleetHandle, id: i64) -> Result<Run> {
+    load(fleet, RUNS, &id.to_string()).await?.ok_or_else(unavailable)
 }
 
 impl Desk {
@@ -133,7 +124,7 @@ impl Desk {
         let (next, response) = book
             .change(action, data, now, &crate::ids::hex(6), known)
             .map_err(rejected)?;
-        save(fleet, BOOK, "book".into(), &next).await?;
+        fleet.keep(BOOK, "book".into(), Some(encode(&next)?)).await.map_err(|_| unavailable())?;
         Ok(response)
     }
 
@@ -149,9 +140,8 @@ impl Desk {
             && let Some(index) = load::<Session>(fleet, SESSIONS, session).await?
         {
             for id in index.spoken {
-                if let Some(r) = run(fleet, id).await?
-                    && !r.transcript.is_empty()
-                {
+                let r = run(fleet, id).await?;
+                if !r.transcript.is_empty() {
                     recent.push(r.transcript);
                 }
             }
@@ -165,7 +155,6 @@ impl Desk {
             .await?
             .unwrap_or_default();
         let id = last.checked_add(1).ok_or_else(unavailable)?;
-        save(fleet, COUNTER, "last".into(), &id).await?;
         let mut session: Session = load(fleet, SESSIONS, &record.session)
             .await?
             .unwrap_or_default();
@@ -176,15 +165,17 @@ impl Desk {
         let mut all: Vec<i64> = load(fleet, GLOBAL, "all").await?.unwrap_or_default();
         remember(&mut all, id, PAGE);
 
-        // The Python transaction publishes its row and indexes together. Here
-        // the row is the last write: after a stop every saved run has all its
-        // lookups. Readers skip a lookup whose reserved run never arrived.
-        save(fleet, SESSIONS, record.session.clone(), &session).await?;
-        save(fleet, GLOBAL, "all".into(), &all).await?;
+        // A rolled-back INSERT in the reference also rolls back its sequence.
+        let mut writes = vec![
+            (COUNTER, "last".into(), encode(&id)?),
+            (SESSIONS, record.session.clone(), encode(&session)?),
+            (GLOBAL, "all".into(), encode(&all)?),
+            (RUNS, id.to_string(), encode(&record)?),
+        ];
         if !record.trace.is_empty() {
-            save(fleet, TRACES, record.trace.clone(), &id).await?;
+            writes.push((TRACES, record.trace.clone(), encode(&id)?));
         }
-        save(fleet, RUNS, id.to_string(), &record).await?;
+        fleet.keep_together(writes).await.map_err(|_| unavailable())?;
         Ok(id)
     }
 
@@ -196,17 +187,17 @@ impl Desk {
         latency: i64,
     ) -> Result<()> {
         let _lock = self.guard.lock().await;
-        let mut r = run(fleet, id).await?.ok_or_else(unavailable)?;
-        // Clip rows start empty. Index a newly heard clip before publishing
-        // its words. An interrupted finish still reads as the original silence.
+        let mut r = run(fleet, id).await?;
+        let mut writes = Vec::new();
         if !transcript.is_empty() && r.transcript.is_empty() {
             let mut session: Session = load(fleet, SESSIONS, &r.session).await?.unwrap_or_default();
             remember(&mut session.spoken, id, RECENT);
-            save(fleet, SESSIONS, r.session.clone(), &session).await?;
+            writes.push((SESSIONS, r.session.clone(), encode(&session)?));
         }
         r.transcript = transcript;
         r.latency = latency;
-        save(fleet, RUNS, id.to_string(), &r).await
+        writes.push((RUNS, id.to_string(), encode(&r)?));
+        fleet.keep_together(writes).await.map_err(|_| unavailable())
     }
 
     pub(super) async fn report(
@@ -223,7 +214,7 @@ impl Desk {
                 .filter(|s| !s.is_empty())
                 .ok_or_else(missing)?;
             let id = load(fleet, TRACES, trace).await?.ok_or_else(missing)?;
-            let mut row = run(fleet, id).await?.ok_or_else(missing)?.row(id);
+            let mut row = run(fleet, id).await?.row(id);
             row["audio_url"] = Value::Null;
             return Ok(row);
         }
@@ -242,13 +233,8 @@ impl Desk {
             None => load(fleet, GLOBAL, "all").await?.unwrap_or_default(),
         };
         let mut rows = Vec::new();
-        for id in ids {
-            if let Some(r) = run(fleet, id).await? {
-                rows.push(r.row(id));
-                if rows.len() == limit {
-                    break;
-                }
-            }
+        for id in ids.into_iter().take(limit) {
+            rows.push(run(fleet, id).await?.row(id));
         }
         Ok(json!({"runs":rows}))
     }

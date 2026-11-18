@@ -15,6 +15,7 @@ use std::{path::Path, sync::Mutex};
 enum Op {
     Read(String, String),
     Write(String, String),
+    Batch(Vec<Op>),
     Scan(String),
     Delete(String, String),
 }
@@ -43,6 +44,14 @@ impl KeyValue for Counted {
             return Err(StoreError("cut before write".into()));
         }
         self.inner.put(table, key, value)
+    }
+    fn put_together(&mut self, writes: &[(String,String,Vec<u8>)]) -> std::result::Result<(),StoreError> {
+        let mut counts = self.counts.lock().unwrap();
+        counts.ops.push(Op::Batch(writes.iter().map(|(table,key,_)| Op::Write(table.clone(),key.clone())).collect()));
+        if writes.iter().any(|(table,_,_)| counts.fail_write.as_ref()==Some(table)) {
+            return Err(StoreError("cut before commit".into()));
+        }
+        self.inner.put_together(writes)
     }
     fn list(&self, table: &str) -> std::result::Result<Vec<(String, Vec<u8>)>, StoreError> {
         self.counts.lock().unwrap().ops.push(Op::Scan(table.into()));
@@ -156,17 +165,12 @@ async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
             read(BOOK, "book"),
             read(SESSIONS, "A"),
             read(COUNTER, "last"),
-            write(COUNTER, "last"),
             read(SESSIONS, "A"),
             read(GLOBAL, "all"),
-            write(SESSIONS, "A"),
-            write(GLOBAL, "all"),
-            write(TRACES, "voice"),
-            write(RUNS, "1"),
+            Op::Batch(vec![write(COUNTER,"last"), write(SESSIONS,"A"),write(GLOBAL,"all"),write(RUNS,"1"),write(TRACES,"voice")]),
             read(RUNS, "1"),
             read(SESSIONS, "A"),
-            write(SESSIONS, "A"),
-            write(RUNS, "1"),
+            Op::Batch(vec![write(SESSIONS,"A"),write(RUNS,"1")]),
         ]
     );
     let late = desk.record(&fleet, clip("A", "voice", "")).await.unwrap();
@@ -258,7 +262,7 @@ async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
 }
 
 #[tokio::test]
-async fn interrupted_publication_skips_the_missing_run_and_keeps_its_number_reserved() {
+async fn an_interrupted_batch_preserves_every_key_and_the_next_number() {
     for kind in [COUNTER, SESSIONS, GLOBAL, TRACES, RUNS] {
         let place = Place::new();
         let fleet = place.start();
@@ -291,11 +295,18 @@ async fn interrupted_publication_skips_the_missing_run_and_keeps_its_number_rese
             );
         }
         assert_eq!(desk.inputs(&fleet, "A").await.unwrap().1, ["first"]);
+        assert_eq!(load::<i64>(&fleet,COUNTER,"last").await.unwrap(),Some(1));
+        assert_eq!(load::<Vec<i64>>(&fleet,GLOBAL,"all").await.unwrap().unwrap(),vec![1]);
+        let index:Session=load(&fleet,SESSIONS,"A").await.unwrap().unwrap();
+        assert_eq!(index.newest,[1]);
+        assert_eq!(index.spoken,[1]);
+        assert!(load::<i64>(&fleet,TRACES,"cut").await.unwrap().is_none());
+        assert!(load::<Run>(&fleet,RUNS,"2").await.unwrap().is_none());
         let next = desk
             .record(&fleet, clip("A", "next", "next"))
             .await
             .unwrap();
-        assert_eq!(next, if kind == COUNTER { 2 } else { 3 });
+        assert_eq!(next, 2);
     }
 }
 
@@ -321,6 +332,8 @@ async fn interrupted_finish_keeps_the_unanswered_clip_out_of_recent_speech() {
         .unwrap();
     assert_eq!(row["run_id"], id);
     assert_eq!(row["transcript"], "");
+    let index:Session=load(&fleet,SESSIONS,"A").await.unwrap().unwrap();
+    assert_eq!(index.spoken,[1]);
     place.cut(None);
     desk.finish(&fleet, id, "completed".into(), 8)
         .await
