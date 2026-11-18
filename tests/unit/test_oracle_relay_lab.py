@@ -775,3 +775,47 @@ def test_an_alias_arriving_mid_telling_neither_cues_nor_interrupts_the_first_ans
     assert [_body(p) for p in call.parts()] == relay.chunks
     assert _cues(call) == ["result"]
     assert {row["delegation_id"], alias["delegation_id"]} <= call.conv.results_sent
+
+
+def test_an_answer_paused_at_the_part_limit_stays_paused_in_the_next_call(lab):
+    """A pause at the limit is deliberate: a call within thirty seconds does not go on past it by itself.
+    Asked for, it continues at part 9; a reading on request that is then cut off continues with its cue."""
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 600}
+    ident = row["delegation_id"]
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    _tell_on(call, mod.oracle_relay.AUTO_PARTS + 3)
+    chunks = call.conv.relays[ident].chunks
+    assert len(chunks) > mod.oracle_relay.AUTO_PARTS + 2
+    assert [_body(p) for p in call.parts()] == chunks[:mod.oracle_relay.AUTO_PARTS]
+
+    _resume_relay_lab(call)
+    _tell_on(call, 3)
+    assert call.parts(-1) == [] and _cues(call) == []
+
+    call.conv.read_result(ident)
+    _tell_on(call, 1)
+    assert [_body(p) for p in call.parts(-1)] == chunks[8:10]
+
+    _resume_relay_lab(call)
+    call.now[0] += 10
+    call.conv.tick()
+    assert [_body(p) for p in call.parts(-1)] == chunks[10:11]
+    assert _cues(call) == ["result"]
+
+
+def test_a_stop_holds_across_three_calls_and_the_answer_stays_readable(lab):
+    row = {**_theo_row(), "result_text": "The old reading."}
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    call.conv.supersede(row["session"])
+    for _ in range(2):
+        _resume_relay_lab(call)
+        call.now[0] += 10
+        call.conv.tick()
+        assert call.parts(-1) == [] and _cues(call) == []
+    call.conv.read_result(row["delegation_id"])
+    assert _body(call.parts(-1)[-1]) == row["result_text"]
