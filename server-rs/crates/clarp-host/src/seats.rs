@@ -301,6 +301,27 @@ fn said(asked: &Value, key: &str) -> String {
     }
 }
 
+/// `POST /hotseat/switch`: another account is asked to be the one in use. `None`: this Host
+/// would have to do it, and that is not built. A Host that does not put the logins of its
+/// machine in place does not do it at all: it says so, in the shape of the Python Host's
+/// refusals, once the asking is one it could read.
+pub fn switch(app: &App, asked: &Value) -> Option<resume::Answer> {
+    let read = resume::switch_wanted(&said(asked, "provider"), &said(asked, "alias"));
+    let (tool, alias) = match read {
+        Ok(wanted) => wanted,
+        Err(refusal) => return Some(refusal),
+    };
+    if app.config.accounts == Accounts::Select {
+        return None;
+    }
+    let body = serde_json::json!({
+        "ok": false, "error": "logins_kept_elsewhere", "provider": tool, "alias": alias,
+        "message": "This Host reads the account seats and moves none. The account in use is \
+                    changed where the logins of this machine are kept.",
+    });
+    Some((409, body))
+}
+
 /// `POST /hotseat/resume`: work that stopped goes on, a held queue is let go, or the command
 /// of a session that is no Host's is given. The status and the body.
 pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
