@@ -120,6 +120,9 @@ RESULT_RELEASE_SILENCE_SECONDS = 4.5
 # A relayed part Oracle never started speaking stops blocking newer results
 # after this long; the relay stays continuable.
 RELAY_STALL_SECONDS = 15.0
+# Native findings remembered across calls, so an alias in a later call is not told
+# twice; the newest are kept (the thread's checkpoint must stay bounded).
+FORWARDED_FINDINGS_KEPT = 500
 # An earcon (oracle_earcons) waits until Oracle's audio has been silent this
 # long, so a cue never lands between two chunks of a reply.
 EARCON_QUIET_SECONDS = 0.6
@@ -446,15 +449,22 @@ class Conversation:
     def checkpoint(self):
         if self.memory:
             with self.lock:
+                # Only this call's work can be told by itself in a call that resumes it
+                # (everything older is background_work there), so only its ids are kept:
+                # the thread lives for every call with this contact and must not grow.
+                work = self.call_work()
+                kept = set(work)
                 state = {"revision": self.revision, "fragments": self.fragments,
-                    "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
+                    "results_sent": sorted(self.results_sent & kept),
+                    "forwarded_findings": dict(list(self.forwarded_findings.items())[-FORWARDED_FINDINGS_KEPT:]),
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
                     "earcons": self.earcons,
                     "routed_revision": self.routed_revision,
-                    "call_active_ms": wall_ms(), "call_work": self.call_work()}
-                if self.silenced_results:
-                    state["silenced_results"] = sorted(self.silenced_results)
+                    "call_active_ms": wall_ms(), "call_work": work}
+                silenced = self.silenced_results & kept
+                if silenced:
+                    state["silenced_results"] = sorted(silenced)
                 self.memory.save(state)
 
     def call_work(self):
