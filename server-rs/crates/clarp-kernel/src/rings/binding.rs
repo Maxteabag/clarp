@@ -28,8 +28,13 @@ impl Binding {
         if opening["clip_bindings"].is_null() {
             opening["clip_bindings"] = json!([]);
         }
-        let Some(bindings) = opening["clip_bindings"].as_array_mut() else { return false };
-        if bindings.iter().any(|old| old["turn_id"] == self.turn_id || old["admission_id"] == self.admission_id && old["kind"] == json!(self.kind)) {
+        let Some(bindings) = opening["clip_bindings"].as_array_mut() else {
+            return false;
+        };
+        if bindings.iter().any(|old| {
+            old["turn_id"] == self.turn_id
+                || old["admission_id"] == self.admission_id && old["kind"] == json!(self.kind)
+        }) {
             return false;
         }
         bindings.push(json!(self));
@@ -38,10 +43,11 @@ impl Binding {
 
     pub fn audio(&self, opening: &Value) -> Value {
         let intent = &opening["intent"];
-        let skip = !opening["retired"].is_null() || self.kind == Kind::Initiative && (
-            intent["admission_id"] != self.admission_id
-            || matches!(intent["state"].as_str(), Some("cancelled" | "unknown"))
-            || !opening["late_greeting"].is_null());
+        let skip = !opening["retired"].is_null()
+            || self.kind == Kind::Initiative
+                && (intent["admission_id"] != self.admission_id
+                    || matches!(intent["state"].as_str(), Some("cancelled" | "unknown"))
+                    || !opening["late_greeting"].is_null());
         json!({"skip":skip,"tag":{"call_id":opening["call_id"],"opening":{
             "ring_id":opening["ring_id"],"token":opening["token"],"epoch":self.epoch,
             "kind":self.kind,"admission_id":self.admission_id}}})

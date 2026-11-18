@@ -891,14 +891,31 @@ impl Mouth {
         }
     }
 
-    async fn opening_audio(&self, agent: &str, turn: u64) -> Result<Option<Value>, crate::agent::Unavailable> {
-        let Some(key) = clarp_kernel::rings::binding::key(agent, turn) else { return Ok(None); };
+    async fn opening_audio(
+        &self,
+        agent: &str,
+        turn: u64,
+    ) -> Result<Option<Value>, crate::agent::Unavailable> {
+        let Some(key) = clarp_kernel::rings::binding::key(agent, turn) else {
+            return Ok(None);
+        };
         let _guard = self.binding_admission.read().await;
-        self.fleet.kept("opening_by_turn",key).await?.map(|raw| serde_json::from_slice(&raw).map_err(|e|crate::agent::Unavailable(e.to_string()))).transpose()
+        self.fleet
+            .kept("opening_by_turn", key)
+            .await?
+            .map(|raw| {
+                serde_json::from_slice(&raw).map_err(|e| crate::agent::Unavailable(e.to_string()))
+            })
+            .transpose()
     }
 
     async fn tag_opening(&self, event: &mut Value, turn: u64) {
-        let Ok(Some(tag)) = self.opening_audio(event["agent_id"].as_str().unwrap_or(""), turn).await else { return; };
+        let Ok(Some(tag)) = self
+            .opening_audio(event["agent_id"].as_str().unwrap_or(""), turn)
+            .await
+        else {
+            return;
+        };
         if let Some(fields) = tag["tag"].as_object() {
             for (k, v) in fields {
                 event[k] = v.clone();
@@ -910,11 +927,19 @@ impl Mouth {
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
-        let bound = match self.opening_audio(&record.agent_id,line.turn).await {
+        let bound = match self.opening_audio(&record.agent_id, line.turn).await {
             Ok(None) => false,
             Ok(Some(tag)) if tag["skip"] != true => true,
-            Ok(Some(_)) => return self.unsaid(member,&line,None,"listen-first opening fenced",false).await,
-            Err(_) => return self.unsaid(member,&line,None,"opening lookup unavailable",false).await,
+            Ok(Some(_)) => {
+                return self
+                    .unsaid(member, &line, None, "listen-first opening fenced", false)
+                    .await;
+            }
+            Err(_) => {
+                return self
+                    .unsaid(member, &line, None, "opening lookup unavailable", false)
+                    .await;
+            }
         };
         let owners = self.owners();
         let has_key = |provider: &str| self.has_key(provider, &owners);
@@ -970,7 +995,8 @@ impl Mouth {
         // line has it and nobody is told yet. A line that is not this one's any more
         // leaves a clip that is nobody's.
         let ours = HeldClip {
-            turn: line.turn, bound,
+            turn: line.turn,
+            bound,
             agent_id: record.agent_id.clone(),
             clip,
             name: name.clone(),
@@ -1139,7 +1165,9 @@ impl Mouth {
                     } else {
                         wire::audio(&member.record, held.clip, &held.name, trace)
                     };
-                    if held.bound { self.tag_opening(&mut event,held.turn).await; }
+                    if held.bound {
+                        self.tag_opening(&mut event, held.turn).await;
+                    }
                     let event_id = self.hub.publish(event, self.now_ms());
                     if this == Some(held.clip) {
                         told_this = Some(event_id);
@@ -1213,12 +1241,12 @@ impl Mouth {
         let view = member.agent.view();
         let lines = view.speech.lines().iter().rev();
         let last = lines
-            .filter_map(|line| Some((line.turn,wire::audio_kept(&member.record, line)?)))
+            .filter_map(|line| Some((line.turn, wire::audio_kept(&member.record, line)?)))
             .next();
-        let Some((turn,mut clip)) = last else {
+        let Some((turn, mut clip)) = last else {
             return false;
         };
-        self.tag_opening(&mut clip,turn).await;
+        self.tag_opening(&mut clip, turn).await;
         clip["replay"] = json!(true);
         self.hub.publish(clip, self.now_ms());
         true
@@ -1740,9 +1768,9 @@ async fn recoverable(
     let lines: Vec<&Line> = clips.iter().map(|(_, line)| *line).collect();
     let mut events = Vec::new();
     for place in spoken::offered_again(&lines, app.clock.now_ms()) {
-        let (record,line) = clips[place];
-        if let Some(mut event) = wire::audio_of(record,line) {
-            app.mouth.tag_opening(&mut event,line.turn).await;
+        let (record, line) = clips[place];
+        if let Some(mut event) = wire::audio_of(record, line) {
+            app.mouth.tag_opening(&mut event, line.turn).await;
             events.push(event);
         }
     }
@@ -1782,7 +1810,7 @@ async fn of_message(
                 .is_some_and(|name| app.mouth.audio.join(name).is_file());
         let event = kept.then(|| wire::audio_kept(&member.record, line));
         let mut event = event.flatten().ok_or_else(unavailable)?;
-        app.mouth.tag_opening(&mut event,line.turn).await;
+        app.mouth.tag_opening(&mut event, line.turn).await;
         events.push(event);
     }
     Ok(Json(json!({ "events": events })))

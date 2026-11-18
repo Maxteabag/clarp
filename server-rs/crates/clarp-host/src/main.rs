@@ -291,13 +291,13 @@ async fn serve(config: Config) -> Result<(), String> {
     // A ring that rang when the Host stopped has its time again, or is missed now: the apps
     // and its agent are told without anybody having to ask first.
     clarp_host::calls::resume(&app);
-    let pruning=app.clone();
+    let pruning = app.clone();
     tokio::spawn(async move {
-        let mut tick=tokio::time::interval(std::time::Duration::from_secs(60));
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             tick.tick().await;
-            if let Err(why)=pruning.calls.prune_openings(&pruning).await {
-                eprintln!("clarp-host: opening retention: {}",why.0);
+            if let Err(why) = pruning.calls.prune_openings(&pruning).await {
+                eprintln!("clarp-host: opening retention: {}", why.0);
             }
         }
     });
