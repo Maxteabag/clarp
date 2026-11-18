@@ -224,40 +224,6 @@ async fn podcast_sources() -> Json<Value> {
     Json(json!({ "next_offset": null, "sources": [] }))
 }
 
-// ---- the vocabulary an engine is asked to listen for ---------------------------------------------
-
-async fn vocab_packs() -> Json<Value> {
-    Json(json!({ "packs": [] }))
-}
-
-async fn vocab_terms(Query(asked): Asked) -> Answered {
-    let pack = asked.get("pack_id").map_or("", |said| said.trim());
-    if pack.is_empty() {
-        return Err(bad("pack_id is required"));
-    }
-    Ok(Json(json!({ "pack_id": pack, "terms": [] })))
-}
-
-async fn vocab_profiles() -> Json<Value> {
-    Json(json!({ "profiles": [] }))
-}
-
-async fn vocab_profile() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, "no such profile")
-}
-
-async fn vocab_assignments() -> Json<Value> {
-    Json(json!({ "assignments": [] }))
-}
-
-async fn vocab_runs() -> Json<Value> {
-    Json(json!({ "runs": [] }))
-}
-
-async fn no_vocabulary() -> ApiError {
-    not_built("The vocabulary is")
-}
-
 // ---- the Oracle --------------------------------------------------------------------------------
 
 async fn oracle_calls() -> Json<Value> {
@@ -420,18 +386,6 @@ pub fn routes() -> Router<App> {
         .route("/hotseat/{action}", post(no_hotseat))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))
-        .route("/vocab/packs", get(vocab_packs).post(no_vocabulary))
-        .route("/vocab/terms", get(vocab_terms).post(no_vocabulary))
-        .route("/vocab/profiles", get(vocab_profiles).post(no_vocabulary))
-        .route("/vocab/profile", get(vocab_profile).post(no_vocabulary))
-        .route(
-            "/vocab/assignments",
-            get(vocab_assignments).post(no_vocabulary),
-        )
-        .route("/vocab/runs", get(vocab_runs))
-        .route("/vocab/run", post(no_vocabulary))
-        .route("/vocab/preview", post(no_vocabulary))
-        .route("/vocab/profiles/workspace", post(no_vocabulary))
         .route("/oracle/calls/status", get(oracle_calls))
         .route("/oracle/{*rest}", post(no_oracle))
 }
