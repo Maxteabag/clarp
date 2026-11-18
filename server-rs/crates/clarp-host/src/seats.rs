@@ -34,8 +34,8 @@
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::process::Stdio;
-mod switching;
 pub(crate) mod automatic;
+mod switching;
 pub use automatic::start as start_switcher;
 use std::time::Duration;
 
@@ -197,7 +197,7 @@ impl Desk {
 
     /// A live read of the tool, for whoever asked: the one under way is waited for, none is
     /// begun before one is allowed, and otherwise the tool is asked now.
-    async fn read(&self, app: &App, force:bool) -> Outcome {
+    async fn read(&self, app: &App, force: bool) -> Outcome {
         let began_ms = app.clock.now_ms();
         let done = {
             let mut state = self.state.lock().await;
@@ -493,7 +493,7 @@ pub async fn resume(app: &App, asked: &Value) -> resume::Answer {
 /// `GET /hotseat/status`: how the account seats stand, as the tool's list last said them.
 /// Nothing is read for it.
 pub async fn status(app: &App) -> Value {
-    let enabled=automatic::enabled(app).await;
+    let enabled = automatic::enabled(app).await;
     let now = app.clock.now_ms();
     let mut state = app.seats.state.lock().await;
     match state.kept(app).await {
@@ -505,10 +505,10 @@ pub async fn status(app: &App) -> Value {
 /// `GET /hotseat/desk`: the desk as it is kept; with `refresh`, after a live read where one
 /// is allowed. The read runs to its end whether or not whoever asked for it is still there.
 pub async fn asked(app: &App, refresh: bool) -> Value {
-    let enabled=automatic::enabled(app).await;
+    let enabled = automatic::enabled(app).await;
     let outcome = if refresh {
         let reader = app.clone();
-        let read = tokio::spawn(async move { reader.seats.read(&reader,false).await });
+        let read = tokio::spawn(async move { reader.seats.read(&reader, false).await });
         Some(read.await.unwrap_or(Outcome::Failed))
     } else {
         None
@@ -531,9 +531,7 @@ pub async fn asked(app: &App, refresh: bool) -> Value {
     let running = state.running.clone();
     match state.kept(app).await {
         Some(kept) => {
-            let mut payload = kept
-                .desk
-                .served(&kept.seats.served(enabled, now), &asked);
+            let mut payload = kept.desk.served(&kept.seats.served(enabled, now), &asked);
             payload["switches"] = json!(
                 ["claude", "codex"]
                     .iter()

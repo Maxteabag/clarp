@@ -200,7 +200,9 @@ impl Desk {
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner) = Some(with.now_ms);
             }
-            let Ok(_login)=crate::pool::Service::use_login(app,name).await else {continue};
+            let Ok(_login) = crate::pool::Service::use_login(app, name).await else {
+                continue;
+            };
             let answer = provider.ask(name, home, with.now_ms, before).await;
             let with = With::of(app, home);
             let mut known = self.known.lock().await;

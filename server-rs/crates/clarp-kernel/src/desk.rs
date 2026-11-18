@@ -901,41 +901,87 @@ pub struct Desk {
 impl Desk {
     /// Update the slots the last full inventory established. A provider read cannot
     /// create an account with switching capabilities that only the TUI reports.
-    pub fn absorb(&mut self,tool:&str,payload:&Value,at:i64){
-        let Some(read)=self.read.as_mut() else{return};
-        let Some(list)=payload["accounts"].as_array() else{return};
-        let agents=read["clarp_agents"].clone();
-        let Some(rows)=read["accounts"].as_array_mut() else{return};
-        for old in rows.iter_mut().filter(|r|r["provider"]==tool) {
-            let Some(source)=list.iter().find(|r|r["alias"]==old["alias"]) else{continue;};
-            let usage=&source["usage"];
-            let claude=tool=="claude";
-            let failure=if claude {&source["error"]}else{&usage["error"]};
-            if !usage.is_object() && (!claude || !python::truthy(failure)){continue;}
-            let mut raw=old.clone();
-            raw["active"]=json!(source["is_active"]==true);
-            raw["error"]=failure.clone();raw["cached"]=json!(false);
-            raw["checked_at"]=json!(if python::truthy(failure){0.0}else{at as f64/1000.0});
-            raw["limited"]=json!(claude && (usage["limited"]==true || usage["status"]=="rejected"));
-            raw["no_reset_reason"]=if claude{json!("")}else{usage["no_reset_reason"].clone()};
-            let mut windows=Vec::new();
+    pub fn absorb(&mut self, tool: &str, payload: &Value, at: i64) {
+        let Some(read) = self.read.as_mut() else {
+            return;
+        };
+        let Some(list) = payload["accounts"].as_array() else {
+            return;
+        };
+        let agents = read["clarp_agents"].clone();
+        let Some(rows) = read["accounts"].as_array_mut() else {
+            return;
+        };
+        for old in rows.iter_mut().filter(|r| r["provider"] == tool) {
+            let Some(source) = list.iter().find(|r| r["alias"] == old["alias"]) else {
+                continue;
+            };
+            let usage = &source["usage"];
+            let claude = tool == "claude";
+            let failure = if claude {
+                &source["error"]
+            } else {
+                &usage["error"]
+            };
+            if !usage.is_object() && (!claude || !python::truthy(failure)) {
+                continue;
+            }
+            let mut raw = old.clone();
+            raw["active"] = json!(source["is_active"] == true);
+            raw["error"] = failure.clone();
+            raw["cached"] = json!(false);
+            raw["checked_at"] = json!(if python::truthy(failure) {
+                0.0
+            } else {
+                at as f64 / 1000.0
+            });
+            raw["limited"] =
+                json!(claude && (usage["limited"] == true || usage["status"] == "rejected"));
+            raw["no_reset_reason"] = if claude {
+                json!("")
+            } else {
+                usage["no_reset_reason"].clone()
+            };
+            let mut windows = Vec::new();
             if !python::truthy(failure) {
                 if claude {
-                    for (label,used,reset) in [("All models · 5-hour","used_5h","reset_5h"),("All models · weekly","used_7d","reset_7d")]{
-                        if usage[used].is_number(){windows.push(json!({"label":label,"used":usage[used],"reset":usage[reset]}));}
+                    for (label, used, reset) in [
+                        ("All models · 5-hour", "used_5h", "reset_5h"),
+                        ("All models · weekly", "used_7d", "reset_7d"),
+                    ] {
+                        if usage[used].is_number() {
+                            windows.push(
+                                json!({"label":label,"used":usage[used],"reset":usage[reset]}),
+                            );
+                        }
                     }
-                    for w in items(&usage["scoped"]){
-                        if let Some(model)=w["model"].as_str().filter(|s|!s.trim().is_empty()){windows.push(json!({"label":format!("{model} · weekly"),"used":w["used"],"reset":w["reset"]}));}
+                    for w in items(&usage["scoped"]) {
+                        if let Some(model) = w["model"].as_str().filter(|s| !s.trim().is_empty()) {
+                            windows.push(json!({"label":format!("{model} · weekly"),"used":w["used"],"reset":w["reset"]}));
+                        }
                     }
-                }else {windows.extend(items(&usage["windows"]).iter().filter(|w|w.is_object()).cloned());}
+                } else {
+                    windows.extend(
+                        items(&usage["windows"])
+                            .iter()
+                            .filter(|w| w.is_object())
+                            .cloned(),
+                    );
+                }
             }
-            raw["windows"]=json!(windows);
-            if let Some(mut fresh)=account(&raw,Some(source),&agents){
-                if fresh["last_good_checked_at"].is_null(){fresh["last_good_checked_at"]=old["last_good_checked_at"].clone();}
-                *old=fresh;
+            raw["windows"] = json!(windows);
+            if let Some(mut fresh) = account(&raw, Some(source), &agents) {
+                if fresh["last_good_checked_at"].is_null() {
+                    fresh["last_good_checked_at"] = old["last_good_checked_at"].clone();
+                }
+                *old = fresh;
             }
         }
-        if tool=="claude" {read["observed_at"]=json!(at);read["sources"]["list"]=json!("ok");self.error=None;}
+        if tool == "claude" {
+            read["observed_at"] = json!(at);
+            read["sources"]["list"] = json!("ok");
+            self.error = None;
+        }
     }
 
     pub fn mark_active(&mut self, tool: &str, alias: &str) {

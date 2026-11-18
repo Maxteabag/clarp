@@ -869,9 +869,21 @@ impl Book {
         // The janitors the Host runs by itself wait as their options say.
         let own = |lane: &str, option: &str| {
             let base = options.get(option).and_then(Value::as_i64).unwrap_or(0);
-            let provider=lane.strip_prefix("hotseat-switcher.");
-            let progress=provider.and_then(|tool|self.progress.get(&format!("account-switch/{agent_id}/{tool}"))).filter(|p|p.generation==config.generation);
-            adaptive::cadence(progress.and_then(|p|p.adaptive.as_ref()).unwrap_or(&fresh), (base,longest),progress.and_then(|p|p.next_run_at).filter(|_|config.enabled),lane)
+            let provider = lane.strip_prefix("hotseat-switcher.");
+            let progress = provider
+                .and_then(|tool| {
+                    self.progress
+                        .get(&format!("account-switch/{agent_id}/{tool}"))
+                })
+                .filter(|p| p.generation == config.generation);
+            adaptive::cadence(
+                progress.and_then(|p| p.adaptive.as_ref()).unwrap_or(&fresh),
+                (base, longest),
+                progress
+                    .and_then(|p| p.next_run_at)
+                    .filter(|_| config.enabled),
+                lane,
+            )
         };
         match config.template_id.as_str() {
             "label-auditor" => return vec![own("label-auditor", "interval_seconds")],

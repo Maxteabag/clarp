@@ -27,9 +27,13 @@ fn reads_and_choices_match_the_python_switcher() {
         };
         assert_eq!(decide(&accounts, demand), c["result"], "{c}");
     }
-    for c in data["reports"].as_array().unwrap(){
-        let report=clarp_kernel::seat_switch::report(c["provider"].as_str().unwrap(),&c["decision"],c["mode"].as_str().unwrap(),c["switched"].as_bool().unwrap());
-        assert_eq!(json!(report),c["expected"],"{c}");
+    for c in data["reports"].as_array().unwrap() {
+        let report = clarp_kernel::seat_switch::report(
+            c["provider"].as_str().unwrap(),
+            &c["decision"],
+            c["mode"].as_str().unwrap(),
+            c["switched"].as_bool().unwrap(),
+        );
+        assert_eq!(json!(report), c["expected"], "{c}");
     }
-
 }

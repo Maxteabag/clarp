@@ -852,7 +852,9 @@ async fn change(
                 clarp_kernel::goals::keeper::ROLE,
                 clarp_kernel::janitors::audio::ROLE,
             ];
-            let seats=app.config.accounts==clarp_kernel::recovery::Accounts::Select && app.seats.told() && agent["template_id"]=="account-hotseat";
+            let seats = app.config.accounts == clarp_kernel::recovery::Accounts::Select
+                && app.seats.told()
+                && agent["template_id"] == "account-hotseat";
             if on && !seats && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
                 return refusal(&told);
