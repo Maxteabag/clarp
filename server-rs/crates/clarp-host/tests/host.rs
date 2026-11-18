@@ -26049,69 +26049,126 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
 
 #[test]
 fn the_other_speech_engines_answer_the_apps() {
-    let place=Place::new("speech-engines");
-    let (http,requests)=answers(vec![
-        ("/v2/speak?","200 OK","Flux sound".into()),
-        ("/v1/speak?","200 OK","Aura sound".into()),
-        ("/token","200 OK",json!({"access_token":"fixture-token","expires_in":3600}).to_string()),
-        ("/tts","200 OK",json!({"audioContent":"Z29vZ2xl"}).to_string()),
+    let place = Place::new("speech-engines");
+    let (http, requests) = answers(vec![
+        ("/v2/speak?", "200 OK", "Flux sound".into()),
+        ("/v1/speak?", "200 OK", "Aura sound".into()),
+        (
+            "/token",
+            "200 OK",
+            json!({"access_token":"fixture-token","expires_in":3600}).to_string(),
+        ),
+        (
+            "/tts",
+            "200 OK",
+            json!({"audioContent":"Z29vZ2xl"}).to_string(),
+        ),
     ]);
-    let listen=TcpListener::bind("127.0.0.1:0").unwrap();
-    let eleven=format!("http://{}",listen.local_addr().unwrap());
-    let frames=Arc::new(Mutex::new(Vec::<Value>::new()));
-    let received=frames.clone();
-    let serving=std::thread::spawn(move ||{
-        let (stream,_)=listen.accept().unwrap();
-        stream.set_read_timeout(Some(Duration::from_secs(15))).unwrap();
-        let mut socket=tungstenite::accept(stream).unwrap();
+    let listen = TcpListener::bind("127.0.0.1:0").unwrap();
+    let eleven = format!("http://{}", listen.local_addr().unwrap());
+    let frames = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let received = frames.clone();
+    let serving = std::thread::spawn(move || {
+        let (stream, _) = listen.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
         for _ in 0..3 {
-            let text=socket.read().unwrap().into_text().unwrap();
-            received.lock().unwrap().push(serde_json::from_str(&text).unwrap());
+            let text = socket.read().unwrap().into_text().unwrap();
+            received
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(&text).unwrap());
         }
-        for event in [json!({"audio":"YWJj"}),json!({"audio":"ZA==","isFinal":true})]{
-            socket.send(tungstenite::Message::Text(event.to_string().into())).unwrap();
+        for event in [
+            json!({"audio":"YWJj"}),
+            json!({"audio":"ZA==","isFinal":true}),
+        ] {
+            socket
+                .send(tungstenite::Message::Text(event.to_string().into()))
+                .unwrap();
         }
     });
-    let account=place.root.join("fixture-account.json");
+    let account = place.root.join("fixture-account.json");
     std::fs::write(&account,json!({"type":"authorized_user","refresh_token":"token","client_id":"id","client_secret":"secret"}).to_string()).unwrap();
-    let owners=place.root.join("speech.toml");
+    let owners = place.root.join("speech.toml");
     std::fs::write(&owners,format!("[tts]\nprovider='deepgram'\n[deepgram]\napi_key='dg-unit'\n[elevenlabs]\napi_key='el-unit'\n[google_tts]\nproject='unit'\ncredentials='{}'\n",account.display())).unwrap();
-    let token=format!("{http}/token");
-    let synth=format!("{http}/tts");
-    let world=[("CLARP_DEEPGRAM_VOICE_ENDPOINT",http.as_str()),("CLARP_ELEVEN_VOICE_ENDPOINT",eleven.as_str()),
-        ("CLARP_GOOGLE_TOKEN_ENDPOINT",token.as_str()),("CLARP_GOOGLE_VOICE_ENDPOINT",synth.as_str()),
-        ("CARTESIA_API_KEY",""),("GOOGLE_VERTEX_API_KEY",""),("GEMINI_API_KEY","")];
-    let host=place.start_in("",&["--speech-keys",owners.to_str().unwrap()],&world);
-    let catalog=host.get("/voice-catalog");
-    let providers=catalog["providers"].as_array().unwrap();
-    let preview=|provider:&str,id:&str|{
-        fetch(&host,"","GET",&format!("/voice-preview?provider={provider}&id={id}"),&[],b"")
+    let token = format!("{http}/token");
+    let synth = format!("{http}/tts");
+    let world = [
+        ("CLARP_DEEPGRAM_VOICE_ENDPOINT", http.as_str()),
+        ("CLARP_ELEVEN_VOICE_ENDPOINT", eleven.as_str()),
+        ("CLARP_GOOGLE_TOKEN_ENDPOINT", token.as_str()),
+        ("CLARP_GOOGLE_VOICE_ENDPOINT", synth.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+    ];
+    let host = place.start_in("", &["--speech-keys", owners.to_str().unwrap()], &world);
+    let catalog = host.get("/voice-catalog");
+    let providers = catalog["providers"].as_array().unwrap();
+    let preview = |provider: &str, id: &str| {
+        fetch(
+            &host,
+            "",
+            "GET",
+            &format!("/voice-preview?provider={provider}&id={id}"),
+            &[],
+            b"",
+        )
     };
-    let voice=|provider:&str,prefix:&str|->String{
-        let row=providers.iter().find(|r|r["id"]==provider).unwrap();
-        assert_eq!(row["available"],true);
-        row["voices"].as_array().unwrap().iter().filter_map(|v|v["id"].as_str()).find(|v|v.starts_with(prefix)).unwrap().into()
+    let voice = |provider: &str, prefix: &str| -> String {
+        let row = providers.iter().find(|r| r["id"] == provider).unwrap();
+        assert_eq!(row["available"], true);
+        row["voices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v["id"].as_str())
+            .find(|v| v.starts_with(prefix))
+            .unwrap()
+            .into()
     };
-    for (provider,prefix,expected) in [("deepgram","flux-","Flux sound"),("deepgram","aura-","Aura sound"),
-            ("elevenlabs","","abcd"),("google","nb-NO-Chirp3-HD-","google")] {
-        let id=voice(provider,prefix);
-        let spoken=preview(provider,&id);
-        assert_eq!((spoken.status,spoken.header("content-type"),spoken.text().as_str()),(200,"audio/mpeg",expected));
-        assert_eq!(preview(provider,&id).text(),expected);
+    for (provider, prefix, expected) in [
+        ("deepgram", "flux-", "Flux sound"),
+        ("deepgram", "aura-", "Aura sound"),
+        ("elevenlabs", "", "abcd"),
+        ("google", "nb-NO-Chirp3-HD-", "google"),
+    ] {
+        let id = voice(provider, prefix);
+        let spoken = preview(provider, &id);
+        assert_eq!(
+            (
+                spoken.status,
+                spoken.header("content-type"),
+                spoken.text().as_str()
+            ),
+            (200, "audio/mpeg", expected)
+        );
+        assert_eq!(preview(provider, &id).text(), expected);
     }
-    assert_eq!(preview("google","not-a-voice").status,404);
+    assert_eq!(preview("google", "not-a-voice").status, 404);
     serving.join().unwrap();
-    let said=frames.lock().unwrap();
-    assert_eq!(said[0]["xi_api_key"],"el-unit");
-    assert_eq!(said[0]["voice_settings"]["speed"],1.0);
+    let said = frames.lock().unwrap();
+    assert_eq!(said[0]["xi_api_key"], "el-unit");
+    assert_eq!(said[0]["voice_settings"]["speed"], 1.0);
     assert!(said[1]["text"].as_str().unwrap().contains("Hello"));
-    assert_eq!(said[2],json!({"text":""}));
-    let requests=requests.lock().unwrap();
-    assert_eq!(requests.len(),4);
+    assert_eq!(said[2], json!({"text":""}));
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 4);
     assert!(requests[0].contains("encoding=mp3&container=none"));
-    assert!(requests[0].to_lowercase().contains("authorization: token dg-unit"));
+    assert!(
+        requests[0]
+            .to_lowercase()
+            .contains("authorization: token dg-unit")
+    );
     assert!(requests[2].contains("grant_type=refresh_token"));
-    assert!(requests[3].to_lowercase().contains("x-goog-user-project: unit"));
+    assert!(
+        requests[3]
+            .to_lowercase()
+            .contains("x-goog-user-project: unit")
+    );
 }
 
 #[test]

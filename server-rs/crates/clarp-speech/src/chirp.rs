@@ -313,7 +313,7 @@ impl Chirp {
         {
             return Ok(token.clone());
         }
-        let (token,lasts) = Self::refresh_token(credentials,&self.token_url)?;
+        let (token, lasts) = Self::refresh_token(credentials, &self.token_url)?;
         let runs_out = Instant::now() + Duration::from_secs_f64(lasts.unwrap_or(3_600.0));
         self.tokens()
             .insert(credentials.to_path_buf(), (token.clone(), runs_out));
@@ -321,7 +321,10 @@ impl Chirp {
     }
 
     /// Exchange an authorized-user ADC refresh token for a short-lived access token.
-    pub(crate) fn refresh_token(credentials:&Path,token_url:&str)->Result<(String,Option<f64>),String> {
+    pub(crate) fn refresh_token(
+        credentials: &Path,
+        token_url: &str,
+    ) -> Result<(String, Option<f64>), String> {
         let read = std::fs::read_to_string(credentials)
             .map_err(|error| error.to_string())
             .and_then(|text| {
@@ -356,7 +359,7 @@ impl Chirp {
             return Err("Google token response had no access_token".to_string());
         };
         let lasts = bought["expires_in"].as_f64().filter(|lasts| *lasts > 0.0);
-        Ok((token.to_string(),lasts))
+        Ok((token.to_string(), lasts))
     }
 
     /// A clip as plain sound, whatever it was recorded as.

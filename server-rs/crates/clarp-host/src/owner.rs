@@ -205,19 +205,32 @@ pub fn google_voice_error(file: &Table) -> Option<&'static str> {
     google_voice_account(file).err()
 }
 
-pub fn google_voice_account(file:&Table) -> Result<(PathBuf,String),&'static str> {
-    let own=file.get("google_tts").and_then(Value::as_table).is_some();
-    let section=if own {"google_tts"} else {"google_stt"};
-    let named=text_at(file,&[section,"credentials"]).or_else(|| if own {None} else {std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok()});
-    let home=||std::env::var_os("HOME").map(PathBuf::from);
-    let path=match named.as_deref().map(str::trim).filter(|s|!s.is_empty()) {
-        Some(name)=>match name.strip_prefix("~/"){Some(tail)=>home().map(|p|p.join(tail)),None=>Some(PathBuf::from(name))},
-        None if !own => home().map(|p|p.join(".config/gcloud/application_default_credentials.json")),
-        None=>None,
+pub fn google_voice_account(file: &Table) -> Result<(PathBuf, String), &'static str> {
+    let own = file.get("google_tts").and_then(Value::as_table).is_some();
+    let section = if own { "google_tts" } else { "google_stt" };
+    let named = text_at(file, &[section, "credentials"]).or_else(|| {
+        if own {
+            None
+        } else {
+            std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok()
+        }
+    });
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let path = match named.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) => match name.strip_prefix("~/") {
+            Some(tail) => home().map(|p| p.join(tail)),
+            None => Some(PathBuf::from(name)),
+        },
+        None if !own => {
+            home().map(|p| p.join(".config/gcloud/application_default_credentials.json"))
+        }
+        None => None,
     };
-    let path=path.filter(|p|p.is_file() && std::fs::File::open(p).is_ok()).ok_or("google_credentials_missing")?;
-    let project=text_at(file,&[section,"project"]).ok_or("google_project_missing")?;
-    Ok((path,project))
+    let path = path
+        .filter(|p| p.is_file() && std::fs::File::open(p).is_ok())
+        .ok_or("google_credentials_missing")?;
+    let project = text_at(file, &[section, "project"]).ok_or("google_project_missing")?;
+    Ok((path, project))
 }
 
 /// Which of Cartesia's models speaks.
