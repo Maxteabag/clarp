@@ -26,6 +26,7 @@ use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, T
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
 use clarp_kernel::journal::Reworded;
 use clarp_kernel::media::Asset;
+use clarp_kernel::oracle::attention;
 use clarp_kernel::spoken::{Line as SpokenLine, Said, SpeechBook};
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
 use clarp_ports::blobs::Blobs;
@@ -342,6 +343,10 @@ pub struct View {
     pub newest: Option<Versioned>,
     /// How the last turn ended, with what its tool said of itself.
     pub ended: Option<TurnEnd>,
+    /// What the agent last finished for its user, of which the user was told and to which
+    /// neither he nor the Oracle wrote since: as the rule that shows it to the Oracle's
+    /// voice takes it ([`attention::finished`]).
+    pub finished: Option<Arc<Value>>,
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
@@ -785,6 +790,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         status: idle,
         newest: None,
         ended: None,
+        finished: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
         books: Arc::default(),
@@ -807,6 +813,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         reworded: false,
         newest: None,
         ended: None,
+        finished: None,
         transcript_sent: None,
         transcript_due: None,
         jobs_told: BTreeMap::new(),
@@ -858,6 +865,8 @@ struct Worker {
     newest: Option<Versioned>,
     /// How the last turn ended.
     ended: Option<TurnEnd>,
+    /// What the agent last finished for its user, as the view shows it.
+    finished: Option<Arc<Value>>,
     transcript_sent: Option<Instant>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
@@ -1232,6 +1241,7 @@ impl Worker {
             .collect();
         self.newest = self.newest_row();
         self.ended = self.last_end();
+        self.finished = self.last_finished();
         // Nor are its artifacts: only what changes from here on is told. How many of its
         // requests wait for the user is counted from the start.
         self.refresh_books(true);
@@ -1549,6 +1559,11 @@ impl Worker {
             Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
             Ask::Amended { record, taken } => {
                 self.amended(*record);
+                // What it last finished is told by the name it now has.
+                if self.finished.is_some() && self.actor.is_some() {
+                    self.finished = self.last_finished();
+                    self.publish_view();
+                }
                 let _ = taken.send(());
                 return Ok(());
             }
@@ -2175,6 +2190,19 @@ impl Worker {
         self.actor.as_ref()?.last_end().ok()?
     }
 
+    /// What the agent last finished for its user, as the log has it and as the agent is
+    /// now named: nothing where the user or the Oracle wrote to it since, where the user
+    /// was told of nothing, or where it is too long ago for anyone to be shown it.
+    fn last_finished(&self) -> Option<Arc<Value>> {
+        let actor = self.actor.as_ref()?;
+        let since = self.now_ms() - attention::FINISHED_SHOWN_FOR_MS;
+        let (asked, answer) = actor
+            .last_finished_for(attention::for_the_user, since)
+            .ok()??;
+        let finished = wire::finished(&self.setup.record, &actor.status(), &asked, &answer);
+        finished.map(Arc::new)
+    }
+
     fn publish_view(&self) {
         let Some(actor) = &self.actor else {
             return;
@@ -2184,6 +2212,7 @@ impl Worker {
             status: actor.status(),
             newest: self.newest.clone(),
             ended: self.ended.clone(),
+            finished: self.finished.clone(),
             backend: actor.backend_id(),
             jobs: actor
                 .jobs()
@@ -2238,6 +2267,22 @@ impl Worker {
                 .and_then(|told| told.last.as_ref())
                 .map(|was| was.id);
         let now = self.now_ms();
+        // What the agent last finished for its user is another thing once a turn of the
+        // user's or the Oracle's began or ended, and once something came to wait for the
+        // agent or was taken back: whatever else it does between leaves that as it was.
+        // (An agent that is started again is opened anew, and it is read then.)
+        let began = status
+            .live
+            .as_ref()
+            .filter(|live| Some(live.turn) != was_live.map(|was| was.turn));
+        let ended = status.last.as_ref().filter(|_| turn_ended);
+        let theirs = |origin: &Origin| attention::for_the_user(origin.name());
+        if began.is_some_and(|live| theirs(&live.origin))
+            || ended.is_some_and(|last| theirs(&last.origin))
+            || status.waiting != was_waiting
+        {
+            self.finished = self.last_finished();
+        }
         if turn_ended {
             self.ended = self.last_end();
             // What the turn used is told to the Host's tally, under the turn's own name: a
@@ -2394,7 +2439,7 @@ impl Worker {
                 message_id: &message_id,
                 client: &client,
             };
-            let id = format!("pn-{}", ids::hex(6));
+            let id = clarp_kernel::notify::id(&record.agent_id, ended.ended_at_ms);
             // A reply with nothing for the user in it is not something to be told of, and
             // neither is what agents say to each other.
             if let Some(told) =

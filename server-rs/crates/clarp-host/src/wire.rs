@@ -880,6 +880,45 @@ pub fn user_notification(
     }))
 }
 
+/// What this Host has of a turn an agent finished for its user, as the rule that shows such
+/// turns to the Oracle's voice takes it ([`clarp_kernel::oracle::attention::finished`]):
+/// what the user was told of its end, and the answer and the message that began it as the
+/// agent's conversation has them. `None` where nobody was told of its end.
+///
+/// `asked` and `answer` are that message and the row that closed the turn. Nothing the
+/// user or the Oracle wrote has entered the conversation since: or this would not be the
+/// last turn they began.
+pub fn finished(
+    record: &AgentRecord,
+    status: &Status,
+    asked: &Versioned,
+    answer: &Versioned,
+) -> Option<Value> {
+    let (Entry::Message(message), Some(end)) = (&asked.entry, &answer.turn) else {
+        return None;
+    };
+    let from = Asked {
+        message_id: &message.id,
+        client: message.client.as_deref().unwrap_or(""),
+    };
+    let id = notify::id(&record.agent_id, end.ended_at_ms);
+    let mut told = user_notification(record, &id, &from, answer, end.ended_at_ms)?;
+    let conversation = session_name(record, status);
+    let as_it_has = |row: &Versioned| {
+        let row = self::row(row);
+        json!({
+            "role": row["role"], "agent_id": record.agent_id,
+            "backend_session_id": conversation, "origin": row["origin"], "text": row["text"],
+        })
+    };
+    told["notify"] = json!(true);
+    told["backend_session_id"] = json!(conversation);
+    told["answer"] = as_it_has(answer);
+    told["asked"] = as_it_has(asked);
+    told["written_to_since"] = json!(false);
+    Some(told)
+}
+
 pub fn roster(kind: &str, session: &str) -> Value {
     json!({ "type": "agent-roster", "kind": kind, "session": session })
 }
@@ -2499,6 +2538,150 @@ mod tests {
             (&told["origin"], &told["push"]),
             (&json!("automation"), &json!(true))
         );
+    }
+
+    #[test]
+    fn what_an_agent_finished_for_its_user_is_kept_as_the_oracles_voice_is_shown_it() {
+        use clarp_kernel::oracle::attention;
+        let end = |ended_at_ms: i64| TurnEnd {
+            id: "t-1".to_string(),
+            turn: 1,
+            closes: "r-1".to_string(),
+            status: "completed".to_string(),
+            started_at_ms: Some(10),
+            ended_at_ms,
+            tool_count: 0,
+            trace_id: None,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+            context_tokens: None,
+            cost_micros: None,
+            cost_so_far: None,
+            total: None,
+            limits: None,
+        };
+        let asked = |origin: Origin| {
+            let message = Message {
+                id: "u-1".to_string(),
+                text: "Is it done?".to_string(),
+                origin,
+                ..Message::default()
+            };
+            version(Entry::Message(message), 1, None)
+        };
+        let answer = |origin: Origin, text: &str| {
+            let reply = Reply {
+                origin,
+                id: "r-1".to_string(),
+                turn: 1,
+                text: text.to_string(),
+                trace_id: None,
+                ..Reply::default()
+            };
+            version(Entry::Reply(reply), 9, Some(end(4_000)))
+        };
+        let oracle = || Origin::Trigger {
+            name: "oracle".to_string(),
+        };
+        let said = "  All done. <speak>It is done.</speak>  ";
+        let (rests, user) = (status(None, Some(Outcome::Completed)), Origin::User);
+        let kept = finished(
+            &record(),
+            &rests,
+            &asked(user.clone()),
+            &answer(user.clone(), said),
+        );
+        let kept = kept.unwrap();
+        // What the user was told of it, under the name both Hosts tell it by; and the two
+        // rows as the conversation has them, in the conversation its tool calls its own.
+        assert_eq!(
+            kept["notification_id"],
+            notify::id("a1", 4_000).as_str(),
+            "{kept}"
+        );
+        assert_eq!(
+            (&kept["notify"], &kept["unread"], &kept["written_to_since"]),
+            (&json!(true), &json!(true), &json!(false))
+        );
+        assert_eq!(
+            (&kept["answer"], &kept["asked"]),
+            (
+                &json!({
+                    "role": "assistant", "agent_id": "a1", "backend_session_id": "sess-1",
+                    "origin": "user", "text": said,
+                }),
+                &json!({
+                    "role": "user", "agent_id": "a1", "backend_session_id": "sess-1",
+                    "origin": "user", "text": "Is it done?",
+                })
+            )
+        );
+        // The rule shows it to a voice, by the agent's name, until it is a day old; and as
+        // something old once a quarter of an hour has passed.
+        let shown = attention::finished([&kept], 4_000 + 60_000, 20);
+        assert_eq!(
+            shown,
+            [json!({
+                "notification_id": notify::id("a1", 4_000), "source_message_id": "r-1",
+                "cause_message_id": "u-1", "agent_id": "a1", "agent": "Maximus",
+                "session": "maximus", "backend_session_id": "sess-1", "origin": "user",
+                "reference_ts": 4_000, "stale": false,
+                "source_text": "All done. <speak>It is done.</speak>",
+            })]
+        );
+        let later = attention::finished([&kept], 4_000 + 16 * 60_000, 20);
+        assert_eq!(later[0]["stale"], true);
+        assert_eq!(
+            attention::finished([&kept], 4_001 + 24 * 3_600_000, 20),
+            [] as [Value; 0]
+        );
+        // What the Oracle handed on for the user is the user's own too.
+        let handed = finished(
+            &record(),
+            &rests,
+            &asked(oracle()),
+            &answer(oracle(), "Found."),
+        );
+        let shown = attention::finished([&handed.unwrap()], 5_000, 20);
+        assert_eq!(shown[0]["origin"], "oracle");
+        // An agent that was never told its tool's name for the conversation has the Host's.
+        let unnamed = Status {
+            backend_session: None,
+            ..rests.clone()
+        };
+        let kept = finished(
+            &record(),
+            &unnamed,
+            &asked(user.clone()),
+            &answer(user.clone(), said),
+        );
+        assert_eq!(kept.unwrap()["backend_session_id"], "conv-1");
+        // Nothing is kept of a turn nobody was told the end of: one that said nothing for
+        // the user, and what one agent answered another.
+        let nothing = answer(user.clone(), "");
+        assert_eq!(
+            finished(&record(), &rests, &asked(user.clone()), &nothing),
+            None
+        );
+        let other = || Origin::Agent {
+            agent_id: "a2".to_string(),
+        };
+        let between = finished(
+            &record(),
+            &rests,
+            &asked(other()),
+            &answer(other(), "Done."),
+        );
+        assert_eq!(between, None);
+        // Nor of a row that closed no turn, or of a turn no message began.
+        let open = version(answer(user.clone(), said).entry, 9, None);
+        assert_eq!(
+            finished(&record(), &rests, &asked(user.clone()), &open),
+            None
+        );
+        let no_message = answer(user.clone(), said);
+        assert_eq!(finished(&record(), &rests, &no_message, &no_message), None);
     }
 
     #[test]

@@ -1847,3 +1847,157 @@ fn what_became_of_the_turn_of_a_message_is_told_by_the_messages_id() {
     };
     assert_eq!((status.as_str(), text.as_str()), ("interrupted", ""));
 }
+
+/// Sends a message somebody else than the user wrote.
+fn send_from(world: &mut World, actor: &mut Actor, origin: Origin, id: &str, text: &str) {
+    let now = world.tick();
+    let sent = Message {
+        origin,
+        ..message(id, text)
+    };
+    let (_, out) = actor.send(&sent, Admission::Queue, now).unwrap();
+    world.carry_out(actor, out);
+}
+
+#[test]
+fn what_an_agent_last_finished_for_its_user_is_the_end_of_the_turn_their_newest_message_began() {
+    let mut world = World::new("finished");
+    let mut actor = world.open();
+    let theirs = |origin: &str| matches!(origin, "user" | "oracle");
+    // What it last finished for them: the message, what was answered, and when.
+    let finished_since = |actor: &Actor, since: i64| {
+        let found = actor.last_finished_for(theirs, since).unwrap();
+        found.map(|(asked, answer)| {
+            let Entry::Reply(reply) = &answer.entry else {
+                panic!("what closed the turn is no answer: {answer:?}");
+            };
+            let ended = answer.turn.as_ref().unwrap().ended_at_ms;
+            (asked.entry.id().to_string(), reply.text.clone(), ended)
+        })
+    };
+    let finished = |actor: &Actor| finished_since(actor, 0);
+    let ended = |actor: &Actor, id: &str| actor.end_of(id).unwrap().unwrap().ended_at_ms;
+    let answers = |world: &mut World, actor: &mut Actor, turn: u64, said: &str| {
+        world.says(turn, said);
+        world.exits(turn, Some(0), None);
+        world.hint(actor);
+    };
+    let the = |id: &str, said: &str, ended: i64| Some((id.to_string(), said.to_string(), ended));
+    let an_agent = || Origin::Agent {
+        agent_id: "a2".to_string(),
+    };
+
+    // An agent nobody wrote to finished nothing, and neither has one that is answering.
+    assert_eq!(finished(&actor), None);
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    assert_eq!(finished(&actor), None);
+    // Its answer is what it finished: until it is too long ago for whoever asks.
+    answers(&mut world, &mut actor, 1, "the first answer");
+    let first = ended(&actor, "u-1");
+    assert_eq!(finished(&actor), the("u-1", "the first answer", first));
+    assert_eq!(
+        finished_since(&actor, first),
+        the("u-1", "the first answer", first)
+    );
+    assert_eq!(finished_since(&actor, first + 1), None);
+
+    // What another agent writes to it changes nothing: while that is answered, while more
+    // of it waits, and after.
+    send_from(&mut world, &mut actor, an_agent(), "u-2", "from an agent");
+    assert_eq!(finished(&actor), the("u-1", "the first answer", first));
+    send_from(&mut world, &mut actor, an_agent(), "u-2b", "and more");
+    assert_eq!(actor.queue().unwrap().len(), 1);
+    assert_eq!(finished(&actor), the("u-1", "the first answer", first));
+    // What the user leaves for later is what he wrote since, though it waits its turn; and
+    // no longer once he took it back.
+    world.send(&mut actor, "u-3", "and then?", Admission::Later);
+    assert_eq!(finished(&actor), None);
+    let now = world.tick();
+    let (was_waiting, out) = actor.withdraw(TurnId(4), "peter", now).unwrap();
+    assert!(was_waiting);
+    world.carry_out(&mut actor, out);
+    assert_eq!(finished(&actor), the("u-1", "the first answer", first));
+    answers(&mut world, &mut actor, 2, "for the agent");
+    answers(&mut world, &mut actor, 3, "and for the agent again");
+    assert_eq!(finished(&actor), the("u-1", "the first answer", first));
+
+    // What the Oracle hands it for the user is the user's own: nothing while it is
+    // answered, and then its answer.
+    let oracle = Origin::Trigger {
+        name: "oracle".to_string(),
+    };
+    send_from(&mut world, &mut actor, oracle, "u-4", "look into it");
+    assert_eq!(finished(&actor), None);
+    answers(&mut world, &mut actor, 5, "found");
+    let fourth = ended(&actor, "u-4");
+    assert_eq!(finished(&actor), the("u-4", "found", fourth));
+
+    // A turn of the user's that failed finished nothing, whatever it said before; and what
+    // was finished before it is what he went on from.
+    world.send(&mut actor, "u-5", "go on", Admission::Queue);
+    world.says(6, r#"{"reply": "half an answer"}"#);
+    world.says(6, r#"{"fail": "it broke"}"#);
+    world.exits(6, Some(1), None);
+    world.hint(&mut actor);
+    assert_eq!(actor.end_of("u-5").unwrap().unwrap().status, "failed");
+    assert_eq!(finished(&actor), None);
+    // Nor did one that was stopped, though what it had said by then is what closed it.
+    world.send(&mut actor, "u-5b", "go on then", Admission::Queue);
+    world.says(7, r#"{"reply": "as far as I got"}"#);
+    world.hint(&mut actor);
+    let now = world.tick();
+    let (_, out) = actor.stop("peter", now).unwrap();
+    world.carry_out(&mut actor, out);
+    world.exits(7, None, Some(15));
+    world.hint(&mut actor);
+    let stopped = actor.end_of("u-5b").unwrap().unwrap();
+    assert_eq!(stopped.status, "interrupted");
+    assert_ne!(stopped.closes, "u-5b");
+    assert_eq!(finished(&actor), None);
+    let now = world.tick();
+    let (_, out) = actor.resume("peter", now).unwrap();
+    world.carry_out(&mut actor, out);
+    // Nor did one that ran to its end and said nothing.
+    world.send(&mut actor, "u-6", "say nothing", Admission::Queue);
+    answers(&mut world, &mut actor, 8, r#"{"activity": "thinking"}"#);
+    assert_eq!(actor.end_of("u-6").unwrap().unwrap().status, "completed");
+    assert_eq!(finished(&actor), None);
+
+    // It is read from the log: the same after the Host was started again.
+    world.send(&mut actor, "u-7", "and now?", Admission::Queue);
+    answers(&mut world, &mut actor, 9, "the last answer");
+    let seventh = ended(&actor, "u-7");
+    assert_eq!(finished(&actor), the("u-7", "the last answer", seventh));
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(finished(&actor), the("u-7", "the last answer", seventh));
+
+    // An agent that is started again has finished nothing in the conversation that begins:
+    // not when another agent writes to it, and then what it answers the user there.
+    let now = world.tick();
+    let (started, out) = actor.start_again(now).unwrap();
+    assert!(started);
+    world.carry_out(&mut actor, out);
+    assert_eq!(finished(&actor), None);
+    send_from(
+        &mut world,
+        &mut actor,
+        an_agent(),
+        "u-8",
+        "from an agent again",
+    );
+    answers(&mut world, &mut actor, 10, "for the agent again");
+    assert_eq!(finished(&actor), None);
+    world.send(&mut actor, "u-9", "anew", Admission::Queue);
+    answers(
+        &mut world,
+        &mut actor,
+        11,
+        "the first answer of the new one",
+    );
+    let ninth = ended(&actor, "u-9");
+    assert_eq!(
+        finished(&actor),
+        the("u-9", "the first answer of the new one", ninth)
+    );
+}

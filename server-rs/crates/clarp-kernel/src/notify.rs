@@ -8,6 +8,8 @@
 //! These are the Python Host's rules (`server/lib/policies/notifications.py`), decision for
 //! decision and reason for reason: the reasons are what the apps and the logs name them by.
 
+use sha1::{Digest, Sha1};
+
 /// The origins of turns that are talk between agents or routine: never told to the user.
 const AGENT_CHATTER: [&str; 4] = ["agent", "schedule", "heartbeat", "dreaming"];
 /// The origins that may tell the user when automation is treated specially.
@@ -69,6 +71,14 @@ pub enum Decision {
     },
     /// Nobody is told. The reason is kept.
     Suppress { reason: String },
+}
+
+/// The name the end of a turn is told under: of the agent and the moment it ended, and so
+/// the same whenever it is told again. The Python Host's (`_notification_id`).
+pub fn id(agent_id: &str, done_ms: i64) -> String {
+    let mark = Sha1::digest(format!("{agent_id}\0{done_ms}").as_bytes());
+    let mark: String = mark.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("pn-{}", &mark[..20])
 }
 
 fn suppress(reason: impl Into<String>) -> Decision {
