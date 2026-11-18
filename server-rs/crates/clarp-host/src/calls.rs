@@ -39,6 +39,7 @@ use crate::ids;
 use crate::pairing::Scope;
 
 pub mod live;
+mod transcript;
 
 pub(crate) use live::{Voice, dial};
 

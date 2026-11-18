@@ -60,7 +60,7 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools)}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools)}
 
 
 def calls(root, tools):
@@ -109,6 +109,29 @@ def calls(root, tools):
             scenarios.append(dict(delivery=delivery,steps=steps))
             call.close()
     return scenarios
+
+
+def transcripts(root,tools):
+    from unittest.mock import patch
+    meta={'call_id':'one','principal':'device-a','agent_session':'guard','agent':'Guard'}
+    samples=[('text',{'role':'user','text':'One '}),('receipt',{'receipt':{'status':'forwarded'}}),
+             ('text',{'role':'user','text':'question'}),('pacing',{'event':'part','detail':'1 of 2'}),
+             ('text',{'role':'assistant','text':'Answer'}),('other',{'extra':1}),
+             ('text',{'role':'user','text':'Again'})]
+    rows=[]
+    for i,ident in enumerate(('call-1','a','a.b-C_1','x'*120,'x'*121,'.','..','../other','',chr(0xe9))):
+        now=[0]
+        with patch.object(tools,'_iso',side_effect=lambda:'T'+str(now[0])):
+            t=tools.Transcript(root/('case'+str(i)),ident,meta)
+            events=[]
+            for n,(kind,fields) in enumerate(samples[:i]):
+                now[0]=n+1
+                t.add(kind,**fields)
+                events.append(json.loads(t.partial.read_text().splitlines()[-1]))
+            now[0]=20
+            t.finish()
+            rows.append(dict(id=ident,name=t.final.stem,entries=events,document=json.loads(t.final.read_bytes())))
+    return rows
 
 
 def callbacks(root, tools):

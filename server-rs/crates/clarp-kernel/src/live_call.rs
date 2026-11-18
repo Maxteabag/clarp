@@ -19,6 +19,7 @@
 pub mod callback;
 pub mod receipts;
 pub mod team;
+pub mod transcript;
 
 use std::collections::BTreeMap;
 
