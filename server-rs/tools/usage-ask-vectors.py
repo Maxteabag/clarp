@@ -185,8 +185,26 @@ def cases(place):
         entry["used_up"] = usage.exhausted_backends(now[0]).get("codex")
         entry["due"] = codex._codex_needs_refresh()
         turns.append(entry)
+    # PR 430: exercise the reference fallback itself. Only the RPC peer and its
+    # process are replaced; capture and bucket selection run on the real result.
+    from unittest.mock import Mock, patch
+    rpc_cases = []
+    fallback = {"primary": window(18, 300)}
+    named = {"primary": window(64, 300)}
+    for result in [{"rateLimits": fallback}, {"rateLimitsByLimitId": {"codex": named}},
+                   {"rateLimits": fallback, "rateLimitsByLimitId": {"codex": named}},
+                   {}, {"rateLimits": {}}, {"rate_limit": room}, {"rateLimitsByLimitId": {}}]:
+        proc = Mock(stdin=io.StringIO())
+        with patch.object(codex.subprocess, "Popen", return_value=proc), patch.object(
+                codex, "_codex_rpc", side_effect=[{"id":1,"result":{}}, {"id":2,"result":result}]):
+            try:
+                report = codex.fetch_codex_usage_app_server()
+                windows = report["windows"]
+            except RuntimeError:
+                windows = None
+        rpc_cases.append({"result": result, "windows": windows})
     return {"at": began, "payload": {"command": {"data": {"groups": groups}}}, "cases": rows, "direct": direct,
-            "authoritative": turns, "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
+            "app_server": rpc_cases, "authoritative": turns, "ages": ages, "origins": origins, "blocks": blocks, "claude": readings, "agy": agy_cases}
 
 
 if __name__ == "__main__":

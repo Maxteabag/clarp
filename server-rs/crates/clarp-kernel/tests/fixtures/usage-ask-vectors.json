@@ -295,6 +295,106 @@
    }
   }
  ],
+ "app_server": [
+  {
+   "result": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900009000,
+      "used_percent": 18,
+      "window_minutes": 300
+     }
+    }
+   },
+   "windows": {
+    "primary": {
+     "resets_at": "2030-03-17T20:16:40Z",
+     "used_percentage": 18.0,
+     "window_minutes": 300
+    }
+   }
+  },
+  {
+   "result": {
+    "rateLimitsByLimitId": {
+     "codex": {
+      "primary": {
+       "resets_at": 1900009000,
+       "used_percent": 64,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "windows": {
+    "primary": {
+     "resets_at": "2030-03-17T20:16:40Z",
+     "used_percentage": 64.0,
+     "window_minutes": 300
+    }
+   }
+  },
+  {
+   "result": {
+    "rateLimits": {
+     "primary": {
+      "resets_at": 1900009000,
+      "used_percent": 18,
+      "window_minutes": 300
+     }
+    },
+    "rateLimitsByLimitId": {
+     "codex": {
+      "primary": {
+       "resets_at": 1900009000,
+       "used_percent": 64,
+       "window_minutes": 300
+      }
+     }
+    }
+   },
+   "windows": {
+    "primary": {
+     "resets_at": "2030-03-17T20:16:40Z",
+     "used_percentage": 64.0,
+     "window_minutes": 300
+    }
+   }
+  },
+  {
+   "result": {},
+   "windows": null
+  },
+  {
+   "result": {
+    "rateLimits": {}
+   },
+   "windows": null
+  },
+  {
+   "result": {
+    "rate_limit": {
+     "primary": {
+      "resets_at": 1900009000,
+      "used_percent": 20,
+      "window_minutes": 300
+     },
+     "secondary": {
+      "resets_at": 1900009000,
+      "used_percent": 42,
+      "window_minutes": 10080
+     }
+    }
+   },
+   "windows": null
+  },
+  {
+   "result": {
+    "rateLimitsByLimitId": {}
+   },
+   "windows": null
+  }
+ ],
  "at": 1900000000000,
  "authoritative": [
   {
