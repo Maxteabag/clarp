@@ -20,12 +20,14 @@ pub mod attention;
 pub mod conversation;
 pub mod delegations;
 pub mod earcons;
+pub mod gemini;
 pub mod handoffs;
 pub mod phone;
 pub mod relay;
 pub mod routing;
 pub mod threads;
 pub mod tools;
+pub mod usage;
 pub mod voice;
 
 /// Under what the contact is kept, and how long a name of one may be.

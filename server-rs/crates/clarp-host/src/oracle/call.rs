@@ -25,7 +25,7 @@ use axum::response::Response;
 use axum::routing::get;
 use axum::{Extension, Router};
 use clarp_kernel::oracle::conversation::{
-    Begin, Conversation, Ids, Now, Phoned, Strategy, Thread, Waiting, Wire,
+    Begin, Conversation, Hook, Ids, Now, Phoned, Strategy, Thread, Waiting, Wire,
 };
 use clarp_kernel::oracle::delegations::Delegation;
 use clarp_kernel::oracle::handoffs::{self as handoff_rules, ToCall};
@@ -34,15 +34,16 @@ use clarp_kernel::oracle::threads::{self, Excerpt, Opened, Opening};
 use clarp_kernel::oracle::voice::{self, Beginning};
 use clarp_kernel::oracle::{self as rules, CONTACT_KEY, attention, phone, tools as tool_rules};
 use clarp_kernel::python;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde_json::{Value, json};
 use tokio::sync::{Notify, mpsc};
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::memory::with_memory;
+use super::upstream::Upstream;
 use super::{agents, delegations, handoffs, keep, router, tools};
-use crate::calls::{Voice, caller, dial};
+use crate::calls::caller;
 use crate::edge::{App, Principal};
 use crate::ids;
 use crate::library;
@@ -80,9 +81,23 @@ struct Open {
 pub struct Calls {
     open: Mutex<HashMap<String, Open>>,
     freed: Notify,
+    gemini_failed: Mutex<Option<Instant>>,
 }
 
 impl Calls {
+    pub(super) fn healthy(&self) -> bool {
+        let failed = self
+            .gemini_failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        failed.is_none_or(|at| rules::gemini::healthy(at.elapsed().as_secs_f64(), Some(0.)))
+    }
+    pub(super) fn health(&self, well: bool) {
+        *self
+            .gemini_failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = (!well).then(Instant::now);
+    }
     fn open(&self) -> MutexGuard<'_, HashMap<String, Open>> {
         self.open
             .lock()
@@ -355,7 +370,7 @@ async fn reached(
     (owner, token): (&str, &str),
     asked: &Asked,
     key: &str,
-) -> Result<(String, Voice), (StatusCode, &'static str)> {
+) -> Result<(String, Upstream), (StatusCode, &'static str)> {
     const UNAVAILABLE: (StatusCode, &str) =
         (StatusCode::BAD_GATEWAY, "Oracle v2 upstream unavailable");
     let new_id = format!("oracle-{}", ids::hex(16));
@@ -376,7 +391,7 @@ async fn reached(
         Ok(Err(why)) => return Err((StatusCode::BAD_REQUEST, why)),
         Err(_) => return Err(UNAVAILABLE),
     };
-    let voice = dial(app, key).await.ok_or(UNAVAILABLE)?;
+    let voice = Upstream::open(app, key).await.ok_or(UNAVAILABLE)?;
     Ok((thread_id, voice))
 }
 
@@ -393,15 +408,23 @@ struct Call {
 
 /// What a conversation tells the two sides of its call, in its order.
 #[derive(Default)]
-struct Said(Vec<(bool, Value)>);
+struct Said(Vec<Output>);
+enum Output {
+    Voice(Value),
+    Phone(Value),
+    Hook(Hook),
+}
 
 impl Wire for Said {
+    fn hook(&mut self, hook: Hook) {
+        self.0.push(Output::Hook(hook));
+    }
     fn voice(&mut self, said: Value) {
-        self.0.push((true, said));
+        self.0.push(Output::Voice(said));
     }
 
     fn phone(&mut self, said: Value) {
-        self.0.push((false, said));
+        self.0.push(Output::Phone(said));
     }
 }
 
@@ -724,7 +747,7 @@ fn voice_lost() -> Value {
 
 /// Carries one call on its socket, from the voice's first word to the end, and lets the
 /// thread and the voice go as a call is to leave them.
-async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
+async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
     let (stops, mut stopped) = mpsc::unbounded_channel::<()>();
     app.oracle.calls.runs(&call.owner, stops);
     let (came, mut comes) = mpsc::unbounded_channel::<Came>();
@@ -787,6 +810,10 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
         line.tell(Told::Close(ENDED_WELL, String::new())).await;
         return;
     };
+    if let Some(second) = voice.machine() {
+        second.languages = languages.clone();
+        machine.use_gemini();
+    }
     if no_cues {
         machine.without_earcons();
     }
@@ -846,13 +873,22 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
         // What the step before this told is said now, in its order; then what it said to
         // keep is kept.
         let mut voice_gone = false;
-        for (to_voice, said) in std::mem::take(&mut session.said.0) {
-            let written = python::dumps_ascii(&said);
-            if to_voice {
-                voice_gone |= voice.send(Message::Text(written.into())).await.is_err();
-            } else {
-                line.tell(Told::Text(written)).await;
+        for output in std::mem::take(&mut session.said.0) {
+            match output {
+                Output::Voice(event) => voice_gone |= voice.send(event).await.is_err(),
+                Output::Hook(hook) => voice_gone |= voice.hook(hook).await.is_err(),
+                Output::Phone(event) => {
+                    line.tell(Told::Text(python::dumps_ascii(&event))).await;
+                }
             }
+        }
+        if voice.events.is_empty() && voice.due() {
+            voice_gone |= voice.resume("go_away").await.is_err();
+        }
+        if !voice_gone && let Some(event) = voice.events.pop_front() {
+            let now = session.now();
+            session.machine.voice(&event, &mut session.said, now);
+            continue;
         }
         if voice_gone {
             line.tell(Told::Text(python::dumps_ascii(&voice_lost())))
@@ -882,20 +918,22 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
             Some(came) = comes.recv() => session.came(came).await,
             // What became of a handoff of this call, as its desk says to tell it.
             Some(what) = handoff_tells.recv() => session.handoff(what),
-            said = voice.next() => {
+            said = voice.socket.next() => {
                 let event = match said {
                     Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(text.as_str()).ok(),
                     // The voice ended the call in its own way: nothing more is said.
-                    Some(Ok(Message::Close(_))) => break Ending::VoiceGone,
-                    Some(Err(_)) | None => {
+                    Some(Ok(Message::Close(_))) if voice.machine().is_none() => break Ending::VoiceGone,
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
+                        if voice.resume("connection_lost").await == Ok(true) { continue; }
+                        if voice.machine().is_some_and(|s| !s.began) {app.oracle.calls.health(false);}
                         line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;
                         break Ending::VoiceGone;
                     }
                     Some(Ok(_)) => None,
                 };
-                if let Some(event) = event.filter(Value::is_object) {
-                    let now = session.now();
-                    session.machine.voice(&event, &mut session.said, now);
+                if let Some(event) = event.filter(Value::is_object) && voice.receive(app,event).await.is_err() {
+                    line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;
+                    break Ending::VoiceGone;
                 }
             }
             heard = tokio::time::timeout_at(phone_spoke + PHONE_IDLE, line.heard()) => {
@@ -924,10 +962,11 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
     if matches!(ending, Ending::Left) {
         // The voice is told that the call is over, and given a moment to say that it took it.
         let bye = async {
-            let _ = voice
-                .send(Message::Text(r#"{"type": "session.close"}"#.into()))
-                .await;
-            while let Some(Ok(said)) = voice.next().await {
+            let _ = voice.send(json!({"type":"session.close"})).await;
+            if voice.machine().is_some() {
+                return;
+            }
+            while let Some(Ok(said)) = voice.socket.next().await {
                 let closed = matches!(&said, Message::Text(text) if text.as_str().contains("session.closed"));
                 if closed || matches!(said, Message::Close(_)) {
                     break;
@@ -943,7 +982,15 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
         session.machine.ends(now);
         let _ = session.keeps().await;
     }
-    let _ = voice.close(None).await;
+    if let Some(used) = voice.used() {
+        eprintln!(
+            "oracleV2Close provider=gemini seconds={} voice_estimate_usd={} reconnects={}",
+            used["seconds"],
+            session.machine.usage()["voice_estimate_usd"],
+            used["reconnects"]
+        );
+    }
+    let _ = voice.socket.close(None).await;
     line.tell(Told::Close(ENDED_WELL, String::new())).await;
     handoffs::closed(app, &call.owner, &call.token).await;
 }

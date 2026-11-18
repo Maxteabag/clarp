@@ -1,0 +1,56 @@
+{
+  "model": "",
+  "generationConfig": {
+    "responseModalities": [
+      "AUDIO"
+    ],
+    "speechConfig": {
+      "voiceConfig": {
+        "prebuiltVoiceConfig": {
+          "voiceName": ""
+        }
+      }
+    }
+  },
+  "systemInstruction": {
+    "parts": [
+      {
+        "text": "\n\nOn this call you reach the Host with the delegate_to_agent function. Call it,\nwith the user's request in their words, whenever the user wants anything an\nagent or the Host handles: work for an agent, what an agent is doing or said,\nreading or continuing a reply, or being put through to an agent. It does not\nblock: at most say a short acknowledgement, then keep listening. Its result is\nthe Host's answer. Text that starts with [Host] is never the user speaking:\n[Host, speak] is for you to tell the user now in your own words; [Host,\ncontext] is background you mention only when it matters.\n"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "delegate_to_agent",
+          "behavior": "NON_BLOCKING",
+          "description": "Hand the user's request to the Clarp Host, which routes it to the right agent or answers from stored work. The result is the Host's answer.",
+          "parameters": {
+            "type": "OBJECT",
+            "required": [
+              "request"
+            ],
+            "properties": {
+              "request": {
+                "type": "STRING",
+                "description": "The user's request, in their words."
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "realtimeInputConfig": {
+    "automaticActivityDetection": {
+      "silenceDurationMs": 700
+    }
+  },
+  "inputAudioTranscription": {},
+  "outputAudioTranscription": {},
+  "contextWindowCompression": {
+    "slidingWindow": {}
+  },
+  "sessionResumption": {}
+}

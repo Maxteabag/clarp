@@ -68,10 +68,8 @@ T = 'clarp-host/src/oracle/tools.rs'
 M = 'clarp-host/src/oracle/memory.rs'
 R = 'clarp-host/src/oracle/router.rs'
 O = 'clarp-host/src/oracle.rs'
-LOST = ('                    Some(Err(_)) | None => {\n'
-        '                        line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;\n'
-        '                        break Ending::VoiceGone;\n'
-        '                    }')
+LOST = ('                        if voice.machine().is_some_and(|s| !s.began) {app.oracle.calls.health(false);}')
+LOST_NOTICE = '                        line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;'
 PLANTS = [
     # ---- one call a phone
     (C, 'ring', 'a phone has as many voices as it asks for', '            if app.calls.claim_voice(app, principal).await {', '            if app.calls.claim_voice(app, principal).await || true {'),
@@ -106,7 +104,7 @@ PLANTS = [
     (C, 'call', "a thread that cannot be had is the Host's fault", '        Ok(Err(why)) => return Err((StatusCode::BAD_REQUEST, why)),', '        Ok(Err(why)) => return Err((StatusCode::BAD_GATEWAY, why)),'),
     (C, 'call', 'every call goes on in the thread of no contact', '            contact: &asked.contact,\n            thread_id: asked.thread_id.as_deref(),', '            contact: "",\n            thread_id: asked.thread_id.as_deref(),'),
     (C, 'call', 'a call that is to begin anew goes on in the old thread', '            fresh: asked.fresh,', '            fresh: false,'),
-    (C, 'refused', 'a call is opened though its voice cannot be reached... as unavailable for no reason', '    let voice = dial(app, key).await.ok_or(UNAVAILABLE)?;', '    let voice = dial(app, key).await.ok_or((StatusCode::CONFLICT, "Oracle v2 upstream unavailable"))?;'),
+    (C, 'refused', 'a call is opened though its voice cannot be reached... as unavailable for no reason', '    let voice = Upstream::open(app, key).await.ok_or(UNAVAILABLE)?;', '    let voice = Upstream::open(app, key).await.ok_or((StatusCode::CONFLICT, "Oracle v2 upstream unavailable"))?;'),
     # ---- how a call begins
     (C, 'call', 'a call begins as if nothing was kept of its thread', '        let saved = memory.load(opened).unwrap_or(Value::Null);', '        let saved = Value::Null;'),
     (C, 'call', 'the work of a thread is not the work of its next call', '            work: &work,\n            contexts: &[],\n            told: &told,', '            work: &[],\n            contexts: &[],\n            told: &told,'),
@@ -129,12 +127,12 @@ PLANTS = [
     (C, 'call', 'a call begins without what was kept of the talk', '        history: history.as_array().map_or(&[][..], Vec::as_slice),', '        history: &[],'),
     (C, 'direct', 'the languages an owner wrote are not told', '        languages: &languages,', '        languages: &[],'),
     # ---- the task of a call
-    (C, 'call', 'a voice that is lost is lost without a word to the phone', LOST, '                    Some(Err(_)) | None => break Ending::VoiceGone,'),
-    (C, 'call', 'a voice that ends its call is said to be lost', '                    Some(Ok(Message::Close(_))) => break Ending::VoiceGone,', '                    Some(Ok(Message::Close(_))) => {\n                        line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;\n                        break Ending::VoiceGone;\n                    }'),
+    (C, 'call', 'a voice that is lost is lost without a word to the phone', LOST + '\n' + LOST_NOTICE, LOST),
+    (C, 'call', 'a voice that ends its call is said to be lost', '                    Some(Ok(Message::Close(_))) if voice.machine().is_none() => break Ending::VoiceGone,', '                    Some(Ok(Message::Close(_))) if voice.machine().is_none() => {\n                        line.tell(Told::Text(python::dumps_ascii(&voice_lost()))).await;\n                        break Ending::VoiceGone;\n                    }'),
     (C, 'call', 'a call goes on after its voice said that it is over', '        if session.machine.closed() {\n            // The voice said that the call is over.\n            break Ending::VoiceGone;\n        }\n', ''),
     (C, 'call', 'two things are routed at once', '        if session.route.is_none()\n            && let Some(ident) = session.machine.next_wanted()', '        if let Some(ident) = session.machine.next_wanted()'),
     (C, 'call', 'bytes of a phone that are no text end its call', '                    Ok(Some(Heard::Bytes(_))) => {}', '                    Ok(Some(Heard::Bytes(_))) => break Ending::Left,'),
-    (C, 'call', 'a phone that goes away leaves its voice without a word', '            let _ = voice\n                .send(Message::Text(r#"{"type": "session.close"}"#.into()))\n                .await;\n', ''),
+    (C, 'call', 'a phone that goes away leaves its voice without a word', '            let _ = voice.send(json!({"type":"session.close"})).await;\n', ''),
     (C, 'call', 'a call that was taken over says goodbye to its voice', '    if matches!(ending, Ending::Left) {', '    if matches!(ending, Ending::Left | Ending::Replaced) {'),
     # ---- a routing
     (C, 'refused', 'the router is asked while the user still speaks', '                if now.ms < self.machine.quiet_at() {', '                if false {'),
@@ -176,7 +174,7 @@ PLANTS = [
     (O, 'call', 'a Host with a key says that no call can be held', '    let key = app.ears.key("openai").is_some();\n    let (model, voice)', '    let key = false;\n    let (model, voice)'),
     (O, 'call', 'the first kind of call is said to be held where the key is', '        "available": false,\n        "model": FIRST_KIND.0,', '        "available": key,\n        "model": FIRST_KIND.0,'),
     (O, 'call', 'WebRTC is claimed', '        "webrtc": false,\n        "v2": {', '        "webrtc": true,\n        "v2": {'),
-    (O, 'call', 'detours into a podcast are claimed', '            "podcast": false,\n            "podcast_history": false,\n            "voice_provider": "openai",', '            "podcast": true,\n            "podcast_history": false,\n            "voice_provider": "openai",'),
+    (O, 'call', 'detours into a podcast are claimed', '            "podcast": false,\n            "podcast_history": false,\n            "voice_provider": choice["provider"],', '            "podcast": true,\n            "podcast_history": false,\n            "voice_provider": choice["provider"],'),
     (O, 'call', 'the other engine is said to hold calls where the key is', '            "direct_contact_available": false,\n            "available": false,', '            "direct_contact_available": false,\n            "available": key,'),
     (O, 'refused', 'a call to the contact alone is said to be had without a key', '            "direct_contact_available": key,', '            "direct_contact_available": true,'),
 ]
