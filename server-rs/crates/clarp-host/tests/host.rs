@@ -21387,6 +21387,7 @@ else:
             }
         );
         if tool == "grok" {
+            assert_eq!(auth()["credential_present"], true);
             std::fs::write(place.root.join("signed-out"), "").unwrap();
             assert_eq!(auth()["state"], "signed_out");
             std::fs::remove_file(place.root.join("signed-out")).unwrap();
