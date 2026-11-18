@@ -675,6 +675,15 @@ class OrchestratorService:
                 # agents of this packet, a group call's participants (RTO-03).
                 decision = self._as_clarify(decision, "I am not sure what you wanted me to do.")
             elif (decision.kind == DECISION_AGENT_CONTROL
+                    and action in {"relaunch", "restart", "resume"} and acted_on is None):
+                # Starting again needs an agent to start: none is made from a
+                # name alone, and there is nothing to hold for a question.
+                decision = OrchestratorDecision(**{
+                    **asdict(decision), "kind": DECISION_CLARIFY,
+                    "spoken_text": "I do not have an agent by that name."})
+                final_action = FINAL_CLARIFY
+                self._speak_as_session(decision.spoken_text, requested_session)
+            elif (decision.kind == DECISION_AGENT_CONTROL
                     and action == "fork"):
                 # No fork source is trusted from the router (RTO-03).
                 decision = self._as_clarify(decision, "Please fork agents from the app.")
@@ -875,39 +884,36 @@ class OrchestratorService:
         trace_id: str,
         prompt_admission: PromptAdmission | None,
     ) -> None:
-        pending_id = decision.pending_id or str(uuid.uuid4())
         target = decision.target_session or ""
         now = self.now()
-        conn().execute(
-            """INSERT INTO orchestrator_pending_utterances
-                  (pending_id, trace_id, utterance, requested_session,
-                   candidate_session, speak_as_session, reason, created_at,
-                   expires_at, status, prompt_admission_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-               ON CONFLICT(pending_id) DO UPDATE SET
-                   trace_id = excluded.trace_id,
-                   utterance = excluded.utterance,
-                   requested_session = excluded.requested_session,
-                   candidate_session = excluded.candidate_session,
-                   speak_as_session = excluded.speak_as_session,
-                   reason = excluded.reason,
-                   created_at = excluded.created_at,
-                   expires_at = excluded.expires_at,
-                   prompt_admission_json = excluded.prompt_admission_json,
-                   status = 'pending'""",
-            (
-                pending_id,
-                trace_id,
-                packet["utterance"],
-                requested_session,
-                target,
-                requested_session,
-                decision.reason,
-                now,
-                now + PENDING_TTL_MS,
-                prompt_admission.to_json() if prompt_admission else "",
-            ),
-        )
+        # Asked about again: the held message keeps its words, id, trace and
+        # admission; only the question (its reason, candidate and expiry) is new.
+        renewed = conn().execute(
+            """UPDATE orchestrator_pending_utterances
+                  SET candidate_session = ?, reason = ?, expires_at = ?
+                WHERE pending_id = ? AND status = 'pending' AND expires_at > ?""",
+            (target, decision.reason, now + PENDING_TTL_MS, decision.pending_id, now),
+        ).rowcount if decision.pending_id else 0
+        if not renewed:
+            conn().execute(
+                """INSERT INTO orchestrator_pending_utterances
+                      (pending_id, trace_id, utterance, requested_session,
+                       candidate_session, speak_as_session, reason, created_at,
+                       expires_at, status, prompt_admission_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (
+                    str(uuid.uuid4()),
+                    trace_id,
+                    packet["utterance"],
+                    requested_session,
+                    target,
+                    requested_session,
+                    decision.reason,
+                    now,
+                    now + PENDING_TTL_MS,
+                    prompt_admission.to_json() if prompt_admission else "",
+                ),
+            )
         spoken = decision.spoken_text.strip()
         if not spoken:
             if target:
