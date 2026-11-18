@@ -6,6 +6,20 @@ use serde_json::{Value, json};
 
 pub const MODE: &str = "listen_first";
 
+pub fn uuid(bytes: &[u8]) -> Option<&str> {
+    let raw = std::str::from_utf8(bytes).ok()?;
+    let text = raw.strip_suffix('\n').unwrap_or(raw);
+    (text.len() == 36
+        && text.bytes().enumerate().all(|(i, c)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                c == b'-'
+            } else {
+                c.is_ascii_digit() || (b'a'..=b'f').contains(&c)
+            }
+        }))
+    .then_some(text)
+}
+
 pub fn breach(stored: &Value, generation: &Value) -> Option<&'static str> {
     if generation.is_null()
         || ["boot", "instance"]

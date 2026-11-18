@@ -237,7 +237,7 @@ impl Desk {
             .map(|r| r.opening.clone()))
     }
 
-    async fn queue_row(&self, app: &App, op: &Value) -> Result<Value, Unavailable> {
+    pub(super) async fn queue_row(&self, app: &App, op: &Value) -> Result<Value, Unavailable> {
         let Some(id) = op["intent"]["admission_id"].as_str() else {
             return Ok(Value::Null);
         };
@@ -344,21 +344,56 @@ impl Desk {
             .member(op["session"].as_str().unwrap_or(""))
             .ok_or_else(|| Unavailable("opening agent gone".into()))?;
         let row = member.agent.opening_row(id).await?;
-        let authorized=self.rings(app,|rings,calls,with,(out,_)|{
-            let generation=proven(with);
-            rings.change_opening(ring_id,with.at.now_ms,out,|ring,fx|{
-                let fence=with.world.opening.and_then(|p|rules::fence(ring,calls,with.at.host_id,p));
-                let op=&mut ring.opening;
-                if op["intent"]["admission_id"]!=id || op["intent"]["trace_id"]!=trace || !op["retired"].is_null() ||
-                    !matches!(op["intent"]["state"].as_str(),Some("intended"|"admitted")) {return false;}
-                let why=rules::breach(&op["fence"]["host_gen"],&generation).or(fence);
-                if why.is_some() || (!row.is_null() && (row["foreign"]==true || row["trace_id"]!=trace)){
-                    op["retired"]=json!({"at":with.at.now_ms,"reason":why.unwrap_or("admission_conflict")});
-                    op["state"]=json!("unknown");op["intent"]["state"]=json!("unknown");fx.dirty=true;fx.announce=true;return false;
-                }
-                op["intent"]["state"]=json!("admitted");fx.dirty=true;row.is_null()
-            }).is_some_and(|(send,_)|send)
-        }).await?;
+        let authorized = self
+            .rings(app, |rings, calls, with, (out, _)| {
+                let generation = proven(with);
+                rings
+                    .change_opening(ring_id, with.at.now_ms, out, |ring, fx| {
+                        let fence = with
+                            .world
+                            .opening
+                            .and_then(|p| rules::fence(ring, calls, with.at.host_id, p));
+                        let op = &mut ring.opening;
+                        if op["intent"]["admission_id"] != id
+                            || op["intent"]["trace_id"] != trace
+                            || !op["retired"].is_null()
+                            || !matches!(
+                                op["intent"]["state"].as_str(),
+                                Some("intended" | "admitted")
+                            )
+                        {
+                            return false;
+                        }
+                        let world = rules::World {
+                            generation: &generation,
+                            now: with.at.now_ms,
+                            host: with.at.host_id,
+                            queue: &row,
+                            nonce: "",
+                            trace: "",
+                            fence,
+                        };
+                        if let Some(reason) =
+                            rules::breach(&op["fence"]["host_gen"], &generation).or(fence)
+                        {
+                            rules::retire_current(op, reason, &world, fx);
+                            fx.announce = fx.dirty;
+                            return false;
+                        }
+                        if !row.is_null() && (row["foreign"] == true || row["trace_id"] != trace) {
+                            op["state"] = json!("unknown");
+                            op["intent"]["state"] = json!("unknown");
+                            fx.dirty = true;
+                            fx.announce = true;
+                            return false;
+                        }
+                        op["intent"]["state"] = json!("admitted");
+                        fx.dirty = true;
+                        row.is_null()
+                    })
+                    .is_some_and(|(send, _)| send)
+            })
+            .await?;
         if !authorized {
             return Ok(());
         }

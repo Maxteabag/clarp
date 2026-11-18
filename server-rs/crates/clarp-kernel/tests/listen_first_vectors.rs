@@ -4,9 +4,10 @@ use serde_json::{Value, json};
 
 #[test]
 fn every_claim_greeting_and_supersession_matches_the_reference() {
-    let stories: Vec<Value> =
+    let fixture: Value =
         serde_json::from_str(include_str!("fixtures/listen-first-vectors.json")).unwrap();
     let mut count = 0;
+    let stories = fixture["stories"].as_array().unwrap();
     for story in stories {
         let mut op = story["initial"].clone();
         let mut generation = op["fence"]["host_gen"].clone();
@@ -102,6 +103,25 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
             }
             count += 1;
         }
+    }
+    for row in fixture["headers"].as_array().unwrap() {
+        let op =
+            json!({"reason":row["reason"],"silence_ms":row["ms"],"intent":{"cause":row["cause"]}});
+        assert_eq!(json!(rules::header(&op)), row["text"]);
+    }
+    for row in fixture["clips"].as_array().unwrap() {
+        let result = rules::clip(&row["op"], row["trace"].as_str().unwrap());
+        let (tag, skip) = result.unwrap_or((Value::Null, false));
+        assert_eq!(
+            (tag, json!(skip)),
+            (row["tag"].clone(), row["skip"].clone())
+        );
+    }
+    for row in fixture["uuids"].as_array().unwrap() {
+        assert_eq!(
+            json!(rules::uuid(row["raw"].as_str().unwrap().as_bytes())),
+            row["canonical"]
+        );
     }
     assert_eq!(count, 418);
 }

@@ -318,6 +318,46 @@ impl Desk {
             };
             ask(&mut rings, &mut calls, &with, (&mut out, &mut of_calls))
         };
+        let mut withdrawals = Vec::new();
+        for event in of_calls
+            .events
+            .iter()
+            .filter(|event| event["state"] == "ended")
+        {
+            let ended = &event["call_id"];
+            let Some(ring) = rings.rings().iter().find(|r| {
+                ended == &r.call_id && !r.opening.is_null() && r.opening["retired"].is_null()
+            }) else {
+                continue;
+            };
+            let id = ring.ring_id.clone();
+            let session = ring.session.clone();
+            let evidence = self.queue_row(app, &ring.opening).await?;
+            let reason = format!("call_{}", event["reason"].as_str().unwrap_or("ended"));
+            let first = generation::read(&app.config.data_dir);
+            let generation = if first == generation::read(&app.config.data_dir) {
+                first
+            } else {
+                Value::Null
+            };
+            let world = rings::opening::World {
+                generation: &generation,
+                now: now_ms,
+                host: &app.server_id,
+                fence: None,
+                queue: &evidence,
+                nonce: "",
+                trace: "",
+            };
+            if let Some((_, fx)) = rings.change_opening(&id, now_ms, &mut out, |r, fx| {
+                fx.announce = rings::opening::retire_current(&mut r.opening, &reason, &world, fx);
+            }) && fx.withdraw
+                && evidence["foreign"] != true
+                && let Some(turn) = evidence["turn"].as_u64()
+            {
+                withdrawals.push((session, turn, reason));
+            }
+        }
         // The group call, its answered ring and the listen-first opening are
         // one fact to a recovering phone. Persist them before publishing either.
         let mut rows = Vec::new();
@@ -428,6 +468,14 @@ impl Desk {
         for (call_id, reason) in stops.into_inner() {
             if let Some(running) = books.sessions.get(&call_id) {
                 running.stop(&reason);
+            }
+        }
+        for (session, turn, reason) in withdrawals {
+            if let Some(member) = directory.by_session(&session) {
+                let _ = member
+                    .agent
+                    .withdraw(clarp_kernel::turn::TurnId(turn), reason)
+                    .await?;
             }
         }
         for event in of_calls.events {
