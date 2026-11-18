@@ -251,16 +251,25 @@ pub struct ActivityBudget {
 }
 
 impl ActivityBudget {
-    pub fn reserve(&mut self, now: i64, update: bool) -> Result<(),i64> {
+    pub fn reserve(&mut self, now: i64, update: bool) -> Result<(), i64> {
         let day = now.div_euclid(86_400_000);
-        if day != self.day { self.count = 0; self.day = day; }
-        if update {
-            let level = self.bucket.map_or(10.0, |(remaining, at)| (remaining + (now-at).max(0) as f64 / 288_000.0).clamp(0.0,10.0));
-            if level < 1.0 {return Err(now+((1.0-level)*288_000.0).ceil() as i64);}
-            if self.count>=300{return Err((day+1)*86_400_000);}
-            self.bucket=Some((level-1.0,now));
+        if day != self.day {
+            self.count = 0;
+            self.day = day;
         }
-        self.count=self.count.saturating_add(1);
+        if update {
+            let level = self.bucket.map_or(10.0, |(remaining, at)| {
+                (remaining + (now - at).max(0) as f64 / 288_000.0).clamp(0.0, 10.0)
+            });
+            if level < 1.0 {
+                return Err(now + ((1.0 - level) * 288_000.0).ceil() as i64);
+            }
+            if self.count >= 300 {
+                return Err((day + 1) * 86_400_000);
+            }
+            self.bucket = Some((level - 1.0, now));
+        }
+        self.count = self.count.saturating_add(1);
         Ok(())
     }
 }

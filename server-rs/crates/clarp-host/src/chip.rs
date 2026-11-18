@@ -142,10 +142,10 @@ impl Chip {
             .ok_or_else(|| Unavailable("the chip could not be read".to_string()))
     }
 
-    pub async fn present(&self, app:&App) -> Option<Value> {
+    pub async fn present(&self, app: &App) -> Option<Value> {
         let mut guard = self.held.lock().await;
         let held = Self::read(&mut guard, app).await.ok()?;
-        Some(held.pacer.now(&roster(app),app.clock.now_ms()))
+        Some(held.pacer.now(&roster(app), app.clock.now_ms()))
     }
     async fn keep_register(app: &App, register: &Register) -> Result<(), Unavailable> {
         let activities: Vec<&Activity> = register.activities().collect();
@@ -572,7 +572,10 @@ async fn register(
         return ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response();
     }
     if said["platform"] == "fcm" {
-        return app.android_chip.registration(&app,&principal,&said["kind"],said["ended"]==true).await;
+        return app
+            .android_chip
+            .registration(&app, &principal, &said["kind"], said["ended"] == true)
+            .await;
     }
     let chip = app.chip.clone();
     let (activity_id, token) = (text(&said, "activity_id"), text(&said, "token"));
@@ -621,7 +624,10 @@ async fn unregister(
         }
     };
     if named("platform") == "fcm" {
-        return app.android_chip.registration(&app,&principal,&Value::Null,true).await;
+        return app
+            .android_chip
+            .registration(&app, &principal, &Value::Null, true)
+            .await;
     }
     let chip = app.chip.clone();
     match chip

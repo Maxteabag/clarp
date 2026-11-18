@@ -1894,8 +1894,12 @@ Direct mode bypasses the relay. Auto mode falls back when the relay is unavailab
 a refused phone grant is cleared even when another path delivers the push. The routing
 vectors run the reference router across four consecutive deliveries for each configuration
 and service response. A desktop reply suppresses the phone alert on both Hosts. Neither
-Host sends a silent sync push (R64). Android and direct Live
-Activity updates remain open.
+Host sends a silent sync push (R64). An iOS activity receives updates, including the idle state, over
+the selected account or key. An uncertain relay send cannot spend the same reservation twice.
+Android phones receive data messages over FCM using the explicitly named service account.
+A live ring is queued for the Android phones that declared it. An end is delivered to the
+eligible tokens its ringing was tried on. A registered Android summary receives updates
+and an end when work becomes idle, with a durable daily count and refill budget per device.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
