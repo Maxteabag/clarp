@@ -573,6 +573,10 @@ enum Ask {
         value: Option<Vec<u8>>,
         answer: Answer<Result<(), Unavailable>>,
     },
+    KeepTogether {
+        writes: Vec<(String, String, Vec<u8>)>,
+        answer: Answer<Result<(), Unavailable>>,
+    },
     /// What was left of a kind: under one key, or all of it, ordered by key.
     Kept {
         kind: &'static str,
@@ -910,6 +914,21 @@ impl FleetHandle {
             answer,
         })
         .await?
+    }
+
+    pub async fn keep_together(
+        &self,
+        rows: Vec<(&'static str, String, Vec<u8>)>,
+    ) -> Result<(), Unavailable> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let writes = rows
+            .into_iter()
+            .map(|(kind, key, value)| (shelf(kind), key, value))
+            .collect();
+        self.ask(|answer| Ask::KeepTogether { writes, answer })
+            .await?
     }
 
     /// What was left of a kind under a key.
@@ -1290,6 +1309,13 @@ impl Fleet {
                     answer,
                 } => {
                     let _ = answer.send(Ok(self.keep(kind, &key, value)));
+                }
+                Ask::KeepTogether { writes, answer } => {
+                    let result = self
+                        .store
+                        .put_together(&writes)
+                        .map_err(|e| Unavailable(e.to_string()));
+                    let _ = answer.send(Ok(result));
                 }
                 Ask::Kept { kind, key, answer } => {
                     let _ = answer.send(Ok(self.kept(kind, key.as_deref())));

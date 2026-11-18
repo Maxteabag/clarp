@@ -421,6 +421,7 @@ pub struct Status {
     pub waiting: Vec<TurnId>,
     pub paused: bool,
     pub queue_revision: u64,
+    pub stop_generation: u64,
     pub head_revision: u64,
     /// The tool's own session, where the next turn continues.
     pub backend_session: Option<String>,
@@ -1350,6 +1351,7 @@ impl Actor {
             waiting: agent.waiting().map(|queued| queued.id).collect(),
             paused: agent.is_paused(),
             queue_revision: agent.queue_revision(),
+            stop_generation: agent.stop_generation(),
             head_revision: self.head_revision(),
             backend_session: agent.backend_session().map(str::to_string),
             label: agent.label().to_string(),

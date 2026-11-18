@@ -50,7 +50,7 @@ enum Placing {
     /// It is answered already: the ring its event rang before.
     Told(Value),
     /// A ring held as a live voice call: placed, with nothing voiced.
-    Placed(live::Placed),
+    Placed(Box<live::Placed>),
     /// An ordinary ring: its line is voiced, and then it is placed.
     ToVoice(rings::Admitted),
 }
@@ -259,6 +259,8 @@ impl Desk {
     ) -> Result<(T, Vec<rings::Pushed>), Unavailable> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
+        let mut rings = books.rings.clone();
+        let mut calls = books.calls.clone();
         let directory = app.fleet.directory();
         let roster = roster(&directory);
         let now_ms = app.clock.now_ms();
@@ -273,7 +275,10 @@ impl Desk {
             let world = rings::World {
                 profiles: &shelf,
                 android: &androids,
-                opening: None,
+                opening: Some(&generation::Evidence {
+                    root: &app.config.data_dir,
+                    directory: &directory,
+                }),
                 can_push_android: app.android.configured(),
                 device_ok: &paired,
                 host_id: &app.server_id,
@@ -303,30 +308,27 @@ impl Desk {
                 world,
                 stops: &stops,
             };
-            ask(
-                &mut books.rings,
-                &mut books.calls,
-                &with,
-                (&mut out, &mut of_calls),
-            )
+            ask(&mut rings, &mut calls, &with, (&mut out, &mut of_calls))
         };
-        // A call that was retired on its ring: its session is told now, under the same lock.
-        for (call_id, reason) in stops.into_inner() {
-            if let Some(running) = books.sessions.get(&call_id) {
-                running.stop(&reason);
-            }
+        // The group call, its answered ring and the listen-first opening are
+        // one fact to a recovering phone. Persist them before publishing either.
+        let mut rows = Vec::new();
+        let taking = shelf.to_keep();
+        if let Some(taking) = &taking {
+            rows.push((
+                RINGS,
+                TAKING_KEPT.to_string(),
+                serde_json::to_vec(taking).map_err(|e| Unavailable(e.to_string()))?,
+            ));
         }
-        if let Some(taking) = shelf.to_keep() {
-            let kept = serde_json::to_vec(&json!(taking)).unwrap_or_default();
-            app.fleet
-                .keep(RINGS, TAKING_KEPT.to_string(), Some(kept))
-                .await?;
-            books.taking = Some(taking);
+        for principal in &of_calls.changed {
+            rows.push((
+                KIND,
+                principal.clone(),
+                serde_json::to_vec(calls.of(principal)).map_err(|e| Unavailable(e.to_string()))?,
+            ));
         }
-        // What a call says of itself comes before what the ring says of its answer.
-        Self::done(app, &directory, &books.calls, of_calls, now_ms).await?;
-        let rings = &books.rings;
-        let keeps = [
+        for (changed, name, bytes) in [
             (
                 out.changed.rings,
                 RINGS_KEPT,
@@ -352,13 +354,31 @@ impl Desk {
                 PREFS_KEPT,
                 serde_json::to_vec(rings.prefs()),
             ),
-        ];
-        for (changed, name, kept) in keeps {
+        ] {
             if changed {
-                app.fleet
-                    .keep(RINGS, name.to_string(), Some(kept.unwrap_or_default()))
-                    .await?;
+                rows.push((
+                    RINGS,
+                    name.to_string(),
+                    bytes.map_err(|e| Unavailable(e.to_string()))?,
+                ));
             }
+        }
+        app.fleet.keep_together(rows).await?;
+        books.calls = calls;
+        books.rings = rings;
+        if let Some(taking) = taking {
+            books.taking = Some(taking);
+        }
+        for (call_id, reason) in stops.into_inner() {
+            if let Some(running) = books.sessions.get(&call_id) {
+                running.stop(&reason);
+            }
+        }
+        for event in of_calls.events {
+            app.hub.publish(event, now_ms);
+        }
+        for notice in of_calls.notices {
+            note(&directory, &notice.agent_id, &notice.id, notice.text).await;
         }
         for event in out.events {
             app.hub.publish(event, now_ms);
@@ -444,14 +464,14 @@ impl Desk {
                 // A live ring's opening is its voice's own: it is placed at once.
                 rings::Admission::Place(admitted) if admitted.is_live() => {
                     let ring = rings.place(admitted, "", with.new_id, now, out);
-                    Placing::Placed(live::placed(rings, ring, &with.world))
+                    Placing::Placed(Box::new(live::placed(rings, ring, &with.world)))
                 }
                 rings::Admission::Place(admitted) => Placing::ToVoice(admitted),
             })
         });
         let (admitted, pushes) = admitted.await?;
         let (placed, pushes) = match admitted {
-            Ok(Placing::Placed(placed)) => (placed, pushes),
+            Ok(Placing::Placed(placed)) => (*placed, pushes),
             Ok(Placing::ToVoice(admitted)) => {
                 // What else the request did is told as ever (an older ring missed by now).
                 self.push(app, pushes).await;
