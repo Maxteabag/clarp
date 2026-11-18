@@ -13,7 +13,7 @@ from .turn_slots import defer_on
 from .log import log, log_exception
 from .turn_dispatch_state import _TURN_LOCK, _SLOTS, _INFLIGHT, _launching
 from .turn_command import _TurnSpec, DispatchError, JanitorDispatchError, _janitor_spawn_lock, OPENING_WITHDRAWN, _ADMISSION_REFUSED, _is_call_opening, _backend_invoked
-from .turn_stop import _result_error_text, _result_detail, _result_assistant_text, _record_dreaming_result
+from .turn_stop import _agy_accounting_event, _result_error_text, _result_detail, _result_assistant_text, _record_dreaming_result
 
 # What a turn is resumed with when it met the limit again soon after a recovery
 # had resumed it. A resume needs a prompt; this is all of it. The recovery
@@ -276,6 +276,7 @@ class LauncherMixin:
                         spec, attempt, state, error_classify.RUNNER_EXIT,
                         f"backend session bind failed: {state['bind_error']}")
                     return
+                event = _agy_accounting_event(event, fresh_session=spec.is_new_session)
                 category = judgment_sites.classify_error_or_unknown(
                     _result_error_text(event), error_classify.classify_result(event))
                 if category != error_classify.CLEAN:

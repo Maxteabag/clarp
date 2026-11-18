@@ -1004,3 +1004,42 @@ def test_healthy_pool_undo_delegates_once_and_preserves_native_errors():
     with pytest.raises(ValueError, match="native undo failed"):
         mp.undo()
     assert owner.state == "CLOSED"
+
+
+def test_usage_counts_each_turn_from_thread_total_without_counting_repeats(monkeypatch):
+    # Three calls from one Codex 0.167.1 rollout. Cached input is part of input.
+    samples = [(426539683, 1158861, 265385, 200, 264704),
+               (426807055, 1159192, 267372, 331, 265216),
+               (427075572, 1159282, 268517, 90, 267264)]
+    results = []
+    client = object.__new__(codex_app_server._Client)
+    client.agent_id = "agent"
+    monkeypatch.setattr(client, "_callback", lambda callback, value: callback(value))
+
+    def start(turn):
+        client.active = codex_app_server._ActiveTurn(
+            turn, "thread", "agent", "session", turn, _TurnState(live_backend_session_id="thread"),
+            _Handle(), results.append, None, None, lambda **_: 0)
+
+    def notify(turn, sample):
+        ti, to, li, lo, cached = sample
+        client._notification("thread/tokenUsage/updated", {
+            "threadId": "thread", "turnId": turn, "tokenUsage": {
+                "total": {"inputTokens": ti, "outputTokens": to},
+                "last": {"inputTokens": li, "outputTokens": lo, "cachedInputTokens": cached}}})
+
+    def finish(turn):
+        client._notification("turn/completed", {"threadId": "thread", "turn": {"id": turn, "status": "completed"}})
+
+    start("first")
+    for sample in (samples[0], samples[1], samples[1], samples[2]):
+        notify("first", sample)
+    finish("first")
+    start("second")
+    notify("first", samples[-1])  # late notification for the previous turn
+    notify("second", (427075582, 1159286, 10, 4, 8))
+    finish("second")
+    assert [r["usage"] for r in results] == [
+        {"input_tokens": 801274, "output_tokens": 621},
+        {"input_tokens": 10, "output_tokens": 4},
+    ]
