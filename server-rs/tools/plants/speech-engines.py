@@ -4,6 +4,8 @@ import runner
 
 RUNS = {
     'deepgram':['test','-p','clarp-speech','--lib','both_deepgram_versions_send'],
+    'guard':['test','-p','clarp-host','--lib','google_collisions_and_acknowledgements_match'],
+    'batch':['test','--test','speech_engines','ink_batch_matches'],
     'ink':['test','-p','clarp-speech','--lib','ink_urls_preserve'],
     'google':['test','-p','clarp-speech','--lib','google_voice::tests'],
     'eleven':['test','--test','speech_engines','elevenlabs_reads'],
@@ -102,6 +104,50 @@ for why,old,new in [
         ('legacy preview events lose their URL','"url":format!("/audio/{name}")','"url":format!("/clips/{name}")'),
         ('legacy picker id cannot be selected','"selection_value":json!({"cartesia":id})','"selection_value":json!({"google":id})'),
         ('preview lookup has the wrong query key','/cartesia-voice-preview?id={quoted}','/cartesia-voice-preview?voice={quoted}')]:
+    wrong(R,'host',why,old,new)
+
+for why,old,new in [
+        ('missing executable marker differs','b"noexec"','b"absent"'),
+        ('illegal executable marker differs','b"other"','b"invalid"'),
+        ('file content marker differs','b"exec"','b"file"'),
+        ('the acknowledgement uses a different fingerprint version','b"clarp-google-collision-v1"','b"clarp-google-collision-v2"'),
+        ('part lengths use another byte order','(part.len() as u64).to_be_bytes()','(part.len() as u64).to_le_bytes()'),
+        ('the operator choice has another spelling','Some("builtin")','Some("built-in")'),
+        ('an incomplete inventory has the wrong refusal','return Some("google_id_unverifiable")','return Some("google_id_collision")'),
+        ('a conflicting id has the wrong refusal','    Some("google_id_collision")','    Some("google_id_unverifiable")')]:
+    wrong('clarp-host/src/google_voice_guard.rs','guard',why,old,new)
+for why,old,new in [
+        ('the batch request uses an incorrect key header','header("Authorization",','header("Other",'),
+        ('the batch request uses another API version header','header("Cartesia-Version",','header("Cartesia-Date",'),
+        ('the uploaded file is named after its MIME type','("file", file_name(content))','("file", content)'),
+        ('the batch duration is absent','Ok(Heard::text(text, duration))','Ok(Heard::text(text, 0.0))'),
+        ('a numeric duration encoded as a string is ignored','data["duration"].as_str()?','data["duration"].as_i64().map(|_| "0")?'),
+        ('a response returns a different text','let text = data["text"]','let text = data["transcript"]')]:
+    wrong(I,'batch',why,old,new)
+
+for why,old,new in [
+        ('5000 bytes refused','s.len() > 5000','s.len() >= 5000'),
+        ('5001 bytes accepted','s.len() > 5000','s.len() > 5001'),
+        ('Unicode counted in characters','s.len() > 5000','s.chars().count() > 5000'),
+        ('allowed voice rejected','if !(self.allowed)(line.voice)','if (self.allowed)(line.voice)'),
+        ('encoded size limit ignored','encoded.len() / 4 * 3 > AUDIO_MAX','encoded.len() / 4 * 3 > AUDIO_MAX + 4'),
+        ('a different body field carries the input','"input":input','"speech":input'),
+        ('Google receives another billing project header','header("x-goog-user-project", project)','header("other-project", project)')]:
+    wrong(G,'host' if 'body field' in why or 'billing' in why else 'google',why,old,new)
+for why,old,new in [
+        ('the wrong legacy model is chosen','"eleven_flash_v2_5".into()','"another-model".into()'),
+        ('the legacy speed default is changed','.unwrap_or(1.2)','.unwrap_or(0.9)'),
+        ('the text preview takes the streaming transport','file: usage == SpeechUse::TextPreview','file: usage == SpeechUse::Turn'),
+        ('a missing fallback prevents a clip failure event','if route.fallback.is_empty()','if !route.fallback.is_empty()'),
+        ('the fallback supplies a different Google default','Some("nb-NO-Chirp3-HD-Kore".into())','Some("nb-NO-Chirp3-HD-Aoede".into())')]:
+    if 'Google default' not in why:
+        wrong(V,'host',why,old,new)
+for why,old,new in [
+        ('the legacy preview loses its character limit','first(text, 200)','first(text, 201)'),
+        ('the local voice setting is not persisted','("speech.local_voice".into(), voice)','("speech.other_voice".into(), voice)'),
+        ('request uses the wrong selection field','word("provider", "")','word("engine", "")'),
+        ('legacy picker uses the wrong name','r["name"].as_str()','r["title"].as_str()'),
+        ('Google conflict applies only to the primary','provider == "google" || fallback == "google"','provider == "google" && fallback == "google"')]:
     wrong(R,'host',why,old,new)
 
 # A mutation must not allow a stand-in to be replaced by a real speech or token endpoint.

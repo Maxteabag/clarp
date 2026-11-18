@@ -230,4 +230,19 @@ mod tests {
             Err("google_audio_too_large")
         );
     }
+    #[test]
+    fn input_and_encoded_audio_are_bounded_in_bytes(){
+        let engine=GoogleVoice{endpoint:"http://127.0.0.1:1".into(),token_url:"http://127.0.0.1:1".into(),
+            account:Box::new(||Ok(("/dev/null".into(),"unit".into()))),allowed:|v|v=="allowed"};
+        let say=|voice:&str,s:&str|engine.speak(Line{text:s,voice},&mut |_|panic!("invalid input emitted audio"));
+        let failed=|s:&str|Err(Mute::Failed{why:s.into(),begun:false});
+        let max="å".repeat(2500);
+        assert_eq!(say("allowed",&max),failed("google_auth_failed"));
+        assert_eq!(say("allowed",&format!("{max}a")),failed("text_too_long"));
+        assert_eq!(say("other",&max),failed("voice_unavailable"));
+        let big="A".repeat(4*(AUDIO_MAX/3+1));
+        let payload=json!({"audioContent":big}).to_string();
+        assert_eq!(decode(payload.as_bytes()),Err("google_audio_too_large"));
+    }
+
 }

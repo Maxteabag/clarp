@@ -26047,6 +26047,7 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
 fn the_other_speech_engines_answer_the_apps() {
     let place = Place::new("speech-engines");
     let (http, requests) = answers(vec![
+        ("/v1/text-to-speech/e-file","200 OK","File voice".into()),
         ("/v2/speak?", "200 OK", "Flux sound".into()),
         ("/v1/speak?", "200 OK", "Aura sound".into()),
         (
@@ -26184,6 +26185,10 @@ fn the_other_speech_engines_answer_the_apps() {
             .to_lowercase()
             .contains("x-goog-user-project: unit")
     );
+    let google_body:Value=serde_json::from_str(reads[3].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(google_body["voice"]["languageCode"],"nb-NO");
+    assert_eq!(google_body["audioConfig"]["audioEncoding"],"MP3");
+    assert!(google_body["input"]["text"].as_str().unwrap().starts_with("Hello, I'm "));
     drop(reads);
     let choose = |provider: &str, fallback: &str| {
         host.post(
@@ -26245,8 +26250,42 @@ fn the_other_speech_engines_answer_the_apps() {
             .0,
         400
     );
+    let legacy = place.root.join("tts-adapters.d");
+    std::fs::create_dir(&legacy).unwrap();
+    let manifest = legacy.join("legacy.json");
+    std::fs::write(&manifest, r#"{"id":"google"}"#).unwrap();
+    for (method, path, body) in [
+        ("GET", "/voice-preview?provider=google&id=missing", None),
+        ("POST", "/tts/providers", Some(json!({"provider":"google"}))),
+    ] {
+        let (status, answer) = host.ask(method, path, body.as_ref());
+        assert_eq!(status, 409);
+        assert_eq!(answer["error"], "google_id_collision");
+    }
+    std::fs::write(&manifest, "not-json").unwrap();
+    let (status, error) = host.ask(
+        "POST",
+        "/tts/providers",
+        Some(&json!({"provider":"deepgram","fallback":"google"})),
+    );
+    assert_eq!(status, 409);
+    assert_eq!(error["error"], "google_id_unverifiable");
+    std::fs::remove_file(manifest).unwrap();
     let selected = choose("deepgram", "none");
     assert_eq!(selected["provider"], "deepgram");
+    let agent = host.new_agent("Echo");
+    let heard = host.listen();
+    let say = |id: &str, words: &str| {
+        host.post("/send",json!({"session":agent,"text":format!("<speak>{words}</speak>"),"client_msg_id":id,"synthesize_audio":true}));
+    };
+    say("voice-first", "First engine speaks.");
+    wait_for("speech on the configured engine", || {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.contains("First engine speaks."))
+    });
     let playback = host.post(
         "/preview",
         json!({"voice_id":"flux-haley-en","text":"test playback","session":"echo"}),
@@ -26288,6 +26327,34 @@ fn the_other_speech_engines_answer_the_apps() {
     assert!(sent.to_lowercase().contains("cartesia-version: 2026-08-14"));
     assert!(sent.contains("ink-whisper") && sent.contains("fixture clip"));
     assert!(!sent.contains("keyterm"));
+    wait_for("the text preview's audio event", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "audio" && e["preview"] == true && e["url"] == playback["url"])
+    });
+    choose("gemini", "elevenlabs");
+    let before = heard.lock().unwrap().len();
+    say("voice-missing", "No engine can say this.");
+    wait_for("registered clip to report failure", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .skip(before)
+            .any(|e| e["type"] == "tts-error" && e["session"] == agent)
+    });
+    let relevant: Vec<String> = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(before)
+        .filter(|e| e["session"] == agent && (e["type"] == "audio" || e["type"] == "tts-error"))
+        .filter_map(|e| e["type"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(relevant, ["audio", "tts-error"]);
+    choose("deepgram", "none");
     host.kill();
 
     // Ink-2 uses a socket, streams the decoded sound in 100 ms pieces, and joins
@@ -26297,12 +26364,23 @@ fn the_other_speech_engines_answer_the_apps() {
     let mut socket_world = world.to_vec();
     socket_world.retain(|(key, _)| *key != "CLARP_INK_ENDPOINT");
     socket_world.push(("CLARP_INK_ENDPOINT", address.as_str()));
+    socket_world.retain(|(key,_)|*key!="CLARP_ELEVEN_VOICE_ENDPOINT");
+    socket_world.push(("CLARP_ELEVEN_VOICE_ENDPOINT",http.as_str()));
     let host = place.start_in(
         "",
         &["--speech-keys", owners.to_str().unwrap()],
         &socket_world,
     );
     assert_eq!(host.get("/tts/providers")["provider"], "deepgram");
+    host.post("/tts/providers",json!({"provider":"elevenlabs","fallback":"none"}));
+    let file_preview=host.post("/preview",json!({"voice_id":"e-file","text":"a".repeat(201)}));
+    assert_eq!(fetch(&host,"","GET",file_preview["url"].as_str().unwrap(),&[],b"").text(),"File voice");
+    let last=requests.lock().unwrap().last().unwrap().clone();
+    assert!(last.starts_with("POST /v1/text-to-speech/e-file "));
+    let file_request:Value=serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(file_request["text"],"a".repeat(200));
+    assert_eq!(file_request["model_id"],"eleven_flash_v2_5");
+    assert_eq!(file_request["voice_settings"]["speed"],1.2);
     let served = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         stream

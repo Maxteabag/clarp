@@ -41,6 +41,10 @@ def reference(root):
                  'a<break/>b', 'a<break time="0s"/>b', '<BREAK TIME="0.001s"/>',
                  'x<break time="3000ms"/>y','<break time="3001ms"/>', '<break time="0.0025s"/>',
                  '<break time="0.0035s"/>', '<break time="1.234s"/>', '<break time="1234567s"/>',
+                 '<break time="2999ms"/>','<break time="1ms"/><break time="3s"/>',
+                 '<break time="0.0001s"/>','<break time="1"/>','</break time="2s">',
+                 '<speed>fast</speed><volume>loud</volume>', 'x\tY\nZ<break time="1ms"/>',
+                 "x<Break  TIME='1 s'/> y<emotion mode='sad'>z</emotion>",
                  '<emotion>Hi</emotion><break time="2s"/> & <untrusted>','<break time="1ms"/>\x01']:
         google.append(dict(text=text,spoken=google_tts.synthesis_input(text)))
 
