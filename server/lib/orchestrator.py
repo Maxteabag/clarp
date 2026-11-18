@@ -746,7 +746,7 @@ class OrchestratorService:
                         )
                 else:
                     self._require_current(janitor_run_id)
-                    held = self._claim_pending(decision.pending_id)
+                    held = self._claim_pending(decision.pending_id, requested_session)
                     if decision.pending_id and held is None:
                         # The message the model confirms is no longer held (expired,
                         # or sent already): the confirmation is not sent in its place.
@@ -972,8 +972,10 @@ class OrchestratorService:
         renewed = conn().execute(
             """UPDATE orchestrator_pending_utterances
                   SET candidate_session = ?, reason = ?, expires_at = ?
-                WHERE pending_id = ? AND status = 'pending' AND expires_at > ?""",
-            (target, decision.reason, now + PENDING_TTL_MS, decision.pending_id, now),
+                WHERE pending_id = ? AND status = 'pending' AND expires_at > ?
+                  AND requested_session = ?""",
+            (target, decision.reason, now + PENDING_TTL_MS, decision.pending_id, now,
+             requested_session),
         ).rowcount if decision.pending_id else 0
         if not renewed:
             conn().execute(
@@ -1015,7 +1017,9 @@ class OrchestratorService:
         ).fetchone()
         return dict(row) if row else None
 
-    def _claim_pending(self, pending_id: str) -> dict[str, Any] | None:
+    def _claim_pending(self, pending_id: str, requested_session: str) -> dict[str, Any] | None:
+        """The held message, claimed: only one held in this session (a hold made while speaking
+        to another agent is not released from here; it expires)."""
         if not pending_id:
             return None
         row = conn().execute(
@@ -1024,8 +1028,9 @@ class OrchestratorService:
                  FROM orchestrator_pending_utterances
                 WHERE pending_id = ?
                   AND status = 'pending'
-                  AND expires_at > ?""",
-            (pending_id, self.now()),
+                  AND expires_at > ?
+                  AND requested_session = ?""",
+            (pending_id, self.now(), requested_session),
         ).fetchone()
         if not row:
             return None
