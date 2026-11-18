@@ -72,7 +72,7 @@ def build_context_packet(
             "recent_user_messages": user_messages,
             "recent_agent_messages": assistant_messages,
         })
-    pending = _pending_utterances(limit=3)
+    pending = _pending_utterances(requested_session, limit=3)
     candidates = _name_candidates(utterance, agents)
     stable = {
         "utterance": utterance,
@@ -165,17 +165,19 @@ def _compact_text(value: Any, max_chars: int) -> str:
     return text[: max(0, max_chars - 3)].rstrip() + "..."
 
 
-def _pending_utterances(limit: int) -> list[dict[str, Any]]:
+def _pending_utterances(requested_session: str, limit: int) -> list[dict[str, Any]]:
+    """The messages held in this session: a hold belongs to the session it was made in, and one
+    made while speaking to another agent is neither shown here nor claimed from here."""
     now = now_ms()
     rows = conn().execute(
         """SELECT pending_id, trace_id, utterance, requested_session,
                   candidate_session, speak_as_session, reason, created_at,
                   expires_at
              FROM orchestrator_pending_utterances
-            WHERE status = 'pending' AND expires_at > ?
+            WHERE status = 'pending' AND expires_at > ? AND requested_session = ?
             ORDER BY created_at DESC
             LIMIT ?""",
-        (now, max(1, limit)),
+        (now, requested_session, max(1, limit)),
     ).fetchall()
     out = [dict(r) for r in rows]
     for item in out:

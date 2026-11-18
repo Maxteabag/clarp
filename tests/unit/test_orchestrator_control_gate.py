@@ -100,8 +100,10 @@ def test_a_router_create_carries_only_the_name(effects):
 
 
 def test_a_router_relaunch_takes_everything_from_the_agents_own_record(effects):
-    send, _ = router({"kind": "agent_control", "control_action": "relaunch",
-                      "target_session": "antoni", "confidence": 0.95, "control_payload": INJECTED})
+    """The payload's name must agree with the target (issue 360 review: a name given anywhere is
+    the target); everything else in it is ignored."""
+    send, _ = router({"kind": "agent_control", "control_action": "relaunch", "target_session": "antoni",
+                      "confidence": 0.95, "control_payload": {**INJECTED, "name": "Antoni"}})
     send()
     antoni = agents.get_by_session("antoni")
     assert effects["created"] == [{
@@ -136,3 +138,10 @@ def test_the_live_default_configuration_is_unchanged(effects):
     assert send() is None                        # an ordinary send never reaches the router
     assert send(fallback_request=True).action == "clarify"
     assert effects["interrupted"] == [] and effects["created"] == [] and dispatched == []
+
+
+def test_a_router_relaunch_whose_payload_names_another_agent_is_refused(effects):
+    send, _ = router({"kind": "agent_control", "control_action": "relaunch",
+                      "target_session": "antoni", "confidence": 0.95, "control_payload": INJECTED})
+    assert send().action == "clarify"
+    assert effects["created"] == []

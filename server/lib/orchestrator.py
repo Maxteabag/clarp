@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import time
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
@@ -51,6 +52,36 @@ from .orchestrator_model import (  # noqa: E402,F401  (split_apply: orchestrator
     _model_prompt, _typesafe_questions, _typesafe_state, _call_typesafe, _extract_json,
     parse_decision, _public_decision,
 )
+NO_SUCH_AGENT = "I do not have an agent by that name."
+HELD_MESSAGE_GONE = "That message is no longer waiting. Please say it again."
+CANNOT_CHECK = "I cannot check on that agent from here."
+CANNOT_COMMAND = "I cannot do that for that agent from here."
+WHICH_AGENT = "Which agent did you mean?"
+UNSURE_COMMAND = "I am not sure what you wanted me to do."
+NO_VOICE_COMMANDS = "That agent does not accept voice commands."
+FORK_IN_APP = "Please fork agents from the app."
+
+
+def _fold(text: object) -> str:
+    """A spoken name as names are compared: case and accents aside."""
+    decomposed = unicodedata.normalize("NFKD", str(text or "").casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).strip()
+
+
+def _agents_named(name: str) -> list[dict[str, Any]]:
+    """The agents a spoken name stands for: the exact id or session first, else every agent
+    whose session or persona name it is, case and accents aside (archived ones included, so
+    that one out of reach is told apart from one that does not exist)."""
+    exact = identity.lookup(name)
+    if exact is not None:
+        return [exact]
+    key = _fold(name)
+    if not key:
+        return []
+    return [agent for agent in agents_db.list_agents()
+            if key in {_fold(agent.get("session")), _fold(agent.get("persona"))}]
+
+
 class _StaleJanitorRun(RuntimeError):
     pass
 
@@ -658,26 +689,22 @@ class OrchestratorService:
 
         try:
             self._require_current(janitor_run_id)
-            control_target = identity.lookup(decision.target_session)
-            if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
-                    and control_target is not None
-                    and not agents_db.interaction_capabilities(control_target)["can_voice_target"]):
-                decision = self._as_clarify(decision, "That agent does not accept voice commands.")
-            # The agent the action will act on, the requested session when the
-            # model names none; create acts on no existing agent.
-            action = (decision.control_action or "").strip().lower()
-            acted_on = (None if decision.kind == DECISION_AGENT_CONTROL and action == "create"
-                        else identity.lookup(decision.target_session or requested_session))
-            if (decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
-                    and (not self._route_confidently(decision, settings)
-                         or (acted_on is not None and acted_on["session"] not in sessions))):
-                # A command clears the bar a message does and acts only on the
-                # agents of this packet, a group call's participants (RTO-03).
-                decision = self._as_clarify(decision, "I am not sure what you wanted me to do.")
-            elif (decision.kind == DECISION_AGENT_CONTROL
-                    and action == "fork"):
-                # No fork source is trusted from the router (RTO-03).
-                decision = self._as_clarify(decision, "Please fork agents from the app.")
+            if decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}:
+                # A command acts only on the agent it names (or, naming none, the one
+                # spoken to), and only inside this packet, a group call's participants
+                # (RTO-03). Anything else is refused with its sentence. A command is
+                # never held: a later "yes" must not deliver its words as chat.
+                refusal, acted_on = self._command_check(
+                    decision, settings, sessions, requested_session)
+                if refusal:
+                    decision = OrchestratorDecision(**{
+                        **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": refusal})
+                    final_action = FINAL_CLARIFY
+                    if not fallback_request:
+                        self._speak_as_session(refusal, requested_session)
+                elif acted_on:
+                    decision = OrchestratorDecision(**{
+                        **asdict(decision), "target_session": acted_on})
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -719,44 +746,53 @@ class OrchestratorService:
                         )
                 else:
                     self._require_current(janitor_run_id)
-                    held = self._claim_pending(decision.pending_id)
-                    routed_admission = prompt_admission
-                    if held is not None:
-                        routed_admission = prompt_admissions.PromptAdmission.from_json(
-                            str(held.get("prompt_admission_json") or "")
+                    held = self._claim_pending(decision.pending_id, requested_session)
+                    if decision.pending_id and held is None:
+                        # The message the model confirms is no longer held (expired,
+                        # or sent already): the confirmation is not sent in its place.
+                        final_action = FINAL_CLARIFY
+                        decision = OrchestratorDecision(**{
+                            **asdict(decision), "kind": DECISION_CLARIFY,
+                            "spoken_text": HELD_MESSAGE_GONE})
+                        self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
+                    else:
+                        routed_admission = prompt_admission
+                        if held is not None:
+                            routed_admission = prompt_admissions.PromptAdmission.from_json(
+                                str(held.get("prompt_admission_json") or "")
+                            )
+                        text_to_send = (
+                            (held or {}).get("utterance")
+                            or decision.text_to_send.strip()
+                            or packet["utterance"]
                         )
-                    text_to_send = (
-                        (held or {}).get("utterance")
-                        or decision.text_to_send.strip()
-                        or packet["utterance"]
-                    )
-                    self._require_current(janitor_run_id)
-                    dispatch_result = dispatch(
-                        text=text_to_send,
-                        requested_session=requested_session,
-                        trace_id=trace_id,
-                        client_msg_id=(
-                            routed_admission.client_admission_id
-                            if routed_admission else ""
-                        ),
-                        origin=routed_admission.origin if routed_admission else "user",
-                        sender_agent_id=(
-                            routed_admission.sender_agent_id
-                            if routed_admission else ""
-                        ),
-                        prompt_admission=routed_admission,
-                        synthesize_audio=synthesize_audio,
-                        unheard_audio_sessions=unheard_audio_sessions,
-                        forced_session=target,
-                        routed_by_orchestrator=True,
-                    )
-                    record_routing_message(
-                        session=target,
-                        role="user",
-                        text=text_to_send,
-                        trace_id=trace_id,
-                    )
-                    final_action = FINAL_ROUTE
+                        self._require_current(janitor_run_id)
+                        dispatch_result = dispatch(
+                            text=text_to_send,
+                            requested_session=requested_session,
+                            trace_id=trace_id,
+                            client_msg_id=(
+                                routed_admission.client_admission_id
+                                if routed_admission else ""
+                            ),
+                            origin=routed_admission.origin if routed_admission else "user",
+                            sender_agent_id=(
+                                routed_admission.sender_agent_id
+                                if routed_admission else ""
+                            ),
+                            prompt_admission=routed_admission,
+                            synthesize_audio=synthesize_audio,
+                            unheard_audio_sessions=unheard_audio_sessions,
+                            forced_session=target,
+                            routed_by_orchestrator=True,
+                        )
+                        record_routing_message(
+                            session=target,
+                            role="user",
+                            text=text_to_send,
+                            trace_id=trace_id,
+                        )
+                        final_action = FINAL_ROUTE
             if final_action == FINAL_ERROR and decision.kind in {
                 DECISION_CLARIFY,
                 DECISION_AMBIGUOUS,
@@ -773,8 +809,21 @@ class OrchestratorService:
             if final_action == FINAL_ERROR and decision.kind == DECISION_STATUS:
                 self._require_current(janitor_run_id)
                 final_action = FINAL_STATUS
-                target = self._valid_target(decision.target_session, sessions) or requested_session
-                spoken = decision.status_text.strip() or self._status_text(target)
+                named = decision.target_session.strip()
+                found = _agents_named(named) if named else []
+                valid = (self._valid_target(found[0]["session"], sessions)
+                         if len(found) == 1 else "")
+                if not named or valid:
+                    target = valid or requested_session
+                    spoken = decision.status_text.strip() or self._status_text(target)
+                else:
+                    # Not another agent's status, nor one the model made up: no such
+                    # agent, two of that name, or one this conversation cannot answer
+                    # about (archived, outside the call, not voice-targetable).
+                    final_action = FINAL_CLARIFY
+                    target = requested_session
+                    spoken = (NO_SUCH_AGENT if not found else WHICH_AGENT if len(found) > 1
+                              else CANNOT_CHECK)
                 self._speak_orchestrator(spoken, settings)
             if final_action == FINAL_ERROR and decision.kind == DECISION_CONTROL:
                 self._require_current(janitor_run_id)
@@ -849,6 +898,47 @@ class OrchestratorService:
             retry_dispatch=dispatch_status >= 500,
         )
 
+    def _command_check(self, decision: OrchestratorDecision, settings: OrchestratorSettings,
+                       sessions: set[str], requested_session: str) -> tuple[str, str]:
+        """(the sentence a command is refused with, or ""; the session it acts on).
+
+        A name given anywhere, in target_session or in the payload, is the target; the agent
+        spoken to is the target only when no name is given at all. Names resolve as voice
+        names. Create acts on no existing agent, and fork is said in the app."""
+        action = (decision.control_action or "").strip().lower()
+        if not self._route_confidently(decision, settings):
+            return UNSURE_COMMAND, ""
+        if decision.kind == DECISION_AGENT_CONTROL and action == "fork":
+            return FORK_IN_APP, ""      # no fork source is trusted from the router (RTO-03)
+        if decision.kind == DECISION_AGENT_CONTROL and action == "create":
+            return "", ""
+        names = [decision.target_session.strip()]
+        if decision.kind == DECISION_AGENT_CONTROL:
+            given = (decision.control_payload or {}).get("name")
+            names.append(given.strip() if isinstance(given, str) else "")
+        names = [name for name in names if name]
+        if not names:
+            agent = identity.lookup(requested_session)
+        else:
+            found = []
+            for name in names:
+                matches = _agents_named(name)
+                if not matches:
+                    return NO_SUCH_AGENT, ""
+                if len(matches) > 1:
+                    return WHICH_AGENT, ""
+                found.append(matches[0])
+            if len({agent["agent_id"] for agent in found}) > 1:
+                return WHICH_AGENT, ""      # the two names given disagree
+            agent = found[0]
+        if agent is None:
+            return NO_SUCH_AGENT, ""
+        if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
+            return NO_VOICE_COMMANDS, ""
+        if agent.get("archived_at") or agent["session"] not in sessions:
+            return CANNOT_COMMAND, ""
+        return "", agent["session"]
+
     def _route_confidently(
         self,
         decision: OrchestratorDecision,
@@ -875,39 +965,38 @@ class OrchestratorService:
         trace_id: str,
         prompt_admission: PromptAdmission | None,
     ) -> None:
-        pending_id = decision.pending_id or str(uuid.uuid4())
         target = decision.target_session or ""
         now = self.now()
-        conn().execute(
-            """INSERT INTO orchestrator_pending_utterances
-                  (pending_id, trace_id, utterance, requested_session,
-                   candidate_session, speak_as_session, reason, created_at,
-                   expires_at, status, prompt_admission_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-               ON CONFLICT(pending_id) DO UPDATE SET
-                   trace_id = excluded.trace_id,
-                   utterance = excluded.utterance,
-                   requested_session = excluded.requested_session,
-                   candidate_session = excluded.candidate_session,
-                   speak_as_session = excluded.speak_as_session,
-                   reason = excluded.reason,
-                   created_at = excluded.created_at,
-                   expires_at = excluded.expires_at,
-                   prompt_admission_json = excluded.prompt_admission_json,
-                   status = 'pending'""",
-            (
-                pending_id,
-                trace_id,
-                packet["utterance"],
-                requested_session,
-                target,
-                requested_session,
-                decision.reason,
-                now,
-                now + PENDING_TTL_MS,
-                prompt_admission.to_json() if prompt_admission else "",
-            ),
-        )
+        # Asked about again: the held message keeps its words, id, trace and
+        # admission; only the question (its reason, candidate and expiry) is new.
+        renewed = conn().execute(
+            """UPDATE orchestrator_pending_utterances
+                  SET candidate_session = ?, reason = ?, expires_at = ?
+                WHERE pending_id = ? AND status = 'pending' AND expires_at > ?
+                  AND requested_session = ?""",
+            (target, decision.reason, now + PENDING_TTL_MS, decision.pending_id, now,
+             requested_session),
+        ).rowcount if decision.pending_id else 0
+        if not renewed:
+            conn().execute(
+                """INSERT INTO orchestrator_pending_utterances
+                      (pending_id, trace_id, utterance, requested_session,
+                       candidate_session, speak_as_session, reason, created_at,
+                       expires_at, status, prompt_admission_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+                (
+                    str(uuid.uuid4()),
+                    trace_id,
+                    packet["utterance"],
+                    requested_session,
+                    target,
+                    requested_session,
+                    decision.reason,
+                    now,
+                    now + PENDING_TTL_MS,
+                    prompt_admission.to_json() if prompt_admission else "",
+                ),
+            )
         spoken = decision.spoken_text.strip()
         if not spoken:
             if target:
@@ -928,7 +1017,9 @@ class OrchestratorService:
         ).fetchone()
         return dict(row) if row else None
 
-    def _claim_pending(self, pending_id: str) -> dict[str, Any] | None:
+    def _claim_pending(self, pending_id: str, requested_session: str) -> dict[str, Any] | None:
+        """The held message, claimed: only one held in this session (a hold made while speaking
+        to another agent is not released from here; it expires)."""
         if not pending_id:
             return None
         row = conn().execute(
@@ -937,8 +1028,9 @@ class OrchestratorService:
                  FROM orchestrator_pending_utterances
                 WHERE pending_id = ?
                   AND status = 'pending'
-                  AND expires_at > ?""",
-            (pending_id, self.now()),
+                  AND expires_at > ?
+                  AND requested_session = ?""",
+            (pending_id, self.now(), requested_session),
         ).fetchone()
         if not row:
             return None
