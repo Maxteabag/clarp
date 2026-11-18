@@ -671,3 +671,17 @@ def test_a_daily_task_runs_on_the_23_hour_day(lane):
     """R31: a 24-hour wait from Saturday nine passes over Sunday nine when the clocks go forward."""
     assert _named_runs(lane, "0 9 * * *", "Europe/Oslo", "2027-03-25T08:00", 6) == [
         "Thu 25 09:00", "Fri 26 09:00", "Sat 27 09:00", "Sun 28 09:00", "Mon 29 09:00", "Tue 30 09:00"]
+
+
+def test_a_tick_hours_late_runs_next_after_it_not_before(lane):
+    """A task that keeps its pace and is looked at three hours late runs next after that look, never at a past time."""
+    store, source, calls, clock, make = lane
+    from datetime import datetime, timezone
+    store.rows[0].update(trigger_id="schedule", options={"max_interval_seconds": 0},
+                         config={"cron": "0 * * * *", "timezone": "UTC", "coalesce_seconds": 0})
+    clock[0] = int(datetime(2026, 11, 19, 9, 30, tzinfo=timezone.utc).timestamp() * 1000)
+    make().tick()
+    due = store.progress["attachment"]["next_run_at"]
+    clock[0] = due + 3 * 3600 * 1000 + 60_000
+    make().tick()
+    assert store.progress["attachment"]["next_run_at"] == due + 4 * 3600 * 1000
