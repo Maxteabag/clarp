@@ -136,13 +136,13 @@ def reference(root):
         post('profiles/delete','profiles_delete',profile_id=pf);get('profile','profile_get',profile_id=pf)
     db.close()
     sources=[]
-    for names,recent,corrections in [([],[],[]),(['a',' A ','beta',''],['Open AlphaBeta or echo_thing','AlphaBeta delta'],[('wrong','target'),('alias','Target')]),
+    for names,recent,corrections in [([],[],[]),(['a',' A ','beta',''],['Open AlphaBeta or echo_thing','AlphaBeta OrioleBeacon delta'],[('wrong','target'),('alias','Target')]),
             (['Z9'],[' '.join('Term'+str(n) for n in range(28))],[])]:
         source=vocab_compile.Sources(agent_names=tuple(names),recent_transcripts=tuple(recent),corrections=tuple(corrections),
             project_name=' Alpha ',identifiers=('Xray','Alpha'),branches=('worktree-123/active-branch','123','one_two_three_four_five_six_seven'),
             commit_subjects=('fix CamelCase in service2',))
         sources.append(dict(input=asdict(source),packs=[asdict(p) for p in vocab_compile.dynamic_packs(source)]))
-    paths=['src/ClipStreamBroker.py','src/ClipStream.rs','lib/WidgetThing.py','build/JunkName.so','libmp3lame.a','MyName.cc','x2.txt','test_only.hh','utils.ts']
+    paths=['src/ClipStreamBroker.py','src/ClipStream.rs','lib/WidgetThing.py','build/JunkName.so','libmp3lame.a','libsilver.so','MyName.cc','x2.txt','test_only.hh','utils.ts']
     workspaces=[dict(paths=paths,ids=workspace_vocab.identifiers_from_paths(paths))]
     traces=[dict(trace=t,valid=heard_audio.valid_trace(t)) for t in ('','a'*7,'a'*8,'a'*64,'a'*65,'ABCDEF12','abcdef01','gg123456','not/a/name')]
     # The reference sweeps sidecars. Record which clip ids survive, independent of
