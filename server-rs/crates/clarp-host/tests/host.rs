@@ -26049,6 +26049,7 @@ fn the_other_speech_engines_answer_the_apps() {
     let (http, requests) = answers(vec![
         ("/v1/text-to-speech/e-file", "200 OK", "File voice".into()),
         ("/v2/speak?", "200 OK", "Flux sound".into()),
+        ("/v1/speak?model=declined&","429 Test Failure","declined".into()),
         ("/v1/speak?", "200 OK", "Aura sound".into()),
         (
             "/token",
@@ -26277,6 +26278,15 @@ fn the_other_speech_engines_answer_the_apps() {
     assert_eq!(status, 409);
     assert_eq!(error["error"], "google_id_unverifiable");
     std::fs::remove_file(manifest).unwrap();
+    choose("cartesia","deepgram");
+    let (status,answer)=host.ask("POST","/preview",Some(&json!({"voice_id":r#"{"cartesia":"sample","deepgram":"declined"}"#,"text":"both fail"})));
+    assert_eq!(status,500);
+    assert!(answer["error"].as_str().unwrap().contains("503"),"{answer}");
+    assert!(requests.lock().unwrap().last().unwrap().starts_with("POST /v1/speak?model=declined&"));
+    choose("cartesia","gemini");
+    let (status,answer)=host.ask("POST","/preview",Some(&json!({"voice_id":r#"{"cartesia":"sample"}"#,"text":"cannot speak"})));
+    assert_eq!(status,500);
+    assert!(answer["error"].as_str().unwrap().contains("503"),"{answer}");
     let selected = choose("deepgram", "none");
     assert_eq!(selected["provider"], "deepgram");
     let agent = host.new_agent("Echo");
@@ -26309,6 +26319,14 @@ fn the_other_speech_engines_answer_the_apps() {
         .text(),
         "Flux sound"
     );
+    let map=r#"{"deepgram":"aura-2-test-en","elevenlabs":"unused"}"#;
+    let audition=host.post("/preview",json!({"voice_id":map,"text":"[happy] mapped speech","session":"echo"}));
+    let bytes=fetch(&host,"","GET",audition["url"].as_str().unwrap(),&[],b"");
+    assert_eq!(bytes.text(),"Aura sound");
+    let last=requests.lock().unwrap().last().unwrap().clone();
+    assert!(last.starts_with("POST /v1/speak?model=aura-2-test-en&"));
+    let body:Value=serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["text"],"mapped speech");
     let reply = fetch(
         &host,
         "",
@@ -26384,7 +26402,7 @@ fn the_other_speech_engines_answer_the_apps() {
     );
     let file_preview = host.post(
         "/preview",
-        json!({"voice_id":"e-file","text":"a".repeat(201)}),
+        json!({"voice_id":r#"{"deepgram":"unused","elevenlabs":"e-file"}"#,"text":format!("[happy] {}","a".repeat(201))}),
     );
     assert_eq!(
         fetch(
@@ -26401,7 +26419,7 @@ fn the_other_speech_engines_answer_the_apps() {
     let last = requests.lock().unwrap().last().unwrap().clone();
     assert!(last.starts_with("POST /v1/text-to-speech/e-file "));
     let file_request: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(file_request["text"], "a".repeat(200));
+    assert_eq!(file_request["text"], "a".repeat(192));
     assert_eq!(file_request["model_id"], "eleven_flash_v2_5");
     assert_eq!(file_request["voice_settings"]["speed"], 1.2);
     let served = std::thread::spawn(move || {

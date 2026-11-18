@@ -30,7 +30,7 @@ use crate::media::header_text;
 use crate::owner;
 
 /// The engines that speak which are built into this Host.
-use crate::voice::BUILT;
+use crate::voice::{Audition,BUILT};
 
 /// How many events of speech an app may report at once (the Python Host's `MAX_BATCH`).
 const MOST_EVENTS: usize = 500;
@@ -330,7 +330,7 @@ async fn preview(
         .collect();
     match app
         .mouth
-        .preview(&provider, voice, &said, Some(&kept_as))
+        .preview(&provider, voice, &said, Audition::Catalogue(&kept_as))
         .await
     {
         Ok(preview) => preview.send(&header_text(&headers, "range")),
@@ -408,7 +408,7 @@ async fn cartesia_preview(
         "{:x}",
         Sha256::digest(format!("v1\0{id}\0{name}\0{model}\0{prompt}").as_bytes())
     );
-    match app.mouth.preview("cartesia", id, &prompt, Some(&key)).await {
+    match app.mouth.preview("cartesia", id, &prompt, Audition::Catalogue(&key)).await {
         Ok(p) => p.send(&header_text(&headers, "range")),
         Err(why) if why == "preview cache unavailable" => ApiError::plain(
             StatusCode::INTERNAL_SERVER_ERROR,
