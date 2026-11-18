@@ -47,7 +47,7 @@ def router(model, effects):
     service = orchestrator.OrchestratorService(context, model_call=lambda packet, *_: dict(model(packet)))
     count = [0]
 
-    def say(text, *, fallback_request=False):
+    def say(text, *, fallback_request=False, only_sessions=None):
         count[0] += 1
         admission = prompt_admissions.create(
             authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
@@ -60,7 +60,7 @@ def router(model, effects):
         return service.handle_send(
             text=text, requested_session="mike", trace_id=f"route-{count[0]}",
             prompt_admission=admission, hands_free=True, synthesize_audio=False, dispatch=dispatch,
-            fallback_request=fallback_request)
+            fallback_request=fallback_request, only_sessions=only_sessions)
     return say, dispatched
 
 
@@ -250,3 +250,47 @@ def test_a_failed_delegation_asking_to_restart_nobody_only_clarifies_as_before(e
         "confidence": 0.95, "reason": "restart zed"}, effects)
     assert say("restart Zed", fallback_request=True).action == "clarify"
     assert effects["created"] == [] and effects["spoken"] == [] and held() == []
+
+
+@pytest.mark.parametrize("told", ["", "Zed is idle."])
+def test_a_status_query_about_an_agent_nobody_has_is_not_answered_for_another(effects, told):
+    """R34: "what is Zed doing?" with no Zed is answered that there is no such agent, not with the
+    status of the agent the message was said to, nor with a status the model made up."""
+    say, _ = router(lambda packet: {
+        "kind": "status_query", "target_session": "zed", "confidence": 0.95, "status_text": told,
+        "reason": "status of zed"}, effects)
+    assert say("what is Zed doing?").action == "clarify"
+    assert effects["spoken"] == [orchestrator.NO_SUCH_AGENT]
+
+
+@pytest.mark.parametrize("why", ["archived", "outside the call", "not voice-targetable"])
+def test_a_status_query_about_an_agent_out_of_reach_says_so_and_not_that_it_does_not_exist(
+        effects, monkeypatch, why):
+    say, _ = router(lambda packet: {
+        "kind": "status_query", "target_session": "antoni", "confidence": 0.95,
+        "status_text": "Antoni is idle.", "reason": "status of antoni"}, effects)
+    only = None
+    if why == "archived":
+        db.conn().execute("UPDATE agents SET archived_at = 1 WHERE session = 'antoni'")
+    elif why == "outside the call":
+        only = ("mike",)
+    else:
+        capabilities = agents.interaction_capabilities
+        monkeypatch.setattr(agents, "interaction_capabilities", lambda agent: {
+            **capabilities(agent), "can_voice_target": agent["session"] != "antoni"})
+    assert say("what is Antoni doing?", only_sessions=only).action == "clarify"
+    assert effects["spoken"] == [orchestrator.CANNOT_CHECK]
+
+
+def test_a_status_query_naming_nobody_is_still_about_the_agent_spoken_to(effects):
+    say, _ = router(lambda packet: {
+        "kind": "status_query", "target_session": "", "confidence": 0.95, "reason": "status"}, effects)
+    assert say("what are you doing?").action == "status"
+    assert effects["spoken"] and effects["spoken"][0].startswith("Mike")
+
+
+def test_a_status_query_about_an_agent_it_can_answer_for_is_unchanged(effects):
+    say, _ = router(lambda packet: {
+        "kind": "status_query", "target_session": "antoni", "confidence": 0.95, "reason": "status"}, effects)
+    assert say("what is Antoni doing?").action == "status"
+    assert effects["spoken"] and effects["spoken"][0].startswith("Antoni")
