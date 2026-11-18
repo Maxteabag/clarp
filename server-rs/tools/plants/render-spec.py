@@ -38,6 +38,9 @@ T = 'clarp-host/src/artifact_tool.rs'
 #     `a heading of length at most true`, planted once each below.
 #   that an integer property takes a truth (`("integer", J::Int(_))` in `of_type`): the catalog's one integer
 #     property has a list of values, and a truth is none of them either way.
+#   that the Host looks for a submission under the same id only in other agents' books (the filter on the
+#     holder in `submit`): without it the holder's own submission is found twice, once there and once on the
+#     agent's own thread, which is the one that counts (`a submission of this agent is not looked for`).
 #   how deep a body may nest before the reader stops (`DEEPEST_READ`) above 300: no vector nests deeper than 300,
 #     on purpose (`docs/differences.md`); a lower limit is planted.
 B = '    let starts = |mark: &[u8]| bytes.starts_with(mark);'

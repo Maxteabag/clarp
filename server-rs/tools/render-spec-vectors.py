@@ -40,6 +40,9 @@ def dumps(value) -> str:
     return json.dumps(value)
 
 
+KEEP = object()
+
+
 class Written(str):
     """A JSON text a case writes itself, where `json.dumps` would not write it so."""
 
@@ -67,6 +70,10 @@ def bodies():
     yield 'utf-32', plain.encode('utf-32')
     yield 'utf-32-le', plain.encode('utf-32-le')
     yield 'utf-32-be', plain.encode('utf-32-be')
+    yield 'utf-32 with the mark of the big end', b'\x00\x00\xfe\xff' + plain.encode('utf-32-be')
+    yield 'utf-16 with the mark of the big end', b'\xfe\xff' + plain.encode('utf-16-be')
+    yield 'utf-16 with a byte more', plain.encode('utf-16-le') + b'\x00'
+    yield 'utf-32 with a byte more', plain.encode('utf-32-le') + b'\x00'
     yield 'utf-16 of non-ascii', json.dumps({'k': 'ø' + chr(0x1f600)}, ensure_ascii=False).encode('utf-16-le')
     yield 'utf-16 odd length', plain.encode('utf-16-le')[:-1]
     yield 'utf-16 lone half', b'{\x00"\x00k\x00"\x00:\x00"\x00' + b'\x00\xd8' + b'"\x00}\x00'
@@ -178,12 +185,12 @@ def payload_cases():
     """(name, payload or JSON text): every stage of the validator, every bound from both sides."""
     out = []
 
-    def case(name, change=None, text=None):
-        payload = form()
+    def case(name, change=None, text=None, whole=KEEP):
+        """`change` changes the form in place (what it answers is passed over); `whole` is another payload
+        altogether."""
+        payload = form() if whole is KEEP else whole(form())
         if change is not None:
-            got = change(payload)
-            if got is not None:
-                payload = got
+            change(payload)
         out.append((name, Written(text(payload)) if text else payload))
 
     def put(path, value):
@@ -207,10 +214,10 @@ def payload_cases():
 
     case('the base form')
     # The payload's own fields.
-    case('a list', lambda p: [p])
-    case('a text', lambda p: 'x')
-    case('null', lambda p: None)
-    case('a number', lambda p: 3)
+    case('a list', whole=lambda p: [p])
+    case('a text', whole=lambda p: 'x')
+    case('null', whole=lambda p: None)
+    case('a number', whole=lambda p: 3)
     case('a key twice', text=replace('"version": "build-1"', '"version": "build-1", "version": "build-1"'))
     case('an unknown key', put(['extra'], 1))
     case('two unknown keys, the first by UTF-16', lambda p: p.update({'zeta': 1, 'alpha': 2}))
@@ -540,7 +547,7 @@ def payload_cases():
         'enum': ['a', 1]}), p['spec']['state'].update(pick=1)) and None)
     case('a state of an enum without type, typed otherwise', lambda p: (p['answer_schema']['properties'].update(pick={
         'enum': ['a', 1]}), p['spec']['state'].update(pick=True)) and None)
-    case('a state without the required key', lambda p: None)
+    case('a state without the required key')
     case('two faults in the state, sorted', lambda p: p['spec']['state'].update(notify='x', choice=1))
     # Submit.
     case('submit that is a list', put(['submit'], []))
@@ -571,12 +578,10 @@ def answers_cases():
             'answers': {'intent': 'submit_decision', 'state': {'choice': 'send', 'notify': True}}}
     out = []
 
-    def case(name, change=None, *, status='ready', text=None, previous=None, payload=None):
-        data = copy.deepcopy(good)
+    def case(name, change=None, *, status='ready', text=None, previous=None, payload=None, whole=KEEP):
+        data = copy.deepcopy(good) if whole is KEEP else whole(copy.deepcopy(good))
         if change is not None:
-            got = change(data)
-            if got is not None:
-                data = got
+            change(data)
         out.append((name, status, Written(text(data)) if text else data, previous, payload))
 
     def put(path, value):
@@ -603,20 +608,20 @@ def answers_cases():
     case('a draft is not open', status='draft')
     case('a failed one is not open', status='failed')
     case('answered already', status='completed')
-    case('a list', lambda d: [d])
+    case('a list', whole=lambda d: [d])
     case('a key twice', text=replace('"version": "build-1"', '"version": "build-1", "version": "build-1"'))
     case('an unknown key', put(['extra'], 1))
     case('an unknown key that is no identifier', put(['Extra'], 1))
     case('an unknown key with half a pair', put([LONE], 1))
     case('without answers', drop(['answers']))
-    case('without anything', lambda d: {})
+    case('without anything', whole=lambda d: {})
     case('without version', drop(['version']))
     case('a submission id of 15', put(['submission_id'], 's' * 15))
     case('a submission id of 16', put(['submission_id'], 's' * 16))
     case('a submission id of 80', put(['submission_id'], 's' * 80))
     case('a submission id of 81', put(['submission_id'], 's' * 81))
     case('a submission id with an underscore', put(['submission_id'], 'vector_answers_0001'))
-    case('a submission id beyond ASCII', put(['submission_id'], 'vector-answers-' + chr(0xf8) * 4))
+    case('a submission id beyond ASCII', put(['submission_id'], 'vector-answers-' + chr(0xea) * 4))
     case('a submission id that is a number', put(['submission_id'], 1234567890123456))
     case('a submission id with half a pair', put(['submission_id'], SID + LONE))
     case('a version that is a number', put(['version'], 1))

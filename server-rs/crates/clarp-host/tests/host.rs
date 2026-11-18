@@ -6811,6 +6811,25 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
             .starts_with("UNIQUE constraint failed"),
         "{said}"
     );
+    // Only a spec that is kept takes its reference: a check does not ask for it.
+    let mut checked_ref = envelope("ref-d");
+    checked_ref["reference_id"] = json!("deploy-1");
+    assert_eq!(
+        ask(
+            "POST",
+            "/artifacts?validate_only=1",
+            capable,
+            Some(&checked_ref)
+        ),
+        (200, json!({ "valid": true }))
+    );
+    // A revision through `POST /artifacts` takes its reference without the hidden blocks.
+    third_ref["reference_id"] = json!("deploy-3 <environment_context>x</environment_context>");
+    let (status, made) = ask("POST", "/artifacts", capable, Some(&third_ref));
+    assert_eq!(
+        (status, &made["artifact"]["reference_id"]),
+        (201, &json!("deploy-3"))
+    );
     let (_, before) = ask("GET", "/artifacts/ref-a", capable, None);
     let mut next_a = form.clone();
     next_a["version"] = json!("build-2");
