@@ -116,6 +116,8 @@ trap 'rm -rf "$STAGE"' EXIT
 cp "$REPO_DIR/server/server.py" "$STAGE/server.py"
 cp "$REPO_DIR/server/runtime.py" "$STAGE/runtime.py"
 cp -r "$REPO_DIR/server/lib" "$STAGE/lib"
+mkdir -p "$STAGE/contract"
+cp -r "$REPO_DIR/contract/catalogs" "$STAGE/contract/catalogs"
 mkdir -p "$STAGE/docs/architecture"
 cp -r "$REPO_DIR/docs/architecture/fleet-map" "$STAGE/docs/architecture/fleet-map"
 cp -r "$REPO_DIR/static" "$STAGE/static"
