@@ -26658,7 +26658,13 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
 fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("oracle-delegations");
-    let host = place.start_with_token(ADMIN);
+    // A stand-in for Antigravity, which takes no message longer than a command line. It is
+    // never run here.
+    let agy = place.root.join("agy");
+    program(&agy, "#!/bin/sh\n");
+    let world = [("CLARP_AGY_PROGRAM", agy.to_str().unwrap())];
+    let start = || place.start_in(ADMIN, &[], &world);
+    let host = start();
     let theo = host.new_agent("Theo");
     let asked = |id: &str, request: &str| json!({ "delegation_id": id, "session": theo, "request": request });
     let hand = |host: &Host, body: Value| host.ask("POST", "/oracle/delegations", Some(&body));
@@ -26722,7 +26728,10 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
 
     // Work is handed on: a turn of the agent's, sent as the Oracle's under the delegation's
     // own ids, and its answer is the result.
-    let (status, taken) = hand(&host, asked(" d-1 ", "  Look into the pump.  "));
+    let padded = json!({
+        "delegation_id": " d-1 ", "session": format!(" {theo} "), "request": "  Look into the pump.  ",
+    });
+    let (status, taken) = hand(&host, padded);
     assert_eq!(status, 200, "{taken}");
     let row = &taken["delegation"];
     assert_eq!(
@@ -26768,6 +26777,8 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
             &json!("oracle")
         )
     );
+    // The turn is followed by the delegation's own trace.
+    assert_eq!(turns[0]["trace_id"], "oracle-d-1");
     // The result is the row the agent answered with.
     assert_eq!(done["result_message_id"], turns[1]["id"]);
     assert_eq!(listed(&host, ""), vec![done.clone()]);
@@ -26852,6 +26863,32 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         ["d-3", "d-2", "d-1"]
     );
 
+    // Whoever asks is told of a delegation as it is now, whether or not anybody read the
+    // book since its turn ended: asked for again, said to be had, called off by its id.
+    let answered = |text: &str| {
+        let turns = host.turns(&theo);
+        turns
+            .iter()
+            .any(|row| row["role"] == "assistant" && row["text"] == text)
+    };
+    for (id, request) in [("e-1", "Look once."), ("e-2", "Look twice."), ("e-3", "Look thrice.")] {
+        assert_eq!(hand(&host, asked(id, request)).0, 200);
+        wait_for("an answer nobody read the book for", || answered(request));
+        wait_for("the agent to rest", || host.state(&theo) == "done");
+    }
+    let (status, again) = hand(&host, asked("e-1", "Look once."));
+    assert_eq!(
+        (status, &again["delegation"]["status"], &again["delegation"]["result_text"]),
+        (200, &json!("completed"), &json!("Look once."))
+    );
+    assert_eq!(ack(&host, json!("e-2")), (200, json!({ "ok": true })));
+    let (status, said) = host.ask(
+        "POST",
+        "/oracle/delegations/cancel",
+        Some(&json!({ "delegation_id": "e-3" })),
+    );
+    assert_eq!((status, &said["delegation"]["status"]), (200, &json!("completed")));
+
     // Work for an agent that is busy waits in its queue. It is not called off by its id
     // while it is not over: that is the agent's to stop.
     host.send(&theo, "sleep 60", "m-busy");
@@ -26863,6 +26900,10 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
     );
     let queue = || host.get(&format!("/turn-queue?session={theo}"));
     assert_eq!(queue()["items"][0]["id"], "oracle-d-4");
+    // Asked again while it waits, it is told as it is: the queue has its turn once.
+    let (status, again) = hand(&host, asked("d-4", "Look into the valve."));
+    assert_eq!((status, &again["delegation"]), (200, &taken["delegation"]));
+    assert_eq!(queue()["items"].as_array().unwrap().len(), 1);
     let cancel =
         |host: &Host, body: Value| host.ask("POST", "/oracle/delegations/cancel", Some(&body));
     let (status, said) = cancel(&host, json!({ "delegation_id": "d-4" }));
@@ -26961,7 +27002,9 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
     // Work that waits and is taken back by the user will never run: its delegation failed,
     // so that whoever waits for its result is told.
     host.send(&theo, "sleep 60", "m-busy-again");
-    wait_for("the agent to be busy again", || host.state(&theo) == "thinking");
+    wait_for("the agent to be busy again", || {
+        host.state(&theo) == "thinking"
+    });
     let (_, taken) = hand(&host, asked("d-back", "Look into the tank again."));
     assert_eq!(taken["delegation"]["status"], "queued");
     let (status, said) = host.ask("DELETE", "/turn-queue/oracle-d-back", None);
@@ -26975,13 +27018,70 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         )
     );
     host.post("/stop", json!({ "session": theo }));
-    wait_for("the busy turn to be over", || host.state(&theo) == "interrupted");
+    wait_for("the busy turn to be over", || {
+        host.state(&theo) == "interrupted"
+    });
     host.post("/turn-queue/resume", json!({ "session": theo }));
+
+    // A phone stops the agent for the Oracle: what that phone handed it is called off, and
+    // nobody else's is the phone's to call off by its id.
+    let body = asked("p-2", "sleep 60");
+    let (status, _) = host.ask_as(&phone, "POST", "/oracle/delegations", Some(&body));
+    assert_eq!(status, 200);
+    wait_for("the phone's turn to run", || {
+        host.state(&theo) == "thinking"
+    });
+    assert_eq!(cancel(&host, json!({ "delegation_id": "p-2" })).0, 404);
+    let stop = json!({ "session": theo });
+    let (status, said) = host.ask_as(&phone, "POST", "/oracle/delegations/cancel", Some(&stop));
+    assert_eq!(
+        (status, &said["cancelled_count"]),
+        (200, &json!(1)),
+        "{said}"
+    );
+    assert_eq!(said["delegations"][0]["delegation_id"], "p-2");
+    wait_for("the phone's turn to be over", || {
+        host.state(&theo) == "interrupted"
+    });
+    host.post("/turn-queue/resume", json!({ "session": theo }));
+
+    // An agent that is removed has no turns any more: what it was handed failed.
+    let mike = host.new_agent("Mike");
+    let to_mike = json!({ "delegation_id": "d-mike", "session": mike, "request": "sleep 60" });
+    assert_eq!(hand(&host, to_mike).0, 200);
+    wait_for("the turn of the agent that is removed", || {
+        host.state(&mike) == "thinking"
+    });
+    assert_eq!(host.ask("DELETE", &format!("/agents/{mike}"), None).0, 200);
+    let lost = of(&host, "d-mike");
+    assert_eq!(
+        (&lost["status"], &lost["error"]),
+        (
+            &json!("failed"),
+            &json!("Agent turn was interrupted before a durable result; delegate it again")
+        )
+    );
+
+    // A turn that cannot be admitted: the delegation failed, in the words it was refused
+    // with, and those are the answer.
+    let made = host.post("/agents", json!({ "name": "Gemma", "backend": "agy" }));
+    let long = json!({
+        "delegation_id": "d-long", "session": made["session"], "request": "x".repeat(61 * 1024),
+    });
+    let too_long = "This message is 61 KiB, more than the 60 KiB this agent can take in one \
+                    message. Shorten it or split it into several messages.";
+    let (status, said) = hand(&host, long);
+    assert_eq!((status, said["error"].as_str()), (413, Some(too_long)));
+    let kept = of(&host, "d-long");
+    assert_eq!(
+        (&kept["status"], &kept["error"]),
+        (&json!("failed"), &json!(too_long))
+    );
 
     // Two results that came while nobody read the book are told in the order they came,
     // each at the moment its turn ended.
     let (_, first) = hand(&host, asked("z-first", "sleep 1"));
-    let (_, second) = hand(&host, asked("a-second", "Look again."));
+    let (_, second) = hand(&host, asked("a-second", "sleep 2"));
     assert_eq!(
         (
             &first["delegation"]["status"],
@@ -26989,11 +27089,15 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         ),
         (&json!("accepted"), &json!("queued"))
     );
+    // What waited is seen to be under way when its turn has begun.
+    wait_for("the second to be under way", || {
+        of(&host, "a-second")["status"] == "accepted"
+    });
     wait_for("both answers", || {
         let turns = host.turns(&theo);
         let answers = turns.iter().filter(|row| row["role"] == "assistant");
         answers
-            .filter(|row| row["text"] == "sleep 1" || row["text"] == "Look again.")
+            .filter(|row| row["text"] == "sleep 1" || row["text"] == "sleep 2")
             .count()
             == 2
     });
@@ -27026,7 +27130,7 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         host.state(&theo) == "thinking"
     });
     host.kill();
-    let host = place.start_with_token(ADMIN);
+    let host = start();
     wait_for("the delegation of the turn that was cut off", || {
         of(&host, "d-6")["status"] == "completed"
     });

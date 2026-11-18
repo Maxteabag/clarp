@@ -190,7 +190,6 @@ async fn hand(
         client_msg_id: Some(admit.client_msg_id.clone()),
         trace_id: Some(admit.trace_id.clone()),
         synthesize_audio: Some(false),
-        force_session: Some(true),
         queue_if_busy: Some(true),
         origin: Some("oracle".to_string()),
         ..SendRequest::default()
@@ -310,7 +309,7 @@ async fn cancel(
     // What the stop did to the turn that ran is in the agent's conversation by now.
     looked_again(&app, book).await?;
     let ids: Vec<String> = found.iter().map(|one| one.delegation_id.clone()).collect();
-    let called_off = book.called_off(&ids, &owner, app.clock.now_ms());
+    let called_off = book.called_off(&ids, app.clock.now_ms());
     written(&app, book).await?;
     // And what waited for the agent is taken out of its queue.
     if let Some(member) = &member {

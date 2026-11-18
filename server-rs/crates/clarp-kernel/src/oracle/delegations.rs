@@ -28,8 +28,6 @@ const REQUEST_MOST: usize = 8000;
 /// How many are shown at most, and where no number is asked for.
 const SHOWN_MOST: i64 = 200;
 pub const SHOWN_USUALLY: i64 = 50;
-/// How many an agent is told it still owes.
-const OWED_MOST: usize = 20;
 const NO_REASON: &str = "Agent turn failed";
 const INTERRUPTED: &str = "Agent turn was interrupted before a durable result; delegate it again";
 /// What follows a request that is for the agent's eyes and not part of what it was asked.
@@ -319,7 +317,7 @@ impl Book {
             return Err(refused(400, "Janitors cannot receive Oracle delegations"));
         }
         let owner = python::strip(asked.owner);
-        if agent.agent_id.is_empty() || owner.is_empty() {
+        if owner.is_empty() {
             return Err(refused(
                 400,
                 "complete Oracle delegation identity is required",
@@ -402,7 +400,7 @@ impl Book {
     /// A turn ended with an answer: it is the result of the delegation the turn was for.
     pub fn completed(&mut self, trace_id: &str, message_id: &str, text: &str, now_ms: i64) -> bool {
         let clean = python::strip(text);
-        if trace_id.is_empty() || message_id.is_empty() || clean.is_empty() {
+        if message_id.is_empty() || clean.is_empty() {
             return false;
         }
         let trace = python::strip(trace_id);
@@ -410,7 +408,6 @@ impl Book {
         let moved = self.moved(holds, Status::Completed, now_ms, |row| {
             row.result_message_id = Some(message_id.to_string());
             row.result_text = clean.to_string();
-            row.error = String::new();
         });
         moved > 0
     }
@@ -464,11 +461,10 @@ impl Book {
                 Fate::Lost => false,
             };
             // An answer that says nothing is none: the delegation failed.
-            let over = said || {
-                let failed = self.fail(&row.delegation_id, INTERRUPTED, now_ms);
-                failed.is_some_and(|row| row.status == Status::Failed)
-            };
-            ended += usize::from(over);
+            if !said {
+                self.fail(&row.delegation_id, INTERRUPTED, now_ms);
+            }
+            ended += 1;
         }
         ended
     }
@@ -513,14 +509,13 @@ impl Book {
         Ok(told.collect())
     }
 
-    /// The agent was stopped: exactly the delegations that were to be called off are, also
-    /// one that failed while its agent was being stopped. One that ended with an answer
-    /// meanwhile stays ended. Answers those that are called off, in the order given.
-    pub fn called_off(&mut self, ids: &[String], owner: &str, now_ms: i64) -> Vec<Delegation> {
-        let owner = python::strip(owner);
+    /// The agent was stopped: exactly the delegations that were to be called off
+    /// ([`Book::to_call_off`]) are, also one that failed while its agent was being stopped.
+    /// One that ended with an answer meanwhile stays ended. Answers those that are called
+    /// off, in the order given.
+    pub fn called_off(&mut self, ids: &[String], now_ms: i64) -> Vec<Delegation> {
         let holds = |row: &Delegation| {
             ids.contains(&row.delegation_id)
-                && row.owner_principal == owner
                 && (row.status.active() || row.status == Status::Failed)
         };
         self.moved(holds, Status::Cancelled, now_ms, |_| {});
@@ -585,31 +580,19 @@ impl Book {
         found
     }
 
-    /// What an agent still owes the Oracle in the turn it runs: the requests of the
-    /// delegations that turn is for, in the order they were taken, each without what was
-    /// added for the agent's eyes only.
+    /// What an agent still owes the Oracle in the turn it runs: the request of the
+    /// delegation that turn is for, without what was added for the agent's eyes only. A
+    /// turn is for one delegation at most.
     pub fn owed(&self, agent_id: &str, trace_id: &str) -> Vec<Value> {
-        if agent_id.is_empty() || trace_id.is_empty() {
-            return Vec::new();
-        }
-        let mut found: Vec<&Delegation> = self
-            .rows
-            .iter()
-            .filter(|row| {
-                row.agent_id == agent_id && row.trace_id == trace_id && row.status.active()
-            })
-            .collect();
-        found.sort_by(|one, other| {
-            let by_time = one.created_at.cmp(&other.created_at);
-            by_time.then_with(|| one.delegation_id.cmp(&other.delegation_id))
-        });
-        let owed = found.into_iter().take(OWED_MOST).map(|row| {
+        let mut open = self.rows.iter().filter(|row| row.status.active());
+        let found = open.find(|row| row.agent_id == agent_id && row.trace_id == trace_id);
+        let owed = found.map(|row| {
             let asked = row.request_text.split(REFERENCE_DATA).next().unwrap_or("");
             json!({
                 "delegation_id": row.delegation_id,
                 "request": python::first(asked, REQUEST_MOST),
             })
         });
-        owed.collect()
+        owed.into_iter().collect()
     }
 }
