@@ -158,7 +158,7 @@ fn the_book_of_delegations_is_kept_as_the_python_host_keeps_it() {
                                 early = book.written();
                                 let new = book.get(&admit.delegation_id).unwrap();
                                 assert_eq!(new.status, Status::Accepted, "{step}");
-                                assert_eq!(early, [new.clone()], "{step}");
+                                assert_eq!(early, std::slice::from_ref(new), "{step}");
                             }
                             if let Some(why) = step["raises"].as_str() {
                                 book.fail(&admit.delegation_id, why, at);
@@ -400,6 +400,36 @@ fn an_id_of_a_delegation_is_short_and_of_plain_signs() {
         );
         assert_eq!(book.recent(ADMINISTRATOR, asked).len(), shown, "{asked}");
     }
+    // The session of the agent's tool is kept with a delegation once the tool has one,
+    // where the delegation was taken before; what is kept stays.
+    let mut book = Book::default();
+    let asked = Asked {
+        delegation_id: "d-1",
+        session: "theo",
+        request: "Look.",
+        owner: ADMINISTRATOR,
+    };
+    assert!(book.take(&asked, Some(theo), false, 10).is_ok());
+    assert_eq!(
+        book.dispatched("d-1", "", false, 11)
+            .unwrap()
+            .backend_session_id,
+        ""
+    );
+    assert_eq!(book.written().len(), 1);
+    assert!(!book.tool_session("d-1", ""));
+    assert!(!book.tool_session("d-0", "s-1"));
+    assert!(book.written().is_empty());
+    assert!(book.tool_session("d-1", "s-1"));
+    let kept = book.get("d-1").unwrap().clone();
+    assert_eq!(
+        (kept.backend_session_id.as_str(), kept.updated_at),
+        ("s-1", 11)
+    );
+    assert_eq!(book.written(), [kept]);
+    assert!(!book.tool_session("d-1", "s-2"));
+    assert_eq!(book.get("d-1").unwrap().backend_session_id, "s-1");
+    assert!(book.written().is_empty());
     // What is over is told as over, in the words a phone reads.
     for (status, word, active) in [
         (Status::Accepted, "accepted", true),
