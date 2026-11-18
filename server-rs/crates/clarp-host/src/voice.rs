@@ -338,7 +338,12 @@ impl Mouth {
         text: &str,
         name: Option<&str>,
     ) -> Result<Preview, String> {
-        if name.is_some() && self.previews.symlink_metadata().is_ok_and(|m|m.is_symlink()) {
+        if name.is_some()
+            && self
+                .previews
+                .symlink_metadata()
+                .is_ok_and(|m| m.is_symlink())
+        {
             return Err("preview cache unavailable".into());
         }
         let file = name.map(|n| self.previews.join(format!("{n}.mp3")));

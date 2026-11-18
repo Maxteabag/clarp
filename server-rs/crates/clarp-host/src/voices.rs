@@ -410,7 +410,11 @@ async fn cartesia_preview(
     );
     match app.mouth.preview("cartesia", id, &prompt, Some(&key)).await {
         Ok(p) => p.send(&header_text(&headers, "range")),
-        Err(why) if why=="preview cache unavailable"=>ApiError::plain(StatusCode::INTERNAL_SERVER_ERROR,"preview cache unavailable").into_response(),
+        Err(why) if why == "preview cache unavailable" => ApiError::plain(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "preview cache unavailable",
+        )
+        .into_response(),
         Err(_) => ApiError::plain(StatusCode::BAD_GATEWAY, "preview unavailable").into_response(),
     }
 }

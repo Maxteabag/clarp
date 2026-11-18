@@ -205,45 +205,71 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
 }
 
 #[test]
-fn ink_batch_matches_the_reference_form_and_answer(){
-    use std::io::{BufRead,BufReader,Read,Write};
-    for row in vectors()["ink_batch"].as_array().unwrap(){
-        let case=row.clone();
-        let (base,server)=peer(move|mut socket|{
-            let mut input=BufReader::new(socket.try_clone().unwrap());
-            let mut header=String::new();
+fn ink_batch_matches_the_reference_form_and_answer() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    for row in vectors()["ink_batch"].as_array().unwrap() {
+        let case = row.clone();
+        let (base, server) = peer(move |mut socket| {
+            let mut input = BufReader::new(socket.try_clone().unwrap());
+            let mut header = String::new();
             loop {
-                let mut line=String::new();
-                let n=input.read_line(&mut line).unwrap();
-                assert_ne!(n,0);
-                if line=="\r\n"{break;}
+                let mut line = String::new();
+                let n = input.read_line(&mut line).unwrap();
+                assert_ne!(n, 0);
+                if line == "\r\n" {
+                    break;
+                }
                 header.push_str(&line);
             }
-            let headers=header.to_lowercase();
+            let headers = header.to_lowercase();
             assert!(header.starts_with("POST /stt HTTP/1.1"));
             assert!(headers.contains("authorization: bearer unit"));
             assert!(headers.contains("cartesia-version: 2026-08-14"));
-            let length:usize=headers.lines().find_map(|s|s.strip_prefix("content-length: ")).unwrap().trim().parse().unwrap();
-            let mut body=vec![0;length];
+            let length: usize = headers
+                .lines()
+                .find_map(|s| s.strip_prefix("content-length: "))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            let mut body = vec![0; length];
             input.read_exact(&mut body).unwrap();
-            let body=String::from_utf8(body).unwrap();
-            let mut rest=body.as_str();
-            for field in case["request"]["fields"].as_array().unwrap(){
-                let name=format!("name=\"{}\"",field["name"].as_str().unwrap());
-                rest=rest.split_once(&name).unwrap().1;
-                if let Some(filename)=field["filename"].as_str(){
-                    rest=rest.split_once(&format!("filename=\"{filename}\"")).unwrap().1;
+            let body = String::from_utf8(body).unwrap();
+            let mut rest = body.as_str();
+            for field in case["request"]["fields"].as_array().unwrap() {
+                let name = format!("name=\"{}\"", field["name"].as_str().unwrap());
+                rest = rest.split_once(&name).unwrap().1;
+                if let Some(filename) = field["filename"].as_str() {
+                    rest = rest
+                        .split_once(&format!("filename=\"{filename}\""))
+                        .unwrap()
+                        .1;
                 }
-                rest=rest.split_once(&format!("\r\n\r\n{}\r\n",field["body"].as_str().unwrap())).unwrap().1;
+                rest = rest
+                    .split_once(&format!("\r\n\r\n{}\r\n", field["body"].as_str().unwrap()))
+                    .unwrap()
+                    .1;
             }
             assert!(!body.contains("keyterm"));
-            let reply=json!({"text":"heard","duration":case["duration"]}).to_string();
+            let reply = json!({"text":"heard","duration":case["duration"]}).to_string();
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",reply.len()).unwrap();
         });
-        let engine=Ink::new("ink-whisper",Box::new(||Some("unit".into())),base,"cat");
-        let heard=engine.hear(Clip{audio:b"clip",content_type:row["ctype"].as_str().unwrap()},Asked{listen_for:"never sent",language:Some("nb"),wait:Duration::from_secs(2)}).unwrap();
-        assert_eq!(heard.segments[0].text,row["heard"][0]);
-        assert_eq!(Some(heard.seconds),row["heard"][1].as_f64());
+        let engine = Ink::new("ink-whisper", Box::new(|| Some("unit".into())), base, "cat");
+        let heard = engine
+            .hear(
+                Clip {
+                    audio: b"clip",
+                    content_type: row["ctype"].as_str().unwrap(),
+                },
+                Asked {
+                    listen_for: "never sent",
+                    language: Some("nb"),
+                    wait: Duration::from_secs(2),
+                },
+            )
+            .unwrap();
+        assert_eq!(heard.segments[0].text, row["heard"][0]);
+        assert_eq!(Some(heard.seconds), row["heard"][1].as_f64());
         server.join().unwrap();
     }
 }

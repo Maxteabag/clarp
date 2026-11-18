@@ -26047,7 +26047,7 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
 fn the_other_speech_engines_answer_the_apps() {
     let place = Place::new("speech-engines");
     let (http, requests) = answers(vec![
-        ("/v1/text-to-speech/e-file","200 OK","File voice".into()),
+        ("/v1/text-to-speech/e-file", "200 OK", "File voice".into()),
         ("/v2/speak?", "200 OK", "Flux sound".into()),
         ("/v1/speak?", "200 OK", "Aura sound".into()),
         (
@@ -26185,10 +26185,16 @@ fn the_other_speech_engines_answer_the_apps() {
             .to_lowercase()
             .contains("x-goog-user-project: unit")
     );
-    let google_body:Value=serde_json::from_str(reads[3].split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(google_body["voice"]["languageCode"],"nb-NO");
-    assert_eq!(google_body["audioConfig"]["audioEncoding"],"MP3");
-    assert!(google_body["input"]["text"].as_str().unwrap().starts_with("Hello, I'm "));
+    let google_body: Value =
+        serde_json::from_str(reads[3].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(google_body["voice"]["languageCode"], "nb-NO");
+    assert_eq!(google_body["audioConfig"]["audioEncoding"], "MP3");
+    assert!(
+        google_body["input"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Hello, I'm ")
+    );
     drop(reads);
     let choose = |provider: &str, fallback: &str| {
         host.post(
@@ -26364,23 +26370,40 @@ fn the_other_speech_engines_answer_the_apps() {
     let mut socket_world = world.to_vec();
     socket_world.retain(|(key, _)| *key != "CLARP_INK_ENDPOINT");
     socket_world.push(("CLARP_INK_ENDPOINT", address.as_str()));
-    socket_world.retain(|(key,_)|*key!="CLARP_ELEVEN_VOICE_ENDPOINT");
-    socket_world.push(("CLARP_ELEVEN_VOICE_ENDPOINT",http.as_str()));
+    socket_world.retain(|(key, _)| *key != "CLARP_ELEVEN_VOICE_ENDPOINT");
+    socket_world.push(("CLARP_ELEVEN_VOICE_ENDPOINT", http.as_str()));
     let host = place.start_in(
         "",
         &["--speech-keys", owners.to_str().unwrap()],
         &socket_world,
     );
     assert_eq!(host.get("/tts/providers")["provider"], "deepgram");
-    host.post("/tts/providers",json!({"provider":"elevenlabs","fallback":"none"}));
-    let file_preview=host.post("/preview",json!({"voice_id":"e-file","text":"a".repeat(201)}));
-    assert_eq!(fetch(&host,"","GET",file_preview["url"].as_str().unwrap(),&[],b"").text(),"File voice");
-    let last=requests.lock().unwrap().last().unwrap().clone();
+    host.post(
+        "/tts/providers",
+        json!({"provider":"elevenlabs","fallback":"none"}),
+    );
+    let file_preview = host.post(
+        "/preview",
+        json!({"voice_id":"e-file","text":"a".repeat(201)}),
+    );
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            file_preview["url"].as_str().unwrap(),
+            &[],
+            b""
+        )
+        .text(),
+        "File voice"
+    );
+    let last = requests.lock().unwrap().last().unwrap().clone();
     assert!(last.starts_with("POST /v1/text-to-speech/e-file "));
-    let file_request:Value=serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(file_request["text"],"a".repeat(200));
-    assert_eq!(file_request["model_id"],"eleven_flash_v2_5");
-    assert_eq!(file_request["voice_settings"]["speed"],1.2);
+    let file_request: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(file_request["text"], "a".repeat(200));
+    assert_eq!(file_request["model_id"], "eleven_flash_v2_5");
+    assert_eq!(file_request["voice_settings"]["speed"], 1.2);
     let served = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         stream
