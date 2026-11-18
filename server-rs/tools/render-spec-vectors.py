@@ -71,6 +71,8 @@ def bodies():
     yield 'utf-16 odd length', plain.encode('utf-16-le')[:-1]
     yield 'utf-16 lone half', b'{\x00"\x00k\x00"\x00:\x00"\x00' + b'\x00\xd8' + b'"\x00}\x00'
     yield 'utf-32 beyond unicode', b'\x00\x00\x11\x00' * 2
+    yield 'utf-32 beyond unicode inside a text', (b'\xff\xfe\x00\x00' + b'"\x00\x00\x00' + b'\x00\x00\x11\x00'
+                                                  + b'"\x00\x00\x00')
     yield 'two bytes', b'1\x00'
     yield 'two bytes big', b'\x001'
     yield 'non-ascii utf-8', json.dumps({'k': 'ø東' + chr(0x1f600)}, ensure_ascii=False).encode()
@@ -90,6 +92,8 @@ def bodies():
     yield 'overlong four', b'{"k": "\xf0\x80\x80\xaf"}'
     yield 'beyond unicode utf-8', b'{"k": "\xf4\x90\x80\x80"}'
     yield 'truncated utf-8', b'{"k": "\xe6\x9d"}'
+    yield 'a lead byte above f4', b'"\xf5\x80\x80\x80"'
+    yield 'a lead byte where a continuation must be', b'"\xc3\xc3"'
     yield 'control in text', b'{"k": "a\x01b"}'
     yield 'tab in text', b'{"k": "a\tb"}'
     yield 'delete in text', b'{"k": "a\x7fb"}'
@@ -371,6 +375,7 @@ def payload_cases():
     case('a heading with a hidden block left open', put(['spec', 'elements', 'topic', 'props', 'text'],
                                                         'a <tool_call>b'))
     case('a heading that reads the state', put(['spec', 'elements', 'topic', 'props', 'text'], {'$state': '/answer'}))
+    case('a heading beyond ASCII', put(['spec', 'elements', 'topic', 'props', 'text'], 'Bygg ' + chr(0xf8) + chr(0x1f600)))
     case('a text of 4000', put(['spec', 'elements', 'instructions', 'props', 'text'], 't' * 4000))
     case('a text of 4001', put(['spec', 'elements', 'instructions', 'props', 'text'], 't' * 4001))
     case('a text that reads the state', put(['spec', 'elements', 'instructions', 'props', 'text'],
@@ -476,6 +481,16 @@ def payload_cases():
                                              nodes(p)['root']['children'].append('line')) and None)
     case('an element nobody holds', lambda p: nodes(p).update(stray={'type': 'divider', 'props': {}}))
     case('an element held twice', lambda p: nodes(p)['root']['children'].append('topic'))
+    case('a root that is an element of no identifier', lambda p: (nodes(p).update(Bad=nodes(p).pop('root')),
+                                                                  p['spec'].update(root='Bad')) and None)
+    case('a child of no identifier held by an element sorted before it', lambda p: (
+        nodes(p).update(a={'type': 'stack', 'props': {}, 'children': ['zZ']}, zZ={'type': 'divider', 'props': {}}),
+        nodes(p)['root']['children'].append('a')) and None)
+    case('two faults in the tree, the first child first', lambda p: (nodes(p).update(
+        one={'type': 'card', 'props': {}, 'children': ['inner1']}, inner1={'type': 'card', 'props': {}},
+        two={'type': 'card', 'props': {}, 'children': ['inner2']}, inner2={'type': 'card', 'props': {}}),
+        nodes(p)['root'].update(children=['one', 'two', 'topic', 'instructions', 'selection', 'comment', 'notify']))
+        and None)
     case('a root held by its child', lambda p: (nodes(p).update(inner={'type': 'stack', 'props': {},
                                                                         'children': ['root']}),
                                                 nodes(p)['root']['children'].append('inner')) and None)
@@ -733,6 +748,19 @@ def catalogs():
     variant('identifiers of signs as a list', lambda d: d['identifiers'].update(first=['ab', 'c'], rest=['a', 'b_']))
     variant('identifiers of length 1 to 3', lambda d: d['identifiers'].update(maxLength=3))
     variant('without identifiers', lambda d: d.pop('identifiers'))
+    variant('identifiers whose least length is true', lambda d: d['identifiers'].update(minLength=True))
+    variant('options whose items have no type', lambda d: d['components']['choice']['props']['properties'][
+        'options']['items'].pop('type'))
+    variant('an axis that is a constant', lambda d: d['components']['stack']['props']['properties'].update(
+        axis={'const': 'vertical'}))
+    variant('a level with bounds and no list', lambda d: d['components']['heading']['props']['properties'].update(
+        level={'type': 'integer', 'minimum': 1, 'maximum': 2}))
+    variant('a heading of length at most true', lambda d: d['components']['heading']['props']['properties'][
+        'text'].update(maxLength=True))
+    variant('heading props that are open', lambda d: d['components']['heading']['props'].update(
+        additionalProperties=True))
+    variant('heading props without a closing word', lambda d: d['components']['heading']['props'].pop(
+        'additionalProperties'))
     variant('without components', lambda d: d.pop('components'))
     refusals = json.loads(reasons)
     refusals.pop('number_form')
@@ -743,6 +771,28 @@ def catalogs():
     out.append(('a catalog that is no JSON', raw[:-10], reasons))
     out.append(('refusals that are no JSON', raw, b'{'))
     out.append(('a catalog that is a list', b'[]', reasons))
+    return out
+
+
+def probes():
+    """Payloads every catalog that loads is asked about."""
+    out = [form()]
+    payload = form()
+    nodes(payload)['selection']['props']['options'][0]['icon'] = 'x'
+    out.append(payload)
+    payload = form()
+    nodes(payload)['root']['props']['axis'] = 'horizontal'
+    out.append(payload)
+    for level in (0, 2, 3, True):
+        payload = form()
+        nodes(payload)['topic']['props']['level'] = level
+        out.append(payload)
+    payload = form()
+    nodes(payload)['topic']['props']['color'] = 'red'
+    out.append(payload)
+    payload = form()
+    nodes(payload)['topic']['props']['text'] = 'x'
+    out.append(payload)
     return out
 
 
@@ -927,11 +977,14 @@ def run() -> dict:
             else:
                 one['loaded'] = {'sha256': got.sha256,
                                  'identifiers': [bool(got.ident.fullmatch(text)) for text in idents]}
-                try:
-                    rs.validate(form())
-                    one['base_form'] = 'valid'
-                except rs.Refusal as error:
-                    one['base_form'] = refusal(error)
+                verdicts = []
+                for probe in probes():
+                    try:
+                        rs.validate(probe)
+                        verdicts.append('valid')
+                    except rs.Refusal as error:
+                        verdicts.append(refusal(error))
+                one['loaded']['probes'] = verdicts
             loaded.append(one)
         rs._catalog_dir = real
         rs._loaded.cache_clear()
@@ -947,7 +1000,8 @@ def run() -> dict:
         shutil.rmtree(root, ignore_errors=True)
     return {'what': 'server/lib/render_spec.py: canonical, validate, admit, message_text; '
                     'server_identity.render_spec_capable; the catalog files',
-            'catalog_sha256': 'c1:' + wire['catalog_sha256'], 'identifiers': idents, 'base_form': dumps(BASE),
+            'catalog_sha256': 'c1:' + wire['catalog_sha256'], 'identifiers': idents,
+            'probes': [dumps(probe) for probe in probes()],
             'without_a_catalog': without, 'canonical': canonical, 'reads': reads, 'payloads': payloads,
             'answers': answers, 'flows': flows, 'messages': told, 'clients': seen, 'catalogs': loaded}
 
@@ -963,7 +1017,7 @@ def main() -> int:
         return 1
     said = json.loads(ran.stdout.splitlines()[-1])
     lines = ['{']
-    for name in ('what', 'catalog_sha256', 'identifiers', 'base_form', 'without_a_catalog', 'canonical'):
+    for name in ('what', 'catalog_sha256', 'identifiers', 'probes', 'without_a_catalog', 'canonical'):
         lines.append(f' {json.dumps(name)}: {json.dumps(said[name], ensure_ascii=True)},')
     sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs')
     for number, name in enumerate(sections):

@@ -6649,12 +6649,216 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     again["payload"]["version"] = json!("build-3");
     again["expected_version"] = json!("build-2");
     assert_eq!(ask("POST", "/artifacts", capable, Some(&again)).0, 201);
+    let vera = host.new_agent("Vera");
     let mut taken = envelope("open");
-    taken["session"] = json!(host.new_agent("Vera"));
+    taken["session"] = json!(vera);
     assert_eq!(
         ask("POST", "/artifacts", capable, Some(&taken)),
         (409, refusal("not_open", ""))
     );
+    // The contract this Host speaks, and the feature.
+    let info = host.get("/server-info");
+    assert_eq!(info["contract"]["host"], 102);
+    assert_eq!(info["contract"]["features"]["render_spec"], 102);
+
+    // What the envelope says is read as the reference reads it: without its blanks and its
+    // hidden blocks, in small letters, a value that is no text as Python writes it.
+    let mut loose = envelope(" spaced-id ");
+    loose["type"] = json!(" Render_Spec ");
+    loose["session"] = json!(format!(" {theo} "));
+    loose["title"] = json!(" Decide <speak>aloud</speak>");
+    loose["status"] = json!(" READY ");
+    let (status, made) = ask("POST", "/artifacts", capable, Some(&loose));
+    assert_eq!(status, 201, "{made}");
+    let row = &made["artifact"];
+    assert_eq!(
+        (&row["artifact_id"], &row["title"], &row["status"]),
+        (&json!("spaced-id"), &json!("Decide"), &json!("ready"))
+    );
+    let mut odd = envelope("spec:odd");
+    odd["title"] = json!(12.5);
+    odd["summary"] = json!(true);
+    odd["reference_id"] = json!(["a"]);
+    odd["status"] = json!("");
+    let (status, made) = ask("POST", "/artifacts", capable, Some(&odd));
+    assert_eq!(status, 201, "{made}");
+    let row = &made["artifact"];
+    assert_eq!(
+        (
+            &row["title"],
+            &row["summary"],
+            &row["reference_id"],
+            &row["status"]
+        ),
+        (
+            &json!("12.5"),
+            &json!("True"),
+            &json!("['a']"),
+            &json!("ready")
+        )
+    );
+    let mut nameless = envelope("");
+    nameless.as_object_mut().unwrap().remove("artifact_id");
+    nameless["expected_version"] = Value::Null;
+    let (status, made) = ask("POST", "/artifacts", capable, Some(&nameless));
+    assert_eq!(status, 201, "{made}");
+    assert!(
+        made["artifact"]["artifact_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("artifact-")
+    );
+    let (status, said) = ask(
+        "POST",
+        "/artifacts?validate_only=1&validate_only=",
+        None,
+        Some(&envelope("checked")),
+    );
+    assert_eq!((status, said), (200, json!({ "valid": true })));
+    // A new one that says it follows a version; an id that is another kind's, or thrown away.
+    let mut follows = envelope("fresh");
+    follows["expected_version"] = json!("build-0");
+    assert_eq!(
+        ask("POST", "/artifacts", capable, Some(&follows)),
+        (409, refusal("version_mismatch", "/expected_version"))
+    );
+    let document = json!({ "session": theo, "type": "document", "artifact_id": "a-document", "title": "Notes",
+                           "payload": { "content": "x" } });
+    assert_eq!(ask("POST", "/artifacts", None, Some(&document)).0, 201);
+    assert_eq!(
+        ask("POST", "/artifacts", capable, Some(&envelope("a-document"))),
+        (409, refusal("not_open", ""))
+    );
+    let (status, renamed) = ask(
+        "POST",
+        "/artifacts/a-document",
+        capable,
+        Some(&json!({ "title": "Renamed" })),
+    );
+    assert_eq!(
+        (status, &renamed["artifact"]["title"]),
+        (200, &json!("Renamed"))
+    );
+    let mut gone = envelope("gone");
+    gone["expected_version"] = json!("build-1");
+    gone["payload"]["version"] = json!("build-2");
+    assert_eq!(
+        ask("POST", "/artifacts", capable, Some(&gone)),
+        (409, refusal("not_open", ""))
+    );
+    let (status, said) = ask(
+        "POST",
+        "/artifacts/gone",
+        capable,
+        Some(&json!({ "payload": form })),
+    );
+    assert_eq!(
+        (status, &said["error"]),
+        (409, &json!("artifact not found"))
+    );
+    let (status, said) = raw("POST", "/artifacts/open", capable, b"[1]");
+    assert_eq!(
+        (status, &said["error"]),
+        (400, &json!("json object required"))
+    );
+    // A draft is not open for answers.
+    let mut draft = envelope("draft");
+    draft["status"] = json!("draft");
+    assert_eq!(ask("POST", "/artifacts", capable, Some(&draft)).0, 201);
+    let mut early = sent.clone();
+    early["submission_id"] = json!("draft-answer-000001");
+    assert_eq!(
+        ask("POST", "/artifacts/draft/submit", capable, Some(&early)),
+        (409, refusal("not_open", ""))
+    );
+    // What it is about is one spec's: once among an agent's specs, kept through revisions.
+    let mut first_ref = envelope("ref-a");
+    first_ref["reference_id"] = json!("deploy-1 <speak>aloud</speak>");
+    let (status, made) = ask("POST", "/artifacts", capable, Some(&first_ref));
+    assert_eq!(
+        (status, &made["artifact"]["reference_id"]),
+        (201, &json!("deploy-1"))
+    );
+    let mut second_ref = envelope("ref-b");
+    second_ref["reference_id"] = json!("deploy-1");
+    let (status, said) = ask("POST", "/artifacts", capable, Some(&second_ref));
+    assert_eq!(status, 409);
+    assert!(
+        said["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("UNIQUE constraint failed"),
+        "{said}"
+    );
+    let mut third_ref = envelope("ref-c");
+    third_ref["reference_id"] = json!("deploy-2");
+    assert_eq!(ask("POST", "/artifacts", capable, Some(&third_ref)).0, 201);
+    third_ref["reference_id"] = json!("deploy-1");
+    third_ref["expected_version"] = json!("build-1");
+    third_ref["payload"]["version"] = json!("build-2");
+    let (status, said) = ask("POST", "/artifacts", capable, Some(&third_ref));
+    assert_eq!(status, 409);
+    assert!(
+        said["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("UNIQUE constraint failed"),
+        "{said}"
+    );
+    let (_, before) = ask("GET", "/artifacts/ref-a", capable, None);
+    let mut next_a = form.clone();
+    next_a["version"] = json!("build-2");
+    let body = json!({ "payload": next_a, "expected_version": "build-1", "summary": "Again", "status": "active" });
+    let (status, changed) = ask("POST", "/artifacts/ref-a", capable, Some(&body));
+    assert_eq!(status, 200, "{changed}");
+    let row = &changed["artifact"];
+    assert_eq!(
+        (&row["reference_id"], &row["summary"], &row["status"]),
+        (&json!("deploy-1"), &json!("Again"), &json!("active"))
+    );
+    assert!(row["updated_at"].as_i64() > before["artifact"]["updated_at"].as_i64());
+    // A submission id is one on the whole Host: answers under one another agent used are
+    // another submission under a used id.
+    let mut theirs = envelope("vera-spec");
+    theirs["session"] = json!(vera);
+    assert_eq!(ask("POST", "/artifacts", capable, Some(&theirs)).0, 201);
+    let mut shared = sent.clone();
+    shared["submission_id"] = json!("shared-answer-000001");
+    assert_eq!(
+        ask(
+            "POST",
+            "/artifacts/vera-spec/submit",
+            capable,
+            Some(&shared)
+        )
+        .0,
+        200
+    );
+    assert_eq!(
+        ask("POST", "/artifacts", capable, Some(&envelope("theo-spec"))).0,
+        201
+    );
+    assert_eq!(
+        ask(
+            "POST",
+            "/artifacts/theo-spec/submit",
+            capable,
+            Some(&shared)
+        ),
+        (409, refusal("reused_id", "/submission_id"))
+    );
+    // Answers that do not want the reply spoken, sent again the same.
+    let mut quiet = sent.clone();
+    quiet["submission_id"] = json!("quiet-answer-000001");
+    quiet["synthesize_audio"] = json!(false);
+    let (status, receipt) = ask("POST", "/artifacts/theo-spec/submit", capable, Some(&quiet));
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(
+        ask("POST", "/artifacts/theo-spec/submit", capable, Some(&quiet)).0,
+        200
+    );
+    let (_, read) = ask("GET", "/artifacts/theo-spec", capable, None);
+    assert!(read["artifact"]["completed_at"].as_i64().is_some());
     // A spec that was answered is not revised.
     let mut closed = envelope("answered");
     closed["payload"]["version"] = json!("build-2");
@@ -6818,6 +7022,31 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         "the tool is no app"
     );
 
+    let refused_request = envelope("tool-refused");
+    let mut refused_request = refused_request;
+    refused_request["session"] = json!("nobody");
+    std::fs::write(work.join("nobody.json"), refused_request.to_string()).unwrap();
+    let (code, out, err) = artifacts(&["publish-render-spec", "nobody.json"]);
+    assert_eq!(code, 1, "{out}");
+    let printed: Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(printed, refusal("not_open", "/session"));
+    let payload = form.to_string();
+    let (code, out, err) = artifacts(&[
+        "create",
+        &theo,
+        "render_spec",
+        "Made by create",
+        "",
+        &payload,
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let created: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (&created["type"], &created["title"]),
+        (&json!("render_spec"), &json!("Made by create"))
+    );
+    assert!(created.get("spec").is_none() && created.get("content_omitted").is_none());
+
     // "-0" is the whole number 0, and its canonical bytes are "0".
     let mut zero = envelope("minus-zero");
     zero["payload"]["answer_schema"]["properties"]["count"] = json!({ "type": "integer" });
@@ -6857,6 +7086,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         read["artifact"]["submission"]["delivery_status"],
         "delivered"
     );
+    assert_eq!(read["artifact"]["submission"]["answers"], sent["answers"]);
     let told: Vec<(String, String)> = host.conversation(&theo);
     assert_eq!(told.iter().filter(|(_, text)| text == message).count(), 1);
 }

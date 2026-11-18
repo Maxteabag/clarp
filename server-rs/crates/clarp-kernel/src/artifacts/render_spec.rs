@@ -146,7 +146,7 @@ impl Refusal {
     /// refusals file. While the catalog cannot be loaded every refusal is that one.
     pub fn triple(&self, catalog: Result<&Catalog, Unavailable>) -> Value {
         match catalog {
-            Ok(catalog) if self.code != CATALOG_UNAVAILABLE => json!({
+            Ok(catalog) => json!({
                 "code": self.code,
                 "path": self.path,
                 "message": catalog.reason(self.code),
@@ -468,7 +468,7 @@ impl ArtifactBook {
                 }
                 let current = old.payload.get("version").and_then(Value::as_str);
                 let follows = expected.and_then(J::str);
-                if follows.is_none() || follows != current || version == follows {
+                if follows != current || version == follows {
                     return no("version_mismatch", "/expected_version");
                 }
             }
@@ -558,10 +558,11 @@ impl ArtifactBook {
         let admitted = admit(catalog, artifact_id, &payload, &form.status, data, before)
             .map_err(Refusal::refused)?;
         let (payload_hash, answers_json, synthesize_audio) = match admitted {
+            // The same answers to the same spec: their submission is this spec's.
             Admitted::Repeat => {
-                let (theirs, submission) = previous
+                let (_, submission) = previous
                     .ok_or_else(|| Refusal::new("reused_id", "/submission_id").refused())?;
-                return Ok((form.clone(), submission.receipt(theirs), false));
+                return Ok((form.clone(), submission.receipt(artifact_id), false));
             }
             Admitted::New {
                 payload_hash,
