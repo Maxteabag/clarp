@@ -52,9 +52,6 @@ const KEPT_FOR: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// the whole of what was said, not a guess along the way: it waits rather than be dropped.
 const WAITS: Duration = Duration::from_secs(10);
 
-/// How many of the fleet's names an engine is asked to listen for.
-const NAMES: usize = 40;
-
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
@@ -397,23 +394,6 @@ fn refuse(status: StatusCode, why: impl Into<String>) -> Told {
 }
 
 /// The names an engine is asked to listen for: what the agents on this Host are called.
-fn names(app: &App) -> String {
-    let directory = app.fleet.directory();
-    let mut names: Vec<&str> = Vec::new();
-    for member in &directory.members {
-        let record = &member.record;
-        let there = record.deleted_at_ms.is_none() && record.archived_at_ms.is_none();
-        let name = record.persona.trim();
-        if there && !name.is_empty() && !name.contains(',') && !names.contains(&name) {
-            names.push(name);
-        }
-        if names.len() == NAMES {
-            break;
-        }
-    }
-    names.join(", ")
-}
-
 /// `POST /transcribe`: a clip of speech is the body. Headers say which engine the app asks
 /// for (`X-Transcription-Model`), what the job is called (`X-Transcription-ID`) and whether
 /// it was said hands-free (`X-Hands-Free`). Answered with the text and the trace the
@@ -479,14 +459,19 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let directory = app.fleet.directory();
     let (own, language) = spoken_to(&directory, &ears.language);
     let order = ears.order(&requested, &own, &ears.default_engine(&directory));
-    let listen_for = names(app);
+    let trace=ids::hex(8);
+    let session=directory.focus.as_deref().and_then(|id|directory.named(id)).map_or("",|m|m.record.session.as_str());
+    let selected=order.first().map_or(requested.as_str(),String::as_str);
+    let began=std::time::Instant::now();
+    let (audit,run_id)=crate::vocabulary::compile(app,session,selected,hands_free,Some(&trace)).await.unwrap_or_default();
+    let listen_for=audit["payload"].as_str().unwrap_or("");
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
         let heard = ears
             .heard_by(
                 model,
                 &language,
-                &listen_for,
+                listen_for,
                 (&audio, content_type.as_str()),
             )
             .await;
@@ -523,7 +508,11 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
     let text = heard::kept(&heard::joined(&said.segments));
-    let mut answer = heard::answer(&text, &ids::hex(8), hands_free);
+    let mut answer = heard::answer(&text, &trace, hands_free);
+    if run_id>0 {
+        crate::vocabulary::finish(app.config.data_dir.clone(),run_id,text.clone(),began.elapsed().as_millis() as i64).await;
+        answer["vocab_run_id"]=json!(run_id);
+    }
     // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
     // the app is told, and sends nothing.
     if !text.is_empty() && app.mouth.heard(&text).await {

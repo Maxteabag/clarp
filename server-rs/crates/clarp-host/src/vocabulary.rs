@@ -1,10 +1,13 @@
 //! The vocabulary managed through the app. Database work runs outside the
 //! request runtime; each change commits its pack, terms and assignments together.
 use std::collections::HashMap;
-use axum::{Json,Router,body::Bytes,extract::{OriginalUri,Query,State},http::StatusCode,routing::{get,post}};
+use axum::{Json,Router,body::Bytes,extract::{Query,State},http::{StatusCode,Uri},routing::{get,post}};
 use serde_json::{Value,json};
 use crate::edge::{App,ApiError};
 mod store;
+mod compile;
+mod workspace;
+pub(crate) use compile::{compile,finish,stream_run};
 
 async fn perform(app:&App,action:String,data:Value,write:bool)->Result<Json<Value>,ApiError>{
     let root=app.config.data_dir.clone();
@@ -23,11 +26,16 @@ async fn perform(app:&App,action:String,data:Value,write:bool)->Result<Json<Valu
     result.map(Json).map_err(|(status,why)|ApiError::new(status,why))
 }
 
-async fn view(State(app):State<App>,OriginalUri(uri):OriginalUri,Query(query):Query<HashMap<String,String>>)->Result<Json<Value>,ApiError>{
+async fn view(State(app):State<App>,uri:Uri,Query(query):Query<HashMap<String,String>>)->Result<Json<Value>,ApiError>{
+    if uri.path()=="/vocab/preview"{
+        let word=|k:&str|query.get(k).map_or("",String::as_str);
+        let delegated=clarp_kernel::heard::truthy(Some(word("delegated")));
+        return compile(&app,word("session"),word("model"),delegated,None).await.map(|(audit,_)|Json(audit)).map_err(|(status,why)|ApiError::new(status,why));
+    }
     perform(&app,uri.path().trim_start_matches("/vocab/").into(),json!(query),false).await
 }
 
-async fn edit(State(app):State<App>,OriginalUri(uri):OriginalUri,body:Bytes)->Result<Json<Value>,ApiError>{
+async fn edit(State(app):State<App>,uri:Uri,body:Bytes)->Result<Json<Value>,ApiError>{
     let data:Value=serde_json::from_slice(&body).ok().filter(Value::is_object).ok_or_else(||ApiError::new(StatusCode::BAD_REQUEST,"bad json"))?;
     perform(&app,uri.path().trim_start_matches("/vocab/").into(),data,true).await
 }
@@ -35,7 +43,7 @@ async fn edit(State(app):State<App>,OriginalUri(uri):OriginalUri,body:Bytes)->Re
 pub fn routes()->Router<App>{
     let mut routes=Router::new();
     for path in ["/vocab/packs","/vocab/terms","/vocab/profiles"] {routes=routes.route(path,get(view).post(edit));}
-    for path in ["/vocab/profile","/vocab/assignments","/vocab/runs","/vocab/run"] {routes=routes.route(path,get(view));}
+    for path in ["/vocab/profile","/vocab/assignments","/vocab/runs","/vocab/run","/vocab/preview"] {routes=routes.route(path,get(view));}
     for path in ["/vocab/packs/update","/vocab/packs/delete","/vocab/terms/update","/vocab/terms/delete","/vocab/profiles/delete","/vocab/profiles/workspace","/vocab/profiles/packs","/vocab/profiles/packs/remove","/vocab/assign","/vocab/unassign"] {routes=routes.route(path,post(edit));}
     routes
 }
