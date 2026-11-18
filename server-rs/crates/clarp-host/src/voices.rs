@@ -303,7 +303,7 @@ async fn preview(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    match app.mouth.preview(&provider, voice, &said, &kept_as).await {
+    match app.mouth.preview(&provider, voice, &said, Some(&kept_as)).await {
         Ok(preview) => preview.send(&header_text(&headers, "range")),
         Err(why) => {
             eprintln!("clarp-host: a preview of a voice could not be made: {why}");
@@ -379,7 +379,7 @@ async fn cartesia_preview(
         "{:x}",
         Sha256::digest(format!("v1\0{id}\0{name}\0{model}\0{prompt}").as_bytes())
     );
-    match app.mouth.preview("cartesia", id, &prompt, &key).await {
+    match app.mouth.preview("cartesia", id, &prompt, Some(&key)).await {
         Ok(p) => p.send(&header_text(&headers, "range")),
         Err(_) => ApiError::plain(StatusCode::BAD_GATEWAY, "preview unavailable").into_response(),
     }
