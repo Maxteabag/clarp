@@ -264,6 +264,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::chip::run(&app, is_limited);
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
+    // And a handoff of the Oracle's that a phone does not get on with is not waited for.
+    clarp_host::oracle::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.
     clarp_host::heartbeat::run(&app);
     // And a janitor's scheduled task is run when its schedule says.

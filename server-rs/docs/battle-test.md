@@ -1332,6 +1332,18 @@ The relay was back 64 ms after the start, and the Host's 23 agents were as befor
 What stands open of this, for the owner's own test once everything is built: a call from his phone, with
 his voice, his router and his agents.
 
+## After the reference's contract 101, and with what agents finished (18 Nov 2026, L36)
+
+The installed Host is `5a43170fc86c`, installed at 15:34:18, without the word for a push key; the relay was
+back 68 ms after the start, and its 23 agents were as before (`verify-rows.py`). It says the contract the
+Python Host has since the release owner's fix of that day (`GET /server-info`: `contract.host` 101), and
+answers of the Oracle at its door as the build before it did. What it does with a ring that is pushed as a
+call (to which phones, and with or without why the agent calls) and what a call's voice is told of what
+agents finished cannot be shown at this door without a key at the push service or a call: both are held by
+the vectors made against the fixed reference, by the tests, and by the wrong rules those tests caught on the
+commit that is installed (what agents finished 78 of 78, the call 93 of 93, the conversation 475 of 475, the
+delegations 165 of 165).
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

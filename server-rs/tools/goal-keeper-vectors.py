@@ -441,8 +441,10 @@ def when_a_goal_is_due(w: World) -> None:
     looked: dict = {}
     seen_of, flag_of = goal_keeper._seen, goal_keeper._needs_stall_flag
 
-    def seen(con, row, now, watch, *, full=False):
-        found = seen_of(con, row, now, watch, full=full)
+    def seen(con, row, now, watch, *, full=False, **more):
+        # Whatever else the keeper hands its own function (since PR 417 what it remembers between two passes)
+        # goes on to it as it came.
+        found = seen_of(con, row, now, watch, full=full, **more)
         looked.setdefault(row['plan_id'], {}).update(
             full=full, triggers=[list(t) for t in found.triggers], status_change=found.status_change,
             any_messages=found.any_messages)

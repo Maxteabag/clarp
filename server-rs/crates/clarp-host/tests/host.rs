@@ -24930,24 +24930,24 @@ fn stand_in_live_voice() -> LiveVoice {
                 stream
                     .set_read_timeout(Some(Duration::from_secs(30)))
                     .unwrap();
-                let shown = Arc::new(Mutex::new(String::new()));
-                let seen = shown.clone();
+                // The key is kept before the answer is written, so that whoever is refused
+                // finds it the moment they are.
                 #[allow(clippy::result_large_err)]
                 let note =
                     move |request: &tungstenite::handshake::server::Request,
                           response: tungstenite::handshake::server::Response| {
                         let key = request.headers().get("authorization");
                         let key = key.and_then(|key| key.to_str().ok()).unwrap_or("");
-                        *seen.lock().unwrap() = key.to_string();
+                        keys.lock().unwrap().push(key.to_string());
                         if key != "Bearer a-key-of-the-test" {
                             let refused = tungstenite::http::Response::builder().status(401);
                             return Err(refused.body(None).unwrap());
                         }
                         Ok(response)
                     };
-                let opened = tungstenite::accept_hdr(stream, note);
-                keys.lock().unwrap().push(shown.lock().unwrap().clone());
-                let Ok(mut socket) = opened else { return };
+                let Ok(mut socket) = tungstenite::accept_hdr(stream, note) else {
+                    return;
+                };
                 let says = |socket: &mut tungstenite::WebSocket<TcpStream>, said: Value| {
                     let _ = socket.send(tungstenite::Message::Text(said.to_string().into()));
                 };
@@ -26511,15 +26511,26 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
         host.get("/oracle/calls/status"),
         json!({ "delegations": [] })
     );
-    for (path, body) in [
-        ("/oracle/handoff", json!({ "session": "theo" })),
-        ("/oracle/v2/calls/control", json!({ "action": "end" })),
-    ] {
-        let (status, said) = host.ask("POST", path, Some(&body));
-        let why = said["error"].as_str().unwrap_or("");
-        assert_eq!(status, 501, "{path}: {said}");
-        assert!(why.ends_with("not built on this Host yet"), "{path}: {why}");
-    }
+    // What a call is steered with while it is carried is not built, and says so. What a call
+    // was put through to is read, not written: the Python Host has no such route either.
+    let (status, said) = host.ask(
+        "POST",
+        "/oracle/v2/calls/control",
+        Some(&json!({ "action": "end" })),
+    );
+    let why = said["error"].as_str().unwrap_or("");
+    assert_eq!(status, 501, "{said}");
+    assert!(why.ends_with("not built on this Host yet"), "{why}");
+    let written = host.ask(
+        "POST",
+        "/oracle/handoff",
+        Some(&json!({ "session": "theo" })),
+    );
+    assert_eq!(
+        written,
+        (404, Value::Null),
+        "no route of that name is written to"
+    );
 
     // A contact is chosen by what an agent is called, whatever the case and the blanks
     // around it, or by its session: what is kept is the session.
@@ -27434,24 +27445,24 @@ fn stand_in_oracle_voice() -> OracleVoice {
             stream
                 .set_read_timeout(Some(Duration::from_secs(30)))
                 .unwrap();
-            let shown = Arc::new(Mutex::new(String::new()));
-            let seen = shown.clone();
+            // The key is kept before the answer is written: whoever is refused may look for
+            // it the moment they are (a Host under load was answered, and had answered its
+            // phone, before the key was kept: 18 Nov 2026).
+            let seen = keys.clone();
             #[allow(clippy::result_large_err)]
             let note =
                 move |request: &tungstenite::handshake::server::Request,
                       response: tungstenite::handshake::server::Response| {
                     let key = request.headers().get("authorization");
                     let key = key.and_then(|key| key.to_str().ok()).unwrap_or("");
-                    *seen.lock().unwrap() = key.to_string();
+                    seen.lock().unwrap().push(key.to_string());
                     if key != "Bearer a-key-of-the-test" {
                         let refused = tungstenite::http::Response::builder().status(401);
                         return Err(refused.body(None).unwrap());
                     }
                     Ok(response)
                 };
-            let opened = tungstenite::accept_hdr(stream, note);
-            keys.lock().unwrap().push(shown.lock().unwrap().clone());
-            if let Ok(socket) = opened {
+            if let Ok(socket) = tungstenite::accept_hdr(stream, note) {
                 let call = End::of(socket, answers.clone());
                 calls.lock().unwrap().push(call);
             }
@@ -27656,7 +27667,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
         ]),
         json!([1, 7, 8, 9, 15])
     );
-    assert!(has["oracle_handoff"].is_null() && has["oracle_gemini_voice"].is_null());
+    assert!(has["oracle_handoff"] == 22 && has["oracle_gemini_voice"].is_null());
 
     // What is no call is refused in plain words, as the Python Host refuses it, and neither
     // the voice nor the router is reached for it.
@@ -27764,7 +27775,12 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
     // The voice began: the phone is told so, and which thread its call goes on in.
     let context = |thread: &str, revision: i64| json!({ "type": "oracle_v2.context", "thread_id": thread, "items": [], "revision": revision });
     assert_eq!(call.told_of("oracle_v2.context", 1), [context(&thread, 0)]);
-    assert_eq!(call.told()[0], json!({ "type": "session.started" }));
+    // Before that it was told which call this is, since it asked for handoffs.
+    assert_eq!(
+        (&call.told()[0]["type"], &call.told()[0]["thread_id"]),
+        (&json!("oracle_v2.session"), &json!(thread))
+    );
+    assert_eq!(call.told()[1], json!({ "type": "session.started" }));
 
     // Sound goes from the phone to the voice, and what is no command of a phone's is said
     // to be none.
@@ -28562,6 +28578,482 @@ fn a_call_of_the_oracle_is_told_of_what_agents_finished_and_nobody_wrote_to_sinc
     spoken.ends();
     assert_eq!(spoken.of_kind("session.thinking.append").len(), 1);
     assert!(router.asked.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_call_of_the_oracle_is_put_through_to_an_agent_and_back() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("oracle-handoff");
+    let voice = stand_in_oracle_voice();
+    let router = stand_in_oracle_router();
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("CLARP_ROUTER_ENDPOINT", router.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let events = host.listen_at(&format!("/events?token={ADMIN}"));
+    let (theo, mike) = (host.new_agent("Theo"), host.new_agent("Mike"));
+    let (phone, phone_id) = pair(&host, "Phone", "full");
+    let info = host.get("/server-info");
+    assert_eq!(info["contract"]["features"]["oracle_handoff"], 22);
+    let host_id = info["server_id"].clone();
+    let asks = |token: &str, method: &str, path: &str, body: Value| {
+        host.ask_as(token, method, path, Some(&body))
+    };
+    let connect = |token: &str, said: Value| asks(token, "POST", "/oracle/connect", said);
+    let shown = |token: &str| host.ask_as(token, "GET", "/oracle/handoff", None).1;
+    // What the apps were told of a handoff, in its order: each state it came to.
+    let told_the_apps = |id: &str| -> Vec<String> {
+        let events = events.lock().unwrap();
+        let of = |event: &&Value| event["type"] == "oracle-handoff" && event["handoff_id"] == id;
+        let states = events.iter().filter(of);
+        states
+            .map(|event| event["state"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // A phone that has no handoff is shown none, with who it is and which Host this is. The
+    // administrator is shown its own, which is none, or that of the phone it names.
+    let none = shown(&phone);
+    assert_eq!(
+        none,
+        json!({
+            "principal": phone_id, "host_id": host_id, "server_now": none["server_now"],
+            "handoff": null, "active": null,
+        })
+    );
+    assert_eq!(shown(ADMIN)["principal"], "administrator");
+    let of_the_phone = format!("/oracle/handoff?principal={phone_id}");
+    let named = host.ask_as(ADMIN, "GET", &of_the_phone, None).1;
+    assert_eq!(named["principal"], phone_id.as_str());
+    // Without a call there is nothing to put through; and what names no agent is refused.
+    assert_eq!(
+        connect(&phone, json!({ "agent": theo })),
+        (404, json!({ "ok": false, "error": "no live Oracle call" }))
+    );
+    assert_eq!(
+        connect(&phone, json!({})),
+        (400, json!({ "ok": false, "error": "agent required" }))
+    );
+    let nothing = host.ask_as(&phone, "POST", "/oracle/connect", Some(&json!([1])));
+    assert_eq!(nothing, (400, json!({ "error": "bad json" })));
+    let unknown = json!({ "handoff_id": format!("hof_{}", "0".repeat(32)), "generation": 1, "phase": "ready" });
+    assert_eq!(
+        asks(&phone, "POST", "/oracle/handoffs/ack", unknown),
+        (404, json!({ "ok": false, "error": "unknown_handoff" }))
+    );
+
+    let open = |query: &str, number: usize| {
+        let door = socket_at(&host, &phone, &format!("/oracle/v2{query}"));
+        let call = End::of_a_phone(door.expect("a call is opened"));
+        let spoken = voice.call(number);
+        spoken.told_of("session.start", 1);
+        call.told_of("oracle_v2.context", 1);
+        (call, spoken)
+    };
+    let hangs_up = |call: &End, spoken: &End| {
+        call.says(&json!({ "type": "session.close" }));
+        call.ends();
+        spoken.ends();
+    };
+    // A call whose phone did not ask for handoffs is not offered one, and is told nothing
+    // of which call it is.
+    let (call, spoken) = open("", 0);
+    assert!(call.of_kind("oracle_v2.session").is_empty());
+    assert_eq!(
+        connect(&phone, json!({ "agent": theo })),
+        (409, json!({ "ok": false, "error": "handoff_unsupported" }))
+    );
+    hangs_up(&call, &spoken);
+
+    // A phone that asks for handoffs is told which call this is, before anything else: in
+    // a call that goes to the contact alone, before it is told that no router is asked.
+    let contact = json!({ "session": theo });
+    assert_eq!(host.ask("POST", "/oracle/contact", Some(&contact)).0, 200);
+    let (call, spoken) = open("?delegation_strategy=direct_contact&handoff=hands_free", 1);
+    let first: Vec<Value> = call
+        .told()
+        .iter()
+        .take(2)
+        .map(|said| said["type"].clone())
+        .collect();
+    assert_eq!(
+        first,
+        [json!("oracle_v2.session"), json!("oracle_v2.routing_mode")]
+    );
+    hangs_up(&call, &spoken);
+    let (call, spoken) = open("?handoff=hands_free", 2);
+    let this = call.told()[0].clone();
+    let name = this["voice_session_id"].as_str().unwrap().to_string();
+    assert_eq!(
+        this,
+        json!({
+            "type": "oracle_v2.session", "host_id": host_id, "principal": phone_id,
+            "voice_session_id": name, "provider_session": name,
+            "thread_id": this["thread_id"], "handoff_id": null, "server_now": this["server_now"],
+        })
+    );
+    assert!(
+        name.len() == 32
+            && this["thread_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("oracle-"))
+    );
+    // Somebody nobody knows, and two names for the administrator to choose between.
+    assert_eq!(
+        connect(&phone, json!({ "agent": "nobody" })),
+        (404, json!({ "ok": false, "error": "unknown agent" }))
+    );
+
+    // The call is put through to an agent, by the administrator, who is kept waiting while
+    // the phone goes there step by step.
+    let ack = |id: &Value, generation: &Value, phase: &str| {
+        let said = json!({ "handoff_id": id, "generation": generation, "phase": phase });
+        asks(&phone, "POST", "/oracle/handoffs/ack", said)
+    };
+    let id = std::thread::scope(|scope| {
+        let asked = scope.spawn(|| connect(ADMIN, json!({ "agent": "theo" })));
+        // The phone hears the agent's chime and is shown the offer on the call's own socket.
+        let offer = call.told_of("oracle_v2.handoff", 1)[0].clone();
+        let id = offer["handoff_id"].clone();
+        assert_eq!(
+            offer,
+            json!({
+                "type": "oracle_v2.handoff", "handoff_id": id, "parent_handoff_id": "",
+                "host_id": host_id, "principal": phone_id, "generation": 1, "revision": 1,
+                "direction": "oracle_to_agent", "mode": "hands_free", "state": "offered",
+                "reason": "", "oracle_call": "running",
+                "agent": { "session": theo, "agent_id": offer["agent"]["agent_id"], "persona": "Theo" },
+                "oracle": {
+                    "voice_session_id": name, "provider_session": name,
+                    "thread_id": this["thread_id"],
+                },
+                "issued_at": offer["issued_at"], "server_now": offer["issued_at"],
+                "ttl_ms": 10_000, "expires_at": offer["issued_at"].as_i64().unwrap() + 10_000,
+            })
+        );
+        let cue = json!({ "type": "oracle_v2.cue", "name": "connected", "agent": "Theo" });
+        assert_eq!(call.told_of("oracle_v2.cue", 1), [cue]);
+        // While it is offered, nothing else is: not by the phone, not by the administrator.
+        let id_text = id.as_str().unwrap();
+        wait_for("the apps to be told of the offer", || {
+            told_the_apps(id_text) == ["offered"]
+        });
+        // The administrator names a phone that has no call: nothing is offered beside it.
+        let elsewhere = json!({ "agent": "theo", "principal": "device_nobody" });
+        assert_eq!(
+            connect(ADMIN, elsewhere),
+            (404, json!({ "ok": false, "error": "no live Oracle call" }))
+        );
+        // The phone prepares: the call is held, and what the Oracle is doing is not known.
+        let (status, prepared) = ack(&id, &json!(1), "preparing");
+        assert_eq!(
+            (
+                status,
+                &prepared["handoff"]["state"],
+                &prepared["handoff"]["oracle_call"]
+            ),
+            (200, &json!("preparing"), &json!("unknown"))
+        );
+        // What the user says while the call is held is not routed: the router is not asked.
+        spoken.says(&heard_by_the_voice("Never mind the pump.", 0, 600));
+        spoken.says(&wanted_by_the_voice("del-held"));
+        // A number that is not the handoff's, and a step that is none from here.
+        assert_eq!(
+            ack(&id, &json!(2), "activating").1["error"],
+            "stale_generation"
+        );
+        assert_eq!(
+            ack(&id, &json!(1), "ready").1["error"],
+            "illegal_transition"
+        );
+        assert_eq!(
+            ack(&id, &json!(1), "activating").1["handoff"]["state"],
+            "activating"
+        );
+        // While it is being activated nothing else is offered.
+        assert_eq!(
+            connect(&phone, json!({ "agent": mike })),
+            (409, json!({ "ok": false, "error": "handoff in progress" }))
+        );
+        let (status, there) = ack(&id, &json!(1), "ready");
+        assert_eq!(
+            (status, &there["handoff"]["state"]),
+            (200, &json!("active"))
+        );
+        let settled_at = Instant::now();
+        // Said again, it is answered as it was.
+        assert_eq!(ack(&id, &json!(1), "ready").1["handoff"]["revision"], 4);
+        // Whoever asked is answered now, and not when every step's time is up: the phone is
+        // with the agent.
+        let (status, answered) = asked.join().unwrap();
+        assert!(settled_at.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            (
+                status,
+                &answered["ok"],
+                &answered["state"],
+                &answered["handoff_id"]
+            ),
+            (200, &json!(true), &json!("active"), &id)
+        );
+        id
+    });
+    let id_text = id.as_str().unwrap();
+    wait_for("the apps to be told of every step", || {
+        told_the_apps(id_text) == ["offered", "preparing", "activating", "active"]
+    });
+    assert_eq!(call.told_of("oracle_v2.handoff", 4).len(), 4);
+    // The phone is shown what it is with an agent by, and the Host's focus followed the user
+    // to that agent.
+    let now = shown(&phone);
+    assert_eq!(
+        host.get("/agents/snapshot")["focus"],
+        now["active"]["agent"]["agent_id"]
+    );
+    assert_eq!(
+        (&now["handoff"]["state"], &now["active"]["handoff_id"]),
+        (&json!("active"), &id)
+    );
+    // The call was held from the moment its phone began to prepare: what the user said then
+    // is not routed, however long the call stays open.
+    std::thread::sleep(Duration::from_millis(1600));
+    assert!(router.asked.lock().unwrap().is_empty());
+    // The phone leaves the call of the Oracle, and names the handoff it leaves it for.
+    call.says(&json!({ "type": "session.close", "handoff_id": id }));
+    call.ends();
+    spoken.ends();
+    wait_for("the call of the Oracle to be closed", || {
+        shown(&phone)["active"]["oracle_call"] == "closed"
+    });
+
+    // Back to the Oracle. The way back is offered to the apps; the phone opens a call that
+    // names it, and is told that this call is the way back.
+    let back = std::thread::scope(|scope| {
+        let asked = scope.spawn(|| connect(ADMIN, json!({ "agent": "Oracle" })));
+        wait_for("the way back to be offered", || {
+            shown(&phone)["handoff"]["direction"] == "agent_to_oracle"
+        });
+        let offered = shown(&phone)["handoff"].clone();
+        let back = offered["handoff_id"].clone();
+        assert_eq!(
+            (
+                &offered["parent_handoff_id"],
+                &offered["generation"],
+                &offered["state"]
+            ),
+            (&id, &json!(2), &json!("offered"))
+        );
+        // A second way back is not offered beside it.
+        assert_eq!(
+            connect(&phone, json!({ "agent": "oracle" })),
+            (409, json!({ "ok": false, "error": "handoff in progress" }))
+        );
+        assert_eq!(ack(&back, &json!(2), "preparing").0, 200);
+        let query = format!("?handoff=hands_free&handoff_id={}", back.as_str().unwrap());
+        let (call, spoken) = open(&query, 3);
+        assert_eq!(call.told()[0]["handoff_id"], back);
+        assert_eq!(ack(&back, &json!(2), "activating").0, 200);
+        let (status, home) = ack(&back, &json!(2), "ready");
+        assert_eq!(
+            (
+                status,
+                &home["handoff"]["state"],
+                &home["handoff"]["reason"]
+            ),
+            (200, &json!("ended"), &json!("returned"))
+        );
+        let (status, answered) = asked.join().unwrap();
+        assert_eq!((status, &answered["state"]), (200, &json!("ended")));
+        // The phone hears that it is back, and the voice is told so in a word.
+        let cue = json!({ "type": "oracle_v2.cue", "name": "back_to_oracle" });
+        assert_eq!(call.told_of("oracle_v2.cue", 1), [cue]);
+        let word = spoken.told_with("session.thinking.append", "returned_from_agent");
+        let fact =
+            r#"Host event, reference data: {"host_event": "returned_from_agent", "agent": "Theo"}"#;
+        assert_eq!(word["content"], fact);
+        (back, call, spoken)
+    });
+    let (back, call, spoken) = back;
+    let back_text = back.as_str().unwrap();
+    wait_for("the apps to be told of the way back", || {
+        told_the_apps(back_text) == ["offered", "preparing", "activating", "ended"]
+            && told_the_apps(id_text).last().map(String::as_str) == Some("ended")
+    });
+    assert_eq!(shown(&phone)["active"], Value::Null);
+
+    // A phone that began to prepare and has the call of the Oracle again: the handoff failed,
+    // the phone hears so, the voice is told in a word, and the call is fed again: what the
+    // user says is routed.
+    std::thread::scope(|scope| {
+        let asked = scope.spawn(|| connect(&phone, json!({ "agent": mike })));
+        let offer = call.told_of("oracle_v2.handoff", 1)[0].clone();
+        let (third, generation) = (offer["handoff_id"].clone(), offer["generation"].clone());
+        assert_eq!(generation, 3);
+        assert_eq!(ack(&third, &generation, "preparing").0, 200);
+        let (status, again) = ack(&third, &generation, "rolled_back");
+        let again = &again["handoff"];
+        assert_eq!(
+            (
+                status,
+                &again["state"],
+                &again["reason"],
+                &again["oracle_call"]
+            ),
+            (
+                200,
+                &json!("failed"),
+                &json!("rolled_back"),
+                &json!("running")
+            )
+        );
+        let (status, refused) = asked.join().unwrap();
+        let why = "the handoff did not happen (failed: rolled_back)";
+        assert_eq!(
+            (status, &refused["ok"], &refused["error"]),
+            (409, &json!(false), &json!(why))
+        );
+        assert_eq!(refused["handoff"]["handoff_id"], third);
+    });
+    let word = spoken.told_with("session.thinking.append", "handoff_failed");
+    let fact = r#"Host event, reference data: {"host_event": "handoff_failed", "agent": "Mike", "reason": "rolled_back"}"#;
+    assert_eq!(word["content"], fact);
+    assert_eq!(call.told_of("oracle_v2.cue", 3)[2]["name"], "switch_failed");
+    assert!(router.asked.lock().unwrap().is_empty());
+    spoken.says(&heard_by_the_voice("How is Theo?", 0, 600));
+    spoken.says(&wanted_by_the_voice("del-fed-again"));
+    router.question(0);
+
+    // An agent asks for it with its own tool, and a phone that does not answer the offer is
+    // not waited for longer than an offer may take: the call is told that it failed.
+    let offered_at = Instant::now();
+    let (code, printed, complained) = tool(
+        &host,
+        &place.root,
+        None,
+        &["clarp-admin", "oracle", "connect", "Mike"],
+    );
+    let printed: Value =
+        serde_json::from_str(&printed).unwrap_or_else(|_| panic!("{printed} {complained}"));
+    assert_eq!(
+        (code, &printed["ok"], &printed["error"]),
+        (
+            1,
+            &json!(false),
+            &json!("the handoff did not happen (failed: no_ack)")
+        )
+    );
+    let waited = offered_at.elapsed();
+    assert!(
+        waited >= Duration::from_secs(9) && waited < Duration::from_secs(25),
+        "{waited:?}"
+    );
+    assert_eq!(
+        (
+            &printed["handoff"]["agent"]["session"],
+            &printed["handoff"]["state"]
+        ),
+        (&json!(mike), &json!("failed"))
+    );
+    let cues = call.told_of("oracle_v2.cue", 5);
+    assert_eq!(
+        (&cues[3], &cues[4]["name"]),
+        (
+            &json!({ "type": "oracle_v2.cue", "name": "connected", "agent": "Mike" }),
+            &json!("switch_failed")
+        )
+    );
+    // An offer nobody answered is no word to the voice: only the one the phone rolled back
+    // was.
+    std::thread::sleep(Duration::from_millis(300));
+    let words = spoken.of_kind("session.thinking.append");
+    let of_a_failure = |said: &&Value| {
+        let text = said["content"].as_str().unwrap_or("");
+        text.contains("handoff_failed")
+    };
+    assert_eq!(words.iter().filter(of_a_failure).count(), 1, "{words:?}");
+    // The tool names the phone whose call it means, where the administrator must.
+    let elsewhere = [
+        "clarp-admin",
+        "oracle",
+        "connect",
+        "Mike",
+        "--principal",
+        "device_nobody",
+    ];
+    let (code, printed, _) = tool(&host, &place.root, None, &elsewhere);
+    let printed: Value = serde_json::from_str(&printed).unwrap();
+    assert_eq!(
+        (code, printed),
+        (1, json!({ "ok": false, "error": "no live Oracle call" }))
+    );
+    // What the tool is told where it is asked wrongly, in the Python tool's words.
+    let wrongly = |args: &[&str]| {
+        let mut line = vec!["clarp-admin", "oracle"];
+        line.extend(args);
+        let (code, _, complained) = tool(&host, &place.root, None, &line);
+        (code, complained.trim_end().to_string())
+    };
+    assert_eq!(
+        wrongly(&[]),
+        (
+            2,
+            "usage: clarp-admin oracle [-h] {connect} ...\nclarp-admin oracle: error: the following \
+             arguments are required: oracle_command"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        wrongly(&["bogus"]),
+        (
+            2,
+            "usage: clarp-admin oracle [-h] {connect} ...\nclarp-admin oracle: error: argument \
+             oracle_command: invalid choice: 'bogus' (choose from 'connect')"
+                .to_string()
+        )
+    );
+    assert_eq!(
+        wrongly(&["connect"]),
+        (
+            2,
+            "usage: clarp-admin oracle connect [-h] [--principal PRINCIPAL] agent\nclarp-admin \
+             oracle connect: error: the following arguments are required: agent"
+                .to_string()
+        )
+    );
+    // A phone that may only read and send has nothing to do with handoffs: the door keeps
+    // it out.
+    let (watch, _) = pair(&host, "Watch", "limited");
+    for (method, path) in [
+        ("GET", "/oracle/handoff"),
+        ("POST", "/oracle/connect"),
+        ("POST", "/oracle/handoffs/ack"),
+    ] {
+        let (status, why) = host.ask_as(&watch, method, path, Some(&json!({})));
+        assert_eq!(status, 403, "{method} {path}: {why}");
+    }
+    hangs_up(&call, &spoken);
+    assert_eq!(router.asked.lock().unwrap().len(), 1);
+
+    // What was kept of the handoffs is there after the Host was started again: the newest
+    // as it ended, and no talk with an agent.
+    let newest = shown(&phone)["handoff"].clone();
+    drop(host);
+    let host = place.start_in(ADMIN, &[], &world);
+    let kept = host.ask_as(&phone, "GET", "/oracle/handoff", None).1;
+    assert_eq!(
+        (
+            &kept["handoff"]["handoff_id"],
+            &kept["handoff"]["state"],
+            &kept["handoff"]["reason"]
+        ),
+        (&newest["handoff_id"], &json!("failed"), &json!("no_ack"))
+    );
+    assert_eq!(
+        (&kept["handoff"]["generation"], &kept["active"]),
+        (&json!(4), &Value::Null)
+    );
 }
 
 #[test]

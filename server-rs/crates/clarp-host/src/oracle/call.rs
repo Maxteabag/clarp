@@ -28,6 +28,7 @@ use clarp_kernel::oracle::conversation::{
     Begin, Conversation, Ids, Now, Phoned, Strategy, Thread, Waiting, Wire,
 };
 use clarp_kernel::oracle::delegations::Delegation;
+use clarp_kernel::oracle::handoffs::{self as handoff_rules, ToCall};
 use clarp_kernel::oracle::routing::{self, Fed, Route, Step};
 use clarp_kernel::oracle::threads::{self, Excerpt, Opened, Opening};
 use clarp_kernel::oracle::voice::{self, Beginning};
@@ -40,7 +41,7 @@ use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::memory::with_memory;
-use super::{agents, delegations, keep, router, tools};
+use super::{agents, delegations, handoffs, keep, router, tools};
 use crate::calls::{Voice, caller, dial};
 use crate::edge::{App, Principal};
 use crate::ids;
@@ -158,6 +159,10 @@ struct Asked {
     contact: String,
     thread_id: Option<String>,
     fresh: bool,
+    /// Its phone takes handoffs: the call can be put through to an agent.
+    handoff: bool,
+    /// The handoff this call is the way back of, when it is one.
+    handoff_id: String,
 }
 
 /// The values a request names a thing with, in their order: a thing may be named more than
@@ -233,6 +238,8 @@ impl Asked {
                 .first()
                 .map(|id| (*id).to_string()),
             fresh,
+            handoff: !named(query, "handoff").is_empty(),
+            handoff_id: handoff_id.to_string(),
         })
     }
 }
@@ -550,6 +557,25 @@ impl Session<'_> {
         }
     }
 
+    /// Something the desk of the handoffs says to tell this call.
+    fn handoff(&mut self, what: ToCall) {
+        let now = self.now();
+        let (machine, said) = (&mut self.machine, &mut self.said);
+        match what {
+            ToCall::Session(frame) => said.phone(frame),
+            ToCall::Offer(persona) => machine.handoff_offer(&persona, said, now),
+            ToCall::Mirror(record) => machine.handoff_mirror(&record, said),
+            ToCall::Hold => machine.handoff_hold(),
+            ToCall::Resume => machine.handoff_resume(),
+            ToCall::Failed {
+                persona,
+                reason,
+                note,
+            } => machine.handoff_failed((&persona, &reason, note), said, now),
+            ToCall::Returned(persona) => machine.handoff_returned(&persona, said, now),
+        }
+    }
+
     /// Time passes: what waits for the user is read where the call says it is the moment.
     async fn ticked(&mut self) {
         let now = self.now();
@@ -700,8 +726,24 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
         doing: None,
         came,
     };
+    // From here on the call can be put through to an agent, where its phone asked for that:
+    // the phone is told which call this is before anything else of it, and before the voice
+    // is told that the call begins.
+    let known = handoff_rules::Call {
+        principal: call.owner.clone(),
+        voice_session_id: call.token.clone(),
+        provider_session: call.token.clone(),
+        thread_id: call.thread_id.clone(),
+        capable: call.asked.handoff,
+        handoff_id: call.asked.handoff_id.clone(),
+        held: false,
+    };
+    let mut handoff_tells = handoffs::opened(app, known).await;
+    while let Ok(what) = handoff_tells.try_recv() {
+        session.handoff(what);
+    }
     if direct {
-        // A phone that asked for it is told first that no router is asked in this call.
+        // A phone that asked for it is told that no router is asked in this call.
         session.said.phone(json!({
             "type": "oracle_v2.routing_mode",
             "strategy": call.asked.strategy.word(),
@@ -761,6 +803,8 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
             // A later call of the same phone takes this one's place.
             Some(()) = stopped.recv() => break Ending::Replaced,
             Some(came) = comes.recv() => session.came(came).await,
+            // What became of a handoff of this call, as its desk says to tell it.
+            Some(what) = handoff_tells.recv() => session.handoff(what),
             said = voice.next() => {
                 let event = match said {
                     Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(text.as_str()).ok(),
@@ -824,6 +868,7 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
     }
     let _ = voice.close(None).await;
     line.tell(Told::Close(ENDED_WELL, String::new())).await;
+    handoffs::closed(app, &call.owner, &call.token).await;
 }
 
 pub(super) fn routes() -> Router<App> {
