@@ -48,7 +48,7 @@ const ENDS_WITHIN: Duration = Duration::from_secs(2);
 
 /// Records completed turns and retains their WAV only while the setting is enabled.
 struct Named {
-    vocab:crate::vocabulary::Desk,
+    vocab: crate::vocabulary::Desk,
     session: String,
     model: String,
     fleet: crate::fleet::FleetHandle,
@@ -62,7 +62,12 @@ impl Keeps for Named {
     }
 
     fn record(&mut self, run: &Run<'_>) -> Option<i64> {
-        tokio::runtime::Handle::current().block_on(crate::vocabulary::stream_run(&self.vocab,&self.fleet,run,self.clock.now_ms()))
+        tokio::runtime::Handle::current().block_on(crate::vocabulary::stream_run(
+            &self.vocab,
+            &self.fleet,
+            run,
+            self.clock.now_ms(),
+        ))
     }
 
     fn retain(&mut self, trace_id: &str, wav: Vec<u8>) {
@@ -258,7 +263,7 @@ async fn stream(
     let ledger = Ledger::new(session, &provider, model, keyterms, capacity);
     let names = (format!("{provider}:{model}"), trace);
     let keeps = Named {
-        vocab:app.ears.vocab.clone(),
+        vocab: app.ears.vocab.clone(),
         session: session.into(),
         model: format!("{provider}:{model}"),
         fleet: app.fleet.clone(),

@@ -2137,7 +2137,10 @@ shows the payload, included and dropped terms, and per-pack counts without creat
 Workspace names are harvested only for an opted-in profile. The Host caches that harvest for five
 minutes under the directory and Git revision.
 
-The fleet keeps packs, terms, profiles, memberships, assignments and the run counter in one book. Each administrative change publishes one replacement document. Every audit run has its own kept-store record. As in the Python Host, runs have no count or age expiry; the runs endpoint limits only the page it returns. The requested vocabulary, returned transcript and elapsed time are linked by run id. A completed
+The fleet keeps packs, terms, profiles, memberships, assignments and the run counter in one book.
+Each administrative change publishes one replacement document. Every audit run has its own
+kept-store record. As in the Python Host, runs have no count or age expiry. The runs endpoint
+limits only the page it returns. The vocabulary, transcript and elapsed time share a run id. A completed
 stream turn records the keyterms actually supplied at connection time. Retried clip jobs return
 the saved result. Optional retained audio is readable by trace, with its original MIME type.
 The Host keeps at most 500 clips for up to fourteen days, sweeping when it saves a clip.

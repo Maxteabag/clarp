@@ -225,8 +225,8 @@ pub fn compile(packs: &[Pack], budget: &Budget) -> Value {
     json!({"payload":payload,"form":form,"unit":budget.unit,"used":selection.used,"capacity":capacity,
         "headroom":capacity-selection.used,"rarity_floor":floor,"included":included,"dropped":selection.dropped})
 }
-pub mod sources;
 pub mod book;
+pub mod sources;
 
 #[allow(clippy::expect_used)]
 pub static JUNK_QUESTION: LazyLock<Value> = LazyLock::new(|| {

@@ -1,11 +1,12 @@
 //! Resolve the focused agent's inputs, compile once for the selected engine,
 //! and record the exact audit. Preview takes the same path without the insert.
-use super::store::{Result,Run,Desk};
+use super::store::{Desk, Result, Run};
 use crate::edge::App;
 use clarp_kernel::{
     python,
     vocabulary::{
-        self, Pack, book::Book,
+        self, Pack,
+        book::Book,
         sources::{Sources, term},
     },
 };
@@ -14,8 +15,8 @@ use std::path::PathBuf;
 
 struct Context {
     workspace: std::sync::Arc<super::workspace::Cache>,
-    book:Book,
-    recent:Vec<String>,
+    book: Book,
+    recent: Vec<String>,
     session: String,
     agent: String,
     cwd: PathBuf,
@@ -23,7 +24,6 @@ struct Context {
     model: String,
     names: Vec<String>,
     glossary: String,
-
 }
 
 fn glossary(raw: &str) -> Vec<Pack> {
@@ -58,12 +58,18 @@ fn glossary(raw: &str) -> Vec<Pack> {
 }
 
 impl Context {
-    fn compile(self)->Value {
-        let assigned=self.book.assigned(&self.agent);
-        let profile=assigned.as_ref().map(|(id,yes,_)|(id.to_string(),*yes));
-        let mut packs=glossary(&self.glossary);
-        if let Some((_,_,more))=assigned{packs.extend(more);}
-        let mut sources=Sources{recent_transcripts:self.recent,corrections:self.book.corrections(),..Sources::default()};
+    fn compile(self) -> Value {
+        let assigned = self.book.assigned(&self.agent);
+        let profile = assigned.as_ref().map(|(id, yes, _)| (id.to_string(), *yes));
+        let mut packs = glossary(&self.glossary);
+        if let Some((_, _, more)) = assigned {
+            packs.extend(more);
+        }
+        let mut sources = Sources {
+            recent_transcripts: self.recent,
+            corrections: self.book.corrections(),
+            ..Sources::default()
+        };
         sources.agent_names = self.names;
         if profile.as_ref().is_some_and(|(_, yes)| *yes) {
             self.workspace.fill(&mut sources, &self.cwd);
@@ -123,10 +129,11 @@ pub async fn compile(
         "" | "server-default" => ("faster-whisper", app.config.whisper_model.as_str()),
         other => other.split_once(':').unwrap_or((other, "")),
     };
-    let (book,recent)=app.ears.vocab.inputs(&app.fleet,session).await?;
+    let (book, recent) = app.ears.vocab.inputs(&app.fleet, session).await?;
     let ctx = Context {
         workspace: app.ears.workspace.clone(),
-        book,recent,
+        book,
+        recent,
         agent: record.map_or_else(String::new, |r| r.agent_id.clone()),
         session: session.into(),
         cwd: record.map_or_else(PathBuf::new, |r| PathBuf::from(&r.cwd)),
@@ -140,9 +147,8 @@ pub async fn compile(
                 .unwrap_or("")
                 .into()
         },
-
     };
-    let audit=tokio::task::spawn_blocking(move || ctx.compile())
+    let audit = tokio::task::spawn_blocking(move || ctx.compile())
         .await
         .map_err(|_| {
             (
@@ -150,17 +156,48 @@ pub async fn compile(
                 "vocabulary worker ended".into(),
             )
         })?;
-    let id=if let Some(trace)=trace{
-        let r=Run{session:session.into(),trace:trace.into(),agent:audit["agent_id"].as_str().unwrap_or("").into(),
-            profile:audit["profile_id"].as_str().map(str::to_string),provider:provider.into(),model:model.into(),audit:audit.clone(),
-            transcript:String::new(),latency:0,now:app.clock.now_ms()};
-        app.ears.vocab.record(&app.fleet,r).await.unwrap_or(0)
-    }else{0};
-    Ok((audit,id))
+    let id = if let Some(trace) = trace {
+        let r = Run {
+            session: session.into(),
+            trace: trace.into(),
+            agent: audit["agent_id"].as_str().unwrap_or("").into(),
+            profile: audit["profile_id"].as_str().map(str::to_string),
+            provider: provider.into(),
+            model: model.into(),
+            audit: audit.clone(),
+            transcript: String::new(),
+            latency: 0,
+            now: app.clock.now_ms(),
+        };
+        app.ears.vocab.record(&app.fleet, r).await.unwrap_or(0)
+    } else {
+        0
+    };
+    Ok((audit, id))
 }
 
-pub async fn stream_run(desk:&Desk,fleet:&crate::fleet::FleetHandle,run:&clarp_kernel::speech_stream::Run<'_>,now:i64)->Option<i64>{
+pub async fn stream_run(
+    desk: &Desk,
+    fleet: &crate::fleet::FleetHandle,
+    run: &clarp_kernel::speech_stream::Run<'_>,
+    now: i64,
+) -> Option<i64> {
     let audit = json!({"payload":run.keyterms.join(", "),"form":"terms","unit":"terms","capacity":run.capacity,"used":run.keyterms.len(),"rarity_floor":0.0,"dropped":[],"included":run.keyterms.iter().map(|t|json!({"text":t,"pack":"stream","rarity":0.5})).collect::<Vec<_>>()});
-    desk.record(fleet,Run{session:run.session.into(),trace:run.trace_id.into(),agent:String::new(),profile:None,
-        provider:run.provider.into(),model:run.model.into(),audit,transcript:run.transcript.into(),latency:run.latency_ms,now}).await.ok()
+    desk.record(
+        fleet,
+        Run {
+            session: run.session.into(),
+            trace: run.trace_id.into(),
+            agent: String::new(),
+            profile: None,
+            provider: run.provider.into(),
+            model: run.model.into(),
+            audit,
+            transcript: run.transcript.into(),
+            latency: run.latency_ms,
+            now,
+        },
+    )
+    .await
+    .ok()
 }

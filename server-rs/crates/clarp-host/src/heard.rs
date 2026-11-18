@@ -54,7 +54,7 @@ const WAITS: Duration = Duration::from_secs(10);
 
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
-    pub(crate) vocab:crate::vocabulary::Desk,
+    pub(crate) vocab: crate::vocabulary::Desk,
     pub(crate) workspace: Arc<crate::vocabulary::workspace::Cache>,
     pub(crate) judge: crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
@@ -162,7 +162,7 @@ impl Ears {
         Self {
             own,
             judge: Default::default(),
-            vocab:Default::default(),
+            vocab: Default::default(),
             workspace: Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
@@ -523,13 +523,16 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
     let mut answer = heard::answer(&text, &trace, hands_free);
     if run_id > 0 {
-        let _=app.ears.vocab.finish(
-            &app.fleet,
-            run_id,
-            text.clone(),
-            began.elapsed().as_millis() as i64,
-        )
-        .await;
+        let _ = app
+            .ears
+            .vocab
+            .finish(
+                &app.fleet,
+                run_id,
+                text.clone(),
+                began.elapsed().as_millis() as i64,
+            )
+            .await;
         answer["vocab_run_id"] = json!(run_id);
     }
     if crate::vocabulary::audio::enabled(&app.fleet.directory()) {

@@ -8,7 +8,8 @@ RUNS={
 }
 K='clarp-kernel/src/vocabulary.rs'
 D='clarp-kernel/src/vocabulary/sources.rs'
-S='clarp-host/src/vocabulary/store.rs'
+S='clarp-kernel/src/vocabulary/book.rs'
+T='clarp-host/src/vocabulary/store.rs'
 C='clarp-host/src/vocabulary/compile.rs'
 A='clarp-host/src/vocabulary/audio.rs'
 PLANTS=[]
@@ -95,22 +96,21 @@ for why,old,new in [
     change(A,'audio',why,old,new)
 
 for why,old,new in [
-        ('pack duplicate is a missing pack', '(StatusCode::CONFLICT, "a pack with that name exists".into())','(StatusCode::NOT_FOUND, "no such pack".into())'),
+        ('pack duplicate is a missing pack','if self.packs.values().any(|p| p.name == name) {\n                        return Err(conflict','if self.packs.values().any(|p| p.name == name) {\n                        return Err(missing'),
         ('pack priority default changes','number(&v["priority"], 1.0)','number(&v["priority"], 2.0)'),
         ('pack floor default changes','integer(&v["floor"], 0)','integer(&v["floor"], 1)'),
         ('wrong required name','bad("name is required")','bad("missing name")'),
         ('wrong workspace response field','"harvests_workspace":enabled','"harvest_workspace":enabled'),
-        ('added flag reversed','Ok(changed > 0)','Ok(changed == 0)'),
-        ('term update flag reversed','"updated":updated','"updated":!updated'),
-        ('reading a profile returns a different pack name',"'position',position,'name',name","'position',position,'name',kind"),
-        ('pack readings lose term counts',"'terms',(SELECT count(*)","'count',(SELECT count(*)"),
-        ('term listing changes order','ORDER BY rarity DESC,text COLLATE NOCASE','ORDER BY rarity ASC,text COLLATE NOCASE'),
-        ('assigned team is hidden',"'team_id',coalesce(team_id,'')","'team_id',coalesce(team_id,'')")]:
-    if old!=new:change(S,'admin',why,old,new)
+        ('added flag reversed','response["added"] = json!(self.add','response["added"] = json!(!self.add'),
+        ('term update flag reversed','response["updated"] = json!(updated)','response["updated"] = json!(!updated)'),
+        ('reading a profile returns a different pack name','"name":pack.name','"name":pack.kind'),
+        ('pack readings lose term counts','"terms":p.terms.len()','"count":p.terms.len()'),
+        ('term listing changes order','b.rarity.total_cmp(&a.rarity).then_with','a.rarity.total_cmp(&b.rarity).then_with'),
+        ('assigned team is hidden','"profile_name":self.profiles[&a.profile_id].name,"agent_id":a.agent_id,"team_id":a.team_id','"profile_name":self.profiles[&a.profile_id].name,"agent_id":a.agent_id,"team_id":""')]:
+    if old!=new:change(S,'vectors',why,old,new)
 for why,old,new in [
         ('preview forgets profile','audit["profile_id"] = json!(pf)','audit["profile_id"] = Value::Null'),
-        ('run neglects transcript result','SET transcript=?,latency_ms=?','SET transcript=upper(?),latency_ms=?'),
-        ('stream reports another engine','run.model,','"wrong-model",')]:
+        ('stream reports another engine','model: run.model.into(),','model: "wrong-model".into(),')]:
     change(C,'admin',why,old,new)
 
 J='clarp-host/src/vocabulary/judge.rs'
@@ -131,20 +131,19 @@ for why,old,new in [
 
 for why,old,new in [
         ('wrong kind refusal','"kind must be static or dynamic"','"unknown kind"'),
-        ('pack response loses its id','"pack_id":id}))','"pack":id}))'),
+        ('pack response loses its id','response["pack_id"] = json!(id);','response["other_id"] = json!(id);'),
         ('wrong profile duplication refusal','"a profile with that name exists"','"duplicate profile"'),
         ('term text limit bypasses update clamp','n.clamp(0.0, 1.0)','n.clamp(0.0, 2.0)'),
         ('wrong assignment owner refusal','"assign to exactly one of agent_id or team_id"','"assign to an owner"'),
-        ('workspace flag accepts only false','let enabled = v["enabled"]\n                .as_bool()','let enabled = v["enabled"]\n                .as_bool().filter(|b| !*b)'),
+        ('workspace flag accepts only false','let enabled = v["enabled"]\n                    .as_bool()','let enabled = v["enabled"]\n                    .as_bool().filter(|b| !*b)'),
         ('unassign refusal changes','"agent_id or team_id is required"','"an owner is required"'),
-        ('term deletion leaves the term','DELETE FROM term WHERE term_id=?','DELETE FROM term WHERE term_id=-?'),
+        ('term deletion leaves the term','p.terms.retain(|t| t.term_id != id);','p.terms.retain(|t| t.term_id == id);'),
         ('pack membership positions move','integer(&v["position"], 0)?','integer(&v["position"], 0)? + 1'),
-        ('workspace flag is not persisted','UPDATE profile SET harvests=? WHERE profile_id=?','UPDATE profile SET harvests=NOT ? WHERE profile_id=?'),
-        ('pack deletion leaves an empty pack','DELETE FROM pack WHERE pack_id=?','DELETE FROM pack WHERE pack_id=? AND 0'),
-        ('profile deletion leaves an empty profile','DELETE FROM profile WHERE profile_id=?','DELETE FROM profile WHERE profile_id=? AND 0')]:
-    change(S,'admin',why,old,new)
+        ('workspace flag is not persisted','.harvests_workspace = enabled;','.harvests_workspace = !enabled;'),
+        ('pack deletion leaves an empty pack','self.packs.remove(&pk);','self.packs.get_mut(&pk).map(|p| p.terms.clear());'),
+        ('profile deletion leaves an empty profile','self.profiles.remove(&pf);','self.profiles.get_mut(&pf).map(|p|p.members.clear());')]:
+    change(S,'vectors',why,old,new)
 for why,old,new in [
-        ('agent has no static terms','if kind == "static"','if kind == "other"'),
         ('terms ordered by lowest rarity first','ORDER BY rarity DESC,term_id','ORDER BY rarity ASC,term_id'),
         ('workspace never contributes names','if profile.as_ref().is_some_and(|(_, yes)| *yes)','if profile.as_ref().is_some_and(|(_, yes)| !yes)'),
         ('preview reports another session','audit["session"] = json!(self.session)','audit["session"] = Value::Null')]:
@@ -154,6 +153,30 @@ for why,old,new in [
         ('range responses return a full-response status','status(StatusCode::PARTIAL_CONTENT)','status(StatusCode::OK)'),
         ('invalid trace has the wrong refusal','"no retained audio for that trace"','"no clip"')]:
     if why not in ('invalid trace has the wrong refusal',):change(A,'admin',why,old,new)
+
+for why,old,new in [
+        ('insertion ignores spelling case only on exact matches','t.text.eq_ignore_ascii_case(word)','t.text == word'),
+        ('renaming can collide with a differently cased term','t.text.eq_ignore_ascii_case(name)','t.text == name'),
+        ('a duplicate insertion uses no term id','self.last_term += 1;','if !p.terms.iter().any(|t|t.text.eq_ignore_ascii_case(word)) {self.last_term += 1;}'),
+        ('renaming a pack accepts a conflicting name','pk != &id && p.name == name','pk == &id && p.name == name'),
+        ('pack deletion leaves memberships','for p in self.profiles.values_mut() {\n                    p.members.remove(&pk);','for p in self.profiles.values_mut() {\n                    p.members.remove("");'),
+        ('profile deletion leaves assignments','self.assignments.retain(|a| a.profile_id != pf)','self.assignments.retain(|a| a.profile_id == pf)'),
+        ('replacement loses unrelated assignments','agent.is_empty() || a.agent_id != agent','!agent.is_empty() && a.agent_id != agent'),
+        ('reassignment keeps an old team binding','team.is_empty() || a.team_id != team','team.is_empty() || a.team_id == team'),
+        ('new profile has workspace harvesting on','harvests_workspace: false,','harvests_workspace: true,'),
+        ('static packs contribute no terms','p.kind == "static"','p.kind == "dynamic"'),
+        ('terms are stored without pronunciation','say_as: text(&v["say_as"]).trim().into()','say_as: String::new()'),
+        ('pack enabled update is inverted','p.enabled = crate::python::truthy(x)','p.enabled = !crate::python::truthy(x)'),
+        ('assignment to both owners is accepted','a.is_empty() == t.is_empty()','a.is_empty() && t.is_empty()')]:
+    change(S,'vectors',why,old,new)
+
+for why,old,new in [
+        ('completed transcript is lost','r.transcript = transcript;','r.transcript.clear();'),
+        ('counter reservations are not persisted','book.last_run = id;','book.last_run = id - 1;'),
+        ('the run is written under the following id','save(fleet, RUNS, id.to_string(), r)','save(fleet, RUNS, (id+1).to_string(), r)'),
+        ('a restarted host forgets older runs','built.observe(key.parse()','built.observe(1 + key.parse::<i64>()'),
+        ('the run lookup drops the trace index','entry(r.trace.clone())','entry(String::new())')]:
+    change(T,'admin',why,old,new)
 
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
