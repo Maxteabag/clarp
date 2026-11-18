@@ -31,7 +31,10 @@
 //! a person types. A turn that waits for an account is not sent a prompt: it is tried at
 //! once on the account that is there, which is all a person who asks for it can mean.
 
+use serde_json::json;
+use std::collections::BTreeMap;
 use std::process::Stdio;
+mod switching;
 use std::time::Duration;
 
 use clarp_kernel::conversation::Message;
@@ -67,12 +70,21 @@ struct Kept {
     seats: Seats,
     #[serde(default)]
     desk: desk::Desk,
+    #[serde(default)]
+    switches: BTreeMap<String, Value>,
+    #[serde(default)]
+    last_switch: BTreeMap<String, Value>,
+    #[serde(default)]
+    next_check: BTreeMap<String, i64>,
+    #[serde(default)]
+    notifications: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
 struct State {
     /// What is kept: read from the fleet once, and written back with every read.
     kept: Option<Kept>,
+    running: BTreeMap<String, Value>,
     /// When this Host, since it started, last began a read.
     last_attempt_ms: i64,
     /// The read that is under way, for whoever else asks for one: it says how it ended.
@@ -105,6 +117,7 @@ pub struct Desk {
     /// Whether the tool may renew a login as it reads: on a Host that keeps the logins.
     renews: bool,
     state: tokio::sync::Mutex<State>,
+    switches: [tokio::sync::Mutex<()>; 2],
 }
 
 impl Desk {
@@ -113,6 +126,7 @@ impl Desk {
             tool: tool.to_string(),
             renews,
             state: tokio::sync::Mutex::default(),
+            switches: Default::default(),
         }
     }
 
@@ -125,6 +139,16 @@ impl Desk {
     /// and read for at most its time; then it is ended, with what it started. The Host's
     /// own secrets stay with the Host.
     async fn asking(&self, (args, most): (&[&str], u64)) -> Answer {
+        self.command(args, most, None, false).await
+    }
+
+    async fn command(
+        &self,
+        args: &[&str],
+        most: u64,
+        lock: Option<&std::fs::File>,
+        exit_only: bool,
+    ) -> Answer {
         // A Host that was told no tool has no program to start: that fails as one that is
         // not there does.
         let mut tool = tokio::process::Command::new(&self.tool);
@@ -136,6 +160,10 @@ impl Desk {
             .kill_on_drop(true);
         for name in crate::OWN_SECRETS {
             tool.env_remove(name);
+        }
+        if let Some(lock) = lock {
+            // The child retains the machine-wide lock even if its Host exits during the switch.
+            tool.stdin(lock.try_clone().map_err(|_| Failed::DidNotRun)?);
         }
         if !self.renews {
             tool.env(RENEW_NOTHING.0, RENEW_NOTHING.1);
@@ -155,6 +183,7 @@ impl Desk {
         };
         let ended = tokio::time::timeout(Duration::from_secs(most), to_its_end).await;
         match ended {
+            Ok((Ok(ended), _)) if exit_only && ended.success() => Ok(Value::Bool(true)),
             Ok((Ok(ended), bytes)) => desk::answer(ended.code(), &String::from_utf8_lossy(&bytes)),
             Ok((Err(_), _)) => Err(Failed::DidNotRun),
             Err(_) => {
@@ -214,6 +243,13 @@ impl Desk {
         let mut made = false;
         if let Some(kept) = state.kept(app).await {
             made = kept.desk.read(&mut kept.seats, answers, began_ms);
+            for (provider, record) in &kept.last_switch {
+                if record["at"].as_i64().is_some_and(|stamp| stamp >= began_ms)
+                    && let Some(alias) = record["to"].as_str()
+                {
+                    kept.desk.mark_active(provider, alias);
+                }
+            }
             if let Ok(written) = serde_json::to_vec(kept) {
                 let _ = app.fleet.keep(KIND, KEPT.to_string(), Some(written)).await;
             }
@@ -305,14 +341,14 @@ fn said(asked: &Value, key: &str) -> String {
 /// would have to do it, and that is not built. A Host that does not put the logins of its
 /// machine in place does not do it at all: it says so, in the shape of the Python Host's
 /// refusals, once the asking is one it could read.
-pub fn switch(app: &App, asked: &Value) -> Option<resume::Answer> {
+pub async fn switch(app: &App, asked: &Value) -> Option<resume::Answer> {
     let read = resume::switch_wanted(&said(asked, "provider"), &said(asked, "alias"));
     let (tool, alias) = match read {
         Ok(wanted) => wanted,
         Err(refusal) => return Some(refusal),
     };
     if app.config.accounts == Accounts::Select {
-        return None;
+        return Some(switching::manual(app, tool, alias).await);
     }
     let body = serde_json::json!({
         "ok": false, "error": "logins_kept_elsewhere", "provider": tool, "alias": alias,
@@ -493,10 +529,20 @@ pub async fn asked(app: &App, refresh: bool) -> Value {
         outcome,
         last_attempt_ms: state.last_attempt_ms,
     };
+    let running = state.running.clone();
     match state.kept(app).await {
-        Some(kept) => kept
-            .desk
-            .served(&kept.seats.served(SWITCHER_ON, now), &asked),
+        Some(kept) => {
+            let mut payload = kept
+                .desk
+                .served(&kept.seats.served(SWITCHER_ON, now), &asked);
+            payload["switches"] = json!(
+                ["claude", "codex"]
+                    .iter()
+                    .filter_map(|tool| running.get(*tool).or_else(|| kept.switches.get(*tool)))
+                    .collect::<Vec<_>>()
+            );
+            payload
+        }
         None => {
             let nothing = Seats::default().served(SWITCHER_ON, now);
             desk::Desk::default().served(&nothing, &asked)
