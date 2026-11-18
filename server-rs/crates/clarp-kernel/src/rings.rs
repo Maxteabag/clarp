@@ -112,7 +112,7 @@ impl Ring {
     }
 
     /// A call the user started with the agent: this phone's own, and no ring of the agent's.
-    fn of_the_user(&self) -> Option<&str> {
+    pub fn of_the_user(&self) -> Option<&str> {
         let live = self.live.as_ref()?;
         (!live.user_call.is_empty()).then_some(live.user_call.as_str())
     }

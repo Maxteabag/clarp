@@ -70,10 +70,13 @@ const SEATS: &str = "hotseat_desk";
 /// set up.
 fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let chip = app.chip.pushes();
+    let fcm = app.android.configured();
     let seats = app.seats.told();
-    FEATURES
-        .iter()
-        .filter(move |(feature, _)| (*feature != CHIP || chip) && (*feature != SEATS || seats))
+    FEATURES.iter().filter(move |(feature, _)| {
+        (*feature != CHIP || chip)
+            && (*feature != SEATS || seats)
+            && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
+    })
 }
 
 pub const FEATURES: &[(&str, u64)] = &[
@@ -157,6 +160,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("background_job_cancel_generation", 23),
     // A send that says it came from the desk is not pushed to the phone.
     ("desktop_send_quiet_push", 27),
+    ("push_fcm", 88),
+    ("agent_live_fcm", 94),
+    ("live_activity_fcm", 95),
     ("decision_lifecycle", 28),
     ("text_input_requests", 29),
     ("artifact_pins", 38),
@@ -207,6 +213,8 @@ pub struct App {
     pub revisions: Arc<Revisions>,
     /// The way to the phones that are not listening.
     pub pusher: Pusher,
+    pub android: Arc<crate::fcm::Sender>,
+    pub android_chip: Arc<crate::android_chip::Desk>,
     /// The desks that have said their user sits at them: no phone is paged meanwhile.
     pub desks: Arc<Mutex<Presence>>,
     /// The bytes of the files agents publish.
@@ -2640,7 +2648,8 @@ async fn revoke_device(
     }
     if app.fleet.revoke(device_id.clone()).await? {
         // What the device still listens to ends now, not when it next asks.
-        let _ = app.door.revoked.send(device_id);
+        let _ = app.door.revoked.send(device_id.clone());
+        app.android_chip.forget(&app, &device_id).await?;
         Ok(Json(json!({ "ok": true })))
     } else {
         Err(ApiError::new(StatusCode::NOT_FOUND, "device not found"))

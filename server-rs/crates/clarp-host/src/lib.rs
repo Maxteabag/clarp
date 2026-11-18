@@ -15,6 +15,7 @@
 pub mod admin;
 pub mod admin_tool;
 pub mod agent;
+pub mod android_chip;
 pub mod apps;
 pub mod artifact_tool;
 pub mod audio;
@@ -28,6 +29,7 @@ pub mod direct;
 pub mod edge;
 pub mod explain;
 pub mod faces;
+pub mod fcm;
 pub mod files;
 pub mod fleet;
 pub mod forks;

@@ -166,7 +166,18 @@ async fn serve(config: Config) -> Result<(), String> {
                 Some(limited.clone()),
             ))
         });
+    let direct = Arc::new(clarp_host::direct::Direct::new(
+        OwnerFile::new(config.push_keys.clone()),
+        &config.apns_endpoint,
+        clock.clone(),
+    ));
+    let android = Arc::new(clarp_host::fcm::Sender::new(
+        OwnerFile::new(config.push_keys.clone()),
+        Arc::new(clarp_host::fcm::Http::new(config.fcm_endpoint.clone())),
+        clock.clone(),
+    ));
     to_push.run(pusher::Works {
+        android: android.clone(),
         relay: relay.clone(),
         fleet: fleet.clone(),
         desks: desks.clone(),
@@ -176,11 +187,7 @@ async fn serve(config: Config) -> Result<(), String> {
         secret: config.auth_token.clone(),
         // The key the owner gave for the push service is named in the file he names for
         // it; without that word nothing is handed to the service.
-        direct: Arc::new(clarp_host::direct::Direct::new(
-            OwnerFile::new(config.push_keys.clone()),
-            &config.apns_endpoint,
-            clock.clone(),
-        )),
+        direct: direct.clone(),
         runtime: tokio::runtime::Handle::current(),
     })?;
     let mouth = to_speak.run(clarp_host::voice::Works {
@@ -190,6 +197,8 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let app = App {
+        android_chip: Arc::default(),
+        android,
         config: config.clone(),
         hub,
         fleet,
@@ -203,7 +212,7 @@ async fn serve(config: Config) -> Result<(), String> {
         blobs,
         activity: Arc::default(),
         calls: Arc::default(),
-        chip: Arc::new(clarp_host::chip::Chip::new(relay, limited)),
+        chip: Arc::new(clarp_host::chip::Chip::new(relay, direct, limited)),
         schedules: Arc::default(),
         heartbeat: Arc::default(),
         janitors: Arc::default(),
@@ -262,6 +271,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::calls::resume(&app);
     // And the chips of the phones are kept current from now on.
     clarp_host::chip::run(&app, is_limited);
+    tokio::spawn(clarp_host::android_chip::run(app.clone()));
     // And what is due of the schedules is sent.
     clarp_host::schedules::run(&app);
     // And a handoff of the Oracle's that a phone does not get on with is not waited for.

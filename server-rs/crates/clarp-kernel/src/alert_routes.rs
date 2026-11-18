@@ -122,3 +122,39 @@ impl Routes {
         }
     }
 }
+
+/// An activity token carries no phone grant. A relay outage may switch the
+/// batch to direct only once the current reservation is known to be unused.
+pub struct ActivityRoutes {
+    path: Option<Path>,
+    fallback: bool,
+    relay_down: bool,
+}
+
+impl ActivityRoutes {
+    pub fn new(mode: &str, account: bool, key: bool) -> Self {
+        let routes = Routes::new(mode, account, account, key);
+        Self {
+            path: routes.base,
+            fallback: routes.fallback,
+            relay_down: false,
+        }
+    }
+
+    pub fn path(&self) -> Option<Path> {
+        self.path
+    }
+
+    pub fn try_relay(&self) -> bool {
+        !self.relay_down
+    }
+
+    pub fn outage(&mut self, uncertain: bool) -> bool {
+        self.relay_down = true;
+        if self.fallback && !uncertain {
+            self.path = Some(Path::Direct);
+            return true;
+        }
+        false
+    }
+}
