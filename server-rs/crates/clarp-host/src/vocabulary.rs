@@ -7,6 +7,8 @@ use crate::edge::{App,ApiError};
 mod store;
 mod compile;
 mod workspace;
+pub(crate) mod judge;
+pub(crate) mod audio;
 pub(crate) use compile::{compile,finish,stream_run};
 
 async fn perform(app:&App,action:String,data:Value,write:bool)->Result<Json<Value>,ApiError>{
@@ -20,6 +22,8 @@ async fn perform(app:&App,action:String,data:Value,write:bool)->Result<Json<Valu
         let mode=if write{rusqlite::TransactionBehavior::Immediate}else{rusqlite::TransactionBehavior::Deferred};
         let tx=db.transaction_with_behavior(mode).map_err(store::unavailable)?;
         let value=if write{store::change(&tx,&action,&data,now,known)?} else {store::read(&tx,&action,&data)?};
+        let mut value=value;
+        if action=="run" {let trace=store::text(&data["trace_id"]);if audio::exists(&root,&trace){value["audio_url"]=json!(format!("/transcription-audio?trace_id={trace}"));}}
         tx.commit().map_err(store::unavailable)?;
         Ok::<_,store::Failure>(value)
     }).await.map_err(|_|ApiError::new(StatusCode::SERVICE_UNAVAILABLE,"vocabulary worker ended"))?;
@@ -41,7 +45,7 @@ async fn edit(State(app):State<App>,uri:Uri,body:Bytes)->Result<Json<Value>,ApiE
 }
 
 pub fn routes()->Router<App>{
-    let mut routes=Router::new();
+    let mut routes=Router::new().route("/judgments/settings",get(judge::get).post(judge::set)).route("/transcription-audio",get(audio::get));
     for path in ["/vocab/packs","/vocab/terms","/vocab/profiles"] {routes=routes.route(path,get(view).post(edit));}
     for path in ["/vocab/profile","/vocab/assignments","/vocab/runs","/vocab/run","/vocab/preview"] {routes=routes.route(path,get(view));}
     for path in ["/vocab/packs/update","/vocab/packs/delete","/vocab/terms/update","/vocab/terms/delete","/vocab/profiles/delete","/vocab/profiles/workspace","/vocab/profiles/packs","/vocab/profiles/packs/remove","/vocab/assign","/vocab/unassign"] {routes=routes.route(path,post(edit));}

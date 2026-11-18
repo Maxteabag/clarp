@@ -48,7 +48,7 @@ const ENDS_WITHIN: Duration = Duration::from_secs(2);
 
 /// What this Host keeps of a stream's turns: a name for each. It writes no runs down and
 /// keeps no sound: it has no vocabulary to write runs of yet, and keeps no clips.
-struct Named{root:std::path::PathBuf,clock:std::sync::Arc<dyn clarp_ports::clock::Clock+Send+Sync>}
+struct Named{session:String,model:String,fleet:crate::fleet::FleetHandle,root:std::path::PathBuf,clock:std::sync::Arc<dyn clarp_ports::clock::Clock+Send+Sync>}
 
 
 impl Keeps for Named {
@@ -60,7 +60,11 @@ impl Keeps for Named {
         crate::vocabulary::stream_run(&self.root,run,self.clock.now_ms())
     }
 
-    fn retain(&mut self, _trace_id: &str, _wav: Vec<u8>) {}
+    fn retain(&mut self, trace_id:&str,wav:Vec<u8>) {
+        if crate::vocabulary::audio::enabled(&self.fleet.directory()) {
+            let _=crate::vocabulary::audio::retain(&self.root,trace_id,&wav,"audio/wav",&self.session,0,&self.model,self.clock.now_ms());
+        }
+    }
 }
 
 /// Reaches the engine at its address, with the owner's key. `Err`: why it could not be
@@ -140,7 +144,7 @@ async fn carried(mut line: Line, engine: Engine, mut ledger: Ledger, names: (Str
                 };
                 let at=began.elapsed().as_secs_f64();
                 let told=if event.kind=="end" {
-                    let Ok((next,book,told))=tokio::task::spawn_blocking(move||{let told=ledger.apply(&event,at,&mut keeps);(ledger,keeps,told)}).await else {break};
+                    let Ok((next,book,told))=tokio::task::spawn_blocking(move||{let told=ledger.apply(&event,at,&mut keeps);(ledger,keeps,told)}).await else {return};
                     ledger=next;keeps=book;told
                 }else{ledger.apply(&event,at,&mut keeps)};
                 if !line.tell(said(&told)).await {
@@ -223,7 +227,7 @@ async fn stream(
     let capacity = listed.models.first().map_or(0, |model| model.capacity);
     let ledger = Ledger::new(session, &provider, model, keyterms, capacity);
     let names = (format!("{provider}:{model}"), trace);
-    let keeps=Named{root:app.config.data_dir.clone(),clock:app.clock.clone()};
+    let keeps=Named{session:session.into(),model:format!("{provider}:{model}"),fleet:app.fleet.clone(),root:app.config.data_dir.clone(),clock:app.clock.clone()};
     socket.open(move |line| carried(line, engine, ledger, names,keeps))
 }
 

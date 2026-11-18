@@ -45,7 +45,17 @@ def reference(root):
     record(live[2:],Budget('synthetic','fixture','terms',20))
     record(live,Budget('s','b','tokens',300,supports_prose=False))
     record([Pack('t',(Term('One','t'),Term('ONE','t'),Term('Two','t')),priority=-1.0)],Budget('s','b','terms',300))
-    return dict(measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
+    from lib import judgment_sites, judgments
+    from unittest.mock import patch
+    verdicts=[]
+    for transcript in ('Okay.', 'Open the folder.'):
+        for probability in (None,0.0,0.5999,0.6,0.6001,1.0):
+            answer=None if probability is None else judgments.Answers({'junk':{'noul':probability}},{})
+            with patch.object(judgments,'judge',return_value=answer),patch.object(judgments,'record_outcome'):
+                discard=judgment_sites.is_junk(transcript)
+            verdicts.append(dict(transcript=transcript,probability=probability,discard=discard))
+    question=judgment_sites._JUNK_QUESTION
+    return dict(question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
 
 
 if __name__ == '__main__':
@@ -53,6 +63,7 @@ if __name__ == '__main__':
         with tempfile.TemporaryDirectory() as tmp:
             value=reference(Path(tmp))
             table=TOOLS.parent/'crates/clarp-kernel/src/vocabulary-budgets.json'
+            (table.parent / 'vocabulary-judge.json').write_text(json.dumps(value['question'],indent=1,ensure_ascii=True)+'\n')
             table.write_text(json.dumps(value['declared'],ensure_ascii=True,indent=1)+'\n')
             OUT.write_text(json.dumps(value,ensure_ascii=True,separators=(',',':'))+'\n')
     else:
