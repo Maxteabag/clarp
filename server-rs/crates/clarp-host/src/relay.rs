@@ -147,14 +147,19 @@ impl Relay {
 
     /// One request to the relay: the status it answered with and what it said. The error is
     /// that it did not answer.
-    fn post(&self, path: &str, bearer: &str, body: &Value) -> Result<(u16, Value), String> {
+    fn post(&self, path: &str, bearer: &str, body: &Value) -> Result<(u16, Value), (String, bool)> {
         let mut response = self
             .agent
             .post(format!("{}{path}", self.base))
             .header("Authorization", format!("Bearer {bearer}"))
             .send_json(body)
             // Only that it failed: never what the request held.
-            .map_err(|_| format!("the relay did not answer {path}"))?;
+            .map_err(|_| {
+                (
+                    format!("the relay did not answer {path}"),
+                    path == "/v1/push/send",
+                )
+            })?;
         let status = response.status().as_u16();
         let wait = response.headers().get("retry-after");
         let wait = wait
@@ -169,7 +174,10 @@ impl Relay {
             let _ = told.send(limited(&wait, &answer));
         }
         match status {
-            404 | 405 | 500.. => Err(format!("the relay answered {status} to {path}")),
+            404 | 405 | 500.. => Err((
+                format!("the relay answered {status} to {path}"),
+                status >= 500 && path == "/v1/push/send",
+            )),
             _ => Ok((status, answer)),
         }
     }
@@ -177,7 +185,7 @@ impl Relay {
     fn by_grant(&self, grant: &str, notification: &Value) -> Outcome {
         let body = json!({ "notifications": [notification] });
         match self.post("/v1/push/send", grant, &body) {
-            Err(why) => Outcome::Down(why),
+            Err((why, _)) => Outcome::Down(why),
             // The phone revoked this Host's grant.
             Ok((401, _)) => Outcome::GrantRevoked,
             Ok((200, answer)) => delivered(&answer),
@@ -204,7 +212,9 @@ impl Relay {
             return Ok(true);
         }
         let body = json!({ "devices": [{ "deviceToken": token, "environment": environment }] });
-        let (status, _) = self.post("/v1/push/devices", &self.credential, &body)?;
+        let (status, _) = self
+            .post("/v1/push/devices", &self.credential, &body)
+            .map_err(|(why, _)| why)?;
         if status != 200 {
             return Ok(false);
         }
@@ -214,7 +224,12 @@ impl Relay {
         Ok(true)
     }
 
-    fn by_credential(&self, (token, environment): (&str, &str), notification: &Value) -> Outcome {
+    fn by_credential(
+        &self,
+        (token, environment): (&str, &str),
+        notification: &Value,
+        uncertain: &mut bool,
+    ) -> Outcome {
         let environment = if environment.eq_ignore_ascii_case("sandbox") {
             "sandbox"
         } else {
@@ -239,8 +254,15 @@ impl Relay {
                 Ok(true) => {}
             }
             let outcome = match self.post("/v1/push/send", &self.credential, &body) {
-                Err(why) => return Outcome::Down(why),
-                Ok((200, answer)) => delivered(&answer),
+                Err((why, may_have_sent)) => {
+                    *uncertain = may_have_sent;
+                    return Outcome::Down(why);
+                }
+                Ok((200, answer)) => {
+                    let outcome = delivered(&answer);
+                    *uncertain = matches!(outcome, Outcome::Down(_));
+                    outcome
+                }
                 Ok((status, answer)) => {
                     if status == 401 {
                         // A credential that was revoked: what it bound is gone with it.
@@ -275,10 +297,16 @@ impl Relay {
     /// Sends one push to a token no phone gave a grant for (the activity a phone shows the
     /// fleet's work in), by this Host's own account at the relay.
     pub fn to_token(&self, token: &str, environment: &str, push: &Push<'_>) -> Outcome {
+        self.to_activity(token, environment, push).0
+    }
+
+    pub fn to_activity(&self, token: &str, environment: &str, push: &Push<'_>) -> (Outcome, bool) {
         if self.credential.is_empty() {
-            return Outcome::NoPath;
+            return (Outcome::NoPath, false);
         }
-        self.by_credential((token, environment), &notification(push))
+        let mut uncertain = false;
+        let outcome = self.by_credential((token, environment), &notification(push), &mut uncertain);
+        (outcome, uncertain)
     }
 
     pub fn to_grant(&self, grant: &str, push: &Push<'_>) -> Outcome {

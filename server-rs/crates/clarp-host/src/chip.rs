@@ -33,9 +33,11 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::agent::Unavailable;
+use crate::direct::{Direct, Key};
 use crate::edge::{ApiError, App, Principal};
 use crate::pairing::Scope;
 use crate::relay::{Limited, Outcome, Push, Relay};
+use clarp_kernel::alert_routes::{ActivityRoutes, Path};
 
 /// The kind of thing the chip keeps with the fleet, and the names of its parts.
 const KIND: &str = "chip";
@@ -60,6 +62,7 @@ pub struct Chip {
     held: tokio::sync::Mutex<Option<Held>>,
     /// The way to the phones, when this Host has one.
     relay: Option<Arc<Relay>>,
+    direct: Arc<Direct>,
     /// Wakes the task that paces when something it sleeps on changed.
     nudge: tokio::sync::Notify,
     /// Where the relay tells of its limits: held here too, so that it stays open on a Host
@@ -94,10 +97,15 @@ fn seconds(now_ms: i64) -> f64 {
 }
 
 impl Chip {
-    pub fn new(relay: Option<Arc<Relay>>, limits: UnboundedSender<Limited>) -> Self {
+    pub fn new(
+        relay: Option<Arc<Relay>>,
+        direct: Arc<Direct>,
+        limits: UnboundedSender<Limited>,
+    ) -> Self {
         Self {
             held: tokio::sync::Mutex::new(None),
             relay,
+            direct,
             nudge: tokio::sync::Notify::new(),
             _limits: limits,
         }
@@ -106,9 +114,13 @@ impl Chip {
     /// Whether this Host can keep a phone's chip current: it has a relay, and an account
     /// of its own there.
     pub fn pushes(&self) -> bool {
-        self.relay
-            .as_ref()
-            .is_some_and(|relay| relay.has_credential())
+        self.routes().0.path().is_some()
+    }
+
+    fn routes(&self) -> (ActivityRoutes, Option<Key>) {
+        let (mode, key) = self.direct.alert_settings();
+        let account = self.relay.as_ref().is_some_and(|r| r.has_credential());
+        (ActivityRoutes::new(&mode, account, key.is_some()), key)
     }
 
     async fn read<'a>(held: &'a mut Option<Held>, app: &App) -> Result<&'a mut Held, Unavailable> {
@@ -292,12 +304,86 @@ impl Chip {
         }
     }
 
+    async fn send_activity(
+        &self,
+        routes: &mut ActivityRoutes,
+        key: Option<&Key>,
+        activity: &Activity,
+        push: Push<'_>,
+    ) -> Outcome {
+        if routes.path() == Some(Path::Account) {
+            let (outcome, uncertain) = if routes.try_relay() {
+                let Some(relay) = self.relay.clone() else {
+                    return Outcome::NoPath;
+                };
+                let (token, environment) = (activity.token.clone(), activity.environment.clone());
+                let (payload, collapse, priority) = (
+                    push.payload.clone(),
+                    push.collapse_id.to_owned(),
+                    push.priority.to_owned(),
+                );
+                tokio::task::spawn_blocking(move || {
+                    relay.to_activity(
+                        &token,
+                        &environment,
+                        &Push {
+                            payload: &payload,
+                            collapse_id: &collapse,
+                            push_type: "liveactivity",
+                            priority: &priority,
+                        },
+                    )
+                })
+                .await
+                .unwrap_or_else(|_| (Outcome::Down("relay worker stopped".into()), true))
+            } else {
+                (
+                    Outcome::Down("relay unavailable in this batch".into()),
+                    false,
+                )
+            };
+            if !matches!(outcome, Outcome::Down(_)) || !routes.outage(uncertain) {
+                return outcome;
+            }
+        }
+        let Some(key) = key else {
+            return Outcome::NoPath;
+        };
+        let request = clarp_kernel::direct_push::Push {
+            payload: push.payload,
+            priority: push.priority,
+            push_type: push.push_type,
+            collapse_id: push.collapse_id,
+            expiration: None,
+        };
+        match self
+            .direct
+            .push(key, (&activity.token, &activity.environment), &request)
+            .await
+        {
+            Ok((200, _, _)) => Outcome::Sent,
+            Ok((status, reason, _)) => {
+                let reason = reason.as_str().unwrap_or("");
+                if status == 410 || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason) {
+                    Outcome::Dead(reason.into())
+                } else {
+                    Outcome::Refused {
+                        status,
+                        reason: reason.into(),
+                    }
+                }
+            }
+            Err(crate::direct::Unsent(why)) => Outcome::Down(why),
+        }
+    }
+
     /// Sends what may go now, one push after another. What the push service does not take
     /// now is put back, the newest state for each token, and goes when it may.
     async fn flush(&self, app: &App, limited: &mut UnboundedReceiver<Limited>) {
-        let Some(relay) = self.relay.clone().filter(|relay| relay.has_credential()) else {
+        let (mut routes, key) = self.routes();
+        if routes.path().is_none() {
             return;
-        };
+        }
         let ready = {
             let mut guard = self.held.lock().await;
             let Ok(held) = Self::read(&mut guard, app).await else {
@@ -338,23 +424,23 @@ impl Chip {
                 }
                 activity
             };
-            let outcome = {
-                let relay = relay.clone();
-                let (token, payload) = (token.clone(), payload.clone());
-                let collapse_id = format!("live-activity-{}", activity.activity_id);
-                let environment = activity.environment.clone();
-                let sending = tokio::task::spawn_blocking(move || {
-                    let push = Push {
+            let collapse_id: String = format!("live-activity-{}", activity.activity_id)
+                .chars()
+                .take(64)
+                .collect();
+            let outcome = self
+                .send_activity(
+                    &mut routes,
+                    key.as_ref(),
+                    &activity,
+                    Push {
                         payload: &payload,
-                        collapse_id: &collapse_id,
-                        push_type: "liveactivity",
                         priority,
-                    };
-                    relay.to_token(&token, &environment, &push)
-                });
-                let unsent = |_| Outcome::Down("the push was not sent".to_string());
-                sending.await.unwrap_or_else(unsent)
-            };
+                        push_type: "liveactivity",
+                        collapse_id: &collapse_id,
+                    },
+                )
+                .await;
             let mut guard = self.held.lock().await;
             let Ok(held) = Self::read(&mut guard, app).await else {
                 return;

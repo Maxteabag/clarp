@@ -1,6 +1,6 @@
 //! The string-valued Android message sent for an APNs-shaped notification.
-use serde_json::{Value, json};
 use crate::python;
+use serde_json::{Value, json};
 
 const DATA_BYTES: usize = 4096;
 
@@ -8,8 +8,9 @@ fn string(value: &Value) -> Option<String> {
     match value {
         Value::Null => None,
         Value::String(text) => Some(text.clone()),
-        Value::Number(n) if n.is_f64() && n.as_f64()?.fract() == 0.0 =>
-            Some(format!("{:.0}", n.as_f64()? + 0.0)),
+        Value::Number(n) if n.is_f64() && n.as_f64()?.fract() == 0.0 => {
+            Some(format!("{:.0}", n.as_f64()? + 0.0))
+        }
         value => Some(python::canonical(value)),
     }
 }
@@ -21,18 +22,27 @@ pub fn data(payload: &Value, context: &Value, collapse: &str, now_ms: i64) -> Op
     for key in ["title", "body", "subtitle"] {
         let value = &aps["alert"][key];
         if !value.is_null() && value != "" {
-            let text = value.as_str().map_or_else(|| python::repr(value), str::to_owned);
+            let text = value
+                .as_str()
+                .map_or_else(|| python::repr(value), str::to_owned);
             data.insert(key.into(), json!(text));
         }
     }
-    for (source, target) in [("interruption-level", "interruption_level"), ("sound","sound"), ("category","category"), ("thread-id","thread_id")] {
+    for (source, target) in [
+        ("interruption-level", "interruption_level"),
+        ("sound", "sound"),
+        ("category", "category"),
+        ("thread-id", "thread_id"),
+    ] {
         if let Some(text) = string(&aps[source]).filter(|v| !v.is_empty()) {
             data.insert(target.into(), json!(text));
         }
     }
     if let Some(fields) = payload.as_object() {
         for (key, value) in fields {
-            if key != "aps" && let Some(text) = string(value) {
+            if key != "aps"
+                && let Some(text) = string(value)
+            {
                 data.insert(key.clone(), json!(text));
             }
         }
@@ -48,13 +58,25 @@ pub fn data(payload: &Value, context: &Value, collapse: &str, now_ms: i64) -> Op
         data.entry("collapse_id").or_insert(json!(collapse));
     }
     data.insert("sent_at".into(), json!(now_ms.to_string()));
-    data.retain(|k, _| !matches!(k.as_str(), "from" | "notification" | "message_type" | "collapse_key") && !k.starts_with("google") && !k.starts_with("gcm"));
+    data.retain(|k, _| {
+        !matches!(
+            k.as_str(),
+            "from" | "notification" | "message_type" | "collapse_key"
+        ) && !k.starts_with("google")
+            && !k.starts_with("gcm")
+    });
     let mut data = Value::Object(data);
-    for key in ["body","opening_line","subtitle","title","reason"] {
+    for key in ["body", "opening_line", "subtitle", "title", "reason"] {
         let size = python::compact(&data).len();
-        if size <= DATA_BYTES { return Some(data); }
-        if key == "reason" && data["kind"] != "agent-ring" { break; }
-        let Some(text) = data[key].as_str().filter(|s| !s.is_empty()) else { continue; };
+        if size <= DATA_BYTES {
+            return Some(data);
+        }
+        if key == "reason" && data["kind"] != "agent-ring" {
+            break;
+        }
+        let Some(text) = data[key].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
         // Removing the original encoded string leaves the cost of all other fields.
         let fixed = size - data[key].to_string().len();
         let mut prefix = String::new();
@@ -62,7 +84,9 @@ pub fn data(payload: &Value, context: &Value, collapse: &str, now_ms: i64) -> Op
         if used <= DATA_BYTES {
             for c in text.chars() {
                 let bytes = json!(c.to_string()).to_string().len() - 2;
-                if used + bytes > DATA_BYTES { break; }
+                if used + bytes > DATA_BYTES {
+                    break;
+                }
                 prefix.push(c);
                 used += bytes;
             }
@@ -83,8 +107,11 @@ pub fn message(token: &str, data: Value, priority: &str, collapse_key: &str) -> 
 
 pub fn activity(state: &Value, server: &str) -> Value {
     let busy = python::truthy(&state["working"]) || python::truthy(&state["needs_you"]);
-    let mut payload = json!({"kind":"agents-working", "event": if busy {"update"} else {"end"}, "state":state});
-    if !server.is_empty() { payload["server_instance_id"] = json!(server); }
+    let mut payload =
+        json!({"kind":"agents-working", "event": if busy {"update"} else {"end"}, "state":state});
+    if !server.is_empty() {
+        payload["server_instance_id"] = json!(server);
+    }
     payload
 }
 
@@ -106,7 +133,11 @@ pub struct Sending {
 impl Sending {
     pub fn answered(&mut self, status: u16, body: &Value, retry_after: &str) -> Next {
         if status == 200 {
-            return Next::Finished(200, String::new(), body["name"].as_str().unwrap_or("").into());
+            return Next::Finished(
+                200,
+                String::new(),
+                body["name"].as_str().unwrap_or("").into(),
+            );
         }
         if status == 401 && !self.refreshed {
             self.refreshed = true;
@@ -114,13 +145,23 @@ impl Sending {
         }
         let error = &body["error"];
         let details = error["details"].as_array().into_iter().flatten();
-        let code = details.clone().filter_map(|d| d["errorCode"].as_str()).find(|c| !c.is_empty()).unwrap_or("");
+        let code = details
+            .clone()
+            .filter_map(|d| d["errorCode"].as_str())
+            .find(|c| !c.is_empty())
+            .unwrap_or("");
         let rpc = error["status"].as_str().unwrap_or("");
         if code == "UNREGISTERED" || (status == 404 && code.is_empty()) {
             return Next::Finished(410, "Unregistered".into(), String::new());
         }
         if status == 400 && (code == "INVALID_ARGUMENT" || rpc == "INVALID_ARGUMENT") {
-            let other = details.filter(|d| d["@type"].as_str().unwrap_or("").ends_with("google.rpc.BadRequest"))
+            let other = details
+                .filter(|d| {
+                    d["@type"]
+                        .as_str()
+                        .unwrap_or("")
+                        .ends_with("google.rpc.BadRequest")
+                })
                 .flat_map(|d| d["fieldViolations"].as_array().into_iter().flatten())
                 .filter_map(|v| v["field"].as_str())
                 .any(|f| !f.is_empty() && f != "message.token");
@@ -128,17 +169,30 @@ impl Sending {
                 return Next::Finished(410, "InvalidRegistration".into(), String::new());
             }
         }
-        let transient = status == 0 || status == 429 || status >= 500 || matches!(code, "QUOTA_EXCEEDED" | "UNAVAILABLE" | "INTERNAL");
+        let transient = status == 0
+            || status == 429
+            || status >= 500
+            || matches!(code, "QUOTA_EXCEEDED" | "UNAVAILABLE" | "INTERNAL");
         if transient && !matches!(status, 401 | 403) && self.transient < 2 {
             let backoff = 1 << self.transient;
             self.transient += 1;
             let raw = retry_after.trim();
             let wait = if !raw.is_empty() && raw.bytes().all(|b| b.is_ascii_digit()) {
                 raw.parse::<u64>().unwrap_or(u64::MAX).min(10)
-            } else { 0 };
+            } else {
+                0
+            };
             return Next::Retry(backoff.max(wait));
         }
-        let reason = if status == 0 { "network".into() } else if !code.is_empty() {code.into()} else if !rpc.is_empty() {rpc.into()} else {format!("HTTP{status}")};
+        let reason = if status == 0 {
+            "network".into()
+        } else if !code.is_empty() {
+            code.into()
+        } else if !rpc.is_empty() {
+            rpc.into()
+        } else {
+            format!("HTTP{status}")
+        };
         Next::Finished(status, reason, String::new())
     }
 }
