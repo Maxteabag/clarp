@@ -5561,9 +5561,14 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
         "session": session, "title": "The code", "question": "Which code?", "response_type": "text_input"
     })));
     assert_eq!(status, 201, "{asked}");
-    wait_for("the request arrives after the reply", || {
-        service.handed().len() == 2
+    let decision_id = &asked["artifact"]["decision"]["decision_id"];
+    wait_for("the accepted decision reaches the phone", || {
+        service
+            .handed()
+            .iter()
+            .any(|(_, _, p)| p.get("decision_id") == Some(decision_id))
     });
+    assert_eq!(service.handed().len(), 2);
     let (_, headers, decision) = &service.handed()[1];
     assert_eq!(decision["aps"]["category"], "input-request");
     assert_eq!(decision["aps"]["sound"], "default");
@@ -26736,6 +26741,7 @@ type Handed = (String, std::collections::BTreeMap<String, String>, Value);
 /// without TLS; writes down what it is handed; and answers what it was told to answer next,
 /// or that it took the push.
 struct PushService {
+    headers_received: Arc<tokio::sync::Notify>,
     address: String,
     handed: Arc<Mutex<Vec<Handed>>>,
     answers: Arc<Mutex<std::collections::VecDeque<(u16, String)>>>,
@@ -26776,6 +26782,8 @@ fn stand_in_push_service() -> PushService {
     let lets_go = hangs_up.clone();
     let connections = Arc::new(AtomicU64::new(0));
     let taken = connections.clone();
+    let headers_received = Arc::new(tokio::sync::Notify::new());
+    let headers = headers_received.clone();
     let (kept, told) = (handed.clone(), answers.clone());
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -26790,74 +26798,100 @@ fn stand_in_push_service() -> PushService {
                 };
                 let (kept, told) = (kept.clone(), told.clone());
                 let lets_go = lets_go.clone();
+                let headers = headers.clone();
                 taken.fetch_add(1, Ordering::SeqCst);
                 tokio::spawn(async move {
                     let Ok(mut connection) = h2::server::handshake(stream).await else {
                         return;
                     };
-                    let shutdown = Arc::new(tokio::sync::Notify::new());
-                    loop {
-                        let incoming = tokio::select! {
-                            next = connection.accept() => next,
-                            () = shutdown.notified() => {connection.graceful_shutdown();continue;}
-                        };
-                        let Some(Ok((request, mut respond))) = incoming else {
-                            break;
-                        };
-                        // Receiving DATA and flushing replies both require the connection
-                        // to keep being polled while this stream is handled.
-                        let (kept, told, lets_go, shutdown) = (
-                            kept.clone(),
-                            told.clone(),
-                            lets_go.clone(),
-                            shutdown.clone(),
-                        );
-                        tokio::spawn(async move {
-                            let (head, mut body) = request.into_parts();
-                            let mut said = Vec::new();
-                            while let Some(Ok(piece)) = body.data().await {
-                                let _ = body.flow_control().release_capacity(piece.len());
-                                said.extend_from_slice(&piece);
-                            }
-                            let headers = head.headers.iter().map(|(name, value)| {
-                                (name.to_string(), value.to_str().unwrap_or("").to_string())
-                            });
-                            let payload = serde_json::from_slice(&said).unwrap_or(Value::Null);
-                            let path = head.uri.path().to_string();
-                            kept.lock()
-                                .unwrap()
-                                .push((path, headers.collect(), payload));
-                            let next = told.lock().unwrap().pop_front();
-                            let (status, answer) = next.unwrap_or((200, String::new()));
-                            let response = http::Response::builder()
-                                .status(status)
-                                .header("apns-id", "id-of-the-stand-in")
-                                .body(())
-                                .unwrap();
-                            let Ok(mut sent) = respond.send_response(response, answer.is_empty())
-                            else {
-                                return;
-                            };
-                            if !answer.is_empty() {
-                                let _ = sent.send_data(bytes::Bytes::from(answer), true);
-                            }
-                            // What it answered is sent, and then the connection is over.
-                            if lets_go.swap(false, Ordering::SeqCst) {
-                                shutdown.notify_one();
-                            }
+                    while let Some(Ok((request, mut respond))) = connection.accept().await {
+                        let (head, mut body) = request.into_parts();
+                        headers.notify_one();
+                        let mut said = Vec::new();
+                        // HEADERS can arrive before DATA. RecvStream only reads buffered
+                        // frames; the connection must be polled to bring in the next one.
+                        while let Some(Ok(piece)) = tokio::select! {
+                            chunk = body.data() => chunk,
+                            _ = std::future::poll_fn(|cx| connection.poll_closed(cx)) => return,
+                        } {
+                            let _ = body.flow_control().release_capacity(piece.len());
+                            said.extend_from_slice(&piece);
+                        }
+                        let headers = head.headers.iter().map(|(name, value)| {
+                            (name.to_string(), value.to_str().unwrap_or("").to_string())
                         });
+                        let payload = serde_json::from_slice(&said).unwrap_or(Value::Null);
+                        let path = head.uri.path().to_string();
+                        kept.lock()
+                            .unwrap()
+                            .push((path, headers.collect(), payload));
+                        let next = told.lock().unwrap().pop_front();
+                        let (status, answer) = next.unwrap_or((200, String::new()));
+                        let response = http::Response::builder()
+                            .status(status)
+                            .header("apns-id", "id-of-the-stand-in")
+                            .body(())
+                            .unwrap();
+                        let Ok(mut sent) = respond.send_response(response, answer.is_empty())
+                        else {
+                            continue;
+                        };
+                        if !answer.is_empty() {
+                            let _ = sent.send_data(bytes::Bytes::from(answer), true);
+                        }
+                        // What it answered is sent, and then the connection is over.
+                        if lets_go.swap(false, Ordering::SeqCst) {
+                            connection.graceful_shutdown();
+                        }
                     }
                 });
             }
         });
     });
     PushService {
+        headers_received,
         address,
         handed,
         answers,
         hangs_up,
         connections,
     }
+}
+
+#[tokio::test]
+async fn the_push_stand_in_receives_a_decision_body_after_accepting_its_headers() {
+    let service = stand_in_push_service();
+    let address = service.address.strip_prefix("http://").unwrap();
+    let socket = tokio::net::TcpStream::connect(address).await.unwrap();
+    let (mut client, connection) = h2::client::handshake(socket).await.unwrap();
+    tokio::spawn(connection);
+
+    // Reuse the reply's connection for the decision. Hold its DATA at the
+    // client until the service has accepted its HEADERS, without a timing guess.
+    for kind in ["reply", "decision"] {
+        client = client.ready().await.unwrap();
+        let request = http::Request::post(format!("{}/3/device/test", service.address))
+            .body(())
+            .unwrap();
+        let (answer, mut stream) = client.send_request(request, false).unwrap();
+        if kind == "decision" {
+            service.headers_received.notified().await;
+            assert_eq!(service.handed().len(), 1, "only the reply body arrived");
+        }
+        stream
+            .send_data(bytes::Bytes::from(json!({"kind":kind}).to_string()), true)
+            .unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(5), answer)
+            .await
+            .expect("a body sent after its headers must be read")
+            .unwrap();
+        assert_eq!(answer.status(), 200);
+        if kind == "reply" {
+            service.headers_received.notified().await;
+        }
+        assert_eq!(service.handed().last().unwrap().2["kind"], kind);
+    }
+    assert_eq!(service.handed().len(), 2);
 }
 
 /// A key as the push service gives one to those who push, in a file; and the public half of
