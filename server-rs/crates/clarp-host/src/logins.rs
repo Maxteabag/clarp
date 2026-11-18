@@ -237,15 +237,7 @@ pub async fn probe_grok(row: &mut Value) {
             let error = if done.status.success() {
                 String::new()
             } else {
-                clarp_kernel::python::first(
-                    said.lines()
-                        .rev()
-                        .map(str::trim)
-                        .find(|s| !s.is_empty())
-                        .unwrap_or("Sign-in failed"),
-                    500,
-                )
-                .to_string()
+                format!("Grok status failed ({})", done.status)
             };
             (valid, error)
         }

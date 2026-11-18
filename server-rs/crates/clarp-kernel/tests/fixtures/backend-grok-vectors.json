@@ -1,4 +1,26 @@
 {
+ "bounds": [
+  {
+   "pairs": 0,
+   "tail": "",
+   "inline": true
+  },
+  {
+   "pairs": 32767,
+   "tail": "a",
+   "inline": true
+  },
+  {
+   "pairs": 32768,
+   "tail": "",
+   "inline": true
+  },
+  {
+   "pairs": 32768,
+   "tail": "a",
+   "inline": false
+  }
+ ],
  "commands": [
   {
    "tool": "grok",
@@ -3122,6 +3144,862 @@
      ],
      "error": "",
      "stopped": true,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call",
+      "toolCallId": "call",
+      "toolName": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "completed"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_started",
+      "toolCallId": "call",
+      "title": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "failed"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_start",
+      "toolCallId": "call",
+      "name": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "error"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_use",
+      "toolCallId": "call",
+      "tool": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "cancelled"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "event": "turn.started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "before"
+     },
+     "text": "before",
+     "all_text": "before",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "item.started",
+      "toolCallId": "call",
+      "ignored": "read_file"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "tool_call_update",
+      "toolCallId": "call",
+      "status": "in_progress"
+     },
+     "text": "",
+     "all_text": "before",
+     "phase": "tool",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "event": "text",
+      "data": "after"
+     },
+     "text": "after",
+     "all_text": "beforeafter",
+     "phase": "speaking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "turn_started"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "thought"
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "thinking",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 7,
+       "output_tokens": "2"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      7,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": "bad",
+       "output_tokens": 5
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": false,
+       "output_tokens": true
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      1
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 3.5,
+       "output_tokens": 4
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      3,
+      4
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": null
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "end",
+      "usage": {}
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "grok",
+   "steps": [
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 7,
+       "output_tokens": "2"
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      7,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": "bad",
+       "output_tokens": 5
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": false,
+       "output_tokens": true
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      1
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 3.5,
+       "output_tokens": 4
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      3,
+      4
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "usage_update",
+      "usage": {
+       "input_tokens": 0,
+       "output_tokens": null
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "type": "end",
+      "usage": {}
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      0,
+      0
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    }
+   ]
+  },
+  {
+   "tool": "muse",
+   "steps": [
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": "5",
+         "output_tokens": 2
+        },
+        3,
+        {
+         "input_tokens": 9,
+         "output_tokens": "bad"
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      14,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": "bad",
+         "output_tokens": 6
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      14,
+      2
+     ],
+     "error": "",
+     "stopped": false,
+     "model": ""
+    },
+    {
+     "event": {
+      "payload_type": "run.usage",
+      "payload": {
+       "models": [
+        {
+         "input_tokens": 1,
+         "output_tokens": true
+        }
+       ]
+      }
+     },
+     "text": "",
+     "all_text": "",
+     "phase": "",
+     "usage": [
+      1,
+      1
+     ],
+     "error": "",
+     "stopped": false,
      "model": ""
     }
    ]

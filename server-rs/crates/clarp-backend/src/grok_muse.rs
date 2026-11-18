@@ -99,6 +99,7 @@ impl Backend for Adapter {
             text: String::new(),
             calls: BTreeMap::new(),
             session: None,
+            saw_output: false,
             outcome: None,
             stderr: ErrorTail::default(),
         })
@@ -113,12 +114,29 @@ struct Stream {
     text: String,
     calls: BTreeMap<String, ToolCall>,
     session: Option<String>,
+    saw_output: bool,
     outcome: Option<RunOutcome>,
     stderr: ErrorTail,
 }
 
 fn word(v: &Value) -> &str {
     v.as_str().unwrap_or("")
+}
+
+/// Counts in both streams use Python's int(value or 0). A bad field
+/// abandons the rest of that conversion.
+fn tokens(value: &Value) -> Option<u64> {
+    if !clarp_kernel::python::truthy(value) {
+        return Some(0);
+    }
+    match value {
+        Value::Bool(_) => Some(1),
+        Value::Number(n) => n
+            .as_u64()
+            .or_else(|| n.as_f64().filter(|v| *v >= 0.0).map(|v| v as u64)),
+        Value::String(s) => clarp_kernel::python::int(s).and_then(|v| v.try_into().ok()),
+        _ => None,
+    }
 }
 
 impl Stream {
@@ -185,7 +203,9 @@ impl Stream {
                 exit_code: None,
             }));
             out.push(Signal::Tool(call));
-            out.push(Signal::Moved(Activity::Thinking));
+            if self.tool == Tool::Grok {
+                out.push(Signal::Moved(Activity::Thinking));
+            }
         }
     }
 
@@ -197,9 +217,10 @@ impl Stream {
             }
             "usage" | "usage_update" | "end" => {
                 let usage = &e["usage"];
-                let tokens_in = usage["input_tokens"].as_u64().unwrap_or(0);
-                let tokens_out = usage["output_tokens"].as_u64().unwrap_or(0);
-                if (tokens_in, tokens_out) != (0, 0) {
+                let (tokens_in, tokens_out) = tokens(&usage["input_tokens"])
+                    .zip(tokens(&usage["output_tokens"]))
+                    .unwrap_or_default();
+                if event_kind(e) != "end" || (tokens_in, tokens_out) != (0, 0) {
                     out.push(Signal::Usage {
                         tokens_in,
                         tokens_out,
@@ -249,9 +270,13 @@ impl Stream {
                 let mut tokens_in: u64 = 0;
                 let mut tokens_out: u64 = 0;
                 for row in p["models"].as_array().into_iter().flatten() {
-                    tokens_in = tokens_in.saturating_add(row["input_tokens"].as_u64().unwrap_or(0));
-                    tokens_out =
-                        tokens_out.saturating_add(row["output_tokens"].as_u64().unwrap_or(0));
+                    let Some(input) = tokens(&row["input_tokens"]) else {
+                        continue;
+                    };
+                    tokens_in = tokens_in.saturating_add(input);
+                    if let Some(output) = tokens(&row["output_tokens"]) {
+                        tokens_out = tokens_out.saturating_add(output);
+                    }
                 }
                 if (tokens_in, tokens_out) != (0, 0) {
                     out.push(Signal::Usage {
@@ -303,6 +328,7 @@ impl Interpreter for Stream {
     fn on_record(&mut self, record: &Record, out: &mut Vec<Signal>) {
         match &record.entry {
             Entry::Out(line) if self.outcome.is_none() => {
+                self.saw_output |= !line.trim().is_empty();
                 let Ok(e) = serde_json::from_str::<Value>(line) else {
                     return;
                 };
@@ -342,7 +368,7 @@ impl Interpreter for Stream {
                     (Some(0),_) => RunOutcome::Completed,
                     _ => {
                         let mut reason = self.stderr.text().unwrap_or_else(|| format!("{tool} exited rc={}",code.unwrap_or(-1)));
-                        if self.tool == Tool::Muse && self.session.as_ref().is_some_and(|id| reason.trim() == format!("session {id} is already in use")) {
+                        if self.tool == Tool::Muse && !self.saw_output && self.session.as_ref().is_some_and(|id| reason.trim() == format!("session {id} is already in use")) {
                             reason = "muse_session_locked: Muse session is held or could not be reclaimed; unverifiable. Close the other Muse process and resend.".into();
                         }
                         RunOutcome::Failed {reason}
@@ -362,6 +388,54 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn composed_prompt_byte_bounds_match_the_reference() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/backend-grok-vectors.json"
+        ))
+        .unwrap();
+        for tool in [Tool::Grok, Tool::Muse] {
+            let adapter = Adapter {
+                tool,
+                program: "synthetic".into(),
+            };
+            for row in fixture["bounds"].as_array().unwrap() {
+                let prompt = format!(
+                    "{}{}",
+                    "ß".repeat(row["pairs"].as_u64().unwrap() as usize),
+                    row["tail"].as_str().unwrap()
+                );
+                let spec = TurnSpec {
+                    agent_id: "a".into(),
+                    session: "my-session".into(),
+                    turn: 1,
+                    cwd: "/example".into(),
+                    prompt: prompt.clone(),
+                    backend_session: None,
+                    new_session: Some("native".into()),
+                    model: None,
+                    effort: None,
+                    identity: None,
+                    told: None,
+                };
+                let launch = adapter.launch(&spec);
+                assert_eq!(launch.program, "synthetic");
+                assert_eq!(launch.env, [(SESSION_ENV.into(), "my-session".into())]);
+                if row["inline"] == true {
+                    assert!(launch.args.ends_with(&[tool.prompt_flag().into(), prompt]));
+                    assert!(launch.stdin.is_empty());
+                } else {
+                    assert!(
+                        launch
+                            .args
+                            .ends_with(&["--prompt-file".into(), "/dev/stdin".into()])
+                    );
+                    assert_eq!(launch.stdin, prompt.as_bytes());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn recorded_streams_follow_the_python_turn_after_every_line() {
         let fixture: Value = serde_json::from_str(include_str!(
             "../../clarp-kernel/tests/fixtures/backend-grok-vectors.json"
@@ -373,6 +447,7 @@ mod tests {
             let mut reader = backend.interpreter(1, "synthetic");
             let (mut saved, mut live, mut model) = (String::new(), String::new(), String::new());
             let mut usage = (0, 0);
+            let mut phase = "";
             let mut last = Value::Null;
             for step in story["steps"].as_array().unwrap() {
                 last = step.clone();
@@ -386,6 +461,14 @@ mod tests {
                 );
                 for signal in signals {
                     match signal {
+                        Signal::Moved(activity) => {
+                            phase = match activity {
+                                Activity::Thinking => "thinking",
+                                Activity::Tool { .. } => "tool",
+                                Activity::Responding => "speaking",
+                                _ => "other",
+                            };
+                        }
                         Signal::Live(reply) => live = reply.text,
                         Signal::Reply(reply) => {
                             saved.push_str(&reply.text);
@@ -399,6 +482,7 @@ mod tests {
                         _ => {}
                     }
                 }
+                assert_eq!(step["phase"], phase, "{step}");
                 assert_eq!(step["text"], live, "{step}");
                 assert_eq!(step["all_text"], format!("{saved}{live}"));
                 assert_eq!(step["usage"], json!([usage.0, usage.1]));
@@ -427,6 +511,6 @@ mod tests {
             };
             assert_eq!(signals.last(), Some(&Signal::Ended(expected)));
         }
-        assert_eq!(count, 26);
+        assert_eq!(count, 73);
     }
 }

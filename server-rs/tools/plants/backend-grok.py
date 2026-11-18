@@ -4,6 +4,7 @@ import runner
 
 RUNS = {
     'vectors': ['test', '--test', 'backend_grok_vectors'],
+    'bounds': ['test', '-p', 'clarp-backend', '--lib', 'composed_prompt_byte_bounds_match'],
     'stream': ['test', '-p', 'clarp-backend', '--lib', 'recorded_streams_follow'],
     'catalogue': ['test', '-p', 'clarp-backend', '--lib', 'model_lists_match'],
     'host': ['test', '--test', 'host', '--', 'grok_and_muse_run_stop_and_resume'],
@@ -73,10 +74,10 @@ for name in ('run.model.configured','model_id','run.usage','models','run.termina
 
 for why,before,after in [
         ('model id remains unset','Signal::Model(word(&p["model_id"]).into())','Signal::Model(String::new())'),
-        ('muse inputs and outputs swapped','tokens_in.saturating_add(row["input_tokens"]','tokens_in.saturating_add(row["output_tokens"]'),
-        ('muse outputs and inputs swapped','tokens_out.saturating_add(row["output_tokens"]','tokens_out.saturating_add(row["input_tokens"]'),
-        ('grok input count is its output','usage["input_tokens"].as_u64()','usage["output_tokens"].as_u64()'),
-        ('grok output count is its input','usage["output_tokens"].as_u64()','usage["input_tokens"].as_u64()'),
+        ('muse inputs and outputs swapped','tokens_in.saturating_add(input)','tokens_in.saturating_add(1)'),
+        ('muse outputs and inputs swapped','tokens_out.saturating_add(output)','tokens_out.saturating_add(1)'),
+        ('grok input count is its output','tokens(&usage["input_tokens"])','tokens(&usage["output_tokens"])'),
+        ('grok output count is its input','tokens(&usage["output_tokens"])','tokens(&usage["input_tokens"])'),
         ('a new delta replaces the paragraph','self.text.push_str(&delta);','self.text = delta;')]:
     change(B,'stream',why,before,after)
 
@@ -95,6 +96,43 @@ for why,before,after in [
         ('tool result text is discarded','call.output = Some(shorten(&text, 4000));','call.output = None;'),
         ('a completed tool reports failure','call.status = if ok','call.status = if !ok'),
         ('resumed sessions are fresh','spec.backend_session.is_none(),','spec.backend_session.is_some(),')]:
+    change(B,'host',why,before,after)
+
+for why,before,after in [
+        ('exactly 64 KiB unnecessarily uses a file','prompt.len() > 64 * 1024','prompt.len() >= 64 * 1024'),
+        ('one byte too many stays on argv','prompt.len() > 64 * 1024','prompt.len() > 64 * 1024 + 1'),
+        ('non-ASCII characters counted instead of bytes','prompt.len() > 64 * 1024','prompt.chars().count() > 64 * 1024'),
+        ('private file transport loses the prompt bytes','stdin = prompt.into_bytes();','stdin = vec![1];'),
+        ('the turn runs under a different name','spec.session.clone())','String::new())')]:
+    change(B,'bounds',why,before,after)
+
+A = 'clarp-host/src/logins.rs'
+P = 'clarp-backend/src/past.rs'
+for why,before,after in [
+        ('a signed-out CLI reports a valid session','!said.to_lowercase().contains("not authenticated")','said.to_lowercase().contains("not authenticated")'),
+        ('a valid session reports no credential','row["credential_present"] = json!(valid);','row["credential_present"] = json!(false);'),
+        ('CLI failure reports signed-out','else if error.is_empty()','else if !error.is_empty()'),
+        ('an installed Muse has the wrong auth state','"host_managed"','"unverified"'),
+        ('an all-harnesses request drops non-default tools','every || matches!(*tool, "claude" | "codex")','matches!(*tool, "claude" | "codex")')]:
+    change(A,'host',why,before,after)
+for why,before,after in [
+        ('year directory needs three digits','date_dirs(base, 4)','date_dirs(base, 3)'),
+        ('month directory needs one digit','date_dirs(&y, 2)','date_dirs(&y, 1)'),
+        ('day directory needs one digit','date_dirs(&m, 2)','date_dirs(&m, 1)'),
+        ('the grok store has a different default path','"CLAUDE_PWA_GROK_HOME", ".grok"','"CLAUDE_PWA_GROK_HOME", ".grok-missing"'),
+        ('session preview is cut to one character','python::first(&preview,240)','python::first(&preview,1)'),
+        ('a session title is shown as its preview','"preview":python::first(&preview,240)','"preview":title.clone()')]:
+    change(P,'host',why,before,after)
+for key in ('turn_started','tool_call_update','run.lifecycle.started','thought','turn.started'):
+    # Only change the stream dispatch. The test compares the wire phase for each line.
+    word(B,'stream',key)
+
+for why,before,after in [
+        ('the router asks the effort as the model','q.model.as_deref().unwrap_or("")','q.effort.as_deref().unwrap_or("")'),
+        ('the router asks the model as the effort','q.effort.as_deref().unwrap_or("")','q.model.as_deref().unwrap_or("")'),
+        ('the routing question is empty','&q.prompt,','"",'),
+        ('an assigned session is not recorded','fn binds_at_spawn(&self) -> bool {\n        true','fn binds_at_spawn(&self) -> bool {\n        false'),
+        ('a Muse lock has no recovery classification','muse_session_locked: Muse session','session_busy: Muse session')]:
     change(B,'host',why,before,after)
 
 if __name__ == '__main__':

@@ -134,6 +134,22 @@ def vectors():
             stories.append(('grok',[dict(type=error,error=dict(message='failed'))]))
         for terminal in ('aborted','failed','cancelled','interrupted'):
             stories.append(('muse',[dict(payload_type='run.terminal.'+terminal,payload=dict(reason='refused'))]))
+        kinds = ['tool_call','tool_started','tool_start','tool_use','item.started']
+        for i, kind in enumerate(kinds):
+            status = ('completed','failed','error','cancelled','in_progress')[i]
+            stories.append(('grok', [
+                dict(event='turn.started'), dict(event='thought'), dict(event='text', data='before'),
+                dict(event=kind, toolCallId='call', **{('toolName','title','name','tool','ignored')[i]:'read_file'}),
+                dict(event='tool_call_update', toolCallId='call', status=status), dict(event='text',data='after')]))
+        for kind in ('turn_started','thought'):
+            stories.append(('grok',[dict(type=kind)]))
+        for field in ('usage', 'usage_update'):
+            stories.append(('grok',[dict(type=field,usage=dict(input_tokens=x,output_tokens=y))
+                                    for x,y in [(7,'2'),('bad',5),(False,True),(3.5,4),(0,None)]]
+                            +[dict(type='end',usage={})]))
+        stories.append(('muse',[dict(payload_type='run.usage', payload={'models':rows}) for rows in [
+            [dict(input_tokens='5',output_tokens=2),3,dict(input_tokens=9,output_tokens='bad')],
+            [dict(input_tokens='bad',output_tokens=6)], [dict(input_tokens=1,output_tokens=True)]]]))
         for tool, events in stories:
             adapter = by_id(tool)
             st = (grok_module if tool=='grok' else muse_module)._TurnState()
@@ -168,7 +184,11 @@ def vectors():
                 ('muse', '[]')]:
             parse = getattr(capabilities, 'parse_'+tool+'_models')
             catalogs.append(dict(tool=tool, raw=raw, models=parse(raw, observed_at='synthetic')))
-        return dict(commands=rows, answers=answers, histories=histories, catalogs=catalogs, streams=streams)
+        from lib.backend.long_prompt import fits_argv
+        bounds = []
+        for n, tail in [(0,''),(32767,'a'),(32768,''),(32768,'a')]:
+            bounds.append(dict(pairs=n,tail=tail,inline=fits_argv(chr(0xdf)*n+tail)))
+        return dict(bounds=bounds, commands=rows, answers=answers, histories=histories, catalogs=catalogs, streams=streams)
 
 
 if __name__ == '__main__':
