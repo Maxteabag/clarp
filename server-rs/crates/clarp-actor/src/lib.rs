@@ -153,6 +153,7 @@ pub struct ShimOrder {
     pub spool: PathBuf,
     pub socket: PathBuf,
     pub stdin_file: PathBuf,
+    pub named_session: Option<String>,
     pub cwd: PathBuf,
     pub program: String,
     pub args: Vec<String>,
@@ -2631,6 +2632,7 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
+        let named_session = self.backend.binds_at_spawn().then(|| backend_session.clone().unwrap_or_else(|| self.profile.conversation_id.clone())).filter(|id| !id.is_empty());
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
@@ -2713,6 +2715,7 @@ impl Actor {
             spool: self.profile.spool_path_of(turn, attempt),
             socket: self.profile.socket_path_of(turn, attempt),
             stdin_file,
+            named_session,
             cwd: self.profile.cwd.clone(),
             program: launch.program,
             args: launch.args,
@@ -3119,10 +3122,7 @@ impl Actor {
                 // command the agent refuses is about a turn that is no longer live: late news.
                 match &record.entry {
                     Line::Shim(ShimEvent::Spawned { .. }) => {
-                        let started = batch.command(Command::TurnStarted { turn }, t).is_ok();
-                        if started && self.backend.binds_at_spawn() && batch.agent().backend_session().is_none() && !self.profile.conversation_id.is_empty() {
-                            let _ = batch.command(Command::TurnBound { turn, backend_session: self.profile.conversation_id.clone() }, t);
-                        }
+                        let _ = batch.command(Command::TurnStarted { turn }, t);
                     }
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();

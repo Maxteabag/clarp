@@ -99,6 +99,7 @@ impl Launcher {
                 command
             }
         };
+        if let Some(session) = &order.named_session { command.arg("--named-session").arg(session); }
         command
             .arg("--spool")
             .arg(&order.spool)
@@ -215,6 +216,7 @@ mod tests {
 
     fn order() -> ShimOrder {
         ShimOrder {
+            named_session: None,
             turn: TurnId(7),
             attempt: 1,
             spool: PathBuf::from("/data/agents/a1/spool/7.jsonl"),
