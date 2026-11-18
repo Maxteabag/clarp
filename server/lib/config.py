@@ -448,6 +448,7 @@ class Config:
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     janitor_read_diagnostics: bool = False
+    render_spec_min_client: int | None = None
     oracle_diagnostics: bool = False
     oracle_router_backend: str = "api"
     oracle_delegation_strategy: str = "operator"
@@ -1067,6 +1068,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
         janitor_read_diagnostics = (data.get("diagnostics", {}).get("janitor_autonomy_reads") is True),
+        render_spec_min_client = (data.get("artifacts") or {}).get("render_spec_min_client"),
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
         oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         oracle_delegation_strategy = str(openai.get("oracle_delegation_strategy", "operator")).strip(),

@@ -23,9 +23,9 @@ def _config() -> tuple[str, str]:
     return f"http://{bind}:{int(server.get('port', 7682))}", str(server.get("auth_token", ""))
 
 
-def _request(method: str, path: str, body: dict | None = None) -> dict:
+def _request(method: str, path: str, body: dict | bytes | None = None) -> dict:
     base, token = _config()
-    data = json.dumps(body).encode() if body is not None else None
+    data = body if isinstance(body, bytes) else json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(base + path, data=data, method=method)
     request.add_header("Content-Type", "application/json")
     if token: request.add_header("Authorization", "Bearer " + token)
@@ -201,6 +201,25 @@ def _attention(args: list[str]) -> dict:
     return result
 
 
+def _publish_render_spec(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts publish-render-spec")
+    parser.add_argument("request_file", type=pathlib.Path, help="Complete render_spec publish request JSON")
+    parser.add_argument("--validate-only", action="store_true")
+    options = parser.parse_args(args)
+    path = "/artifacts?validate_only=1" if options.validate_only else "/artifacts"
+    # Preserve the author's bytes, including numeric spellings and duplicate keys,
+    # so the Host remains the sole validator.
+    try:
+        return _request("POST", path, options.request_file.read_bytes())
+    except urllib.error.HTTPError as exc:
+        if exc.code not in (400, 403, 409):
+            raise
+        refusal = json.load(exc)
+        if not isinstance(refusal, dict) or not isinstance(refusal.get("error"), dict):
+            raise
+        return refusal
+
+
 def _create_form(args: list[str]) -> dict:
     parser = _Parser(prog="clarp-agent-artifacts create-form")
     parser.add_argument("session")
@@ -330,6 +349,7 @@ def _form_events(args: list[str]) -> dict:
 
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | "
+             "publish-render-spec REQUEST_FILE [--validate-only] | "
              "create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | "
              "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
              "form-events ARTIFACT_ID [--draft-key KEY] [--after N] [--limit N] [--output JSONL] [--overwrite] | "
@@ -343,7 +363,12 @@ def main(argv: list[str]) -> int:
              "update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION")
     try:
         cmd = argv[1]
-        if cmd == "create-form":
+        if cmd == "publish-render-spec":
+            result = _publish_render_spec(argv[2:])
+            if "error" in result:
+                print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
+                return 1
+        elif cmd == "create-form":
             result = _create_form(argv[2:])
         elif cmd == "create-report":
             result = _create_report(argv[2:])
