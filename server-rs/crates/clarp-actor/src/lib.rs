@@ -802,13 +802,11 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     end.context_tokens = facts.context;
     end.limits = facts.limits.map(|(at_ms, said)| LimitsSaid { at_ms, said });
     // What the tool tells of cost is what its whole conversation has cost so far: the turn's
-    // share is what that grew by. A total that fell is a conversation the tool began anew,
-    // and is the turn's own. Where what it stood at before is not known (a session that was
-    // taken up, or one from before totals were kept), the share is not known either, and the
-    // total is kept for the turn after.
+    // share is what that grew by. Where what it stood at before is not known (a session that
+    // was taken up, or one from before totals were kept), or the total fell, the share is not
+    // known either, and the total is kept for the turn after.
     if let Some(so_far) = facts.cost {
-        let share = |before: u64| so_far.checked_sub(before).unwrap_or(so_far);
-        end.cost_micros = facts.cost_before.map(share);
+        end.cost_micros = clarp_kernel::usage::rise(facts.cost_before, so_far);
         end.cost_so_far = batch.agent().backend_session().map(|session| CostSoFar {
             session: session.to_string(),
             micros: so_far,

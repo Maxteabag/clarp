@@ -32,6 +32,8 @@ use crate::quota;
 
 /// The kind of thing a turn's use is, among what is left with the fleet.
 const KIND: &str = "used";
+/// And the kind of the moment from which this Host has counted.
+const SINCE: &str = "counted-since";
 /// The tools this Host runs, in the order an app lists them.
 const TOOLS: [&str; 3] = ["claude", "codex", "agy"];
 /// After how many turns what is too old to count is looked for and let go.
@@ -104,12 +106,27 @@ fn before(at_ms: i64) -> String {
     format!("{:013}", at_ms.max(0))
 }
 
+/// From when this Host has counted what turns cost: the moment it first kept count, which
+/// is kept from then on. This Host has told a turn's own share of a session's cost for as
+/// long as it has counted, so every cost it keeps is one turn's.
+async fn since(fleet: &FleetHandle, now_ms: i64) -> i64 {
+    let kept = fleet.kept_all(SINCE).await.unwrap_or_default();
+    let read = |written: &Vec<u8>| std::str::from_utf8(written).ok()?.parse::<i64>().ok();
+    if let Some(at) = kept.first().and_then(|(_, written)| read(written)) {
+        return at;
+    }
+    let written = now_ms.to_string().into_bytes();
+    let _ = fleet.keep(SINCE, "at".to_string(), Some(written)).await;
+    now_ms
+}
+
 /// Keeps what turns used with the fleet as it is told, and now and then lets go of what
 /// ended longer ago than the longest window; and has what a tool wrote of its account read
 /// when a turn of the tool is over. Ends when no agent can tell any more.
 pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, works: Works) {
     let clock = &works.clock;
     let home = crate::config::home();
+    since(&fleet, clock.now_ms()).await;
     // The first thing told is followed by a look for what is too old.
     let mut since_looked = LOOKED_OVER_EVERY;
     while let Some(told) = told.recv().await {
@@ -173,10 +190,11 @@ async fn told(State(app): State<App>) -> Json<Value> {
         .iter()
         .filter_map(|(_, written)| serde_json::from_slice(written).ok())
         .collect();
+    let since = since(&app.fleet, now).await;
     let backends: Vec<Value> = TOOLS
         .iter()
         .map(|tool| {
-            let totals = usage::totals(&kept, tool, now);
+            let totals = usage::totals(&kept, tool, (now, since));
             let ended_at = totals["last_turn_at"]
                 .as_i64()
                 .map(crate::wire::to_the_second);
@@ -253,13 +271,14 @@ mod tests {
                 moments += 1;
             }
         }
-        assert_eq!(moments, 12);
+        assert_eq!(moments, 13);
     }
 
     #[test]
     fn a_turns_use_is_kept_under_a_name_that_begins_with_when_it_ended() {
         let (tally, mut told) = tally();
-        let used = Used::said("claude", 1_800_000_000_123, Some(5), Some(7), None).unwrap();
+        let tokens = (Some(5), Some(7));
+        let used = Used::said("claude", 1_800_000_000_123, tokens, None, false).unwrap();
         tally.ended("a1b2", 9, used.clone());
         tally.ended("a1b2", 9, used);
         let mut named = || match told.try_recv().unwrap() {

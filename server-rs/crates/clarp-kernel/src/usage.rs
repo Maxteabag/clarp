@@ -7,6 +7,11 @@
 //! through this Host, and not how much of an account is left: no tool says that at the end
 //! of a turn.
 //!
+//! A tool may tell, with a turn's end, what its whole session has cost so far and not the
+//! turn's share (Claude Code does): then a turn cost what that total grew by, and where
+//! what it stood at before is not known, or it fell, what the turn cost is not known. Such
+//! a turn is counted all the same; only its cost is in no sum.
+//!
 //! The rules are the Python Host's (`server/lib/turn_usage.py`, and the row an app is
 //! given, `backend_usage_claude.py`, `_claude_response_row`), held by
 //! `tests/fixtures/usage-vectors.json`.
@@ -46,14 +51,16 @@ pub struct Used {
 impl Used {
     /// What a turn used, from what its tool said of it. `None` where the tool said
     /// nothing of the three: a turn that failed early says none, and is not counted.
+    /// `told_a_total`: the tool said what its session has cost so far; then the turn is
+    /// counted whatever is known of its own share.
     pub fn said(
         tool: &str,
         at_ms: i64,
-        tokens_in: Option<u64>,
-        tokens_out: Option<u64>,
+        (tokens_in, tokens_out): (Option<u64>, Option<u64>),
         cost_usd: Option<f64>,
+        told_a_total: bool,
     ) -> Option<Self> {
-        if tokens_in.is_none() && tokens_out.is_none() && cost_usd.is_none() {
+        if tokens_in.is_none() && tokens_out.is_none() && cost_usd.is_none() && !told_a_total {
             return None;
         }
         Some(Self {
@@ -66,10 +73,29 @@ impl Used {
     }
 }
 
+/// Whether a tool tells with a turn's end what its whole session has cost so far, and not
+/// what the turn cost.
+pub fn tells_a_total(tool: &str) -> bool {
+    tool == "claude"
+}
+
+/// What a turn cost, of a tool that tells what its session has cost so far: what the total
+/// grew by since it was told last, in millionths of a dollar. `stood_at`: what it was told
+/// last for this session (nothing for one that begins with the turn), where that is known.
+/// Not known where that is not, and where the total fell.
+pub fn rise(stood_at: Option<u64>, total: u64) -> Option<u64> {
+    stood_at.and_then(|before| total.checked_sub(before))
+}
+
 /// A tool's sums over each window, and when its newest turn ended (`last_turn_at`; `null`
 /// where none is kept). A window holds the turns that ended less than its length ago. The
-/// cost of a window is told only where a turn in it said one.
-pub fn totals<'a>(turns: impl IntoIterator<Item = &'a Used>, tool: &str, now_ms: i64) -> Value {
+/// cost of a window is told only where a turn in it said one. Of a tool that tells its
+/// session's total, also from when its cost is counted turn by turn (`since_ms`).
+pub fn totals<'a>(
+    turns: impl IntoIterator<Item = &'a Used>,
+    tool: &str,
+    (now_ms, since_ms): (i64, i64),
+) -> Value {
     let of_the_tool: Vec<&Used> = turns.into_iter().filter(|used| used.tool == tool).collect();
     let mut windows = Map::new();
     for (name, span_ms) in WINDOWS {
@@ -90,7 +116,11 @@ pub fn totals<'a>(turns: impl IntoIterator<Item = &'a Used>, tool: &str, now_ms:
         windows.insert(name.to_string(), window);
     }
     let newest = of_the_tool.iter().map(|used| used.at_ms).max();
-    json!({ "windows": windows, "last_turn_at": newest.filter(|at| *at != 0) })
+    let mut totals = json!({ "windows": windows, "last_turn_at": newest.filter(|at| *at != 0) });
+    if tells_a_total(tool) {
+        totals["cost_activation_ms"] = json!(since_ms);
+    }
+    totals
 }
 
 /// The row an app's usage screen is given for a tool, from its sums: no share of an
@@ -105,7 +135,7 @@ pub fn row(tool: &str, totals: &Value, now_ms: i64, ended_at: Option<String>) ->
         Some(at) if now_ms - at <= FRESH_FOR_MS => "fresh",
         Some(_) => "stale",
     };
-    json!({
+    let mut row = json!({
         "backend": tool,
         "used_percentage": null,
         "resets_at": null,
@@ -115,5 +145,9 @@ pub fn row(tool: &str, totals: &Value, now_ms: i64, ended_at: Option<String>) ->
         "error": if newest.is_some() { "" } else { NONE_YET },
         "windows": {},
         "totals": totals["windows"],
-    })
+    });
+    if let Some(since) = totals.get("cost_activation_ms") {
+        row["cost_activation_ms"] = since.clone();
+    }
+    row
 }

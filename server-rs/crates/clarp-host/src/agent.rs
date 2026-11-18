@@ -2239,9 +2239,9 @@ impl Worker {
                 && let Some(used) = clarp_kernel::usage::Used::said(
                     backend,
                     end.ended_at_ms,
-                    end.tokens_in,
-                    end.tokens_out,
+                    (end.tokens_in, end.tokens_out),
                     end.cost_micros.map(|micros| micros as f64 / 1_000_000.0),
+                    end.cost_so_far.is_some(),
                 )
             {
                 let agent_id = &self.setup.record.agent_id;
