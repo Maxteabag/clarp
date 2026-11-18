@@ -37,7 +37,7 @@ use clarp_spool::{Entry, MAX_OUTPUT_CHUNK, Record, ShimEvent, SpoolWriter};
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::signal::{SigSet, Signal, kill, killpg};
-use nix::sys::wait::{Id, WaitPidFlag, waitid};
+use nix::sys::wait::{Id, WaitPidFlag, WaitStatus, waitid};
 use nix::unistd::{Pid, setsid};
 
 /// How long a tool gets to end by itself when the shim is told to go.
@@ -119,6 +119,8 @@ enum ToSpool {
     Entry(Entry),
     /// Write, make durable, and tell the sender it is done.
     Now(Entry, Sender<()>),
+    /// Durably end this spool, then drop its receiver so later signals and hooks cannot append.
+    Last(Entry, Sender<()>),
     /// A connection that wants a newline whenever the spool has grown.
     Follow(UnixStream),
 }
@@ -144,12 +146,13 @@ fn write(writer: &mut SpoolWriter, entry: Entry, durable: bool) {
 fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
     let mut followers: Vec<UnixStream> = Vec::new();
     for message in entries {
+        let last = matches!(&message, ToSpool::Last(..));
         match message {
             ToSpool::Entry(entry) => {
                 let durable = matches!(entry, Entry::Shim(_));
                 write(&mut writer, entry, durable);
             }
-            ToSpool::Now(entry, done) => {
+            ToSpool::Now(entry, done) | ToSpool::Last(entry, done) => {
                 write(&mut writer, entry, true);
                 let _ = done.send(());
             }
@@ -161,6 +164,9 @@ fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
             Ok(_) => true,
             Err(error) => error.kind() == ErrorKind::WouldBlock,
         });
+        if last {
+            return;
+        }
     }
 }
 
@@ -433,6 +439,25 @@ fn listen(socket: &Path) -> std::io::Result<UnixListener> {
     UnixListener::bind(socket)
 }
 
+/// Observe an exited child, keeping its pid reserved until its owner reaps it.
+fn observe_exit(pid: u32) -> Result<std::process::ExitStatus, String> {
+    loop {
+        let child = Id::Pid(Pid::from_raw(pid as i32));
+        match waitid(child, WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT) {
+            Ok(WaitStatus::Exited(_, code)) => {
+                return Ok(std::process::ExitStatus::from_raw(code << 8));
+            }
+            Ok(WaitStatus::Signaled(_, signal, core)) => {
+                return Ok(std::process::ExitStatus::from_raw(
+                    signal as i32 | if core { 128 } else { 0 },
+                ));
+            }
+            Ok(_) | Err(Errno::EINTR) => continue,
+            Err(e) => return Err(format!("observing child {pid}: {e}")),
+        }
+    }
+}
+
 fn run(args: Args) -> Result<u8, String> {
     // A session of its own: what happens to the server's terminal or process group does not
     // reach a running turn.
@@ -599,27 +624,39 @@ fn run(args: Args) -> Result<u8, String> {
     });
 
     if let Some(early) = &control.before_stop {
-        // Observe exit without reaping: while Stop owns the group, its numeric
-        // id must not be reusable between the gentle signal and the final kill.
-        loop {
-            match waitid(
-                Id::Pid(Pid::from_raw(pid as i32)),
-                WaitPidFlag::WEXITED | WaitPidFlag::WNOWAIT,
-            ) {
-                Ok(_) => break,
-                Err(Errno::EINTR) => continue,
-                Err(e) => return Err(format!("observing {}: {e}", args.program)),
-            }
-        }
+        // Keep the process group reserved while the last kill is outstanding.
+        let observed = observe_exit(pid)?;
         exited.store(true, Ordering::SeqCst);
+        {
+            let _stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
+            early.changed.notify_all();
+        }
+        for pump in pumps {
+            let _ = pump.join();
+        }
+        let (done, wait) = mpsc::channel();
+        let entry = Entry::Shim(ShimEvent::Exited {
+            code: observed.code(),
+            signal: observed.signal(),
+        });
+        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {
+            let _ = wait.recv();
+        }
+        let _ = std::fs::remove_file(&args.socket);
         let stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-        early.changed.notify_all();
         drop(
             early
                 .changed
                 .wait_while(stage, |s| matches!(s, StopStage::Asked))
                 .unwrap_or_else(PoisonError::into_inner),
         );
+        child
+            .wait()
+            .map_err(|e| format!("reaping {}: {e}", args.program))?;
+        return Ok(observed
+            .code()
+            .and_then(|c| u8::try_from(c).ok())
+            .unwrap_or(1));
     }
     let status = child
         .wait()
@@ -668,6 +705,39 @@ fn main() -> ExitCode {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_last_spool_record_discards_a_kill_already_queued_behind_it() {
+        let file = std::env::temp_dir().join(format!("clarp-closed-spool-{}", std::process::id()));
+        let writer = SpoolWriter::create(&file).unwrap();
+        let (send, receive) = mpsc::channel();
+        let (done, ack) = mpsc::channel();
+        let term = Entry::Shim(ShimEvent::Stopping {
+            signal: "SIGTERM".into(),
+        });
+        let end = Entry::Shim(ShimEvent::Exited {
+            code: None,
+            signal: Some(15),
+        });
+        send.send(ToSpool::Entry(term.clone())).unwrap();
+        send.send(ToSpool::Last(end.clone(), done)).unwrap();
+        send.send(ToSpool::Entry(Entry::Shim(ShimEvent::Stopping {
+            signal: "SIGKILL".into(),
+        })))
+        .unwrap();
+        drop(send);
+        spool_thread(writer, receive);
+        ack.recv().unwrap();
+        let entries = clarp_spool::SpoolReader::new(&file)
+            .read_from(0)
+            .unwrap()
+            .records
+            .into_iter()
+            .map(|r| r.entry)
+            .collect::<Vec<_>>();
+        assert_eq!(entries, [term, end]);
+        std::fs::remove_file(file).unwrap();
+    }
 
     fn printed() -> (Arc<Printed>, std::io::PipeReader, std::io::PipeWriter) {
         let (reader, writer) = std::io::pipe().unwrap();

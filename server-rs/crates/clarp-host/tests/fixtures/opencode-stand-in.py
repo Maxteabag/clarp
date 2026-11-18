@@ -2,7 +2,7 @@
 import base64, json, os, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import pathlib
+import pathlib, signal, socket, struct, subprocess
 root = pathlib.Path(os.environ["FAKE_ROOT"])
 LOG = str(root / "requests")
 session = "ses_" + os.environ.get("CLAUDE_PWA_SESSION", "once")
@@ -38,8 +38,26 @@ if sys.argv[1] == "run":
                       "part": {"text": "from run"}}))
     sys.exit(0)
 assert sys.argv[1:] == ["serve", "--hostname", "127.0.0.1", "--port", "0"]
+dependent = None
+def terminate_server(*_):
+    (root/"server-term").write_text(str(os.getpid()))
+    if (root/"resist-term").exists():
+        return
+    if dependent is not None:
+        dependent.terminate()
+        dependent.wait(timeout=2)
+        (root/"dependent-reaped").write_text(str(dependent.pid))
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, terminate_server)
+if (root/"before-subscription").exists():
+    # A local language-server stand-in keeps the turn's stderr until shutdown.
+    dependent = subprocess.Popen([sys.executable,"-c","import time;time.sleep(12)"],
+                                 stdout=subprocess.DEVNULL, start_new_session=True)
 if (root/"fallback").exists():
-    sys.exit(3)
+    os.close(1)
+    signal.alarm(12)
+    while True: signal.pause()
 with open(root/"pid", "w") as f:
     f.write(str(os.getpid()))
 def _events(sid="ses_new"):
@@ -162,6 +180,13 @@ class H(BaseHTTPRequestHandler):
         if path == "/session":
             return self._json(200, {"id": session})
         if path.endswith("/prompt_async"):
+            if (root/"signal-shim").exists():
+                with socket.socket(socket.AF_UNIX) as peer:
+                    peer.connect(os.environ["CLARP_SHIM_SOCKET"])
+                    shim_pid, _, _ = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
+                    argv = pathlib.Path(f"/proc/{shim_pid}/cmdline").read_bytes().split(b"\0")
+                    (root / "signalled-spool").write_bytes(argv[argv.index(b"--spool") + 1])
+                    os.kill(shim_pid, signal.SIGTERM)
             if (root/"hang").exists():
                 EVENTS[:] = [e for e in EVENTS if e["type"]=="session.status" and e["properties"]["sessionID"]==session][:1]+["HANG"]
             if (root/"fail").exists(): EVENTS[:] = [{"type":"session.status","properties":{"sessionID":session,"status":{"type":"busy"}}}, {"type":"session.error","properties":{"sessionID":session,"error":{"data":{"message":"synthetic refusal"}}}}, EVENTS[-1]]

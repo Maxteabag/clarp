@@ -1418,6 +1418,10 @@ loopback, verifies the continued session or creates a fresh one, writes and flus
 to events and submits the prompt. A startup failure before any submission permits the command-line
 fallback. Stop signals the driver once and allows three seconds for its HTTP abort (D26). The picker
 reads the command's model listing once for both cards and filters the DeepSeek card by family.
+An ordinary or failed turn asks its server to terminate and gives it five seconds for its own
+children before escalation. A shim-directed abort ends the driver by SIGTERM. The shim records
+the observed exit when both output streams have closed; its group remains reserved until any
+outstanding kill is sent. A late escalation cannot append to the finished spool.
 The actor counts each step's usage and the turn's own charge. Native history reads the messages and
 parts from the shared SQLite store.
 

@@ -159,5 +159,27 @@ rules('clarp-host/src/logins/opencode.rs','host',[
     ('a picker model is grouped under another key','model["model_provider"] = json!(provider)','model["provider"] = json!(provider)'),
     ('the picker does not offer provider grouping','row["harness_providers"] = json!(true)','row["harness_providers"] = json!(false)'),
 ])
+rules(DRIVER, 'host', [
+    ('normal shutdown kills the server without asking it to end', 'kill(server, Signal::SIGTERM)', 'kill(server, Signal::SIGKILL)'),
+    ('a server is killed before its five seconds are up', 'wait.recv_timeout(Duration::from_secs(5))', 'wait.recv_timeout(Duration::from_secs(1))'),
+    ('an externally aborted driver reports success', 'let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGTERM);', 'std::process::exit(0);'),
+])
+MAIN = 'clarp-shim/src/main.rs'
+WAIT_FOR_STOP = """        let stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
+        drop(
+            early
+                .changed
+                .wait_while(stage, |s| matches!(s, StopStage::Asked))
+                .unwrap_or_else(PoisonError::into_inner),
+        );"""
+rules(MAIN,'stop',[
+    ('the turn end waits for group escalation', '        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {',
+     WAIT_FOR_STOP + '\n        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {'),
+    ('group escalation can append to a finished spool', 'to_spool.send(ToSpool::Last(entry, done))', 'to_spool.send(ToSpool::Now(entry, done))'),
+])
+RUNS['spool_end'] = ['test','-p','clarp-shim','--bin','clarp-shim','the_last_spool_record_discards']
+rules(MAIN,'spool_end',[
+    ('a queued kill is written after the final record', 'let last = matches!(&message, ToSpool::Last(..));', 'let last = false;'),
+])
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

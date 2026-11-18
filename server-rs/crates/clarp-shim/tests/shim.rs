@@ -451,10 +451,10 @@ def terminate(sig,frame):
     sys.exit(0)
 signal.signal(signal.SIGUSR1,direct)
 if os.fork()==0:
-    # No pipe keeps the shim up on this descendant's behalf.
+    # In one case stderr stays open until KILL; in the other the pumps end early.
     signal.signal(signal.SIGTERM,signal.SIG_IGN)
     signal.signal(signal.SIGUSR1,lambda *_: note("wrong child"))
-    for fd in (0,1,2): os.close(fd)
+    for fd in ((0,1,2) if sys.argv[1]=="true" else (0,1)): os.close(fd)
     with open("stubborn","w") as f: f.write(str(os.getpid()))
     signal.alarm(12)
     while True: signal.pause()
@@ -488,7 +488,7 @@ while True: signal.pause()
             read().contains("ready") && dir.join("stubborn").is_file()
         });
         let start = Instant::now();
-        let stop = Request::Stop { grace_ms: 500 };
+        let stop = Request::Stop { grace_ms: 2000 };
         assert!(ask(&socket, &stop).ok);
         if !exits {
             wait_for("direct abort", || read().contains("direct"));
@@ -497,7 +497,22 @@ while True: signal.pause()
         wait_for("group termination", || read().contains("group"));
         assert_eq!(read(), "ready\ndirect\ngroup\n");
         if exits {
-            assert!(start.elapsed() < Duration::from_millis(1450));
+            wait_for("exited in the spool", || {
+                records(&dir.join("spool/turn.jsonl")).iter().any(|r| {
+                    matches!(
+                        r.entry,
+                        Entry::Shim(ShimEvent::Exited {
+                            code: Some(0),
+                            signal: None
+                        })
+                    )
+                })
+            });
+            assert!(
+                start.elapsed() < Duration::from_millis(500),
+                "Exited was held behind group escalation"
+            );
+            assert!(shim.try_wait().unwrap().is_none());
         } else {
             assert!(
                 (Duration::from_millis(1450)..Duration::from_secs(3)).contains(&start.elapsed())
@@ -509,7 +524,24 @@ while True: signal.pause()
             let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
             stat.is_empty() || stat.contains(") Z ")
         });
-        assert!(start.elapsed() < Duration::from_secs(4));
+        let all = records(&dir.join("spool/turn.jsonl"));
+        assert_eq!(all.iter().any(|r| matches!(&r.entry, Entry::Shim(ShimEvent::Stopping{signal}) if signal=="SIGKILL")), !exits);
+
+        assert!(
+            matches!(
+                all.last().unwrap().entry,
+                Entry::Shim(ShimEvent::Exited { .. })
+            ),
+            "late record: {all:?}"
+        );
+        assert_eq!(
+            all.iter()
+                .filter(|r| matches!(r.entry, Entry::Shim(ShimEvent::Exited { .. })))
+                .count(),
+            1
+        );
+        assert!(start.elapsed() >= Duration::from_secs(2));
+        assert!(start.elapsed() < Duration::from_secs(5));
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
