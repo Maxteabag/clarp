@@ -195,7 +195,10 @@ def parse_turns(path) -> list[dict]:
 
 def find_latest_jsonl(session_id: str, *, home: pathlib.Path | None = None):
     """``sessions/YYYY/MM/DD/<id>/session.jsonl``, newest day first."""
-    if not session_id or not _SESSION_ID.fullmatch(session_id):
+    if not session_id:
+        return None
+    if not transcript_paths.session_id_ok(session_id) or not _SESSION_ID.fullmatch(session_id):
+        transcript_paths.refused("muse")      # the one line, as for every other refusal (R70)
         return None
     root = sessions_root(home)
     if not root.is_dir():

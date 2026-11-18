@@ -4543,3 +4543,21 @@ def test_the_leak_release_leaves_a_send_waiting_behind_a_held_session(tmp_path):
     assert released == {}
     held.alive = False
     assert _wait_until(lambda: len(backends.spawned) == 2)
+
+
+def test_a_stored_id_that_fails_the_rule_is_never_handed_to_the_cli(tmp_path, monkeypatch):
+    """R70 review: a binding stored before the shared rule, on an agent restore does not clean (a
+    Janitor run on demand), reaches the turn. Even for a CLI that resumes by id (its resume target
+    is the id itself) it is not resumed: one line names the backend, and the turn starts fresh."""
+    from lib import backends as registry, db, transcript_paths
+    service, backends, agent_id = _make_service(tmp_path)
+    db.conn().execute("UPDATE runtimes SET backend_session_id = '--last' "
+                      "WHERE agent_id = ? AND ended_at IS NULL", (agent_id,))
+    monkeypatch.setattr(type(registry.by_id("claude")), "resume_target",
+                        lambda self, session_id, cwd, home=None: session_id or None)
+    lines = []
+    monkeypatch.setattr(transcript_paths, "log", lambda event, detail="": lines.append((event, detail)))
+    service.dispatch(text="hello", requested_session="mike", trace_id="t", synthesize_audio=False)
+    _, call = backends.spawned[0]
+    assert call["is_new_session"] is True and call["backend_session_id"] != "--last"
+    assert lines == [("transcriptSessionIdRefused", "backend=claude")]

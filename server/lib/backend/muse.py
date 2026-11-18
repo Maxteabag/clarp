@@ -410,7 +410,9 @@ class MuseBackend(StreamJsonBackend):
         pid, signals, outcome = 0, [], 'unverifiable'
         digest = hashlib.sha256(session_id.encode()).hexdigest()[:12]
         try:
-            if not re.fullmatch(r'[0-9a-fA-F-]{8,64}', session_id):
+            if (not transcript_paths.session_id_ok(session_id)
+                    or not re.fullmatch(r'[0-9a-fA-F-]{8,64}', session_id)):
+                transcript_paths.refused(self.id)
                 return outcome
             paths = list(muse_transcript.sessions_root().glob(
                 f'[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]/{session_id}/.session.lock'))
