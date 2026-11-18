@@ -160,6 +160,13 @@ def sqlite_write_wait(detail: str, connection) -> None:
         _WAIT_CONTEXT.connection = previous
 
 
+def log_exception_type(event: str, error_type: str, detail: str) -> None:
+    """Report an error at a privacy boundary without passing its exception to either sink."""
+    safe_detail = f"{detail} error_type={_fault_label(error_type, 'UnknownError')}"
+    print(f"{time.strftime('%H:%M:%S')} {event} {safe_detail}", file=sys.stderr, flush=True)
+    _eventlog_emit(event, "error", safe_detail)
+
+
 def log_exception(event: str, exc: BaseException, detail: str = "") -> None:
     """Log a caught exception with type, message, and short traceback summary.
 
