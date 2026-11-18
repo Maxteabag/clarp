@@ -707,7 +707,11 @@ def run() -> dict:
                 live._SESSIONS.clear()
                 with live._RETIRED_LOCK:
                     live._RETIRED.clear()
-                return {'retired': agent_rings.recover_joined_live_calls()}
+                retired = agent_rings.recover_joined_live_calls()
+                # What is kept of every call after it: where it is, and why it is over where it is.
+                kept_calls = sorted([r['_live_call_id'], r.get('_live_phase') or '', r.get('_live_retired_reason') or '']
+                                    for r in agent_rings._load() if r.get('_live_call_id'))
+                return {'retired': retired, 'kept': kept_calls}
             if do == 'session':
                 call_id, what = kept.get('_live_call_id', ''), step['what']
                 if what == 'unsettled':
