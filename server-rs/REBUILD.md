@@ -1910,6 +1910,22 @@ Python Host has no feature that stands for schedules, and neither has this one: 
 Found on the way and reported: the Python scheduler counts through a range far larger than its field
 (reference defect R24; fixed there the same day, PR 381).
 
+**Asking what an account has left** (18 Nov 2026). With `--ask-usage`, an app opening the usage
+screen can ask the providers on the Host's current logins, whether the Host follows a selector or
+runs its own. The default is off. Claude's OAuth usage endpoint reports percentages. Codex's
+ChatGPT usage endpoint is tried first, then its read-only app-server. Antigravity's own
+`--output-format json -p /usage` command reports buckets per model group. No model turn is
+started. A reading is due after five minutes or when the app requests a refresh. A failed
+request preserves the previous percentage and its age. As in the Python reference, a failed
+Codex refresh after a block that had no percentage clears the block, even when its reset is
+still in the future. An omitted window disappears from the current report. If it returns, its
+recent limit episode still identifies the recovery an app saw. A Codex structured window is fresh for
+fifteen minutes, and a Claude or Antigravity reading for an hour. A reset makes the corresponding
+Antigravity bucket stale even if the other buckets are fresh. A successful reading can verify
+the same login for a minute. The Host tests direct requests with a numeric loopback socket
+address in `CLARP_USAGE_LOOPBACK` and give both tools private executable stand-ins.
+The first run against the installed Host belongs to the release lead.
+
 **The connection relay** (16 Nov 2026; the owner's requirement, through the Python Host's release owner: "when
 we switch to rust it will use relay"). A Host without a public address is reached through a relay: the Host
 keeps one outbound WebSocket to it, and what a phone asks at `<relay>/h/<host id>` comes down that socket as

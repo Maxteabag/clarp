@@ -138,6 +138,9 @@ struct Episode {
     current_kind: String,
     threshold_id: Option<String>,
     opened_at_ms: i64,
+    /// An authoritative read can omit the window before this episode ages out.
+    #[serde(default)]
+    omitted_window_end_ms: Option<i64>,
     current_event_id: Option<String>,
 }
 
@@ -159,6 +162,9 @@ pub struct Kept {
     windows: Vec<Window>,
     episodes: Vec<Episode>,
     row: Option<Row>,
+    authoritative_ms: Option<i64>,
+    block: Option<Value>,
+    error: String,
     /// When a turn of the tool last completed.
     done_ms: Option<i64>,
 }
@@ -192,6 +198,36 @@ impl Kept {
         self.row.as_ref().map(|row| row.seen_at_ms)
     }
 
+    pub fn refresh_due(&self, login: Option<Login<'_>>, now: i64) -> bool {
+        let Some(row) = &self.row else { return true };
+        let other = login.is_some_and(|on| match &row.account {
+            Some(account) => on.account != Some(account.as_str()),
+            None => on.generation != row.generation,
+        });
+        let latest = self
+            .shown(login, now)
+            .into_iter()
+            .filter(|w| w.kind != "unknown")
+            .map(|w| w.window.observed_at_ms)
+            .max();
+        other
+            || crate::usage_ask::due(latest, now)
+            || crate::usage_ask::due(self.authoritative_ms, now)
+            || ((self.block.is_some() || row.used.as_f64().is_some_and(|n| n >= 100.0))
+                && self
+                    .done_ms
+                    .is_some_and(|done| done > self.authoritative_ms.unwrap_or(0) && done <= now))
+    }
+
+    pub fn refresh_failed(&mut self, now: i64) {
+        self.error = "Codex usage unavailable".into();
+        if self.row.as_ref().is_none_or(|r| r.used.is_null()) {
+            self.authoritative_ms = Some(now);
+            self.block = None;
+            self.row = None;
+        }
+    }
+
     /// A record of the account's limits was seen on a login: what the tool's reader made of
     /// it (`clarp_backend::limits::codex`), where it was seen (`detail`), and now. `new_id`
     /// makes an id nobody has, after the prefix it is given. Answers the events to tell.
@@ -213,7 +249,12 @@ impl Kept {
         let same = |row: &&Row| {
             row.generation == login.generation && row.account.as_deref() == login.account
         };
-        let mut merged: Map<String, Value> = match self.row.as_ref().filter(same) {
+        if self.row.as_ref().is_some_and(|row| !same(&row)) {
+            self.block = None;
+        }
+        let whole = matches!(detail, "/wham/usage" | "account/rateLimits/read");
+        let mut merged: Map<String, Value> = match self.row.as_ref().filter(same).filter(|_| !whole)
+        {
             Some(row) => {
                 let named = |(name, window): &(&String, &Value)| {
                     ROW_WINDOWS.contains(&name.as_str()) && window.is_object()
@@ -238,6 +279,63 @@ impl Kept {
             seen.values().find(long).cloned()
         };
         let (five_hours, week) = (of_length(300.0), of_length(10_080.0));
+        if whole {
+            self.authoritative_ms = Some(now_ms);
+            self.block = snapshot.get("blocked").cloned();
+            let omitted = |w: &Window| {
+                w.generation == login.generation
+                    && match w.kind.as_str() {
+                        "five_hour" => five_hours.is_none(),
+                        "seven_day" => week.is_none(),
+                        _ => false,
+                    }
+            };
+            for at in 0..self.episodes.len() {
+                let ep = &self.episodes[at];
+                if ep.status == "open"
+                    && self
+                        .windows
+                        .iter()
+                        .any(|w| omitted(w) && w.window_id == ep.window_id)
+                {
+                    let tell = Told {
+                        kind: "unknown",
+                        threshold_id: None,
+                        used: None,
+                        resets_at: None,
+                        freshness: "unknown",
+                        source_kind: "authoritative_window_omitted",
+                    };
+                    events.extend(self.tell(tool, at, &tell, now_ms, new_id));
+                    self.episodes[at].status = "invalidated".into();
+                }
+            }
+            for episode in &mut self.episodes {
+                if let Some(window) = self.windows.iter().find(|w| {
+                    omitted(w)
+                        && w.generation == episode.generation
+                        && w.window_id == episode.window_id
+                }) {
+                    episode.omitted_window_end_ms = Some(
+                        window
+                            .resets_at
+                            .as_deref()
+                            .and_then(from_text)
+                            .unwrap_or(window.observed_at_ms),
+                    );
+                }
+            }
+            self.windows.retain(|w| !omitted(w));
+            if self.block.is_none()
+                && !seen.is_empty()
+                && seen
+                    .values()
+                    .all(|w| w["used_percentage"].as_f64().unwrap_or(0.0) < 100.0)
+            {
+                events.extend(self.clear_unknown(tool, Some(login), now_ms, new_id));
+            }
+        }
+        self.error.clear();
         self.row = Some(Row {
             generation: login.generation.to_string(),
             account: login.account.map(str::to_string),
@@ -288,7 +386,9 @@ impl Kept {
                 let reset = window.resets_at.as_deref().and_then(from_text);
                 reset.unwrap_or(window.observed_at_ms)
             });
-            ended.is_none_or(|ended_ms| now_ms - ended_ms > KEPT_AFTER_MS)
+            ended
+                .or(episode.omitted_window_end_ms)
+                .is_none_or(|ended_ms| now_ms - ended_ms > KEPT_AFTER_MS)
         };
         self.episodes
             .retain(|episode| episode.status == "open" || !long_over(episode));
@@ -389,6 +489,7 @@ impl Kept {
                     current_kind: "unknown".to_string(),
                     threshold_id: None,
                     opened_at_ms: now_ms,
+                    omitted_window_end_ms: None,
                     current_event_id: None,
                 });
                 self.episodes.len() - 1
@@ -499,6 +600,7 @@ impl Kept {
                         current_kind: "unknown".to_string(),
                         threshold_id: None,
                         opened_at_ms: now_ms,
+                        omitted_window_end_ms: None,
                         current_event_id: None,
                     });
                     self.episodes.len() - 1
@@ -758,6 +860,16 @@ impl Kept {
         new_id: &mut dyn FnMut(&str) -> String,
     ) -> Vec<Value> {
         self.done_ms = Some(self.done_ms.map_or(at_ms, |done| done.max(at_ms)));
+        self.clear_unknown(tool, login, at_ms, new_id)
+    }
+
+    fn clear_unknown(
+        &mut self,
+        tool: Tool<'_>,
+        login: Option<Login<'_>>,
+        at_ms: i64,
+        new_id: &mut dyn FnMut(&str) -> String,
+    ) -> Vec<Value> {
         // Whose such limits: this login's, those kept under no login, and those of this
         // login's account under whichever login.
         let generation = login.map_or(NO_LOGIN, |login| login.generation);
@@ -806,7 +918,25 @@ impl Kept {
         };
         let mut full: Vec<ShownWindow<'_>> = self.shown(login, now_ms);
         full.retain(all_used);
-        let first_said = full.iter().map(|one| one.window.observed_at_ms).min()?;
+        let block = self.block.as_ref().filter(|b| {
+            let at = self.authoritative_ms.unwrap_or(0);
+            now_ms - at <= WINDOW_FRESH_MS
+                && !self.done_ms.is_some_and(|d| d > at && d <= now_ms)
+                && !b["resets_at"]
+                    .as_str()
+                    .and_then(from_text)
+                    .is_some_and(|end| now_ms >= end)
+                && login.is_none_or(|l| {
+                    self.row
+                        .as_ref()
+                        .is_some_and(|r| r.account.as_deref() == l.account)
+                })
+        });
+        let first_said = full
+            .iter()
+            .map(|one| one.window.observed_at_ms)
+            .min()
+            .unwrap_or(now_ms);
         // A turn that completed after the first of it was said: what still counts is what
         // was said after that turn.
         let since = |done: &i64| *done > first_said && *done <= now_ms;
@@ -826,13 +956,15 @@ impl Kept {
                 last = Some(one);
             }
         }
-        let named = unsaid.or(last)?;
+        let Some(named) = unsaid.or(last) else {
+            return block.map(|b| json!({"state":"exhausted","provider_id":tool.provider,"reason":b["reason"],"window":"unknown","resets_at":b["resets_at"],"observed_at":null}));
+        };
         Some(json!({
             "state": "exhausted",
             "provider_id": tool.provider,
-            "reason": "usage_limit",
+            "reason": block.map_or(json!("usage_limit"),|b| b["reason"].clone()),
             "window": named.kind,
-            "resets_at": named.window.resets_at,
+            "resets_at": named.window.resets_at.clone().or_else(|| block.and_then(|b| text(&b["resets_at"]))),
             "observed_at": moment(named.window.observed_at_ms),
         }))
     }
@@ -842,6 +974,9 @@ impl Kept {
     /// the account, and a Host that is given only records that are none says 1970 and stale.)
     fn row(&self, tool: &str, now_ms: i64) -> Value {
         let Some(row) = &self.row else {
+            if let Some(at) = self.authoritative_ms {
+                return json!({"backend":tool,"used_percentage":null,"resets_at":null,"source":"codex-usage-endpoint","fetched_at":moment(at),"freshness":"unknown","error":self.error,"windows":{}});
+            }
             return json!({
                 "backend": tool,
                 "used_percentage": null,
@@ -853,9 +988,10 @@ impl Kept {
                 "windows": {},
             });
         };
+        let fetched = self.authoritative_ms.unwrap_or(row.seen_at_ms);
         let freshness = if row.used.is_null() {
             "unknown"
-        } else if now_ms - row.seen_at_ms <= ROW_FRESH_MS {
+        } else if now_ms - fetched <= ROW_FRESH_MS {
             "fresh"
         } else {
             "stale"
@@ -873,10 +1009,10 @@ impl Kept {
             "backend": tool,
             "used_percentage": row.used,
             "resets_at": if row.resets_at.is_empty() { Value::Null } else { json!(row.resets_at) },
-            "source": SOURCE,
-            "fetched_at": moment(row.seen_at_ms),
+            "source": if self.authoritative_ms.is_some() {"codex-usage-endpoint"} else {SOURCE},
+            "fetched_at": moment(fetched),
             "freshness": freshness,
-            "error": "",
+            "error": self.error,
             "windows": windows,
         })
     }
