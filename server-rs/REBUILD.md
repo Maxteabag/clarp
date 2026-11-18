@@ -1056,6 +1056,49 @@ Host's refusals, that the account in use is changed where the logins of the mach
 keeps the logins itself says that switching from the desk is not built. Ten more planted rules of the
 kernel and five of the Host, each caught.
 
+**Sockets: one line, two carriers, and the Host's own terminal** (18 Nov 2026). Some of what an app asks
+of a Host is a conversation and not a request: a terminal, the stream of speech, a ring's live socket, the
+Oracle's. The app holds it over a WebSocket, and that reaches a Host at its door or, as a stream (`WS_OPEN`),
+down the one socket the Host keeps to the relay. It is the first gate before a phone moves (section 7), and
+it is built as one port so that no route is written twice. `line.rs`: a `Line` is what a route has of a
+socket (what it hears, what it tells, a close with a code and a word, and the word that nobody is there any
+more); a `Carrier` is its other end. Two things carry a line. The door carries it over the upgrade of a
+request. The relay's connector carries it as frames (`connector.rs`, `conversation`): `WS_ACCEPT`, then
+each thing the route tells as `WS_MSG` with its kind before it, then `WS_CLOSE` with the route's code and
+the connector's own word. **A socket is asked for through the Host's own router either way**: the connector
+asks with a request that carries the line, and a route takes its socket with `Socket`, which finds that line
+or the upgrade. So the checks of who asks stand before every socket, once, and a route cannot tell its
+carriers apart. Whether a request asks for a socket at all is read as the Python Host reads it
+(`clarp-kernel` `socket.rs`, by `tools/socket-vectors.py`: that Host's `ws.is_websocket_upgrade` asked 1,323
+times), and each route refuses what does not in its own words, as there.
+
+**One rule where the Python Host has two**, decided on the way. That Host's connector lets a phone go when
+sixteen messages wait, and at its door a client is made to wait. Built so at first, a test of this port
+failed: a client that left while its route was not listening was never noticed, because a carrier that has
+stopped reading cannot see its client go. The Python Host's terminal has that leak (the thread that types
+is the thread that listens). So here a line holds what was said and not heard by its weight (two of the
+largest messages; a thing weighs 256 bytes beside its own), a client that says more is let go by either
+carrier (`ABORT` through the relay, a close with 1008 at the door), and a route is always told that its
+client is gone, also while it waits for something else (`Line::gone`). The count is in bytes because
+sixteen small things said at once must not end a stream: keys, or pieces of speech after a network stood
+still. Registered in `docs/differences.md`.
+
+**The Host's own terminal** (`GET /server-terminal`, `terminal.rs`, the feature `server_home_terminal`): a
+login shell in the home of whoever the Host runs as, on a pseudo-terminal of its own that it leads, for the
+administrator and a device of full scope. The two calls a terminal needs are calls this workspace does not
+make itself (it forbids unsafe code): the crate `pty-process` makes them. It is refused as the Python Host
+refuses it: a Host without a token opens none, since nobody there has said who they are; what asks for no
+socket is told so (426) before anything of the machine is looked at; a shell that is not there or that
+nobody may run is none (500). Bytes are keys, what is printed comes back in bytes, a text sets the size
+and the program is told that its terminal changed. At its end the program's group is asked to end and
+killed after a second, while its terminal is still there, as on the Python Host: a terminal that went
+first would end a shell at once and not for the asking (found by a test, in this port's first form). A
+device of limited scope is kept from an agent's terminal too (`GET /terminal/...`), though that route is
+not built yet. Tested: the line by itself, the door against a real client, the relay's carriage by its frames (seven tests), and a real Host process at its door and through a stand-in relay (three). Of 83 wrong rules planted one at a time (16 into the kernel's reading of a request, 39 into the line, its carriers and the reading of a size, 28 into the terminal through a Host) each is caught.
+
+Not built on it yet, and closed through the relay as sockets that failed: an agent's terminal (turns to
+that agent have to wait while it is open), the stream of speech, a ring's live socket, the Oracle's.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain
@@ -1457,9 +1500,8 @@ read `GET /network/relay`; `clarp-host network relay status` shows the same; `cl
 a stand-in for the relay on the loopback (`CLARP_RELAY_DIAL`, taken for an address of this machine only): a
 real Host process dials it, a phone is paired and served through it, the administrator's token is refused
 there, a stream of events flows and ends at a revocation, and the Host dials again after a loss.
-Not built with it: no route of this Host is a WebSocket yet, so a phone that asks for one through the relay
-is told what the Python connector tells it of a Host that could not open one; each such route is built
-against one port that a socket at the door and the relay's tunnel both carry. A run through the relay
+A WebSocket a phone asks for comes down the same socket (`WS_OPEN`) and is served by the Host's own router
+too: see "Sockets" below. A run through the relay
 itself, under a name of the battle test's own, is in `docs/battle-test.md` (16 Nov). Found on the way and
 reported: the Python connector dropped the apps' own headers (reference defect R25; fixed there within the
 hour, PR 383).
@@ -1972,11 +2014,12 @@ A phone is switched from the Python Host of a machine to the Rust Host by the Ru
 connection relay under the name the phone is paired with. Each of these is true first; none is a note.
 
 1. **Voice goes through the relay.** The owner talks to his agents by voice from the phone: the stream of
-   speech and the Oracle's live sockets are WebSockets, and the terminal is one. The Rust Host has no
-   WebSocket route yet and answers such a request through the relay as a Host that could not open it. Each
-   of these routes is built against one port that a socket at the door and the relay's tunnel both carry,
-   and is shown through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a
-   gate, not a note").
+   speech and the Oracle's live sockets are WebSockets, and the terminal is one. Each of these routes is
+   built against one port that a socket at the door and the relay's tunnel both carry, and is shown
+   through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a gate, not a
+   note"). The port and its two carriers are built, and the Host's own terminal on them (18 Nov 2026,
+   "Sockets" in section 6). Still closed as sockets that failed: an agent's terminal, the stream of
+   speech, a ring's live socket, the Oracle's.
 2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
    session for a name and closes the older one when another dials: a Python Host that came back would take
    the phones again, and neither Host would report an error, only lose its connection again and again. The

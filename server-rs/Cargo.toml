@@ -33,7 +33,7 @@ clarp-shim = { path = "crates/clarp-shim" }
 clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
 clarp-store-files = { path = "crates/clarp-store-files" }
 clarp-speech = { path = "crates/clarp-speech" }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "ws"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "process", "io-util"] }
 # The owner's own file of settings is written in TOML, by hand and by other programs. It is
@@ -56,6 +56,10 @@ webpki-roots = "1"
 # the same routes as what came through the door, with no socket in between.
 tower = { version = "0.5", default-features = false, features = ["util"] }
 nix = { version = "0.29", features = ["signal", "process", "poll", "user"] }
+# A terminal needs a pseudo-terminal: a child that has one for its own, and a size that can
+# be set. Both are calls this workspace does not make itself (it forbids unsafe code); this
+# crate makes them and gives the terminal as something to read and to write.
+pty-process = { version = "0.5", features = ["async"] }
 # A janitor's schedule is read in a time zone its owner chooses. Which local times a clock skips
 # and which come twice is the zone's own, read from the machine's table of zones, the one the
 # Python Host reads. Pinned to a release that had been in use for six weeks when it was taken:

@@ -20,6 +20,7 @@ clarp-store-mem.workspace = true
 clarp-store-sqlite.workspace = true
 futures-util.workspace = true
 nix.workspace = true
+pty-process.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
