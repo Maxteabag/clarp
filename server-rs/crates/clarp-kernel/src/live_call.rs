@@ -583,7 +583,7 @@ fn given<'a>(fields: &'a Map<String, Value>, name: &str) -> Option<&'a Value> {
 /// An address of a director on this machine: plain `http` to `127.0.0.1` or `::1` by their
 /// numbers, with no name to look up, nobody's name or password, no question and no
 /// fragment. Read as Python reads an address (`urllib.parse.urlsplit`).
-fn on_this_machine(value: Option<&Value>) -> Option<&str> {
+pub fn on_this_machine(value: Option<&Value>) -> Option<&str> {
     let given = value?.as_str()?;
     if given.chars().count() > 300 {
         return None;

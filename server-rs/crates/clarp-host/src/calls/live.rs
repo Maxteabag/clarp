@@ -180,6 +180,7 @@ pub(super) fn androids(directory: &Directory) -> Vec<Android> {
 /// A session that runs: how it is told that its call was ended beside it, and how it is
 /// known that it is over.
 pub struct Running {
+    active:std::sync::Arc<std::sync::atomic::AtomicBool>,
     stops: mpsc::UnboundedSender<String>,
     over: watch::Receiver<bool>,
 }
@@ -187,6 +188,7 @@ pub struct Running {
 impl Running {
     /// The call was retired on its ring: its session is to stop, for this reason.
     pub(super) fn stop(&self, reason: &str) {
+        self.active.store(false,std::sync::atomic::Ordering::Release);
         let _ = self.stops.send(reason.to_string());
     }
 }
@@ -315,7 +317,7 @@ impl Desk {
 
     /// One step of a session: its ring is written on under the desk's lock, and kept where
     /// it changed, before anything of the step is told to either side.
-    async fn step<T>(
+    pub(super) async fn step<T>(
         &self,
         app: &App,
         call: (&str, i64),
@@ -747,11 +749,16 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let call_id = joined.call_id.clone();
     let call = (call_id.as_str(), joined.call_epoch);
     let principal = joined.principal.clone();
+    let active=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let configured=joined.snapshot["live_tools"].is_object() && joined.snapshot["live_tools"]["from"]==joined.snapshot["agent"]["session"] && joined.principal!=joined.snapshot["agent"]["session"] && !joined.principal.is_empty();
+    let mut worker=configured.then(||super::tools::Worker {app:app.clone(),call:joined.clone(),active:active.clone(),team:Default::default(),taken:Vec::new()});
+    let mut routing=clarp_kernel::live_call::routing::Routing::default();
+    let (completed,mut results)=mpsc::unbounded_channel::<(super::tools::Worker,clarp_kernel::live_call::routing::Route,Option<Vec<Value>>)>();
     let transcript = super::transcript::Transcript::start(app, &joined);
     let mut machine = Session::new(joined, &ids::hex(16), seconds(began));
     let (stops, mut stopped) = mpsc::unbounded_channel::<String>();
     let (is_over, over) = watch::channel(false);
-    desk.began(&call_id, Running { stops, over }).await;
+    desk.began(&call_id, Running { stops, over,active:active.clone() }).await;
     // The voice is reached with the owner's key, where the Host has one.
     let key = app.ears.key("openai");
     let mut voice = match &key {
@@ -807,6 +814,15 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             break;
         }
         let now = seconds(began);
+        if let (Some(owned),Some(key))=(&worker,&key) {
+            if let Some(route)=routing.begin(&owned.call.snapshot,now,&super::tools::time(app.clock.now_ms())) && let Some(mut owned)=worker.take() {
+                let completed=completed.clone();let key=key.clone();
+                tokio::spawn(async move {
+                    let receipts=owned.route(&key,&route).await;
+                    let _=completed.send((owned,route,receipts));
+                });
+            }
+        }
         let from_voice = async {
             match voice.as_mut() {
                 Some(voice) => voice.next().await,
@@ -817,6 +833,18 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             biased;
             // A request ended the call on its ring: that is why the session is over.
             Some(reason) = stopped.recv() => machine.stopped(&mut told, &reason),
+            Some((owned,route,results))=results.recv()=>{
+                routing.taken=owned.taken.clone();
+                let failed=results.is_none();let receipts=results.unwrap_or_default();
+                if let Some(transcript)=&transcript {
+                    for r in &receipts {transcript.add("receipt",json!({"receipt":r}),app.clock.now_ms());}
+                }
+                let notes=routing.finish(route,&receipts,failed);
+                if machine.accepts_tool_note() && owned.current().await {
+                    for (kind,text) in notes {told.said.push(Said::Voice(json!({"type":format!("session.{kind}.append"),"content":text,"delegation_id":Value::Null})));}
+                }
+                worker=Some(owned);
+            }
             said = from_voice => {
                 let event = match said {
                     Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(text.as_str()).ok(),
@@ -830,6 +858,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
+                    if configured {routing.observe(&event,seconds(began));}
                     if let Some(transcript)=&transcript && let Some(delta)=event["delta"].as_str().filter(|text| !python::strip(text).is_empty()) {
                         let role=match event["type"].as_str(){
                             Some("session.input_transcript.delta")=>Some("user"),
@@ -880,6 +909,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             }
         }
     }
+    active.store(false,std::sync::atomic::Ordering::Release);
     drop(voice);
     if let Some(transcript) = transcript {
         transcript.finish().await;
