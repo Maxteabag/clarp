@@ -65,7 +65,9 @@ impl Ident {
         let mut signs = text.chars();
         let count = text.chars().count();
         (self.shortest..=self.longest).contains(&count)
-            && signs.next().is_some_and(|first| self.first.contains(&first))
+            && signs
+                .next()
+                .is_some_and(|first| self.first.contains(&first))
             && signs.all(|sign| self.rest.contains(&sign))
     }
 
@@ -286,9 +288,10 @@ impl Catalog {
                 None => "string",
                 Some(kind) => kind.str().ok_or(Unavailable)?,
             };
-            let known = rule
-                .keys()
-                .all(|key| key.as_str().is_some_and(|key| named.iter().any(|n| n == key)));
+            let known = rule.keys().all(|key| {
+                key.as_str()
+                    .is_some_and(|key| named.iter().any(|n| n == key))
+            });
             if !known || !TYPES.contains(&kind) {
                 return Err(Unavailable);
             }

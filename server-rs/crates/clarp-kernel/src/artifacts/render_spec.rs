@@ -219,7 +219,9 @@ pub fn capable(header: Option<&str>, minimum: Option<i64>) -> bool {
         return false;
     };
     let mut signs = platform.chars();
-    let platform_ok = signs.next().is_some_and(|first| first.is_ascii_alphabetic())
+    let platform_ok = signs
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
         && platform.len() <= 32
         && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');
     let Some((build, contract)) = rest.split_once(' ') else {
@@ -326,7 +328,9 @@ pub fn admit(
     if Some(version) != payload.get("version") {
         return refuse("version_mismatch", "/version");
     }
-    let declared = payload.get("submit").and_then(|submit| submit.get("intent"));
+    let declared = payload
+        .get("submit")
+        .and_then(|submit| submit.get("intent"));
     if given.get("intent") != declared {
         return refuse("intent_mismatch", "/answers/intent");
     }
@@ -555,9 +559,8 @@ impl ArtifactBook {
             .map_err(Refusal::refused)?;
         let (payload_hash, answers_json, synthesize_audio) = match admitted {
             Admitted::Repeat => {
-                let (theirs, submission) = previous.ok_or_else(|| {
-                    Refusal::new("reused_id", "/submission_id").refused()
-                })?;
+                let (theirs, submission) = previous
+                    .ok_or_else(|| Refusal::new("reused_id", "/submission_id").refused())?;
                 return Ok((form.clone(), submission.receipt(theirs), false));
             }
             Admitted::New {

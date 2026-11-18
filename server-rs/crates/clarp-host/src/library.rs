@@ -355,7 +355,9 @@ pub fn carry_out(
                 elsewhere,
                 catalog,
             } => {
-                let elsewhere = elsewhere.as_deref().map(|(id, before)| (id.as_str(), before));
+                let elsewhere = elsewhere
+                    .as_deref()
+                    .map(|(id, before)| (id.as_str(), before));
                 book.spec_submitted(catalog, artifact_id, data, elsewhere, now)
                     .map(|(form, said, changed)| {
                         receipt = Some(said);
@@ -550,7 +552,9 @@ fn spec_of(app: &App, artifact_id: &str) -> Option<Artifact> {
     let member = fleet.holder(artifact_id, true)?;
     let view = member.agent.view();
     let found = view.books.artifacts.any(artifact_id);
-    found.filter(|artifact| artifact.kind == spec::KIND).cloned()
+    found
+        .filter(|artifact| artifact.kind == spec::KIND)
+        .cloned()
 }
 
 /// The artifact as a representation asks for it: as it is, without the payload its fields
@@ -930,20 +934,37 @@ async fn post_artifact(
         let Some(J::Object(data)) = render_spec::body(&body) else {
             return Err(refused(StatusCode::BAD_REQUEST, "json object required"));
         };
-        return Ok(Json(render_spec::update(&app, &current, &data, capable).await?));
+        return Ok(Json(
+            render_spec::update(&app, &current, &data, capable).await?,
+        ));
     }
-    Ok(Json(changed_as(&app, &rest, object(&body)?, capable).await?))
+    Ok(Json(
+        changed_as(&app, &rest, object(&body)?, capable).await?,
+    ))
 }
 
 /// `POST /artifacts/<id>/submit`: a user sends answers to a form. Answered with a receipt;
 /// the same answers under the same id are answered with the same.
-async fn submit(app: &App, artifact_id: &str, body: &[u8], capable: bool) -> Result<Value, ApiError> {
+async fn submit(
+    app: &App,
+    artifact_id: &str,
+    body: &[u8],
+    capable: bool,
+) -> Result<Value, ApiError> {
     // Answers to a render spec are read as the Python Host reads them.
     let spec = {
         let fleet = Fleet::of(app);
         fleet.holder(artifact_id, true).cloned().and_then(|member| {
-            let found = member.agent.view().books.artifacts.any(artifact_id).cloned();
-            found.filter(|form| form.kind == spec::KIND).map(|form| (member, form))
+            let found = member
+                .agent
+                .view()
+                .books
+                .artifacts
+                .any(artifact_id)
+                .cloned();
+            found
+                .filter(|form| form.kind == spec::KIND)
+                .map(|form| (member, form))
         })
     };
     if let Some((member, form)) = spec {
