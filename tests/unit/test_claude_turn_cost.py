@@ -36,9 +36,12 @@ def complete(monkeypatch):
             assert diagnostic["raw_total_cost_usd"] == total
         else:
             assert "raw_total_cost_usd" not in diagnostic
-        row = db.conn().execute("SELECT cost_usd FROM turn_usage ORDER BY usage_id DESC LIMIT 1").fetchone()
-        assert detail["cost_usd"] == diagnostic["cost_usd"] == row[0]
-        return row[0]
+        row = db.conn().execute("SELECT cost_usd FROM turn_usage WHERE trace_id=? "
+                                "ORDER BY usage_id DESC LIMIT 1", (trace,)).fetchone()
+        assert detail["cost_usd"] == diagnostic["cost_usd"]
+        if row is not None:
+            assert row[0] == detail["cost_usd"]
+        return detail["cost_usd"]
 
     return result
 
@@ -82,15 +85,16 @@ def test_decreasing_cost_rebaselines_and_sessions_are_independent(complete):
     assert complete(4) == 1
 
 
-def test_rolling_cost_excludes_pre_activation_rows_but_counts_tokens():
+def test_rolling_cost_uses_writer_marker_but_counts_all_tokens():
     from lib import backend_usage_claude
 
     at = db.conn().execute("SELECT value FROM settings WHERE key='usage.claude_cost_activation_ms'").fetchone()
     assert at is not None
     since = int(at[0])
-    for stamp, cost in [(since - 1, 400), (since, 2), (since + 1, 3)]:
-        db.conn().execute("INSERT INTO turn_usage(backend, agent_id, at, cost_usd, tokens_in) "
-                          "VALUES ('claude','agent',?,?,10)", (stamp, cost))
+    for stamp, cost, kind in [(since + 1, 400, "legacy"), (since - 1, 2, "per_turn"),
+                              (since, 3, "per_turn")]:
+        db.conn().execute("INSERT INTO turn_usage(backend, agent_id, at, cost_usd, tokens_in, cost_kind) "
+                          "VALUES ('claude','agent',?,?,10,?)", (stamp, cost, kind))
     result = backend_usage_claude._claude_response_row(since + 2)
     assert result["cost_activation_ms"] == since
     for window in result["totals"].values():
@@ -153,3 +157,66 @@ def test_each_unknown_total_logs_only_the_reason(monkeypatch):
 def test_opencode_already_supplies_per_turn_cost(complete):
     assert complete(5, backend="opencode") == 5
     assert complete(2, backend="opencode") == 2
+
+@pytest.mark.parametrize("tokens", [False, True], ids=["empty-usage", "with-tokens"])
+@pytest.mark.parametrize("has_total", [False, True], ids=["no-total", "with-total"])
+@pytest.mark.parametrize("known", [False, True], ids=["unknown-baseline", "known-baseline"])
+def test_row_presence_matches_original_result_fields(complete, tokens, has_total, known):
+    if known:
+        complete(5, fresh=True, trace="baseline")
+    cost = complete(7 if has_total else None, usage={"input_tokens": 1} if tokens else {},
+                    trace="observed")
+    assert cost == (2 if has_total and known else None)
+    count = db.conn().execute("SELECT count(*) FROM turn_usage WHERE trace_id='observed'").fetchone()[0]
+    assert count == int(tokens or has_total)
+
+
+def _old_result(connection, total, at):
+    # The v127 writer's complete named column list, including across a drain.
+    connection.execute(
+        "INSERT INTO turn_usage (backend,agent_id,trace_id,tokens_in,tokens_out,cost_usd,duration_ms,at) "
+        "VALUES ('claude','agent','old',1,2,?,3,?)", (total, at))
+
+
+def test_old_writer_finishing_after_migration_is_excluded():
+    import sqlite3
+    from lib import db_migrations
+
+    database = db.conn()
+    path = database.execute("PRAGMA database_list").fetchone()[2]
+    with sqlite3.connect(path, isolation_level=None) as old:
+        old.execute("ALTER TABLE turn_usage DROP COLUMN cost_kind")
+        old.execute("DROP TABLE usage_cursors")
+        old.execute("DELETE FROM settings WHERE key='usage.claude_cost_activation_ms'")
+        old.execute("PRAGMA user_version=127")
+        _old_result(old, 40, 1)
+        db_migrations._migrate(database)
+        since = int(database.execute("SELECT value FROM settings WHERE key='usage.claude_cost_activation_ms'").fetchone()[0])
+        _old_result(old, 40.25, since + 24)
+    window = turn_usage.totals("claude", now=since + 25)["windows"]["five_hour"]
+    assert window["turns"] == 1 and window["tokens_out"] == 2
+    assert window["cost_usd"] is None
+
+
+def test_old_writer_after_rollback_does_not_change_new_dollar_sum(complete):
+    import sqlite3
+
+    complete(3.25, trace="first-observation")
+    assert complete(4, trace="new-result") == .75
+    path = db.conn().execute("PRAGMA database_list").fetchone()[2]
+    with sqlite3.connect(path) as old:
+        _old_result(old, 3, db.now_ms())
+    window = turn_usage.totals("claude")["windows"]["five_hour"]
+    assert window["turns"] == 3
+    assert window["cost_usd"] == .75
+
+
+def test_out_of_order_replay_rebaselines_and_can_repeat_a_rise(complete, monkeypatch):
+    from lib import log as host_log
+
+    notices = Mock()
+    monkeypatch.setattr(host_log, "log", notices)
+    costs = [complete(v, fresh=(i == 0), trace=f"attempt-{i}")
+             for i, v in enumerate((1, 1.25, 1, 1.25))]
+    assert costs == [1, .25, None, .25]
+    assert ("claudeTurnCostUnknown", "reason=decreased_total") in [call.args for call in notices.call_args_list]
