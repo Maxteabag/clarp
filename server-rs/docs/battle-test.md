@@ -1190,6 +1190,31 @@ What this does not show: a program that prints much through the real relay, a ph
 than a line holds there, and a session with the relay that is lost while a terminal is open. Those are
 held by the Host's tests against a stand-in for the relay.
 
+## An agent's own terminal, with the real tool, and a turn that waits for it
+
+18 Nov 2026, 03:57, on elitebook, build `3fab2d7b` installed a minute before. The check makes an agent
+of its own that Codex runs (the owner's rule for live test agents), opens its terminal at the Host's door
+with the administrator's token as an app does, and types nothing into the tool: a prompt typed there
+would be a turn of a model. What the tool asks of the terminal itself (where the cursor is) is answered
+as a terminal answers it.
+
+| Step | What the installed Host showed |
+|---|---|
+| The agent's terminal is opened | after 0.17 s |
+| Its tool, the real Codex, started fresh (the agent has no session of it yet) | draws on the terminal, in bytes |
+| A size is set | the tool draws again for it |
+| A message is sent to the agent while its terminal is open | taken; twelve seconds later nothing is answered and the terminal is still open: the turn waits |
+| The terminal is left by the client going, without a word to the tool | the turn that waited runs, and its answer is there eight seconds after |
+| What asks for no socket; nobody of that name; nobody without a token | 426 before anybody is looked up; 404 `no such agent`; 401 |
+
+One turn of Codex is the whole spend. The agent was removed and the Host had the agents it had before.
+While its turn waited the agent was shown as thinking: the turn has begun and its tool has not, which is
+the registered difference from the Python Host, where the message waits in the queue.
+
+What this does not show: Claude Code and Antigravity in a terminal (their words are held by the vectors
+and by the Host's test with a stand-in), an agent that has a session of its tool taken up there, and a
+terminal of an agent through the relay.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

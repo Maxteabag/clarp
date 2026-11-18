@@ -601,7 +601,7 @@ and a long one sent in pieces. The owner makes these settings from an app (`POST
 by that Host's rules and in its words), and they are kept with the fleet (`Directory.settings`). Not there:
 the vocabulary an engine is asked to listen for beyond what this Host's agents are called, the judge that
 tells an invented "Okay." from one that was said (the list throws both away), a stronger engine for long
-recordings, Deepgram and Cartesia as engines that listen, the record of each thing said (`/voice-events`),
+recordings, Cartesia as an engine that listens (Deepgram's came on 18 Nov), the record of each thing said (`/voice-events`),
 and calls.
 
 **An agent says something aloud, and the Host makes a clip of it** (16 Nov 2026). A reply marks what is for
@@ -1111,8 +1111,32 @@ queue. Here the agent's thread holds the launch of the turn, as it holds one for
 is closed, and a turn stopped meanwhile is over at once. The agent's state machine is not changed for it;
 registered in `docs/differences.md`. Tested through a real Host process with a stand-in for Claude Code that is both the tool of the agent's turns and of its terminal. Of 36 wrong rules planted one at a time (12 into the kernel's word for each tool, 24 into the route and the agent's thread) each is caught. Four more were tried and showed what no test saw: one check got its case, two were redundant and are gone, and one changes nothing that can be seen (the launch a stopped turn left waiting, kept in place of dropped: carried out later, it fails where the turn's message was).
 
-Not built on it yet, and closed through the relay as sockets that failed: the stream of speech, a ring's
-live socket, the Oracle's.
+**The stream of speech** (`GET /stt/stream`, 18 Nov 2026, `listening.rs`). A phone finds the end of a turn
+of speech itself and posts the clip, unless the engine that hears is one that finds the ends of turns: then
+the phone streams what it hears and the Host carries the sound to the engine (Deepgram Flux) and tells the
+phone what the engine says of the turns. The owner does not use it now (measured on both of his Hosts: no
+stream in thirty days; he speaks in clips), and it is built because everything is. What is pure in the
+Python Host's `stt_stream.py` is the kernel's, by that Host's own answers (`speech_stream.rs`,
+`tools/stream-vectors.py`): the engine's address for every way a phone tunes the listening (138 requests,
+four of which fail there), what a message of the engine means (55), the books of one stream through nine
+stories of sound, events and time (which sound belongs to which turn, what the phone is told, what is
+written down and kept when a turn ends: 78 steps), and the sound of a turn as a file (7). The port matched
+at its first compile, so wrong rules were planted. The Host's part is the carrying. The engine is reached
+before the phone's socket is opened, with the owner's key, which never leaves the Host, so that a phone is
+told in words when it cannot be (no engine that finds turns, 409; no key, 503; the engine not reached,
+502); then sound goes up and events come down until either side is done; a phone that is done says so, the
+engine is told to say the rest and given four seconds for it; the phone is told last how many turns ended.
+Refusals are JSON here, as on the Python Host, where a terminal's are plain: each route says it in its own
+way, which is why the port leaves the saying to the route. With it comes what makes the engine one that can
+be chosen: **Deepgram for clips** (`clarp-speech` `nova.rs`, by `deepgram_stt.py`: the clip posted as it
+is, what is asked in the address), the key read where the owner keeps it, and the setting of how a turn's
+end is found (`turn_taking`), kept and told as the Python Host keeps and tells it: the engine finds it only
+while the engine chosen is one that can, and both are changed together. Not with it: the vocabulary (no
+words to listen for, no runs written) and the keeping of sound, which this Host has not; both are
+registered. Of 144 wrong rules planted one at a time (80 into the kernel's rules, 64 into the route, the engine for clips and the setting) each is caught. Two were missed at first and got their case (a run written as nothing is no run; what a phone says in words that is not its leave-taking ends nothing), one planting of mine did not compile and was planted again in other words, and two let a Host start that was to refuse, where its test waited without end and held the build machine's one slot until the run was ended by hand: every command of the Host's own program in the tests has a limit now.
+
+Not built on the line yet, and closed through the relay as sockets that failed: a ring's live socket, the
+Oracle's.
 
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
@@ -2032,8 +2056,8 @@ connection relay under the name the phone is paired with. Each of these is true 
    speech and the Oracle's live sockets are WebSockets, and the terminal is one. Each of these routes is
    built against one port that a socket at the door and the relay's tunnel both carry, and is shown
    through a relay before the switch (the release owner of the Python Host, 16 Nov 2026: "a gate, not a
-   note"). The port and its two carriers are built, and on them the Host's own terminal and an agent's
-   (18 Nov 2026, "Sockets" in section 6). Still closed as sockets that failed: the stream of speech, a
+   note"). The port and its two carriers are built, and on them the Host's own terminal, an agent's, and
+   the stream of speech (18 Nov 2026, "Sockets" in section 6). Still closed as sockets that failed: a
    ring's live socket, the Oracle's.
 2. **The Python Host of that machine is stopped and cannot come back by itself.** The relay keeps one
    session for a name and closes the older one when another dials: a Python Host that came back would take

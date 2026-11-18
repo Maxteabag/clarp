@@ -32,6 +32,7 @@ use clarp_kernel::languages;
 use clarp_kernel::said::Who;
 use clarp_speech::chirp::Chirp;
 use clarp_speech::listen::{Asked, Clip, Deaf, Heard, Listener};
+use clarp_speech::nova::Nova;
 use clarp_speech::scribe::Scribe;
 use clarp_speech::whisper::{self, Whisper, Worker};
 use serde_json::{Value, json};
@@ -61,6 +62,8 @@ pub struct Ears {
     own: Option<(Arc<dyn Listener>, String)>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
+    /// Deepgram Nova, which is there when its key is.
+    nova: Arc<dyn Listener>,
     /// Google's Chirp, which is there when the owner's file names a project and his
     /// account's file can be read.
     chirp: Arc<dyn Listener>,
@@ -79,6 +82,7 @@ pub struct Ears {
 
 /// The names a client gives the engines over the network that this Host has.
 const SCRIBE: &str = "elevenlabs:scribe_v2";
+const NOVA: &str = "deepgram:nova-3";
 const CHIRP: &str = "google:chirp_3";
 
 /// Where the owner's choice of the engine that hears by default is kept, and how a turn of
@@ -126,6 +130,11 @@ impl Ears {
         if !config.scribe_endpoint.is_empty() {
             scribe = scribe.at(config.scribe_endpoint.clone());
         }
+        let read = keys.clone();
+        let mut nova = Nova::new("nova-3", Box::new(move || read.key("deepgram")));
+        if !config.nova_endpoint.is_empty() {
+            nova = nova.at(config.nova_endpoint.clone());
+        }
         // The owner's account at Google is read where he keeps it, each time it is needed.
         let read = keys.clone();
         let account = move || read.read().and_then(|file| owner::google_speech(&file));
@@ -142,6 +151,7 @@ impl Ears {
         Self {
             own,
             scribe: Arc::new(scribe),
+            nova: Arc::new(nova),
             chirp: Arc::new(chirp),
             keys,
             engine: config.transcription_engine.clone(),
@@ -149,6 +159,12 @@ impl Ears {
             kept: config.data_dir.join("transcriptions"),
             jobs: Mutex::default(),
         }
+    }
+
+    /// The key of a provider of engines, where the owner has one for it: read now, kept
+    /// nowhere.
+    pub(crate) fn key(&self, provider: &str) -> Option<String> {
+        self.keys.key(provider)
     }
 
     /// The name a client gives the Host's own engine.
@@ -161,7 +177,7 @@ impl Ears {
     /// what it needs: its key, or for Google the owner's project and account.
     fn has(&self, provider: &str) -> bool {
         match provider {
-            "elevenlabs" => self.keys.key(provider).is_some(),
+            "elevenlabs" | "deepgram" => self.keys.key(provider).is_some(),
             "google" => {
                 let file = self.keys.read();
                 file.is_some_and(|file| owner::google_speech(&file).is_some())
@@ -172,7 +188,7 @@ impl Ears {
 
     /// The engine that hears a clip nobody named one for: what the owner set from an app,
     /// else what this Host was started with.
-    fn default_engine(&self, directory: &Directory) -> String {
+    pub(crate) fn default_engine(&self, directory: &Directory) -> String {
         let set = directory.setting(ENGINE_KEY).map(str::trim);
         let set = set.filter(|engine| !engine.is_empty());
         set.unwrap_or(&self.engine).to_string()
@@ -197,7 +213,8 @@ impl Ears {
     /// The engine a name stands for on this Host. With the engine comes what is said while
     /// it loads.
     fn engine_of(&self, model: &str) -> Result<Chosen, Refused> {
-        if self.own.is_none() && !self.has("elevenlabs") && !self.has("google") {
+        let built = ["elevenlabs", "deepgram", "google"];
+        if self.own.is_none() && !built.iter().any(|provider| self.has(provider)) {
             return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
         }
         let own_id = self.own_id();
@@ -226,6 +243,7 @@ impl Ears {
         };
         let engine = match model {
             SCRIBE => &self.scribe,
+            NOVA => &self.nova,
             CHIRP => &self.chirp,
             // An engine the contract lists and this Host does not have.
             _ => return Err((StatusCode::BAD_REQUEST, heard::not_installed(model))),
@@ -602,15 +620,34 @@ async fn capabilities(State(app): State<App>) -> Json<Value> {
         "available": !models.is_empty(),
         "default_model": ears.own_id().unwrap_or_default(),
         "engine": ears.default_engine(&app.fleet.directory()),
-        "turn_taking": "native",
+        "turn_taking": turn_taking(&app.fleet.directory()),
         "models": models,
         "catalog": [],
         "adapters": [],
     }))
 }
 
+/// How the end of a turn of speech is found, as the owner set it: on the phone (`native`),
+/// unless he chose that the engine finds it on a stream (`provider`).
+fn turn_taking(directory: &Directory) -> &'static str {
+    match directory.setting(TURN_TAKING_KEY) {
+        Some("provider") => "provider",
+        _ => "native",
+    }
+}
+
+/// Whether the engine that is chosen is one that finds the ends of turns itself, and
+/// whether this Host can use it.
+fn finds_turns(ears: &Ears, engine: &str) -> (bool, bool) {
+    let chosen = heard::cloud_model(engine);
+    let finds = chosen.is_some_and(|(provider, _)| provider.turn_detection == "own");
+    let usable = chosen.is_some_and(|(provider, _)| ears.has(provider.id));
+    (finds, finds && usable)
+}
+
 /// `GET /transcription-providers`: what the settings of speech in are on this Host, and
-/// what could be chosen. Where a turn of speech ends is found on the phone itself.
+/// what could be chosen. Where a turn of speech ends is found on the phone itself, unless
+/// the engine that hears finds it on a stream (`listening.rs`).
 async fn providers(State(app): State<App>) -> Json<Value> {
     Json(status(&app))
 }
@@ -637,24 +674,26 @@ fn status(app: &App) -> Value {
             })
         })
         .collect();
+    let engine = ears.default_engine(&directory);
+    let (finds, usable) = finds_turns(ears, &engine);
     json!({
-        "engine": ears.default_engine(&directory),
+        "engine": engine,
         "language": languages::selected(directory.setting(languages::LANGUAGE_KEY), &ears.language),
         "agent_languages": told_map(languages::languages(directory.setting(languages::AGENT_LANGUAGES_KEY))),
         "agent_engines": told_map(languages::stored(directory.setting(languages::AGENT_ENGINES_KEY))),
         "call_languages": "",
         "call_engines": "",
         "call_policy_error": "",
-        "turn_taking": "native",
+        "turn_taking": turn_taking(&directory),
         "retain_audio": false,
         "long_form_model": "",
         "long_form_threshold_sec": long_form_threshold(&directory),
         "long_form_threshold_range": { "min": 1, "max": 3600 },
-        "stream_path": "",
-        "provider_turn_taking_available": false,
+        "stream_path": "/stt/stream",
+        "provider_turn_taking_available": usable,
         "turn_taking_options": [
             { "id": "native", "name": "Native (on-device VAD + Smart Turn)", "available": true },
-            { "id": "provider", "name": "Provider-owned end of turn", "available": false },
+            { "id": "provider", "name": "Provider-owned end of turn", "available": finds },
         ],
         "providers": listed,
         "models": models,
@@ -767,16 +806,15 @@ async fn set_providers(
         let changed = languages::languages_changed(kept, change).map_err(|why| bad(&why))?;
         settings.push((languages::AGENT_LANGUAGES_KEY.to_string(), changed));
     }
-    // Where a turn of speech ends is found on the phone: no engine of this Host finds it.
+    // The engine and how a turn's end is found are looked at together, each as this save
+    // names it or else as it is kept: the engine finds the ends of turns only where it is
+    // one that can.
     let now = engine.unwrap_or_else(|| app.ears.default_engine(&directory));
-    let finds_turns =
-        heard::cloud_model(&now).is_some_and(|(provider, _)| provider.turn_detection == "own");
-    if strategy.as_deref() == Some("provider") {
-        return Err(bad(if finds_turns {
-            "an engine does not find the end of a turn on this Host yet (turn_taking)"
-        } else {
-            "provider-owned turn taking needs an engine that detects turns"
-        }));
+    let found_how = strategy.as_deref().unwrap_or(turn_taking(&directory));
+    if found_how == "provider" && !finds_turns(&app.ears, &now).0 {
+        return Err(bad(
+            "provider-owned turn taking needs an engine that detects turns",
+        ));
     }
     if let Some(strategy) = strategy {
         settings.push((TURN_TAKING_KEY.to_string(), strategy));

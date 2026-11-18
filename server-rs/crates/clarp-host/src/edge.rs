@@ -426,6 +426,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::files::routes())
         .merge(crate::screens::routes())
         .merge(crate::terminal::routes())
+        .merge(crate::listening::routes())
         .merge(crate::voice::routes())
         .merge(crate::voices::routes())
         .merge(crate::faces::routes())

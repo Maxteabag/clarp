@@ -5,8 +5,8 @@
 //! screen, where none of the marking may show.
 //!
 //! What a person says reaches an agent as text. [`listen`] is the port to the engines that
-//! turn a clip of speech into text; [`scribe`] and [`chirp`] are reached over the network,
-//! [`whisper`] is one the Host runs itself.
+//! turn a clip of speech into text; [`scribe`], [`nova`] and [`chirp`] are reached over the
+//! network, [`whisper`] is one the Host runs itself.
 //!
 //! What an agent says aloud reaches a person as sound. [`speak`] is the port to the engines
 //! that turn a line of text into audio, and the rule by which the next one is tried;
@@ -17,6 +17,7 @@ pub mod chirp;
 pub mod gemini;
 pub mod listen;
 pub mod markup;
+pub mod nova;
 pub mod scribe;
 pub mod speak;
 pub mod whisper;

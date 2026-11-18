@@ -16,6 +16,53 @@ use serde_json::{Value, json};
 
 static HOSTS: AtomicU64 = AtomicU64::new(0);
 
+/// A command of the Host's own program that is to end by itself: what it said and how it
+/// ended. One that does not end is ended, and that is a failure: a Host that starts where it
+/// was to refuse would be waited for without end.
+trait Ends {
+    fn ended(&mut self) -> std::process::Output;
+}
+
+impl Ends for Command {
+    fn ended(&mut self) -> std::process::Output {
+        let mut child = self
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (mut out, mut err) = (child.stdout.take().unwrap(), child.stderr.take().unwrap());
+        let printed = std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let _ = out.read_to_end(&mut all);
+            all
+        });
+        let complained = std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let _ = err.read_to_end(&mut all);
+            all
+        });
+        let began = Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if began.elapsed() > Duration::from_secs(60) {
+                let _ = child.kill();
+                let _ = child.wait();
+                let said = String::from_utf8_lossy(&complained.join().unwrap()).into_owned();
+                panic!("a command that was to end by itself did not: {said}");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        std::process::Output {
+            status,
+            stdout: printed.join().unwrap(),
+            stderr: complained.join().unwrap(),
+        }
+    }
+}
+
 /// A Host's place on disk. It outlives the Host's process: that is the point.
 struct Place {
     root: PathBuf,
@@ -475,7 +522,7 @@ fn tool(
     if let Some(pid) = worker {
         command.env("CLARP_BACKGROUND_WORKER_PID", pid.to_string());
     }
-    let out = command.output().unwrap();
+    let out = command.ended();
     (
         out.status.code().unwrap_or(-1),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -1561,8 +1608,7 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
                 .current_dir(dir)
                 .env("CLARP_HOST_ADDR", address)
                 .env("CLARP_HOST_TOKEN", token)
-                .output()
-                .unwrap()
+                .ended()
         })
     };
     std::thread::sleep(Duration::from_millis(700));
@@ -3001,8 +3047,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     // The owner's own command for it reads the same.
     let listed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args(["peer", "list", "--host", &host.address])
-        .output()
-        .unwrap();
+        .ended();
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout).trim(),
         format!("work http://{}", other.address)
@@ -3017,8 +3062,7 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
             &host.address,
         ])
         .env_remove("CLARP_PEER_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     assert_eq!(unnamed.status.code(), Some(2), "a peer needs its token");
     let (code, out, err) = admin(&[
         "prompt",
@@ -3801,7 +3845,7 @@ fn call_tool(
     if !session.is_empty() {
         command.env("CLAUDE_PWA_SESSION", session);
     }
-    let out = command.output().unwrap();
+    let out = command.ended();
     let said = String::from_utf8_lossy(&out.stdout);
     (
         out.status.code().unwrap_or(-1),
@@ -5239,8 +5283,7 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
             &host.address,
         ])
         .env("CLARP_HOST_TOKEN", "the-administrators-token")
-        .output()
-        .unwrap();
+        .ended();
     assert!(
         shown.status.success(),
         "{}",
@@ -5256,8 +5299,7 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
             &host.address,
         ])
         .env("CLARP_HOST_TOKEN", "not-the-token")
-        .output()
-        .unwrap();
+        .ended();
     assert_eq!(refused.status.code(), Some(2));
 
     // The device hands the code in, with no token, and is given one of its own.
@@ -5557,8 +5599,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
         .env_remove("CLARP_SOURCE_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     assert!(
         moved.status.success(),
         "{}",
@@ -5753,8 +5794,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .args(["--session", &session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
         .env_remove("CLARP_SOURCE_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     let told = String::from_utf8_lossy(&again.stdout).into_owned();
     assert!(
         again.status.success()
@@ -5791,8 +5831,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .env_remove("CLARP_HOST_TOKEN")
         .env_remove("CLARP_SOURCE_TOKEN")
         .env_remove("CLARP_FILES_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     let told = String::from_utf8_lossy(&again.stdout).into_owned();
     assert!(again.status.success(), "{told}");
     assert_eq!(
@@ -5854,8 +5893,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     assert_eq!(again.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&again.stderr).contains("already has the agent"));
     // The agent whose picture came along moves too. Its picture is here already, as a file
@@ -5866,8 +5904,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         .args(["--session", &other_session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
         .env_remove("CLARP_SOURCE_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     let told = String::from_utf8_lossy(&moved.stdout).into_owned();
     assert!(
         moved.status.success(),
@@ -6285,7 +6322,7 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
         if let Some(own) = own {
             command.env("CLAUDE_PWA_SESSION", own);
         }
-        let out = command.output().unwrap();
+        let out = command.ended();
         (
             out.status.code().unwrap_or(-1),
             String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -8495,8 +8532,7 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
         .env("CLARP_HOST_TOKEN", &host.token)
         .env_remove("CLAUDE_PWA_SESSION")
         .env("CLARP_SESSION", &maker)
-        .output()
-        .unwrap();
+        .ended();
     let shown: Value = serde_json::from_slice(&own.stdout).unwrap_or(Value::Null);
     assert_eq!(own.status.code(), Some(0), "{shown}");
     assert_eq!(
@@ -10480,8 +10516,7 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         .env("CLARP_HOST_ADDR", &host.address)
         .env("CLARP_TOOL_TOKEN", &tools)
         .env_remove("CLARP_HOST_TOKEN")
-        .output()
-        .unwrap();
+        .ended();
     assert_eq!(
         by_hand.status.code(),
         Some(0),
@@ -13415,10 +13450,11 @@ fn a_person_speaks_and_the_clip_becomes_text() {
             "transcription model not installed: nothing-of-the-kind",
         ),
         (
-            "deepgram:nova-3",
+            "cartesia:ink-2",
             400,
-            "transcription model not installed: deepgram:nova-3",
+            "transcription model not installed: cartesia:ink-2",
         ),
+        ("deepgram:nova-3", 500, "deepgram API key is not configured"),
         (
             "elevenlabs:scribe_v9",
             500,
@@ -16550,8 +16586,7 @@ fn an_agent_that_moves_stays_who_it_was() {
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .current_dir(&new_place.root)
-        .output()
-        .unwrap();
+        .ended();
     let said = String::from_utf8_lossy(&moved.stdout).into_owned();
     assert!(
         moved.status.success(),
@@ -17492,8 +17527,7 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
     let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args(["network", "relay", "status", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
-        .output()
-        .unwrap();
+        .ended();
     let shown: Value = serde_json::from_slice(&shown.stdout).unwrap();
     assert_eq!(shown, status);
 
@@ -17513,8 +17547,7 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
     let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args(["pair", "--relay", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
-        .output()
-        .unwrap();
+        .ended();
     let shown = String::from_utf8_lossy(&shown.stdout).into_owned();
     assert!(
         shown.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
@@ -17913,8 +17946,7 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
     let elsewhere = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args(["--data", place.root.join("other").to_str().unwrap()])
         .env("CLARP_RELAY_DIAL", "ws://relay.example:80")
-        .output()
-        .unwrap();
+        .ended();
     assert!(!elsewhere.status.success());
     let said = String::from_utf8_lossy(&elsewhere.stderr).into_owned();
     assert!(said.contains("an address on this machine"), "{said}");
@@ -23947,5 +23979,820 @@ fn an_agents_own_tool_is_spoken_to_in_a_terminal_and_its_turns_wait_meanwhile() 
     assert_eq!(
         (none.status, none.text().as_str()),
         (500, "/nowhere/is/claude not on PATH")
+    );
+}
+
+// ---- sockets: the stream of speech ------------------------------------------------------------
+
+/// A stand-in for the engine that finds the ends of turns: it listens on this machine, notes
+/// how it was asked and what it was sent, and says what an engine says as the sound comes in.
+/// After 3,200 bytes it has understood a word, after 6,400 it thinks the turn may be over and
+/// then that it went on, after 9,600 the turn ends, and the count begins again for the next.
+/// Told to say the rest, it ends the turn it is in and goes. What the address it is asked at
+/// says of the longest silence makes it behave otherwise: 777 ms, it says that it failed;
+/// 888 ms, it goes at the first sound; 999 ms, it does not go when it is told to say the rest.
+struct StandInEngine {
+    address: String,
+    /// How it was asked: each time the address and the key it was shown.
+    asked: Arc<Mutex<Vec<(String, String)>>>,
+    /// How many bytes of sound it was sent in all, and whether a socket of it is open.
+    heard: Arc<AtomicU64>,
+    open: Arc<AtomicU64>,
+}
+
+fn stand_in_engine() -> StandInEngine {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("ws://{}", listener.local_addr().unwrap());
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let heard = Arc::new(AtomicU64::new(0));
+    let open = Arc::new(AtomicU64::new(0));
+    let (noted, counted, opened) = (asked.clone(), heard.clone(), open.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else { break };
+            let (noted, counted, opened) = (noted.clone(), counted.clone(), opened.clone());
+            std::thread::spawn(move || {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let how = Arc::new(Mutex::new((String::new(), String::new())));
+                let seen = how.clone();
+                #[allow(clippy::result_large_err)]
+                let note =
+                    move |request: &tungstenite::handshake::server::Request,
+                          response: tungstenite::handshake::server::Response| {
+                        let key = request.headers().get("authorization");
+                        let key = key.and_then(|key| key.to_str().ok()).unwrap_or("");
+                        *seen.lock().unwrap() = (request.uri().to_string(), key.to_string());
+                        // A key that is not the one of the tests opens nothing.
+                        if key != "Token a-key-of-the-test" {
+                            let refused = tungstenite::http::Response::builder().status(401);
+                            return Err(refused.body(None).unwrap());
+                        }
+                        Ok(response)
+                    };
+                let Ok(mut socket) = tungstenite::accept_hdr(stream, note) else {
+                    return;
+                };
+                let (address, key) = how.lock().unwrap().clone();
+                noted.lock().unwrap().push((address.clone(), key));
+                opened.fetch_add(1, Ordering::SeqCst);
+                // What a Host passes over: words that are no message, and bytes.
+                let _ = socket.send(tungstenite::Message::Text("not a message".into()));
+                let _ = socket.send(tungstenite::Message::Binary(vec![1, 2, 3].into()));
+                let says = |socket: &mut tungstenite::WebSocket<TcpStream>, said: Value| {
+                    socket
+                        .send(tungstenite::Message::Text(said.to_string().into()))
+                        .is_ok()
+                };
+                let turn_info = |event: &str, turn: u64, text: &str, sure: f64| {
+                    json!({
+                        "type": "TurnInfo", "event": event, "turn_index": turn,
+                        "transcript": text, "end_of_turn_confidence": sure,
+                    })
+                };
+                let (mut turn, mut of_turn, mut stage) = (0u64, 0usize, 0u8);
+                says(
+                    &mut socket,
+                    json!({ "type": "Connected", "request_id": "stand-in" }),
+                );
+                loop {
+                    let said = match socket.read() {
+                        Ok(said) => said,
+                        Err(_) => break,
+                    };
+                    match said {
+                        tungstenite::Message::Binary(sound) => {
+                            counted.fetch_add(sound.len() as u64, Ordering::SeqCst);
+                            of_turn += sound.len();
+                            if address.contains("eot_timeout_ms=777") {
+                                let unwell = json!({
+                                    "type": "Error", "description": "the engine is unwell",
+                                });
+                                says(&mut socket, unwell);
+                                continue;
+                            }
+                            if address.contains("eot_timeout_ms=888") {
+                                let _ = socket.close(None);
+                                continue;
+                            }
+                            if stage == 0 {
+                                says(&mut socket, turn_info("StartOfTurn", turn, "", 0.0));
+                                stage = 1;
+                            }
+                            if stage == 1 && of_turn >= 3200 {
+                                says(&mut socket, turn_info("Update", turn, "hello", 0.2004));
+                                stage = 2;
+                            }
+                            if stage == 2 && of_turn >= 6400 {
+                                let so_far = "hello there";
+                                says(&mut socket, turn_info("EagerEndOfTurn", turn, so_far, 0.6));
+                                says(&mut socket, turn_info("TurnResumed", turn, so_far, 0.3));
+                                stage = 3;
+                            }
+                            if stage == 3 && of_turn >= 9600 {
+                                let all = "hello there you";
+                                says(&mut socket, turn_info("EndOfTurn", turn, all, 0.9549));
+                                (turn, of_turn, stage) = (turn + 1, 0, 0);
+                            }
+                        }
+                        tungstenite::Message::Text(text) => {
+                            if text.as_str() != r#"{"type": "CloseStream"}"# {
+                                says(
+                                    &mut socket,
+                                    json!({ "type": "Error", "description": text.as_str() }),
+                                );
+                                continue;
+                            }
+                            if address.contains("eot_timeout_ms=999") {
+                                continue;
+                            }
+                            says(
+                                &mut socket,
+                                turn_info("EndOfTurn", turn, "the last w\u{f8}rds", 1.0),
+                            );
+                            let _ = socket.close(None);
+                        }
+                        tungstenite::Message::Close(_) => {}
+                        _ => {}
+                    }
+                }
+                opened.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
+    });
+    StandInEngine {
+        address,
+        asked,
+        heard,
+        open,
+    }
+}
+
+/// The next thing a phone is told on its stream, as it is written.
+fn written_on(stream: &mut Door) -> String {
+    match stream.read() {
+        Ok(tungstenite::Message::Text(text)) => text.as_str().to_string(),
+        other => panic!("a stream tells in words, it said {other:?}"),
+    }
+}
+
+/// The next thing a phone is told on its stream, as the value it is.
+fn told_on(stream: &mut Door) -> Value {
+    serde_json::from_str(&written_on(stream)).unwrap()
+}
+
+/// A phone's stream at the door, opened and told that the engine is ready.
+fn stream_at(host: &Host, token: &str, asked: &str) -> (Door, Value) {
+    let mut stream =
+        socket_at(host, token, &format!("/stt/stream{asked}")).expect("a stream is opened");
+    let ready = told_on(&mut stream);
+    (stream, ready)
+}
+
+fn sound_of(count: usize) -> tungstenite::Message {
+    tungstenite::Message::Binary(vec![7u8; count].into())
+}
+
+#[test]
+fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("stream");
+    let engine = stand_in_engine();
+    let world = [
+        ("CLARP_FLUX_ENDPOINT", engine.address.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let agent = host.new_agent("Echo");
+    let refused = |asked: &str| {
+        let answer = asked_for_a_socket(&host, ADMIN, &format!("/stt/stream{asked}"));
+        (
+            answer.status,
+            serde_json::from_slice::<Value>(&answer.body).unwrap(),
+        )
+    };
+
+    // What is no stream that can be carried is told so in words, before any socket is open.
+    let plain = host.ask("GET", "/stt/stream?model=deepgram:nova-3", None);
+    assert_eq!(
+        plain,
+        (426, json!({ "error": "upgrade required (websocket)" }))
+    );
+    // The engine that hears is the Host's own unless another is named: it finds no turns.
+    assert_eq!(
+        refused(""),
+        (
+            409,
+            json!({ "error": "engine does not detect turns on a stream: local" })
+        )
+    );
+    assert_eq!(
+        refused("?model=%20"),
+        (
+            409,
+            json!({ "error": "engine does not detect turns on a stream: local" })
+        )
+    );
+    assert_eq!(
+        refused("?model=elevenlabs:scribe_v2"),
+        (
+            409,
+            json!({ "error": "engine does not detect turns on a stream: elevenlabs:scribe_v2" })
+        )
+    );
+    assert_eq!(
+        refused("?model=%20deepgram:nova-3%20&eot_timeout_ms=nan"),
+        (
+            400,
+            json!({ "error": "eot_timeout_ms is no number of milliseconds" })
+        )
+    );
+    assert_eq!(
+        engine.asked.lock().unwrap().len(),
+        0,
+        "nothing was asked of the engine"
+    );
+    assert_eq!(
+        asked_for_a_socket(&host, "", "/stt/stream?model=deepgram:nova-3").status,
+        401
+    );
+
+    // A stream: the engine is asked at its address with how the phone tunes it, with the
+    // owner's key, and the phone is told that it is ready, under a name of the stream's own.
+    let tuned = format!(
+        "?session={agent}&model=deepgram:nova-3&eot_threshold=0.8&eager_eot_threshold=0.45"
+    );
+    let (mut stream, ready) = stream_at(&host, ADMIN, &tuned);
+    let trace = ready["trace_id"].as_str().unwrap().to_string();
+    assert!(
+        trace.len() == 16 && trace.chars().all(|sign| sign.is_ascii_hexdigit()),
+        "{trace}"
+    );
+    assert_eq!(
+        ready,
+        json!({
+            "type": "ready", "engine": "deepgram:flux-general-en", "turn_detection": "provider",
+            "keyterms": 0, "trace_id": trace,
+        })
+    );
+    assert_eq!(
+        engine.asked.lock().unwrap().clone(),
+        [(
+            "/?model=flux-general-en&encoding=linear16&sample_rate=16000&eot_threshold=0.80\
+             &eot_timeout_ms=60000&eager_eot_threshold=0.45"
+                .to_string(),
+            "Token a-key-of-the-test".to_string()
+        )]
+    );
+
+    // Sound goes up as it comes, and what the engine says of a turn comes down in the
+    // Host's words for it: each event with the turn's name, which is the same until the
+    // turn ends and another for the next.
+    stream.send(sound_of(3200)).unwrap();
+    let started = told_on(&mut stream);
+    let turn = started["trace_id"].as_str().unwrap().to_string();
+    assert!(turn.len() == 16 && turn != trace, "{started}");
+    assert_eq!(
+        started,
+        json!({ "type": "turn", "event": "start", "turn": 0, "text": "", "trace_id": turn, "confidence": 0.0 })
+    );
+    assert_eq!(
+        told_on(&mut stream),
+        json!({ "type": "turn", "event": "update", "turn": 0, "text": "hello", "trace_id": turn, "confidence": 0.2 })
+    );
+    stream.send(sound_of(3200)).unwrap();
+    assert_eq!(
+        told_on(&mut stream),
+        json!({ "type": "turn", "event": "eager", "turn": 0, "text": "hello there", "trace_id": turn, "confidence": 0.6 })
+    );
+    assert_eq!(told_on(&mut stream)["event"], "resumed");
+    stream.send(sound_of(3200)).unwrap();
+    let ended = told_on(&mut stream);
+    let took = ended["turn_ms"].as_i64().unwrap();
+    assert!((0..20_000).contains(&took), "{ended}");
+    assert_eq!(
+        ended,
+        json!({
+            "type": "turn", "event": "end", "turn": 0, "text": "hello there you", "trace_id": turn,
+            "confidence": 0.955, "vocab_run_id": null, "turn_ms": took,
+        })
+    );
+    wait_for("the engine to have the sound", || {
+        engine.heard.load(Ordering::SeqCst) == 9600
+    });
+    // What a phone says in words that is not its leave-taking ends nothing: sound is
+    // carried on, and the next turn begins.
+    for words in [
+        r#"{"type":"ping"}"#,
+        r#"{"close":"type"}"#,
+        "not even JSON",
+        "[\"close\"]",
+    ] {
+        stream
+            .send(tungstenite::Message::Text(words.into()))
+            .unwrap();
+    }
+    stream.send(sound_of(100)).unwrap();
+    let next = told_on(&mut stream);
+    let second = next["trace_id"].as_str().unwrap().to_string();
+    assert!(second != turn, "{next}");
+    assert_eq!(
+        (&next["event"], &next["turn"]),
+        (&json!("start"), &json!(1))
+    );
+    // What a phone says in words that is no leave-taking changes nothing.
+    stream
+        .send(tungstenite::Message::Text("not json".into()))
+        .unwrap();
+    stream
+        .send(tungstenite::Message::Text(r#"{"type":"something"}"#.into()))
+        .unwrap();
+    // The phone says that it is done: the engine says the rest, the phone is told the
+    // last turn and how many ended, and the socket closes as one that ended well.
+    stream
+        .send(tungstenite::Message::Text(r#"{"type":"close"}"#.into()))
+        .unwrap();
+    // What the phone is told is written as the Python Host writes it: a space after every
+    // comma and colon, and nothing but ASCII.
+    let written = written_on(&mut stream);
+    assert!(
+        written.contains(r#", "text": "the last w\u00f8rds", "#),
+        "{written}"
+    );
+    let last: Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(
+        (
+            &last["event"],
+            &last["text"],
+            &last["trace_id"],
+            &last["confidence"]
+        ),
+        (
+            &json!("end"),
+            &json!("the last w\u{f8}rds"),
+            &json!(second),
+            &json!(1.0)
+        )
+    );
+    assert_eq!(written_on(&mut stream), r#"{"type": "closed", "turns": 2}"#);
+    let mut code = None;
+    while let Ok(said) = stream.read() {
+        if let tungstenite::Message::Close(frame) = said {
+            code = frame.map(|frame| u16::from(frame.code));
+        }
+    }
+    assert_eq!(code, Some(1000));
+    wait_for("the engine's socket to be closed", || {
+        engine.open.load(Ordering::SeqCst) == 0
+    });
+
+    // The engine says that something failed: the phone is told its account of it, and the
+    // stream goes on.
+    let (mut stream, _) = stream_at(&host, ADMIN, "?model=deepgram:nova-3&eot_timeout_ms=777");
+    stream.send(sound_of(10)).unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            told_on(&mut stream),
+            json!({ "type": "error", "message": "the engine is unwell" })
+        );
+        stream.send(sound_of(10)).unwrap();
+    }
+    // The phone goes without a word: the engine's socket is closed.
+    assert_eq!(engine.open.load(Ordering::SeqCst), 1);
+    drop(stream);
+    wait_for("the engine's socket to be closed", || {
+        engine.open.load(Ordering::SeqCst) == 0
+    });
+
+    // The engine goes: the phone is told how many turns ended, and its socket closes.
+    let (mut stream, _) = stream_at(&host, ADMIN, "?model=deepgram:nova-3&eot_timeout_ms=888");
+    stream.send(sound_of(10)).unwrap();
+    assert_eq!(
+        told_on(&mut stream),
+        json!({ "type": "closed", "turns": 0 })
+    );
+    assert!(matches!(stream.read(), Ok(tungstenite::Message::Close(_))));
+
+    // A Host that has no key for the engine says so, and one whose engine is not there
+    // says that it could not be reached: nothing of the key is in its words.
+    let other = Place::new("stream-none");
+    let keyless = other.start_without(
+        ADMIN,
+        &[],
+        &[("HOME", other.root.to_str().unwrap())],
+        &["DEEPGRAM_API_KEY"],
+    );
+    let none = asked_for_a_socket(&keyless, ADMIN, "/stt/stream?model=deepgram:nova-3");
+    assert_eq!(
+        (
+            none.status,
+            serde_json::from_slice::<Value>(&none.body).unwrap()
+        ),
+        (
+            503,
+            json!({ "error": "deepgram API key is not configured" })
+        )
+    );
+    drop(keyless);
+    let nobody = TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("ws://{}", nobody.local_addr().unwrap());
+    drop(nobody);
+    let world = [
+        ("CLARP_FLUX_ENDPOINT", gone.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
+    ];
+    let deaf = other.start_in(ADMIN, &[], &world);
+    let none = asked_for_a_socket(&deaf, ADMIN, "/stt/stream?model=deepgram:nova-3");
+    let said: Value = serde_json::from_slice(&none.body).unwrap();
+    let why = said["error"].as_str().unwrap();
+    assert_eq!(none.status, 502, "{said}");
+    assert!(
+        why.starts_with("deepgram stream connect failed: ") && !why.contains("a-key-of-the-test"),
+        "{why}"
+    );
+    drop(deaf);
+    // An engine that does not take the key says so, and the phone is told what it answered.
+    let world = [
+        ("CLARP_FLUX_ENDPOINT", engine.address.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-the-engine-does-not-know"),
+    ];
+    let unknown = other.start_in(ADMIN, &[], &world);
+    let none = asked_for_a_socket(&unknown, ADMIN, "/stt/stream?model=deepgram:nova-3");
+    assert_eq!(
+        (
+            none.status,
+            serde_json::from_slice::<Value>(&none.body).unwrap()
+        ),
+        (
+            502,
+            json!({ "error": "deepgram stream connect failed: it answered 401" })
+        )
+    );
+    drop(unknown);
+    // A stand-in for an engine is on this machine, or it is none: a Host does not start
+    // with another.
+    for (variable, elsewhere, what) in [
+        (
+            "CLARP_FLUX_ENDPOINT",
+            "ws://engine.example:80",
+            "a socket on this machine",
+        ),
+        (
+            "CLARP_FLUX_ENDPOINT",
+            "http://127.0.0.1:80",
+            "a socket on this machine",
+        ),
+        (
+            "CLARP_NOVA_ENDPOINT",
+            "http://engine.example/v1/listen",
+            "an address on this machine",
+        ),
+    ] {
+        let started = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+            .args(["--data", other.root.join("elsewhere").to_str().unwrap()])
+            .env(variable, elsewhere)
+            .ended();
+        let said = String::from_utf8_lossy(&started.stderr).into_owned();
+        assert!(
+            !started.status.success() && said.contains(what),
+            "{variable}: {said}"
+        );
+    }
+}
+
+#[test]
+fn an_engine_that_is_slow_to_end_or_to_answer_is_given_its_time_and_no_more() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("stream-slow");
+    let engine = stand_in_engine();
+    let world = [
+        ("CLARP_FLUX_ENDPOINT", engine.address.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    // An engine that takes the connection and never answers: the phone is told after
+    // fifteen seconds that it could not be reached. (Asked first, and waited for last.)
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let never = format!("ws://{}", silent.local_addr().unwrap());
+    let other = Place::new("stream-silent");
+    let world = [
+        ("CLARP_FLUX_ENDPOINT", never.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
+    ];
+    let waiting = other.start_in(ADMIN, &[], &world);
+    let asked_at = Instant::now();
+    let unanswered = std::thread::scope(|scope| {
+        let asked = "/stt/stream?model=deepgram:nova-3";
+        let unanswered = scope.spawn(|| asked_for_a_socket(&waiting, ADMIN, asked));
+
+        // An engine that does not go when it is told to say the rest is given four seconds.
+        let (mut stream, _) = stream_at(&host, ADMIN, "?model=deepgram:nova-3&eot_timeout_ms=999");
+        let before = engine.heard.load(Ordering::SeqCst);
+        stream.send(sound_of(10)).unwrap();
+        assert_eq!(told_on(&mut stream)["event"], "start");
+        let done_at = Instant::now();
+        let done = tungstenite::Message::Text(r#"{"type":"close"}"#.into());
+        stream.send(done).unwrap();
+        // What the phone says after that is heard no more, and is not carried.
+        let _ = stream.send(sound_of(10));
+        assert_eq!(
+            told_on(&mut stream),
+            json!({ "type": "closed", "turns": 0 })
+        );
+        let waited = done_at.elapsed();
+        assert!(
+            waited >= Duration::from_millis(3500) && waited < Duration::from_secs(12),
+            "{waited:?}"
+        );
+        wait_for("the engine's socket to be closed", || {
+            engine.open.load(Ordering::SeqCst) == 0
+        });
+        assert_eq!(engine.heard.load(Ordering::SeqCst), before + 10);
+        unanswered.join().unwrap()
+    });
+    let waited = asked_at.elapsed();
+    assert_eq!(
+        (
+            unanswered.status,
+            serde_json::from_slice::<Value>(&unanswered.body).unwrap()
+        ),
+        (
+            502,
+            json!({ "error": "deepgram stream connect failed: it did not answer in time" })
+        )
+    );
+    assert!(
+        waited >= Duration::from_secs(14) && waited < Duration::from_secs(40),
+        "{waited:?}"
+    );
+    drop(silent);
+}
+
+#[test]
+fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("stream-relayed");
+    let settings = relay_settings(&place, 0o600);
+    let worker = StandInWorker::new();
+    let engine = stand_in_engine();
+    let world = [
+        ("CLARP_RELAY_DIAL", worker.address.as_str()),
+        ("CLARP_FLUX_ENDPOINT", engine.address.as_str()),
+        ("DEEPGRAM_API_KEY", "a-key-of-the-test"),
+    ];
+    let relayed = ["--relay-config", settings.to_str().unwrap()];
+    let host = place.start_in(ADMIN, &relayed, &world);
+    let mut session = worker.session();
+    // A phone of limited scope may speak: a stream of speech is no more than a clip is.
+    let (limited, _) = pair(&host, "A limited phone", "limited");
+    let bearer = format!("Bearer {limited}");
+    let asked = json!({
+        "path": "/stt/stream?model=deepgram:nova-3&eot_threshold=0.9",
+        "headers": { "authorization": bearer },
+    });
+    session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, 3, &asked));
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_ACCEPT, 3));
+    assert_eq!(payload, br#"{"ok":true}"#);
+    // What the phone is told comes as words, each a message of its own.
+    let told = |session: &mut Session| -> Value {
+        let (kind, of, payload) = session.frame();
+        assert_eq!(
+            (kind, of, payload.first()),
+            (relay_rules::WS_MSG, 3, Some(&1))
+        );
+        serde_json::from_slice(&payload[1..]).unwrap()
+    };
+    let says = |session: &mut Session, kind: u8, said: &[u8]| {
+        let mut message = vec![kind];
+        message.extend_from_slice(said);
+        session.tell(relay_rules::frame(relay_rules::WS_MSG, 3, &message));
+    };
+    let ready = told(&mut session);
+    assert_eq!(
+        (&ready["type"], &ready["engine"], &ready["turn_detection"]),
+        (
+            &json!("ready"),
+            &json!("deepgram:flux-general-en"),
+            &json!("provider")
+        )
+    );
+    assert!(
+        engine.asked.lock().unwrap()[0]
+            .0
+            .contains("&eot_threshold=0.90&"),
+        "{:?}",
+        engine.asked
+    );
+    says(&mut session, 0, &[7u8; 9600]);
+    let events: Vec<Value> = (0..5).map(|_| told(&mut session)).collect();
+    let kinds: Vec<&str> = events
+        .iter()
+        .map(|event| event["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["start", "update", "eager", "resumed", "end"]);
+    assert_eq!(
+        (
+            &events[4]["text"],
+            &events[4]["trace_id"],
+            &events[4]["vocab_run_id"]
+        ),
+        (
+            &json!("hello there you"),
+            &events[0]["trace_id"],
+            &json!(null)
+        )
+    );
+    // The phone says that it is done: the last turn, how many ended, and the close with the
+    // route's code and the connector's word.
+    says(&mut session, 0, &[7u8; 10]);
+    assert_eq!(told(&mut session)["event"], "start");
+    says(&mut session, 1, br#"{"type":"close"}"#);
+    let last = told(&mut session);
+    assert_eq!(
+        (&last["event"], &last["text"]),
+        (&json!("end"), &json!("the last w\u{f8}rds"))
+    );
+    assert_eq!(told(&mut session), json!({ "type": "closed", "turns": 2 }));
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_CLOSE, 3));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).unwrap(),
+        json!({ "code": 1000, "reason": "Host connection closed" })
+    );
+    wait_for("the engine's socket to be closed", || {
+        engine.open.load(Ordering::SeqCst) == 0
+    });
+
+    // What is no stream is closed as a socket that failed, whatever the Host said of it
+    // in words: an engine that finds no turns.
+    let asked = json!({ "path": "/stt/stream", "headers": { "authorization": bearer } });
+    session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, 4, &asked));
+    let (kind, of, payload) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_CLOSE, 4));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&payload).unwrap(),
+        json!({ "code": 1011, "reason": "Host WebSocket failed" })
+    );
+    // The phone goes while a stream is open: the engine's socket is closed.
+    let asked = json!({
+        "path": "/stt/stream?model=deepgram:nova-3",
+        "headers": { "authorization": bearer },
+    });
+    session.tell(relay_rules::json_frame(relay_rules::WS_OPEN, 5, &asked));
+    let (kind, of, _) = session.frame();
+    assert_eq!((kind, of), (relay_rules::WS_ACCEPT, 5));
+    wait_for("the engine's socket to be open", || {
+        engine.open.load(Ordering::SeqCst) == 1
+    });
+    let gone = json!({ "code": 1001 });
+    session.tell(relay_rules::json_frame(relay_rules::WS_CLOSE, 5, &gone));
+    wait_for("the engine's socket to be closed", || {
+        engine.open.load(Ordering::SeqCst) == 0
+    });
+}
+
+#[test]
+fn a_clip_is_heard_by_deepgram_and_its_engine_may_be_set_to_find_the_ends_of_turns() {
+    let place = Place::new("speech-deepgram");
+    let (address, taken) = scribe_stand_in(
+        r#"{"metadata":{"duration":1.5},"results":{"channels":[{"alternatives":[{"transcript":" Open the door. "}]}]}}"#,
+    );
+    let token = "deepgram-token";
+    // The owner's own file of keys: the key is read there, each time it is needed.
+    let keys = place.root.join("python-host-config.toml");
+    std::fs::write(&keys, "[deepgram]\napi_key = \"a-key-of-the-test\"\n").unwrap();
+    let world = [
+        ("CLARP_NOVA_ENDPOINT", address.as_str()),
+        ("DEEPGRAM_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let chosen = [
+        "--transcription-engine",
+        "deepgram:nova-3",
+        "--speech-keys",
+        keys.to_str().unwrap(),
+    ];
+    let host = place.start_in(token, &chosen, &world);
+    host.new_agent("Maximus");
+    let hear = |headers: &[(&str, &str)], clip: &[u8]| -> (u16, Value) {
+        let answer = fetch(&host, token, "POST", "/transcribe", headers, clip);
+        let said = serde_json::from_slice(&answer.body).unwrap_or(Value::Null);
+        (answer.status, said)
+    };
+
+    // The engine chosen for this Host hears the clip: posted as it is, with the key, and
+    // what the engine is asked in the address (its model, the language, the names of the
+    // agents here to listen for).
+    let (status, said) = hear(&[("Content-Type", "audio/mp4")], b"made-up audio");
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        (&said["text"], &said["ends_terminal"]),
+        (&json!("Open the door."), &json!(true))
+    );
+    let request = taken.lock().unwrap().last().cloned().unwrap();
+    let (head, body) = request.split_once("\r\n\r\n").unwrap();
+    assert_eq!(
+        head.lines().next().unwrap(),
+        "POST /v1/speech-to-text?model=nova-3&smart_format=true&language=en&keyterm=Maximus HTTP/1.1"
+    );
+    let head = format!("{}\r\n", head.to_lowercase());
+    assert!(
+        head.contains("\r\nauthorization: token a-key-of-the-test\r\n"),
+        "{head}"
+    );
+    assert!(head.contains("\r\ncontent-type: audio/mp4\r\n"), "{head}");
+    assert_eq!(body, "made-up audio");
+    let (status, _) = hear(&[("X-Transcription-Model", "deepgram:nova-3")], b"clip");
+    assert_eq!((status, taken.lock().unwrap().len()), (200, 2));
+
+    // What the apps are told of it: it can be used, and it is an engine that finds the
+    // ends of turns itself, on a stream at this path.
+    let able = host.get("/transcription-capabilities");
+    assert_eq!(
+        (&able["available"], &able["engine"], &able["turn_taking"]),
+        (&json!(true), &json!("deepgram:nova-3"), &json!("native"))
+    );
+    assert_eq!(
+        able["models"],
+        json!([{ "id": "deepgram:nova-3", "name": "Deepgram Nova-3", "provider": "deepgram",
+                 "model": "nova-3", "weight": "cloud", "available": true,
+                 "credential": "DEEPGRAM_API_KEY", "turn_detection": "own", "biasing": "keyterm",
+                 "budget": { "unit": "terms", "capacity": 50, "max_term_chars": null } }])
+    );
+    let told = host.get("/transcription-providers");
+    let options = json!([
+        { "id": "native", "name": "Native (on-device VAD + Smart Turn)", "available": true },
+        { "id": "provider", "name": "Provider-owned end of turn", "available": true },
+    ]);
+    assert_eq!(
+        (
+            &told["turn_taking"],
+            &told["stream_path"],
+            &told["provider_turn_taking_available"],
+            &told["turn_taking_options"]
+        ),
+        (
+            &json!("native"),
+            &json!("/stt/stream"),
+            &json!(true),
+            &options
+        )
+    );
+
+    // The owner has the engine find the ends of turns. That stands while the engine is one
+    // that can: another engine is not chosen while it does, and both are changed together.
+    let set = |asked: Value| host.ask("POST", "/transcription-providers", Some(&asked));
+    let (status, told) = set(json!({ "turn_taking": "provider" }));
+    assert_eq!(
+        (status, &told["turn_taking"]),
+        (200, &json!("provider")),
+        "{told}"
+    );
+    assert_eq!(
+        host.get("/transcription-capabilities")["turn_taking"],
+        "provider"
+    );
+    let needs = json!({ "error": "provider-owned turn taking needs an engine that detects turns" });
+    assert_eq!(set(json!({ "engine": "local" })), (400, needs.clone()));
+    assert_eq!(
+        set(json!({ "engine": "elevenlabs:scribe_v2" })),
+        (400, needs.clone())
+    );
+    assert_eq!(
+        host.get("/transcription-providers")["engine"],
+        "deepgram:nova-3"
+    );
+    let (status, told) = set(json!({ "engine": "local", "turn_taking": "native" }));
+    assert_eq!(
+        (status, &told["engine"], &told["turn_taking"]),
+        (200, &json!("local"), &json!("native")),
+        "{told}"
+    );
+    // With the Host's own engine chosen nothing finds the ends of turns: it cannot be set
+    // to, and the apps are told so.
+    assert_eq!(set(json!({ "turn_taking": "provider" })), (400, needs));
+    let told = host.get("/transcription-providers");
+    assert_eq!(
+        (
+            &told["provider_turn_taking_available"],
+            &told["turn_taking_options"][1]["available"]
+        ),
+        (&json!(false), &json!(false))
+    );
+
+    // A Host without the key has the engine listed and cannot use it: it finds turns, and
+    // is not available to.
+    let other = Place::new("speech-deepgram-keyless");
+    let chosen = ["--transcription-engine", "deepgram:nova-3"];
+    let keyless = other.start_without(token, &chosen, &[], &["DEEPGRAM_API_KEY"]);
+    let told = keyless.get("/transcription-providers");
+    assert_eq!(
+        (
+            &told["provider_turn_taking_available"],
+            &told["turn_taking_options"][1]["available"]
+        ),
+        (&json!(false), &json!(true))
     );
 }
