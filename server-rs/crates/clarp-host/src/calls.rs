@@ -159,7 +159,10 @@ impl Desk {
         app: &App,
         ask: impl FnOnce(&mut Calls, At, (&[Contact], &str), &mut Effects) -> T,
     ) -> Result<T, Unavailable> {
-        self.rings(app, |_,calls,with,(_,out)| ask(calls,with.at,(with.roster,with.new_id),out)).await
+        self.rings(app, |_, calls, with, (_, out)| {
+            ask(calls, with.at, (with.roster, with.new_id), out)
+        })
+        .await
     }
 
     /// The books, read where they are kept when this is the first request since the Host
@@ -330,10 +333,7 @@ impl Desk {
             {
                 Self::attach_opening(app, &mut rings, &mut archived, id).await?;
             }
-            let Some(ring) = rings
-                .opening_records()
-                .find(|r| ended == &r.call_id)
-            else {
+            let Some(ring) = rings.opening_records().find(|r| ended == &r.call_id) else {
                 continue;
             };
             let id = ring.ring_id.clone();
@@ -359,8 +359,10 @@ impl Desk {
             if let Some((_, fx)) = rings.change_opening(&id, now_ms, &mut out, |r, fx| {
                 fx.announce = rings::opening::retire_current(&mut r.opening, &reason, &world, fx);
                 if r.opening["call_ended_at"].is_null() {
-                    r.opening["call_ended_at"] = event["ended_at"].as_i64().map_or(json!(now_ms), |t|json!(t));
-                    fx.dirty=true;
+                    r.opening["call_ended_at"] = event["ended_at"]
+                        .as_i64()
+                        .map_or(json!(now_ms), |t| json!(t));
+                    fx.dirty = true;
                 }
             }) && fx.takes_waiter(&evidence, &trace)
                 && let Some(turn) = evidence["turn"].as_u64()
@@ -437,10 +439,15 @@ impl Desk {
                 }
                 if let Some(entries) = ring.opening["clip_bindings"].as_array() {
                     for entry in entries {
-                        let binding: rings::binding::Binding = serde_json::from_value(entry.clone())
-                            .map_err(|e| Unavailable(e.to_string()))?;
-                        if let Some(key) = rings::binding::key(&ring.agent_id,binding.turn_id) {
-                            rows.push(("opening_by_turn", key, binding.audio(&ring.opening).to_string().into_bytes()));
+                        let binding: rings::binding::Binding =
+                            serde_json::from_value(entry.clone())
+                                .map_err(|e| Unavailable(e.to_string()))?;
+                        if let Some(key) = rings::binding::key(&ring.agent_id, binding.turn_id) {
+                            rows.push((
+                                "opening_by_turn",
+                                key,
+                                binding.audio(&ring.opening).to_string().into_bytes(),
+                            ));
                         }
                     }
                 }

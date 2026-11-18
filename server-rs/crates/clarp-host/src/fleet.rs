@@ -921,16 +921,25 @@ impl FleetHandle {
         &self,
         rows: Vec<(&'static str, String, Vec<u8>)>,
     ) -> Result<(), Unavailable> {
-        self.change_together(rows,Vec::new()).await
+        self.change_together(rows, Vec::new()).await
     }
 
-    pub async fn change_together(&self,rows:Vec<(&'static str,String,Vec<u8>)>, deletes:Vec<(&'static str,String)>) -> Result<(),Unavailable> {
+    pub async fn change_together(
+        &self,
+        rows: Vec<(&'static str, String, Vec<u8>)>,
+        deletes: Vec<(&'static str, String)>,
+    ) -> Result<(), Unavailable> {
         if rows.is_empty() && deletes.is_empty() {
             return Ok(());
         }
         let writes = rows
             .into_iter()
-            .map(|(kind, key, value)| (shelf(kind), key, Some(value))).chain(deletes.into_iter().map(|(kind,key)|(shelf(kind),key,None)))
+            .map(|(kind, key, value)| (shelf(kind), key, Some(value)))
+            .chain(
+                deletes
+                    .into_iter()
+                    .map(|(kind, key)| (shelf(kind), key, None)),
+            )
             .collect();
         self.ask(|answer| Ask::KeepTogether { writes, answer })
             .await?
