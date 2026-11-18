@@ -227,7 +227,6 @@ muse_effort            = ""   # none | minimal | low | medium | high | xhigh | m
 #            Notifications service"). The .p8 is a secret — keep it out of
 #            git, e.g. ~/.config/clarp/AuthKey_XXXX.p8.
 # mode        = "auto"                # auto (relay if possible, else direct) | relay | direct | off
-# background_sync = false             # silent sync push when a turn ends without an alert
 # key_path    = "~/.config/clarp/AuthKey_XXXXXXXXXX.p8"   # direct only
 # key_id      = "XXXXXXXXXX"          # direct only: the .p8 Key ID
 # team_id     = "XXXXXXXXXX"          # direct only: Apple Developer Team ID
