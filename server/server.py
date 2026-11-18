@@ -3316,6 +3316,15 @@ def _recover_queued_after_start(ctx: ServerContext) -> None:
 def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
                          restart_recovery: bool) -> None:
     """Boot-time repair, after the boot workers and before serving listeners."""
+    from lib import agent_rings
+    if restart_recovery:
+        from lib.log import log_fault
+        try:
+            retired = agent_rings.recover_joined_live_calls()
+            if retired:
+                log("agentRingLiveRestartRecovery", f"retired={retired}")
+        except Exception as exc:
+            log_fault("agentRingLiveRestartRecoveryFail", exc)
     broadcast_boot_version(ctx)
     runtime_client = getattr(ctx, "runtime_client", None)
     if runtime_client is None:
@@ -3339,7 +3348,6 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
     try:
         # A listen-first initiative resolved but never admitted (the Host died
         # in between) is admitted now, exactly once (docs/agent-rings.md).
-        from lib import agent_rings
         agent_rings.bind(ctx)
         recovered_openings = agent_rings.recover_openings()
         if recovered_openings:
