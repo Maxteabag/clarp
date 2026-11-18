@@ -185,6 +185,17 @@ def submit(artifact_id: str, data: dict, *, render_capable: bool = False, on_com
         raise
 
 
+def record_submission_in(con, *, submission_id: str, artifact_id: str, version: str, session: str,
+                         answers_json: str, payload_hash: str, prompt: str, created_at: int,
+                         synthesize_audio: int) -> None:
+    """A form submission row, written on the caller's connection inside its transaction
+    (a render spec's submission is one transaction with its completion)."""
+    con.execute("INSERT INTO form_submissions(submission_id,artifact_id,version,session,"
+                "answers_json,payload_hash,prompt,created_at,synthesize_audio) VALUES(?,?,?,?,?,?,?,?,?)",
+                (submission_id, artifact_id, version, session, answers_json, payload_hash, prompt,
+                 created_at, synthesize_audio))
+
+
 def receipt(row) -> dict:
     return {'submission_id': row['submission_id'], 'artifact_id': row['artifact_id'],
             'version': row['version'], 'accepted': True, 'delivery_status': row['status']}
