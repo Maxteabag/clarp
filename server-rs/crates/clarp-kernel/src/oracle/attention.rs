@@ -8,7 +8,9 @@
 //! an excerpt that says it is one: a choice is never shown with half its conditions.
 //!
 //! The Python Host's `oracle_attention.context_text` and `completion_context_text`, held to
-//! them by `tests/fixtures/oracle-conversation-vectors.json`.
+//! them by `tests/fixtures/oracle-conversation-vectors.json`; and which finished turns are
+//! shown at all, its `pending_completion_notifications`, held to it by
+//! `tests/fixtures/oracle-completions-vectors.json`.
 
 use serde_json::{Map, Value, json};
 
@@ -107,6 +109,122 @@ pub fn pending(listed: &[Value], most: usize) -> Vec<Value> {
         Value::Object(record)
     });
     shown.collect()
+}
+
+/// How long after an agent finished something a voice is shown it at all, and for how long
+/// of that it is new enough to be brought up.
+pub const FINISHED_SHOWN_FOR_MS: i64 = 24 * 60 * 60 * 1000;
+pub const FINISHED_NEW_FOR_MS: i64 = 15 * 60 * 1000;
+
+/// Whether what somebody of this name began is the user's own: what he asked for himself,
+/// and what the Oracle handed on for him. By the contract's word for who began a turn.
+pub fn for_the_user(origin: &str) -> bool {
+    matches!(origin, "user" | "oracle")
+}
+
+/// What agents finished for the user and the user has not gone on about, as a voice is
+/// shown it: the newest first, `most` of them at most.
+///
+/// `had` is what the Host has of each turn it kept the end of: what it told its user
+/// (whether it told him, `notify`, and he has not read it, `unread`; the agent, its
+/// conversation, when it ended, and the names of the answer and of the message that began
+/// the turn), that answer and that message as its conversations have them (`answer`,
+/// `asked`: nothing where they have none of that name), and whether the user or the Oracle
+/// wrote to that conversation since (`written_to_since`).
+pub fn finished<'a>(
+    had: impl IntoIterator<Item = &'a Value>,
+    now_ms: i64,
+    most: usize,
+) -> Vec<Value> {
+    // What the user was told of and has not read, where the conversation it names has the
+    // answer as that agent's own and the message as one to that agent.
+    let told = had.into_iter().filter(|row| {
+        let (answer, asked) = (&row["answer"], &row["asked"]);
+        let named = [
+            "source_message_id",
+            "cause_message_id",
+            "backend_session_id",
+        ];
+        row["notify"] == true
+            && row["unread"] == true
+            && named.iter().all(|name| !as_text(&row[*name]).is_empty())
+            && answer["role"] == "assistant"
+            && answer["agent_id"] == row["agent_id"]
+            && answer["backend_session_id"] == row["backend_session_id"]
+            && asked["role"] == "user"
+            && asked["agent_id"] == row["agent_id"]
+    });
+    // The newest first; of two that ended at one moment, the one named last.
+    let mut told: Vec<&Value> = told.collect();
+    told.sort_by(|one, other| ended_and_named(other).cmp(&ended_and_named(one)));
+    // No more of them are looked at than four for each that is asked for, and never more
+    // than four for each a voice is shown at most.
+    let looked_at = (most * 4).min(PENDING_MOST * 4);
+    let mut shown = Vec::new();
+    for row in told.into_iter().take(looked_at) {
+        if shown.len() >= most {
+            break;
+        }
+        // Only what the user or the Oracle asked for: by what was told, and by the message
+        // itself where it says who wrote it.
+        let (asked, told_for) = (&row["asked"], python::strip(as_text(&row["origin"])));
+        let asked_by = match as_text(&asked["origin"]) {
+            "" => told_for,
+            said => python::strip(said),
+        };
+        let in_one = as_text(&asked["backend_session_id"]) == as_text(&row["backend_session_id"]);
+        if !for_the_user(told_for) || !for_the_user(asked_by) || !in_one {
+            continue;
+        }
+        let ended = as_whole(&row["done_ts"]);
+        let answer = python::strip(as_text(&row["answer"]["text"]));
+        if now_ms - ended > FINISHED_SHOWN_FOR_MS
+            || row["written_to_since"] == true
+            || answer.is_empty()
+        {
+            continue;
+        }
+        let agent = match as_text(&row["persona"]) {
+            "" => &row["session"],
+            _ => &row["persona"],
+        };
+        let mut record = Map::new();
+        for name in [
+            "notification_id",
+            "source_message_id",
+            "cause_message_id",
+            "agent_id",
+        ] {
+            put(&mut record, name, row[name].clone());
+        }
+        put(&mut record, "agent", agent.clone());
+        for name in ["session", "backend_session_id"] {
+            put(&mut record, name, row[name].clone());
+        }
+        put(&mut record, "origin", json!(asked_by));
+        put(&mut record, "reference_ts", json!(ended));
+        let old = now_ms - ended > FINISHED_NEW_FOR_MS;
+        put(&mut record, "stale", json!(old));
+        put(&mut record, "source_text", json!(answer));
+        shown.push(Value::Object(record));
+    }
+    shown
+}
+
+/// A text of a record, and nothing where it is none.
+fn as_text(value: &Value) -> &str {
+    value.as_str().unwrap_or("")
+}
+
+/// A whole number of a record, and nought where it is none.
+fn as_whole(value: &Value) -> i64 {
+    value.as_i64().unwrap_or(0)
+}
+
+/// When a turn ended and what it was told under: what the turns that ended are put in
+/// order by.
+fn ended_and_named(row: &Value) -> (i64, &str) {
+    (as_whole(&row["done_ts"]), as_text(&row["notification_id"]))
 }
 
 /// A field of a record as it is, or this where the record has none.

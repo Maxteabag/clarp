@@ -554,16 +554,22 @@ impl Session<'_> {
     async fn ticked(&mut self) {
         let now = self.now();
         let looks = self.machine.tick(&mut self.said, now);
-        let decisions = if looks {
+        let waits = looks.then(|| {
             let listed = library::inbox(self.app, true, false);
             let listed = listed["items"].as_array().cloned().unwrap_or_default();
-            Some(attention::pending(&listed, attention::PENDING_MOST))
-        } else {
-            None
-        };
-        let waiting = decisions.as_ref().map(|decisions| Waiting {
+            let decisions = attention::pending(&listed, attention::PENDING_MOST);
+            // What each agent last finished for its user, as its own thread has it.
+            let directory = self.app.fleet.directory();
+            let views = directory.members.iter().map(|member| member.agent.view());
+            let views: Vec<_> = views.collect();
+            let had = views.iter().filter_map(|view| view.finished.as_deref());
+            let at = self.app.clock.now_ms();
+            let finished = attention::finished(had, at, attention::PENDING_MOST);
+            (decisions, finished)
+        });
+        let waiting = waits.as_ref().map(|(decisions, completions)| Waiting {
             decisions,
-            completions: &[],
+            completions,
         });
         let rows = self.rows().await;
         let claim = self.machine.ticked(&rows, waiting, &mut self.said, now);

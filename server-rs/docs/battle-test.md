@@ -1308,6 +1308,30 @@ Nothing was chosen and nothing was changed:
 What stands open of this, for the owner's own test once everything is built: a contact chosen from his
 phone, and the Oracle's conversation that uses it, which is not built yet.
 
+## A call of the Oracle, as far as the door of the installed Host goes (18 Nov 2026, L35)
+
+The installed Host is `30575557ab81`, installed at 13:53:51, without the word for a push key. It holds calls
+of the Oracle now (`GET /oracle/v2`). No call was opened to show it, and nothing was handed to an agent:
+a call reaches the owner's provider with the owner's key, and work handed on runs a turn of one of the
+agents here, both of which are the owner's to begin. What a call does is held by the tests, whose voice and
+router stand in on the test's own machine, and by 1063 wrong rules, each of which those tests caught on the
+commit that is installed (`Planted rules (Rust)`). Asked at the door, as the administrator and as nobody:
+
+| Asked | Answered |
+|---|---|
+| `GET /server-info`, the features of the Oracle | `oracle` 1, `oracle_contact` 7, `oracle_direct_contact` 8, `oracle_context_memory` 9, `oracle_earcons` 15; no `oracle_handoff`, no `oracle_gemini_voice` |
+| `GET /oracle/status` | calls in a thread (`v2.available`, with the owner's key, which the Host reads from his file of speech keys), also to the contact alone; no call of the first kind, no WebRTC, no podcast, the one voice |
+| `GET /oracle/status` without the Host's token | 401 |
+| `GET /oracle/delegations?all=1` | no delegation, before and after |
+| `GET /oracle/v2` without an upgrade | 426, `WebSocket upgrade required` |
+| `GET /oracle/v2?delegation_strategy=other` | 400, `Unsupported Oracle delegation strategy` |
+| `GET /oracle/v2?podcast_artifact=a-1` | 400, `Podcast detours are not available on this Host` |
+
+The relay was back 64 ms after the start, and the Host's 23 agents were as before (`verify-rows.py`).
+
+What stands open of this, for the owner's own test once everything is built: a call from his phone, with
+his voice, his router and his agents.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

@@ -1757,8 +1757,8 @@ reached). The status says what this Host holds: calls of this kind where the own
 thread of their owner and contact or anew, also to the contact alone; and nothing of what is not built.
 The features are listed (`oracle`, `oracle_contact`, `oracle_direct_contact`, `oracle_context_memory`,
 `oracle_earcons`). Not built yet, and said so: a call put through to an agent (`oracle_handoff`), the
-second voice, podcast detours, the words a contact's vocabulary was prepared in, what agents finished that
-the user has not read, the first kind of call and WebRTC.
+second voice, podcast detours, the words a contact's vocabulary was prepared in, the first kind of call
+and WebRTC.
 Tested through a real Host process, with a voice and a router that stand in on the test's own machine (no
 test reaches a provider): every refusal in its words; a whole call (how the voice is told the call begins,
 with the agents and what was kept; sound both ways; a wanting said twice routed once; the question the
@@ -1775,6 +1775,34 @@ that cannot be written, work for an agent there is none of, a tool there is none
 call handing work on as any other; and a call carried through the relay as it is at the door (opened,
 sound both ways, ended by the phone, refused, and left by a phone that went away). Four defects of the reference were found on the way (R58 to R61).
 
+**The Oracle: what agents finished** (18 Nov 2026). Between two turns of a call its voice is also told,
+as something from before the call that it is not to bring up by itself, of what an agent finished for the
+user and the user did not go on about. Which finished turns are shown, the newest first, at most twenty,
+none older than a day, and as old once a quarter of an hour has passed, is the kernel's rule
+(`oracle/attention.rs`, `finished`: the Python Host's `oracle_attention.pending_completion_notifications`,
+run as it is on a database of the generator's own, `tools/oracle-completions-vectors.py`: 13 cases, 178
+turns, 31 askings). What that rule is handed is this Host's own. The Python Host keeps a row for every
+end of a turn it told its user of, and compares clocks to see whether the user wrote since. This Host
+keeps no such list: an agent's log has it all. Each agent's thread says, in what anyone may read of the
+agent without asking it, what the agent last finished for the user or the Oracle: the turn that answers
+the newest message of theirs in its conversation, where that turn ran to its end with something for the
+user in it and nothing of theirs waits in its mailbox (`clarp-actor`, `last_finished_for`). It is read
+anew when a turn of theirs begins or ends, when the mailbox changes, when the agent is renamed, and when
+the Host starts; it is gone when the agent is started again. A call collects these when it looks for what
+waits, and the rule does the rest. What the Oracle itself handed on is shown as well, as on the Python
+Host: its voice is told the result, and later has it as background. The end of a turn is told to the
+apps under the name the Python Host gives it (`notify::id`: of the agent and the moment), which is the
+name a voice is told it under, the same whenever it is told again. The walk through an agent's log has a
+test of the actor's own (what another agent wrote or left waiting changes nothing; what the user left
+waiting does, until he takes it back; a turn that failed or said nothing finished nothing; the same after
+a restart; nothing of a conversation that was started again). Tested through a real Host process: a call
+told of what agents finished, the newest first and one thing at a time, in the Python Host's words, under
+the name the apps were told and by the name an agent was given since; not of what the user wrote to since
+(a turn that runs, a message that waits, a turn that failed), of what one agent answered another, or of a
+conversation that was started again, each of which ended later and would have been told first; and a
+later call of the thread told only of what the call before had not told: what an agent had finished
+before the user wrote to it again, once he took those words back.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
@@ -1787,7 +1815,12 @@ of 60, the cues 32 of 32, the tools 80 of 80, the memory 158 of 158, the convers
 the call on the Host 93 of 93. What their first runs missed was mended before: the memory's stories went
 from 10 to 18, the conversation's from 43 to 70, the tools' and the call's cases grew, and code that
 nothing could observe is gone (the set of what was handed to the contact, the early end of a tick after a
-part, a second look at whose work a thread's work is, guards that nothing reaches).
+part, a second look at whose work a thread's work is, guards that nothing reaches). With what agents
+finished (the next landing) came a list of its own, 78 of 78 caught on the commit that landed, and the
+lists whose code that landing touched were run again there, whole: the call 93 of 93, the conversation 475
+of 475, the delegations 165 of 165. Its first run missed two: a turn that was stopped had no case and got
+one, and a moment at which the worker read anew for an agent that was started again was code nothing
+could observe, since such an agent is opened anew, and went.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and

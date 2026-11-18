@@ -137,7 +137,7 @@ PLANTS = [
     (C, 'call', 'an action is done for the folder of the data itself', '                let folder = app.config.data_dir.join("media").join(HANDOFF_FILES);', '                let folder = app.config.data_dir.join(HANDOFF_FILES);'),
     (C, 'direct', 'a tool is done for the administrator whoever called', '                let who = (self.call.owner.clone(), self.call.asked.contact.clone());', '                let who = (self.call.owner.clone(), String::new());'),
     # ---- what waits for the user
-    (C, 'call', 'what waits for the user is never read', '            Some(attention::pending(&listed, attention::PENDING_MOST))', '            Some(attention::pending(&listed, 0))'),
+    (C, 'call', 'what waits for the user is never read', '            let decisions = attention::pending(&listed, attention::PENDING_MOST);', '            let decisions = attention::pending(&listed, 0);'),
     (C, 'call', 'questions that wait for the user are not read', '            let listed = library::inbox(self.app, true, false);', '            let listed = library::inbox(self.app, false, false);'),
     (C, 'call', 'what a voice was told of is not written down', '            let _ = told.await;', '            drop(told);'),
     # ---- the file of where a request came from

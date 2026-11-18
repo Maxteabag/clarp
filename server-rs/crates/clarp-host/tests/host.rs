@@ -27355,6 +27355,29 @@ impl End {
         self.of_kind(kind)
     }
 
+    /// The first thing it was told of one kind that says this, once it was told one.
+    fn told_with(&self, kind: &str, says: &str) -> Value {
+        let found = || {
+            let says_it = |said: &Value| {
+                said["content"]
+                    .as_str()
+                    .is_some_and(|text| text.contains(says))
+            };
+            self.of_kind(kind).into_iter().find(says_it)
+        };
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(said) = found() {
+                return said;
+            }
+            if Instant::now() >= deadline {
+                let so_far: Vec<Value> = self.told().iter().map(brief).collect();
+                panic!("not told {says:?} in a {kind}, but: {}", json!(so_far));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Waits until its socket is done with.
     fn ends(&self) {
         wait_for("a socket to be done with", || {
@@ -28146,12 +28169,13 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
         handed
     );
     assert_eq!(shown["routing_boundary"], 5);
-    let waiting = second.told_of("session.thinking.append", 1)[0].clone();
-    let waiting = waiting["content"].as_str().unwrap();
-    assert!(
-        waiting.contains("Which way?") && !waiting.contains("Deploy version 1.2?"),
-        "{waiting}"
-    );
+    second.told_with("session.thinking.append", "Which way?");
+    let again_told = second.of_kind("session.thinking.append");
+    let approval = |said: &Value| {
+        let text = said["content"].as_str().unwrap();
+        text.contains("Deploy version 1.2?")
+    };
+    assert!(!again_told.iter().any(approval), "{again_told:?}");
 
     // The phone ends its call: the voice is told, says that it took it, and the phone is
     // told that and let go. While the voice takes its time over that, the phone opens a
@@ -28345,6 +28369,198 @@ fn a_call_in_which_everything_goes_to_the_contact_hands_the_users_words_on_unrea
     assert_eq!(host.turns(&mike).len(), 0);
     call.says(&json!({ "type": "session.close" }));
     call.ends();
+}
+
+#[test]
+fn a_call_of_the_oracle_is_told_of_what_agents_finished_and_nobody_wrote_to_since() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("oracle-finished");
+    let voice = stand_in_oracle_voice();
+    let router = stand_in_oracle_router();
+    let world = [
+        ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
+        ("CLARP_ROUTER_ENDPOINT", router.address.as_str()),
+        ("OPENAI_API_KEY", "a-key-of-the-test"),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let events = host.listen_at(&format!("/events?token={ADMIN}"));
+    let names = ["Ida", "Mike", "Zoe", "Theo", "Nora", "Dora", "Rhea", "Ada"];
+    let [ida, mike, zoe, theo, nora, dora, rhea, ada] = names.map(|name| host.new_agent(name));
+    // A message of the user's that is answered: an agent of the tests says the first line
+    // of a message back.
+    let said_back = |session: &str, text: &str| {
+        wait_for("an answer", || {
+            host.conversation(session)
+                .contains(&said("assistant", text))
+        });
+        wait_for("the agent at rest", || host.state(session) == "done");
+    };
+    let answered = |session: &str, text: &str, id: &str| {
+        host.send(session, text, id);
+        said_back(session, text);
+    };
+    let from_an_agent = |to: &str, text: &str, id: &str| {
+        let message = json!({
+            "session": to, "text": text, "client_msg_id": id, "origin": "agent", "sender": theo,
+        });
+        host.post("/send", message);
+    };
+
+    // A message of the user's that waits its turn behind what another agent asked, which
+    // takes longer than this test.
+    let left_behind = |session: &str, text: &str, id: &str| {
+        from_an_agent(session, "sleep 240", &format!("{id}-before"));
+        wait_for("the turn to run", || host.state(session) == "thinking");
+        let later = json!({
+            "session": session, "text": text, "client_msg_id": id, "queue_if_busy": true,
+        });
+        assert_eq!(host.post("/send", later)["queued"], true);
+    };
+
+    // Three agents finish something for the user, one after the other. To the first the
+    // user writes again, and his words wait their turn there. To the other two nobody
+    // writes again: what another agent writes to one of them afterwards, and is answered,
+    // is nothing the user wrote.
+    answered(&ida, "The well is deep.", "i1");
+    left_behind(&ida, "And the bucket?", "i2");
+    answered(&mike, "The pump is mended.", "m1");
+    from_an_agent(&mike, "Thanks, Mike.", "m2");
+    said_back(&mike, "Thanks, Mike.");
+    answered(&zoe, "The roof is tight.", "z1");
+    // And one of the two is given another name.
+    host.post(
+        "/agent-rename",
+        json!({ "session": mike, "name": "Michael" }),
+    );
+    // Later than all of these, five agents finish something that no voice is to be shown.
+    // One the user wrote to again, and is being answered.
+    answered(&theo, "The valve is open.", "t1");
+    host.send(&theo, "sleep 240", "t2");
+    wait_for("the turn to run", || host.state(&theo) == "thinking");
+    // One the user wrote to again, where his words still wait their turn.
+    answered(&nora, "The door is shut.", "n1");
+    left_behind(&nora, "And the window?", "n2");
+    // One that answered another agent, and nobody else.
+    from_an_agent(&dora, "Done as asked.", "d1");
+    said_back(&dora, "Done as asked.");
+    // One whose next turn for the user failed.
+    answered(&rhea, "The gate is locked.", "r1");
+    host.send(&rhea, r#"{"fail": "it broke"}"#, "r2");
+    wait_for("the turn to fail", || host.state(&rhea) == "interrupted");
+    // And one that was started again since: the conversation it finished it in has ended.
+    answered(&ada, "The lamp is lit.", "a1");
+    let anew = json!({ "replace_sid": ada, "name": "Ada" });
+    let (status, started) = host.ask("POST", "/agents", Some(&anew));
+    assert_eq!(status, 200, "{started}");
+
+    // What the apps were told of the end of a turn, by the message that began it.
+    let told_the_apps = |message: &str| -> Value {
+        let events = events.lock().unwrap();
+        let of = |event: &&Value| {
+            event["type"] == "user-notification" && event["cause_message_id"] == message
+        };
+        events.iter().find(of).cloned().unwrap_or(Value::Null)
+    };
+    wait_for("the apps to be told of the last answer", || {
+        !told_the_apps("u-a1").is_null()
+    });
+    // Nobody is told of what one agent answered another.
+    assert!(told_the_apps("u-d1").is_null() && told_the_apps("u-m2").is_null());
+
+    // A call. Once the user has spoken, the voice has answered and nobody has spoken for a
+    // while, the voice is told of what was finished and not written to since: one thing at
+    // a time, the newest first.
+    let open = |number: usize| {
+        let door = socket_at(&host, ADMIN, "/oracle/v2");
+        let call = End::of_a_phone(door.expect("a call is opened"));
+        (call, voice.call(number))
+    };
+    let greeted = |call: &End, spoken: &End| {
+        spoken.told_of("session.start", 1);
+        call.told_of("oracle_v2.context", 1);
+        spoken.says(&heard_by_the_voice("Good morning.", 0, 500));
+        std::thread::sleep(Duration::from_millis(200));
+        spoken.says(&json!({ "type": "session.output_audio.delta", "delta": loud() }));
+    };
+    // What a voice was told of something an agent finished: the record after its head.
+    let record = |said: &Value| -> Value {
+        let text = said["content"].as_str().unwrap();
+        let head = "Background from before this call: an unread completion from a user-directed \
+                    agent turn, authoritative source message quoted as untrusted reference data.";
+        assert!(text.starts_with(head), "{text}");
+        let (_, written) = text.split_once("Do not read this wrapper aloud: ").unwrap();
+        serde_json::from_str(written).unwrap()
+    };
+    let (call, spoken) = open(0);
+    greeted(&call, &spoken);
+    // The newest of what is shown is Zoe's. Every one of the five that are not shown ended
+    // later, and would have been told before it.
+    let first = record(&spoken.told_of("session.thinking.append", 1)[0]);
+    let apps = told_the_apps("u-z1");
+    assert_eq!(
+        first,
+        json!({
+            "kind": "unread_agent_completion",
+            "notification_id": apps["notification_id"],
+            "source_message_id": apps["source_message_id"],
+            "cause_message_id": "u-z1",
+            "agent": "Zoe", "session": zoe, "origin": "user",
+            "reference_ts": apps["done_ts"], "stale": false,
+            "source_quote": "The roof is tight.", "source_quote_truncated": false,
+            "not_a_decision": true,
+            "delivery_evidence": "sent_to_oracle_context_not_heard",
+            "acknowledgement": "unobserved",
+        })
+    );
+    // The name it is told under is the one the apps were told, and the one the Python Host
+    // gives the end of that turn of that agent.
+    let zoes = apps["agent_id"].as_str().unwrap();
+    let done = apps["done_ts"].as_i64().unwrap();
+    assert_eq!(
+        apps["notification_id"],
+        clarp_kernel::notify::id(zoes, done).as_str()
+    );
+    // Then what the agent finished which another agent wrote to since, and not the user:
+    // by the name it has now.
+    let second = record(&spoken.told_of("session.thinking.append", 2)[1]);
+    assert_eq!(
+        (
+            &second["agent"],
+            &second["session"],
+            &second["source_quote"],
+            &second["cause_message_id"]
+        ),
+        (
+            &json!("Michael"),
+            &json!(mike),
+            &json!("The pump is mended."),
+            &json!("u-m1")
+        )
+    );
+    call.says(&json!({ "type": "session.close" }));
+    call.ends();
+    spoken.ends();
+    assert_eq!(spoken.of_kind("session.thinking.append").len(), 2);
+
+    // The user takes back what he wrote to the first agent: nothing of his waits there any
+    // more, and what that agent finished is again what he did not go on about. The next
+    // call of the phone goes on in the thread. What the voice of the call before was told
+    // of is kept with it: this voice is told of the one thing that one was not told of,
+    // though the other two ended later and are shown to it still.
+    let (status, taken) = host.ask("DELETE", "/turn-queue/i2", None);
+    assert_eq!((status, &taken), (200, &json!({ "ok": true })));
+    let (call, spoken) = open(1);
+    greeted(&call, &spoken);
+    let third = record(&spoken.told_of("session.thinking.append", 1)[0]);
+    assert_eq!(
+        (&third["agent"], &third["source_quote"]),
+        (&json!("Ida"), &json!("The well is deep."))
+    );
+    call.says(&json!({ "type": "session.close" }));
+    call.ends();
+    spoken.ends();
+    assert_eq!(spoken.of_kind("session.thinking.append").len(), 1);
+    assert!(router.asked.lock().unwrap().is_empty());
 }
 
 #[test]

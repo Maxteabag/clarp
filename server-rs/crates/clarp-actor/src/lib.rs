@@ -50,7 +50,7 @@ use clarp_kernel::turn::{
     Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
     Wait, silent_when_failed,
 };
-use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
+use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
@@ -59,6 +59,8 @@ use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
 /// How many lines of a spool are read, understood and written to the log at a time.
 const WINDOW: usize = 2_000;
+/// How many messages of a conversation are read at a time by what looks back through them.
+const MESSAGES_AT_A_TIME: usize = 32;
 
 /// What an actor is told about its agent. It does not change while the actor lives.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1471,6 +1473,72 @@ impl Actor {
         } else {
             TurnFate::Gone
         })
+    }
+
+    /// What the agent last finished for one of those `asked_by` names (by the contract's
+    /// word for who began a turn), when none of them wrote to it since: the message that
+    /// began that turn and the row that closed it, which says how and when it ended.
+    ///
+    /// It is the turn that answers the newest message of one of them in the conversation,
+    /// and only where that turn ran to its end with something said, no earlier than
+    /// `since_ms`. A newer message of theirs that waits its turn, is being answered or was
+    /// not answered to the end is what they wrote since, and then there is nothing. Nor is
+    /// there anything of a conversation that ended when the agent was started again.
+    pub fn last_finished_for(
+        &self,
+        asked_by: impl Fn(&str) -> bool,
+        since_ms: i64,
+    ) -> Result<Option<(Versioned, Versioned)>, ActorError> {
+        // What one of them wrote and the agent has not come to yet, they wrote since.
+        let mut waiting = self.recorder.agent().waiting();
+        if waiting.any(|queued| asked_by(queued.origin.name())) {
+            return Ok(None);
+        }
+        let log = self.recorder.log();
+        // How the turn that answers a message ended, once it has.
+        let ended = |item: &Item| match item.turn {
+            Some(turn) => self.turn_end(turn),
+            None => Ok(None),
+        };
+        let floor = self.recorder.floor();
+        let mut before = Seq::MAX;
+        loop {
+            let page = log.read_before(before, Kinds::only(kind::MESSAGE), MESSAGES_AT_A_TIME)?;
+            let Some(oldest) = page.first() else {
+                return Ok(None);
+            };
+            before = oldest.seq;
+            for item in page.iter().rev() {
+                if item.seq <= floor {
+                    return Ok(None);
+                }
+                let message: Message = serde_json::from_slice(&item.body).map_err(|error| {
+                    ActorError::Corrupt(format!(
+                        "the message at {} cannot be read: {error}",
+                        item.seq
+                    ))
+                })?;
+                if !asked_by(message.origin.name()) {
+                    // A message enters a conversation when its turn starts, after the
+                    // turn before it has ended: what stands before one that entered so
+                    // long ago ended longer ago still, and need not be read.
+                    if item.ts_ms < since_ms {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+                let Some(end) = ended(item)? else {
+                    return Ok(None);
+                };
+                if end.status != "completed" || end.ended_at_ms < since_ms {
+                    return Ok(None);
+                }
+                let asked = conversation::one(log, &message.id)?;
+                let answer = conversation::one(log, &end.closes)?;
+                let said = |answer: &Versioned| matches!(answer.entry, Entry::Reply(_));
+                return Ok(asked.zip(answer.filter(said)));
+            }
+        }
     }
 
     fn turn_end(&self, turn: u64) -> Result<Option<TurnEnd>, ActorError> {
