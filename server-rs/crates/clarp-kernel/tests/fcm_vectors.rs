@@ -124,4 +124,25 @@ fn reference_android_data_and_activity_messages() {
             );
         }
     }
+    let mut lanes = 0;
+    for row in fixture["lanes"].as_array().unwrap() {
+        let elapsed = std::time::Duration::from_millis(row["elapsed"].as_u64().unwrap());
+        let mut queue: Vec<_> = row["decisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .collect();
+        while let Some(i) = fcm::slow_queue_victim(elapsed, queue.iter().map(|(_, v)| **v == true))
+        {
+            queue.remove(i);
+        }
+        assert_eq!(
+            json!(queue.iter().map(|(i, _)| i).collect::<Vec<_>>()),
+            row["kept"],
+            "{row}"
+        );
+        lanes += 1;
+    }
+    assert_eq!(lanes, 189);
 }

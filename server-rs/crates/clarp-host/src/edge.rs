@@ -72,12 +72,11 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
     let seats = app.seats.told();
-    FEATURES
-        .iter()
-        .filter(move |(feature, _)| {
-            (*feature != CHIP || chip) && (*feature != SEATS || seats)
-                && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
-        })
+    FEATURES.iter().filter(move |(feature, _)| {
+        (*feature != CHIP || chip)
+            && (*feature != SEATS || seats)
+            && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
+    })
 }
 
 pub const FEATURES: &[(&str, u64)] = &[

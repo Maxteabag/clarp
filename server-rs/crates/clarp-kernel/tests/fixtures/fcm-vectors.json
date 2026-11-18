@@ -7712,5 +7712,2736 @@
    "allowed": true,
    "wait": 0.0
   }
+ ],
+ "lanes": [
+  {
+   "decisions": [],
+   "elapsed": 4999,
+   "kept": []
+  },
+  {
+   "decisions": [],
+   "elapsed": 5000,
+   "kept": []
+  },
+  {
+   "decisions": [],
+   "elapsed": 5001,
+   "kept": []
+  },
+  {
+   "decisions": [
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    false,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    0,
+    1
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    false,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    1,
+    2
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    false
+   ],
+   "elapsed": 5001,
+   "kept": [
+    2,
+    3
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 4999,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5000,
+   "kept": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "decisions": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ],
+   "elapsed": 5001,
+   "kept": [
+    3,
+    4
+   ]
+  }
  ]
 }

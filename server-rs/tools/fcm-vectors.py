@@ -19,7 +19,7 @@ def record(root):
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(ROOT / 'server'))
-    return {**android_cases(), "deliveries": deliveries(), "rings": rings(), "budgets": budgets()}
+    return {**android_cases(), "deliveries": deliveries(), "rings": rings(), "budgets": budgets(), "lanes": lanes()}
 
 
 def android_cases():
@@ -68,6 +68,23 @@ def android_cases():
                 chips.append(dict(state=state, server=server, payload=payload))
                 take(payload, priority='5', collapse='agents-working')
     return dict(cases=cases, chips=chips)
+
+
+def lanes():
+    import itertools
+    from lib import apns
+    apns.log = lambda *_: None
+    out = []
+    for n in range(6):
+        for decisions in itertools.product((False,True), repeat=n):
+            for elapsed in (4999,5000,5001):
+                lane = apns._AndroidLane()
+                lane.busy = True
+                lane.started = 1.0
+                lane.queue.extend(apns._AndroidTicket(str(i), decision) for i,decision in enumerate(decisions))
+                lane.prune('session', 1 + elapsed / 1000)
+                out.append(dict(decisions=decisions, elapsed=elapsed, kept=[int(t.label) for t in lane.queue]))
+    return out
 
 
 def budgets():

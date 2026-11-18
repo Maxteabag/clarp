@@ -5843,6 +5843,158 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
         ),
         (200, json!({"ok":true,"removed":0}))
     );
+    // Drive the credential clock at the refresh boundary. The in-memory port
+    // records the exchange and message before returning each scripted refusal.
+    use clarp_ports::fcm::{FcmHttp, Response as AndroidResponse};
+    #[derive(Default)]
+    struct Google {
+        signed: Mutex<Vec<String>>,
+        sends: Mutex<Vec<(String, String)>>,
+        responses: Mutex<std::collections::VecDeque<(u16, Value)>>,
+    }
+    impl FcmHttp for Google {
+        fn exchange(&self, issuer: &str, assertion: &str) -> Option<AndroidResponse> {
+            assert_eq!(issuer, "https://oauth2.googleapis.com/token");
+            let mut signed = self.signed.lock().unwrap();
+            signed.push(assertion.into());
+            Some(AndroidResponse {
+                status: 200,
+                retry_after: String::new(),
+                body: json!({"access_token":format!("token-{}",signed.len()),"expires_in":600})
+                    .to_string()
+                    .into_bytes(),
+            })
+        }
+        fn deliver(&self, project: &str, bearer: &str, body: &[u8]) -> Option<AndroidResponse> {
+            let msg: Value = serde_json::from_slice(body).unwrap();
+            assert_eq!(msg["message"]["token"], "device");
+            self.sends
+                .lock()
+                .unwrap()
+                .push((project.into(), bearer.into()));
+            let (status, body) = self
+                .responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or((200, json!({"name":"accepted"})));
+            Some(AndroidResponse {
+                status,
+                retry_after: String::new(),
+                body: body.to_string().into_bytes(),
+            })
+        }
+    }
+    let google = Arc::new(Google::default());
+    let clock = Arc::new(clarp_ports::clock::ManualClock::starting_at(1_000_000));
+    let adapter = clarp_host::fcm::Sender::new(
+        clarp_host::owner::OwnerFile::new(Some(config.clone())),
+        google.clone(),
+        clock.clone(),
+    );
+    let send = || {
+        adapter.push(
+            "device",
+            &json!({"kind":"agent-ring"}),
+            &Value::Null,
+            "10",
+            "ring-one",
+            false,
+        )
+    };
+    use clarp_kernel::alert_routes::Outcome;
+    assert_eq!(send(), Outcome::Sent);
+    clock.advance_ms(299_999);
+    assert_eq!(send(), Outcome::Sent);
+    assert_eq!(google.signed.lock().unwrap().len(), 1);
+    clock.advance_ms(1);
+    assert_eq!(send(), Outcome::Sent);
+    assert_eq!(google.signed.lock().unwrap().len(), 2);
+    google
+        .responses
+        .lock()
+        .unwrap()
+        .extend([(401, json!({})), (200, json!({}))]);
+    assert_eq!(send(), Outcome::Sent);
+    let sent = google.sends.lock().unwrap().clone();
+    assert_eq!(
+        sent.iter()
+            .map(|(_, bearer)| bearer.as_str())
+            .collect::<Vec<_>>(),
+        ["token-1", "token-1", "token-2", "token-2", "token-3"]
+    );
+    assert!(sent.iter().all(|(project, _)| project == "sample"));
+    let assertion = google.signed.lock().unwrap()[0].clone();
+    let parts: Vec<_> = assertion.split('.').collect();
+    assert_eq!(parts.len(), 3);
+    let decode = |part: &str| {
+        let mut s = part.replace('-', "+").replace('_', "/");
+        s.push_str(&"=".repeat((4 - s.len() % 4) % 4));
+        clarp_kernel::python::b64decode(&s).unwrap()
+    };
+    assert_eq!(
+        serde_json::from_slice::<Value>(&decode(parts[0])).unwrap(),
+        json!({"alg":"RS256","typ":"JWT","kid":"fixture"})
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&decode(parts[1])).unwrap(),
+        json!({"iss":"sender@example.invalid","scope":"https://www.googleapis.com/auth/firebase.messaging","aud":"https://oauth2.googleapis.com/token","iat":1000,"exp":4600})
+    );
+    // The fixture's public key must verify the actual RS256 assertion.
+    let held_account: Value = serde_json::from_slice(&std::fs::read(&account).unwrap()).unwrap();
+    let pem = place.root.join("fixture.pem");
+    std::fs::write(&pem, held_account["private_key"].as_str().unwrap()).unwrap();
+    let public = Command::new("openssl")
+        .args([
+            "rsa",
+            "-in",
+            pem.to_str().unwrap(),
+            "-RSAPublicKey_out",
+            "-outform",
+            "DER",
+        ])
+        .output()
+        .unwrap();
+    assert!(public.status.success());
+    ring::signature::UnparsedPublicKey::new(
+        &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+        public.stdout,
+    )
+    .verify(
+        format!("{}.{}", parts[0], parts[1]).as_bytes(),
+        &decode(parts[2]),
+    )
+    .unwrap();
+    google.responses.lock().unwrap().extend([(404,json!({})),(400,json!({"error":{"status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","fieldViolations":[{"field":"message.data"}]}]}}))]);
+    assert_eq!(send(), Outcome::Dead("Unregistered".into()));
+    assert_eq!(
+        send(),
+        Outcome::Refused {
+            status: 400,
+            reason: "INVALID_ARGUMENT".into()
+        }
+    );
+    // Capability discovery follows owner-file changes. A missing required
+    // field or a non-TLS issuer immediately withdraws Android push capability.
+    for key in ["project_id", "client_email", "private_key"] {
+        let mut invalid = held_account.clone();
+        invalid.as_object_mut().unwrap().remove(key);
+        std::fs::write(&account, invalid.to_string()).unwrap();
+        assert!(!adapter.configured(), "{key}");
+        assert!(
+            host.get("/server-info")["contract"]["features"]
+                .get("push_fcm")
+                .is_none()
+        );
+    }
+    let mut invalid = held_account.clone();
+    invalid["token_uri"] = json!("http://127.0.0.1/token");
+    std::fs::write(&account, invalid.to_string()).unwrap();
+    assert!(!adapter.configured());
+    invalid = held_account.clone();
+    invalid["type"] = json!("authorized_user");
+    std::fs::write(&account, invalid.to_string()).unwrap();
+    assert!(!adapter.configured());
 }
 
 #[test]

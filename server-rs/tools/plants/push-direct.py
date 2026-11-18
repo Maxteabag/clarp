@@ -127,5 +127,62 @@ for what, old, new in [
 ]:
     PLANTS.append((K,'activity',what,old,new))
 
+for what, old, new in [
+    ('the exact refill is insufficient','if level < 1.0','if level <= 1.0'),
+    ('daily cap one send late','self.count >= 300','self.count > 300'),
+    ('daily cap one send early','self.count >= 300','self.count >= 299'),
+    ('an end spends a burst token','if update {','if true {'),
+    ('day change retains spent count','self.count = 0;', 'self.count = 300;'),
+    ('one more free burst token','self.bucket.map_or(10.0','self.bucket.map_or(11.0'),
+    ('one fewer free burst token','self.bucket.map_or(10.0','self.bucket.map_or(9.0'),
+    ('update never debits bucket','level - 1.0, now','level, now'),
+    ('day never fills','self.count.saturating_add(1)','self.count'),
+    ('bucket refills twice as fast','as f64 / 288_000.0','as f64 / 144_000.0'),
+    ('end at exact overload boundary prunes','elapsed <= std::time','elapsed < std::time'),
+    ('three tickets allowed under pressure','decisions.len() <= 2','decisions.len() <= 3'),
+    ('one ticket allowed under pressure','decisions.len() <= 2','decisions.len() <= 1'),
+    ('waiting decision dropped before reply','position(|decision| !decision)','position(|decision| decision)'),
+    ('second oldest waiting decision dropped','position(|decision| !decision).unwrap_or(0)','position(|decision| !decision).unwrap_or(1)'),
+]:
+    PLANTS.append((F,'android',what,old,new))
+A='clarp-host/src/fcm.rs'
+for what, old, new in [
+    ('OAuth assertion has wrong algorithm','"alg":"RS256"','"alg":"RS512"'),
+    ('OAuth assertion omits JWT type','"typ":"JWT"','"typ":"other"'),
+    ('assertion omits key id','if !self.id.kid.is_empty()','if false'),
+    ('assertion signed for another email','"iss":self.id.email','"iss":"other"'),
+    ('assertion audience wrong','"aud":self.id.issuer','"aud":"other"'),
+    ('assertion issued late','"iat":now','"iat":now+1'),
+    ('assertion expires early','"exp":now+3600','"exp":now+3599'),
+    ('assertion scope wrong','"scope":SCOPE','"scope":"other"'),
+    ('signature inverted','direct_push::base64url(&signature)','direct_push::base64url(&[0;256])'),
+    ('wrong token exchange grant','jwt-bearer&assertion=', 'another-grant&assertion='),
+    ('wrong credential bearer','&format!("Bearer {bearer}")','&format!("Other {bearer}")'),
+    ('change intended project path','/v1/projects/{project}/messages:send','/v1/projects/other/messages:send'),
+    ('cache accepted at exact threshold','now < expires - 300.0','now <= expires - 300.0'),
+    ('cache expires early','now < expires - 300.0','now < expires - 301.0'),
+    ('fresh bearer reused on refusal','if !refresh','if true'),
+    ('refresh refused','rules::Next::Refresh => refresh = true','rules::Next::Refresh => refresh = false'),
+    ('only authorised users configured','value["type"] != "service_account"','value["type"] != "authorized_user"'),
+    ('non HTTPS issuer configured','if !issuer.starts_with("https://")','if issuer.is_empty()'),
+    ('no project is sufficient','text("project_id")?.into()', 'text("project_id").unwrap_or("missing").into()'),
+    ('no email is sufficient','text("client_email")?.into()', 'text("client_email").unwrap_or("missing").into()'),
+    ('no key is sufficient','text("private_key")?.into()', 'text("private_key").unwrap_or("missing").into()'),
+    ('sent message lacks data map','self.http.deliver(&project, &bearer, body.as_bytes())','self.http.deliver(&project, &bearer, b"{}")'),
+    ('gone phone counted successful','return Outcome::Dead(reason)','return Outcome::Sent'),
+]:
+    PLANTS.append((A,'host',what,old,new))
+C='clarp-host/src/android_chip.rs'
+for what,old,new in [
+    ('Android sends quiet end to unseen phone','end && row["shown"] != true','end && row["shown"] == true'),
+    ('end does not follow update','row["shown"] = json!(!end)','row["shown"] = json!(end)'),
+    ('activity never urgent','if *high && !end','if false'),
+    ('Android activity collapse group wrong','"agents-working",\n                        true','"other",\n                        true'),
+    ('kind registration responds differently','kind must be agents-working','invalid kind'),
+    ('registration without a token returns wrong status','StatusCode::CONFLICT','StatusCode::BAD_REQUEST'),
+]:
+    PLANTS.append((C,'host',what,old,new))
+# The loopback endpoint guard and the routing to its local credential exchange are not
+# planted: weakening either could cause a test to contact a real push provider.
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
