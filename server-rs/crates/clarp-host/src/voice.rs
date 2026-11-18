@@ -224,9 +224,11 @@ impl Mouth {
         file
     }
 
-    pub async fn google_refusal(&self)->Option<&'static str>{
-        let owner=self.owner.clone();
-        tokio::task::spawn_blocking(move||owner.google_refusal(&owner.read().unwrap_or_default())).await.unwrap_or(Some("google_id_unverifiable"))
+    pub async fn google_refusal(&self) -> Option<&'static str> {
+        let owner = self.owner.clone();
+        tokio::task::spawn_blocking(move || owner.google_refusal(&owner.read().unwrap_or_default()))
+            .await
+            .unwrap_or(Some("google_id_unverifiable"))
     }
 
     /// Whether an engine that speaks has its key.
@@ -336,6 +338,9 @@ impl Mouth {
         text: &str,
         name: Option<&str>,
     ) -> Result<Preview, String> {
+        if name.is_some() && self.previews.symlink_metadata().is_ok_and(|m|m.is_symlink()) {
+            return Err("preview cache unavailable".into());
+        }
         let file = name.map(|n| self.previews.join(format!("{n}.mp3")));
         let _lock = if let Some(name) = name {
             let bucket =
@@ -428,8 +433,10 @@ impl Mouth {
                 let why = match error {
                     Mute::Unavailable(why) | Mute::Failed { why, .. } => why,
                 };
-                if !matches!(why.as_str(),"voice_unavailable"|"google_id_collision"|"google_id_unverifiable")
-                    && let Some((engine, voice)) = fallback
+                if !matches!(
+                    why.as_str(),
+                    "voice_unavailable" | "google_id_collision" | "google_id_unverifiable"
+                ) && let Some((engine, voice)) = fallback
                 {
                     bytes.clear();
                     if engine
@@ -744,8 +751,10 @@ impl Mouth {
                     token_url: self.google_token_at.clone(),
                     allowed: clarp_kernel::voices::google_has,
                     account: Box::new(move || {
-                        let file=owner.read().unwrap_or_default();
-                        if let Some(code)=owner.google_refusal(&file){return Err(code.into());}
+                        let file = owner.read().unwrap_or_default();
+                        if let Some(code) = owner.google_refusal(&file) {
+                            return Err(code.into());
+                        }
                         owner::google_voice_account(&file).map_err(str::to_string)
                     }),
                 }))

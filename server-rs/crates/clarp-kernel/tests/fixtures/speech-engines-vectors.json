@@ -183,6 +183,54 @@
    }
   },
   {
+   "text": "<break time=\"2999ms\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"2999ms\"/></speak>"
+   }
+  },
+  {
+   "text": "<break time=\"1ms\"/><break time=\"3s\"/>",
+   "spoken": {
+    "ssml": "<speak><break time=\"1ms\"/><break time=\"3000ms\"/></speak>"
+   }
+  },
+  {
+   "text": "<break time=\"0.0001s\"/>",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "<break time=\"1\"/>",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "</break time=\"2s\">",
+   "spoken": {
+    "text": ""
+   }
+  },
+  {
+   "text": "<speed>fast</speed><volume>loud</volume>",
+   "spoken": {
+    "text": "fast loud"
+   }
+  },
+  {
+   "text": "x\tY\nZ<break time=\"1ms\"/>",
+   "spoken": {
+    "ssml": "<speak>x\tY\nZ<break time=\"1ms\"/></speak>"
+   }
+  },
+  {
+   "text": "x<Break  TIME='1 s'/> y<emotion mode='sad'>z</emotion>",
+   "spoken": {
+    "ssml": "<speak>x<break time=\"1000ms\"/> y z</speak>"
+   }
+  },
+  {
    "text": "<emotion>Hi</emotion><break time=\"2s\"/> & <untrusted>",
    "spoken": {
     "ssml": "<speak>Hi <break time=\"2000ms\"/> &amp; &lt;untrusted&gt;</speak>"

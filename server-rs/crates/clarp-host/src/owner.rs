@@ -244,9 +244,20 @@ impl OwnerFile {
     }
 
     /// The operator's adapter directory beside the chosen configuration, or its explicit override.
-    pub fn google_refusal(&self, file:&Table)->Option<&'static str>{
-        let root=std::env::var_os("CLARP_TTS_ADAPTERS_DIR").map(PathBuf::from).or_else(||std::env::var_os("CLARP_CONFIG_DIR").map(|p|PathBuf::from(p).join("tts-adapters.d"))).or_else(||self.path.as_ref()?.parent().map(|p|p.join("tts-adapters.d")))?;
-        crate::google_voice_guard::refusal(&root,file)
+    pub fn google_refusal(&self, file: &Table) -> Option<&'static str> {
+        let root = std::env::var_os("CLARP_TTS_ADAPTERS_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("CLARP_CONFIG_DIR")
+                    .map(|p| PathBuf::from(p).join("tts-adapters.d"))
+            })
+            .or_else(|| {
+                self.path
+                    .as_ref()?
+                    .parent()
+                    .map(|p| p.join("tts-adapters.d"))
+            })?;
+        crate::google_voice_guard::refusal(&root, file)
     }
 
     /// The file as it is now. `None`: no file was named, it is not there, or what is in it
