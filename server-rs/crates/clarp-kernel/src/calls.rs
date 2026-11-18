@@ -557,6 +557,12 @@ impl Calls {
         self.books.get(principal).map_or(&[], Vec::as_slice)
     }
 
+    pub fn exact_recipient(&self,owner:&str,call_id:&str,session:&str)->Result<(),Refused>{
+        let call=self.of(owner).iter().find(|call|call.call_id==call_id && call.state=="live").ok_or_else(||refused_with(409,"call ended",json!({"call_id":call_id})))?;
+        if !call.participants.iter().any(|p|p.session==session && p.reachable()){return Err(refused_with(409,"wrong call",json!({"reason":"not_reachable","session":session})));}
+        Ok(())
+    }
+
     /// Any call, up or over, by its id, as an app reads it.
     pub fn by_id(&self, call_id: &str, now_ms: i64) -> Option<Value> {
         let mut all = self.books.values().flatten();

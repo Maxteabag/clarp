@@ -40,6 +40,7 @@ use crate::pairing::Scope;
 
 pub mod generation;
 pub mod live;
+pub(crate) mod opening;
 mod tools;
 mod transcript;
 
@@ -1084,6 +1085,7 @@ pub fn routes() -> Router<App> {
         .route("/calls", get(snapshot).post(start))
         .route("/calls/ring", get(ring_look).post(ring))
         .route("/calls/ring/answer", post(ring_answer))
+        .route("/calls/ring/opening",post(opening::claim))
         .route("/calls/ring/decline", post(ring_decline))
         .route("/calls/ring/cancel", post(ring_cancel))
         .route(
