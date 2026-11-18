@@ -53,6 +53,7 @@ from .orchestrator_model import (  # noqa: E402,F401  (split_apply: orchestrator
 )
 NO_SUCH_AGENT = "I do not have an agent by that name."
 HELD_MESSAGE_GONE = "That message is no longer waiting. Please say it again."
+CANNOT_CHECK = "I cannot check on that agent from here."
 
 
 class _StaleJanitorRun(RuntimeError):
@@ -796,8 +797,17 @@ class OrchestratorService:
             if final_action == FINAL_ERROR and decision.kind == DECISION_STATUS:
                 self._require_current(janitor_run_id)
                 final_action = FINAL_STATUS
-                target = self._valid_target(decision.target_session, sessions) or requested_session
-                spoken = decision.status_text.strip() or self._status_text(target)
+                named = decision.target_session.strip()
+                target = self._valid_target(named, sessions) if named else requested_session
+                if target:
+                    spoken = decision.status_text.strip() or self._status_text(target)
+                else:
+                    # Not another agent's status, nor one the model made up: no such
+                    # agent, or one this conversation cannot answer about (archived,
+                    # outside the call, not voice-targetable).
+                    final_action = FINAL_CLARIFY
+                    target = requested_session
+                    spoken = CANNOT_CHECK if identity.lookup(named) else NO_SUCH_AGENT
                 self._speak_orchestrator(spoken, settings)
             if final_action == FINAL_ERROR and decision.kind == DECISION_CONTROL:
                 self._require_current(janitor_run_id)
