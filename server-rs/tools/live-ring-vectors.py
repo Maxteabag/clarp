@@ -195,6 +195,11 @@ def callkit(has):
     return {'do': 'callkit', 'has': has}
 
 
+def settings(said):
+    """The owner's switches: whether agents may ring at all, and whether a locked phone shows why an agent calls."""
+    return {'do': 'settings', 'said': said}
+
+
 def call_push(principal, status=200, reason='', raises=False):
     """What the push service answers from now on when a ring is pushed as a call to this phone: a status and its
     reason, or nothing at all (the way to it fails)."""
@@ -358,6 +363,10 @@ SCRIPTS = [
                timer(), tick(61 * SECOND),
                call_push(A), prefs(B, False), prefs(C, False), prefs(D, False), ring('a-theo'), answer(A), tick(61 * SECOND),
                prefs(A, False), ring('a-mike'), cancel('a-mike'), prefs(A, True), tick(61 * SECOND),
+               # Why an agent calls is in a call push only once the owner lets a locked phone show it.
+               settings({'show_reason': True}), ring('a-theo'), decline(A), tick(61 * SECOND),
+               live_ring('a-mike', event_id='evt-0'), decline(A), tick(61 * SECOND),
+               settings({'show_reason': False}), ring('a-theo'), decline(A), tick(61 * SECOND),
                callkit(False), ring('a-theo'), decline(A), tick(61 * SECOND),
                callkit(True), prefs(D, True), call_push(D), live_ring('a-mike', event_id='evt-1'), live_answer(D), live_answer(A),
                close(A), tick(61 * SECOND),
@@ -590,6 +599,8 @@ def run() -> dict:
                                                        supported_conversation_modes=step['modes'])
             if do == 'prefs':
                 return agent_rings.set_receive_rings(step['principal'], step['said'])
+            if do == 'settings':
+                return agent_rings.update_settings(step['said'])
             if do == 'ring':
                 more = {name: step[name] for name in ('conversation_mode', 'event_context', 'opening_mode') if name in step}
                 return agent_rings.ring(caller_agent_id=step['turn'], agent=step['agent'], reason=step['reason'],

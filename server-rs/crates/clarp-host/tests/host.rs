@@ -322,7 +322,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 100);
+    assert_eq!(info["contract"]["host"], 101);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -4038,17 +4038,14 @@ fn an_agent_rings_its_owner_and_the_answer_starts_a_call_with_its_opening_line_f
         ),
         (&json!("agent-call"), &json!("time-sensitive"))
     );
+    // Nor is it in what the phone is pushed beside the alert, until then.
     assert_eq!(
         (
             &payload["reason"],
             &payload["opening_line"],
             &payload["expires_at"]
         ),
-        (
-            &json!("Possible water leak"),
-            &json!(line),
-            &ring["expires_at"]
-        )
+        (&Value::Null, &json!(line), &ring["expires_at"])
     );
     // The opening line is a clip the phone fetches when the user answers.
     let clip = ring["opening_audio_url"].as_str().unwrap();
@@ -26346,7 +26343,7 @@ fn a_ring_is_pushed_to_a_phone_as_an_incoming_call_with_a_key_of_the_hosts_own()
             payload,
             &json!({
                 "kind": "agent-ring", "ring_id": ring["ring_id"], "ring_state": "ringing",
-                "session": ring["session"], "persona": "Ben", "reason": "Possible water leak",
+                "session": ring["session"], "persona": "Ben",
                 "expires_at": ring["expires_at"], "server_instance_id": host.get("/server-info")["server_id"],
             })
         );
@@ -26396,9 +26393,9 @@ fn a_ring_is_pushed_to_a_phone_as_an_incoming_call_with_a_key_of_the_hosts_own()
     });
 
     // A phone that switched rings off is not rung, and one whose pairing was taken away is
-    // not either, though the token it left is still there: the Python Host rings that one.
-    // (The connection is let go after the first of these pushes, and the next finds a new
-    // one.)
+    // not either, though the token it left is still there. (The connection is let go after
+    // the first of these pushes, and the next finds a new one.) And once the owner lets a
+    // locked phone show why an agent calls, the call that is pushed says why.
     service.hangs_up_after_the_next();
     let off = json!({ "receive_rings": false });
     assert_eq!(
@@ -26406,11 +26403,15 @@ fn a_ring_is_pushed_to_a_phone_as_an_incoming_call_with_a_key_of_the_hosts_own()
             .0,
         200
     );
+    let shown = json!({ "show_reason": true });
+    let said = host.ask_as(&phone, "POST", "/calls/ring/settings", Some(&shown));
+    assert_eq!(said.0, 200, "{}", said.1);
     let rung = rings(4);
     let calls = json!({ "enabled": true, "sent": 1, "failed": 0 });
     assert_eq!(rung["delivery"], with(&calls, None));
     assert_eq!(service.handed().len(), 8);
     assert_eq!(service.handed()[7].0, format!("/3/device/{of_phone}"));
+    assert_eq!(service.handed()[7].2["reason"], "Possible water leak");
     // And it is left out of the alert of what became of the ring.
     taken_back(&rung);
     wait_for("the alert that the ring was taken back", || {

@@ -67,6 +67,9 @@ pub struct Rung {
     /// The phones a ring that begins to ring is pushed to as an incoming call: the token
     /// each left for calls, and the side of the push service it belongs to.
     pub calls: Vec<(String, String)>,
+    /// The ring is for a phone that left a token for calls, whether or not that phone is
+    /// one that is pushed.
+    pub calls_asked: bool,
 }
 
 /// What became of the pushes of one change of a ring, as the one who rang is told.
@@ -235,8 +238,8 @@ impl Waiting {
 /// (`apns.send_agent_ring_voip`). Without a key of the Host's own nothing is pushed.
 fn called(works: &Works, rung: &Rung) -> Value {
     let key = works.direct.key();
-    let Some(key) = key.filter(|_| !rung.calls.is_empty()) else {
-        return push::calls_counted(&[]);
+    let Some(key) = key.filter(|_| rung.calls_asked) else {
+        return push::calls_counted(false, &[]);
     };
     let ring = &rung.ring;
     let said = push::Rung {
@@ -245,6 +248,7 @@ fn called(works: &Works, rung: &Rung) -> Value {
         persona: &ring.persona,
         reason: &ring.reason,
         expires_at: ring.expires_at,
+        show_reason: rung.show_reason,
         server_instance_id: &works.server_id,
         ..push::Rung::default()
     };
@@ -281,7 +285,7 @@ fn called(works: &Works, rung: &Rung) -> Value {
         };
         answers.push(answer);
     }
-    push::calls_counted(&answers)
+    push::calls_counted(true, &answers)
 }
 
 /// The payload of a job, and the name it goes by in what the Host says of it. `face` is

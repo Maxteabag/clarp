@@ -196,7 +196,12 @@ struct CallPushes {
 impl CallPushes {
     /// A ring pushed as an incoming call to the phones that are to have it: what is handed
     /// over for each, what the service answers, and what the one who rang is told of it.
-    fn pushed(&self, rings: &Rings, ring: &Ring, phones: &[String]) -> (Vec<Value>, Value) {
+    fn pushed(
+        &self,
+        (rings, world): (&Rings, &World),
+        ring: &Ring,
+        phones: &[String],
+    ) -> (Vec<Value>, Value) {
         let asked = self.ready && !phones.is_empty();
         let rung = push::Rung {
             ring_id: &ring.ring_id,
@@ -204,12 +209,13 @@ impl CallPushes {
             persona: &ring.persona,
             reason: &ring.reason,
             expires_at: ring.expires_at,
+            show_reason: rings.shows_reason(),
             server_instance_id: "host-1",
             ..push::Rung::default()
         };
         let (mut sends, mut answers) = (Vec::new(), Vec::new());
-        for phone in phones.iter().filter(|_| asked) {
-            let (token, environment) = rings.call_token(phone).unwrap();
+        let handed = rings.pushed_as_calls(phones, world);
+        for (phone, token, environment) in handed.iter().filter(|_| asked) {
             let answer = self.answers.get(phone).cloned();
             let answer = answer.unwrap_or_else(|| json!([200, ""]));
             answers.push(
@@ -224,7 +230,7 @@ impl CallPushes {
                 "expiration": push::call_expires(ring.expires_at), "answered": answer,
             }));
         }
-        (sends, push::calls_counted(&answers))
+        (sends, push::calls_counted(asked, &answers))
     }
 }
 
@@ -232,7 +238,7 @@ impl CallPushes {
 /// phones a live ring is told to, and the alert where no call push reached a phone.
 fn delivery(rings: &Rings, ring: &Ring, world: &World, calls: &CallPushes) -> Value {
     let sent = rings.sent(ring, "ring", world);
-    let (_, counted) = calls.pushed(rings, ring, &sent.voip.unwrap_or_default());
+    let (_, counted) = calls.pushed((rings, world), ring, &sent.voip.unwrap_or_default());
     let reached = counted["sent"].as_u64().unwrap();
     let mut delivery = json!({ "voip": counted });
     if !sent.android.is_empty() {
@@ -410,6 +416,10 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                     &mut out,
                 ),
                 "prefs" => rings.receive(&principal, &step["said"], (&world, 0), now, &mut out),
+                "settings" => {
+                    let changed = rings.change(&step["said"], now, &mut out);
+                    changed.map(|_| rings.settings())
+                }
                 "ring" => {
                     let asked = Asked {
                         turn_agent_id: step["turn"].as_str().unwrap(),
@@ -643,7 +653,8 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                 }
                 let mut reached = 0;
                 if let Some(phones) = &sent.voip {
-                    let (sends, counted) = call_pushes.pushed(&rings, &pushed.ring, phones);
+                    let (sends, counted) =
+                        call_pushes.pushed((&rings, &world), &pushed.ring, phones);
                     reached = counted["sent"].as_u64().unwrap();
                     call_pushes_sent += sends.len();
                     let mut as_calls = of("voip", phones);
@@ -708,6 +719,6 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             );
         }
     }
-    assert_eq!((steps, refusals, placed, joined), (642, 180, 63, 14));
-    assert_eq!((closes_between, call_pushes_sent), (3, 97));
+    assert_eq!((steps, refusals, placed, joined), (653, 185, 63, 14));
+    assert_eq!((closes_between, call_pushes_sent), (3, 80));
 }

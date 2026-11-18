@@ -382,15 +382,37 @@ impl Rings {
         sent
     }
 
-    /// The phones a ring that begins to ring is pushed to as an incoming call: those the
-    /// Python Host pushes it to ([`Rings::sent`]), less every one that is no longer paired
-    /// with all rights. That Host pushes the call to those too (R56 in
-    /// `docs/reference-defects.md`): a phone taken out of the fleet would go on showing who
-    /// calls, and count as rung.
-    pub fn rung_as_calls(&self, ring: &Ring, world: &World) -> Vec<String> {
+    /// The phones a ring that begins to ring is pushed to as an incoming call, each with
+    /// the token it left for calls and its side of the push service: of the phones the ring
+    /// is for ([`Rings::sent`]), those that are still paired with all rights and left a
+    /// token, and no token twice. So the Python Host pushes it
+    /// (`apns.send_agent_ring_voip`), since a phone taken out of the fleet is no longer
+    /// rung there either (R56 in `docs/reference-defects.md` was that it was).
+    pub fn rung_as_calls(&self, ring: &Ring, world: &World) -> Vec<(String, String, String)> {
         let phones = self.sent(ring, "ring", world).voip.unwrap_or_default();
-        let paired = phones.into_iter().filter(|phone| world.a_phone(phone));
-        paired.collect()
+        self.pushed_as_calls(&phones, world)
+    }
+
+    /// Of these phones, the ones a call push is handed over for, with the token it goes by
+    /// (in the one form a token has) and its side of the push service.
+    pub fn pushed_as_calls(
+        &self,
+        phones: &[String],
+        world: &World,
+    ) -> Vec<(String, String, String)> {
+        let mut pushed: Vec<(String, String, String)> = Vec::new();
+        for phone in phones {
+            let Some((token, environment)) = self.call_token(phone) else {
+                continue;
+            };
+            let token = crate::devices::canonical_token(token);
+            let twice = pushed.iter().any(|(_, had, _)| *had == token);
+            if token.is_empty() || twice || !world.a_phone(phone) {
+                continue;
+            }
+            pushed.push((phone.clone(), token, environment.to_string()));
+        }
+        pushed
     }
 
     /// Whether a change of a ring is alerted, once its call pushes are over, and the phones

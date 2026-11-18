@@ -214,12 +214,16 @@ pub fn ring(rung: &Rung<'_>) -> Value {
         "ring_state": rung.state,
         "session": rung.session,
         "persona": persona,
-        "reason": rung.reason,
         "opening_line": rung.opening_line,
         "opening_audio_url": rung.opening_audio_url,
         "expires_at": rung.expires_at,
         "notification_id": notification_id,
     });
+    // Why the agent calls is not in what a phone is pushed, unless the owner lets a locked
+    // phone show it: a ring opened from the notification then has no line of why.
+    if rung.show_reason {
+        payload["reason"] = json!(rung.reason);
+    }
     if rung.kind == "ring" {
         payload["aps"]["interruption-level"] = json!("time-sensitive");
         payload["aps"]["sound"] = json!("default");
@@ -275,9 +279,12 @@ pub fn call(rung: &Rung<'_>, conversation_mode: &str) -> Value {
     };
     let mut payload = json!({
         "kind": "agent-ring", "ring_id": rung.ring_id, "ring_state": "ringing",
-        "session": rung.session, "persona": persona, "reason": rung.reason,
-        "expires_at": rung.expires_at,
+        "session": rung.session, "persona": persona, "expires_at": rung.expires_at,
     });
+    // Why the agent calls, only where the owner lets a locked phone show it.
+    if rung.show_reason {
+        payload["reason"] = json!(rung.reason);
+    }
     // A ring held as a live voice call says so; an ordinary one says nothing of it.
     if !conversation_mode.is_empty() {
         payload["conversation_mode"] = json!(conversation_mode);
@@ -294,19 +301,18 @@ pub fn call_expires(expires_at_ms: i64) -> i64 {
     expires_at_ms.div_euclid(1000)
 }
 
-/// What became of the call pushes of one ring, as the one who rang is told. `answers`: the
+/// What became of the call pushes of one ring, as the one who rang is told. `asked`: the
+/// ring was for a phone that left a token for calls, and the Host has a key of its own at
+/// the service; where it is not so the Host pushes no calls, and says so. `answers`: the
 /// status the push service gave for each phone that was pushed, and `None` where it could
-/// not be asked. No phone was pushed where there is none to push, and where the Host has no
-/// key of its own at the service: then it pushes no calls, and says so.
-pub fn calls_counted(answers: &[Option<u16>]) -> Value {
-    if answers.is_empty() {
-        return json!({ "enabled": false, "sent": 0, "failed": 0 });
-    }
+/// not be asked. A ring can be asked for and reach nobody: where every phone that left a
+/// token is no longer paired, none is pushed.
+pub fn calls_counted(asked: bool, answers: &[Option<u16>]) -> Value {
     let sent = answers
         .iter()
         .filter(|answer| **answer == Some(200))
         .count();
-    json!({ "enabled": true, "sent": sent, "failed": answers.len() - sent })
+    json!({ "enabled": asked, "sent": sent, "failed": answers.len() - sent })
 }
 
 /// A collapse id as the push service takes it: at most 64 bytes, cut between characters.

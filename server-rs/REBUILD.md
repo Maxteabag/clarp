@@ -1579,16 +1579,19 @@ reads such a file and hands the push service nothing). Without the word, or the 
 the service, and whoever rings is told so (`delivery.voip.enabled` is false). The rules are the kernel's, held to the Python Host's own module: who is pushed a ring as a call,
 what became of it as the one who rang is told, and that the alert follows only where no phone was reached
 and never for a ring held as a live voice call (`rings/live.rs`, by that Host's `send_agent_ring_voip` run
-over a stand-in for the push service in `tools/live-ring-vectors.py`: 97 pushes handed over in 13 scripts
-of 642 steps); and where the service is, the request for one push of every kind, what an answer means,
+over a stand-in for the push service in `tools/live-ring-vectors.py`: 80 pushes handed over in 13 scripts
+of 653 steps, two of them with why the agent calls, since the owner let a locked phone show it); and where
+the service is, the request for one push of every kind, what an answer means,
 what a token of the Host's says and for how long one is used, and when a push is handed over a second time
 (`direct_push.rs`, `tools/direct-push-vectors.py`). The Host's part (`clarp-host` `direct.rs`): the key is
 read and a token signed with it (ES256), and the service is spoken to over HTTP/2, over one connection for
 the pushes of one ring. That is the one new thing this Host needs from outside for it (`h2`, the HTTP/2
 client of the hyper project; the signing is done by the provider of cryptography the Host's TLS already
 brings). The key never leaves the Host, and nothing said of a failure holds the key, a token signed with
-it, a phone's token or what a push says. One thing is not the Python Host's, on purpose: a phone whose
-pairing was taken away is not rung, though the token it left is still there (candidate R56, reported).
+it, a phone's token or what a push says. A phone whose pairing was taken away is not rung, though the
+token it left is still there: this Host did so from the start, and the Python Host does since its
+contract 101 (R56, reported and fixed there on 18 Nov 2026), with which neither a call push nor an alert
+says why the agent calls unless the owner lets a locked phone show it.
 Tested: the kernel by its vectors; the signing against the key's public half; and through a real Host
 process with a stand-in push service that speaks HTTP/2 on this machine (`CLARP_APNS_ENDPOINT`, a loopback
 address and no other): no push without a key; with one, each phone that left a token is handed the push,

@@ -426,17 +426,20 @@ impl Names {
 pub(super) struct Placed {
     pub ring: rings::Ring,
     pub calls: Vec<(String, String)>,
+    /// The ring is for a phone that left a token for calls, pushed or not.
+    pub calls_asked: bool,
     pub android: usize,
 }
 
 /// Whom a ring that was just placed is pushed to, read under the desk's lock.
 pub(super) fn placed(rings: &Rings, ring: rings::Ring, world: &rings::World) -> Placed {
-    let phones = rings.rung_as_calls(&ring, world);
-    let tokens = phones.iter().filter_map(|phone| rings.call_token(phone));
-    let calls = tokens.map(|(token, environment)| (token.to_string(), environment.to_string()));
+    let phones = rings.rung_as_calls(&ring, world).into_iter();
+    let calls = phones.map(|(_, token, environment)| (token, environment));
+    let sent = rings.sent(&ring, "ring", world);
     Placed {
         calls: calls.collect(),
-        android: rings.sent(&ring, "ring", world).android.len(),
+        calls_asked: sent.voip.is_some_and(|phones| !phones.is_empty()),
+        android: sent.android.len(),
         ring,
     }
 }
