@@ -207,6 +207,19 @@ mod tests {
             File::create(&path).unwrap().set_modified(moment).unwrap();
             path
         };
+        for case in fixture["audio_sweeps"].as_array().unwrap() {
+            for (id,age) in case["ages"].as_array().unwrap().iter().enumerate(){
+                make(id,now-Duration::from_secs(age.as_u64().unwrap()));
+            }
+            sweep(&root,now).unwrap();
+            let mut kept=Vec::new();
+            for entry in root.read_dir().unwrap().flatten(){
+                let path=entry.path();kept.push(path.file_stem().unwrap().to_str().unwrap().to_string());
+                fs::remove_file(path).unwrap();
+            }
+            kept.sort();
+            assert_eq!(json!(kept),case["survived"]);
+        }
         let expiring = make(0, now - AGE);
         let expired = make(1, now - AGE - Duration::from_secs(1));
         let unrelated = root.join("unrelated");

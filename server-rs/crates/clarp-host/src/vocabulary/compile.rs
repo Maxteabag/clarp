@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 struct Context {
+    workspace:std::sync::Arc<super::workspace::Cache>,
     root: PathBuf,
     session: String,
     agent: String,
@@ -139,7 +140,7 @@ impl Context {
         tx.commit().map_err(unavailable)?;
         sources.agent_names = self.names;
         if profile.as_ref().is_some_and(|(_, yes)| *yes) {
-            super::workspace::fill(&mut sources, &self.cwd);
+            self.workspace.fill(&mut sources, &self.cwd);
         }
         packs.extend(sources.packs());
         let mut audit =
@@ -229,10 +230,11 @@ pub async fn compile(
         Vec::new()
     };
     let (provider, model) = match selected.trim() {
-        "" | "server-default" | "local" => ("faster-whisper", app.config.whisper_model.as_str()),
+        "" | "server-default" => ("faster-whisper", app.config.whisper_model.as_str()),
         other => other.split_once(':').unwrap_or((other, "")),
     };
     let ctx = Context {
+        workspace:app.ears.workspace.clone(),
         root: app.config.data_dir.clone(),
         agent: record.map_or_else(String::new, |r| r.agent_id.clone()),
         session: session.into(),

@@ -107,6 +107,20 @@ def reference(root):
         get('assignments','assignments_get');get('profile','profile_get',profile_id=pf)
         post('unassign','unassign_post',team_id='example-team')
         post('packs/delete','packs_delete',pack_id=pk);get('profile','profile_get',profile_id=pf)
+        get('terms','terms_get')
+        post('packs/update','packs_update')
+        post('terms','terms_post',pack_id='missing',text='X')
+        post('assign','assign_post',profile_id=pf)
+        post('assign','assign_post',profile_id=pf,agent_id='a',team_id='b')
+        post('assign','assign_post',team_id='b')
+        post('unassign','unassign_post')
+        post('profiles/workspace','profile_workspace',profile_id=pf,enabled='yes')
+        post('profiles/workspace','profile_workspace',profile_id='missing',enabled=True)
+        post('profiles/packs','profile_packs_post',profile_id=pf)
+        post('profiles/packs','profile_packs_post',profile_id=pf,pack_id='gone')
+        post('terms/delete','terms_delete')
+        post('terms/update','terms_update',term_id='bad')
+        post('profiles','profiles_post',name='Default')
         post('profiles/delete','profiles_delete',profile_id=pf);get('profile','profile_get',profile_id=pf)
     db.close()
     sources=[]
@@ -119,7 +133,25 @@ def reference(root):
     paths=['src/ClipStreamBroker.py','src/ClipStream.rs','lib/WidgetThing.py','build/JunkName.so','libmp3lame.a','MyName.cc','x2.txt','test_only.hh','utils.ts']
     workspaces=[dict(paths=paths,ids=workspace_vocab.identifiers_from_paths(paths))]
     traces=[dict(trace=t,valid=heard_audio.valid_trace(t)) for t in ('','a'*7,'a'*8,'a'*64,'a'*65,'ABCDEF12','abcdef01','gg123456','not/a/name')]
-    return dict(admin=snapshots,sources=sources,workspaces=workspaces,traces=traces,question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
+    # The reference sweeps sidecars. Record which clip ids survive, independent of
+    # the Rust Host's on-disk representation of each clip.
+    import os
+    audio_sweeps=[]
+    for times in ([0,1,2], [13*86400,14*86400,14*86400+1],
+                  list(range(499)),list(range(500)),list(range(501))):
+        clips=root/'clips'
+        clips.mkdir()
+        now=2_000_000_000
+        for i,age in enumerate(times):
+            ident=f'{i:08x}'
+            side=clips/(ident+'.json')
+            side.write_text('{}')
+            (clips/(ident+'.wav')).write_bytes(b'fixture')
+            os.utime(side,(now-age,now-age))
+        heard_audio.sweep(clips,now=now)
+        audio_sweeps.append(dict(ages=times,survived=sorted(p.stem for p in clips.glob('*.json'))))
+        shutil.rmtree(clips)
+    return dict(audio_sweeps=audio_sweeps,admin=snapshots,sources=sources,workspaces=workspaces,traces=traces,question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
 
 
 if __name__ == '__main__':

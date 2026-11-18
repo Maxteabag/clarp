@@ -23,13 +23,40 @@ fn git(cwd: &Path, args: &[&str]) -> String {
         })
 }
 
-pub(super) fn fill(s: &mut Sources, cwd: &Path) {
-    if cwd.as_os_str().is_empty() || !cwd.is_dir() {
-        return;
+#[derive(Clone)]
+struct Harvest {
+    head:String,at:std::time::Instant,project:String,identifiers:Vec<String>,branches:Vec<String>,subjects:Vec<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct Cache {
+    entries:std::sync::Mutex<std::collections::HashMap<std::path::PathBuf,Harvest>>,
+}
+
+impl Cache {
+    pub fn fill(&self,s:&mut Sources,cwd:&Path){
+        let Ok(cwd)=cwd.canonicalize() else{return};
+        if !cwd.is_dir(){return;}
+        let head=git(&cwd,&["rev-parse","HEAD"]);
+        let now=std::time::Instant::now();
+        let cached=self.entries.lock().unwrap_or_else(|p|p.into_inner()).get(&cwd)
+            .filter(|h|h.head==head && now.duration_since(h.at)<std::time::Duration::from_secs(300)).cloned();
+        if let Some(entry)=cached {
+            s.project_name=entry.project;s.identifiers=entry.identifiers;s.branches=entry.branches;s.commit_subjects=entry.subjects;
+            return;
+        }
+        collect(s,&cwd,&head);
+        let entry=Harvest{head,at:now,project:s.project_name.clone(),identifiers:s.identifiers.clone(),branches:s.branches.clone(),subjects:s.commit_subjects.clone()};
+        let mut entries=self.entries.lock().unwrap_or_else(|p|p.into_inner());
+        entries.retain(|_,h|now.saturating_duration_since(h.at)<std::time::Duration::from_secs(300));
+        if entries.get(&cwd).is_none_or(|h|h.at<=now){entries.insert(cwd,entry);}
     }
-    s.project_name = cwd.file_name().unwrap_or_default().to_string_lossy().into();
+}
+
+fn collect(s:&mut Sources,cwd:&Path,head:&str){
+    s.project_name=cwd.file_name().unwrap_or_default().to_string_lossy().into();
     let mut paths = Vec::new();
-    if !git(cwd, &["rev-parse", "HEAD"]).trim().is_empty() {
+    if !head.trim().is_empty() {
         let top = git(cwd, &["rev-parse", "--show-toplevel"]);
         if let Some(name) = Path::new(top.trim()).file_name() {
             s.project_name = name.to_string_lossy().into();

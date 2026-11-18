@@ -28685,9 +28685,20 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         true
     );
     host.post("/select", json!({"session":session}));
+    let workspace=place.root.join("work");
+    std::fs::write(workspace.join("PloverChecklist.rs"),"unused contents").unwrap();
     let meter = host.get(&format!(
         "/vocab/preview?session={session}&model=elevenlabs:scribe_v2&delegated=true"
     ));
+    assert!(!meter["payload"].as_str().unwrap().contains("PloverChecklist"));
+    let changed=host.post("/vocab/profiles/workspace",json!({"profile_id":pf,"enabled":true}));
+    assert_eq!(changed["harvests_workspace"],true);
+    let where_from=host.get(&format!("/vocab/preview?session={session}&model=deepgram:nova-3"));
+    assert!(where_from["payload"].as_str().unwrap().contains("PloverChecklist"),"{where_from}");
+    std::fs::write(workspace.join("OrioleChecklist.rs"),"unused contents").unwrap();
+    let cached=host.get(&format!("/vocab/preview?session={session}&model=deepgram:nova-3"));
+    assert_eq!(cached,where_from);
+    host.post("/vocab/profiles/workspace",json!({"profile_id":pf,"enabled":false}));
     assert_eq!(meter["profile_id"], pf);
     assert!(meter["payload"].as_str().unwrap().contains("Nadia"));
     assert!(meter["payload"].as_str().unwrap().contains("Plover"));

@@ -14,7 +14,7 @@ pub(crate) mod audio;
 mod compile;
 pub(crate) mod judge;
 mod store;
-mod workspace;
+pub(crate) mod workspace;
 pub(crate) use compile::{compile, finish, stream_run};
 
 async fn perform(
