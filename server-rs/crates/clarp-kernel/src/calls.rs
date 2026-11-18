@@ -439,6 +439,15 @@ impl Call {
     /// what was said since it last spoke. It goes with what the tool is told, never into the
     /// user's words.
     pub fn header(&self, session: &str, said: &[Said]) -> String {
+        self.header_with_opening(session, said, None)
+    }
+
+    pub fn header_with_opening(
+        &self,
+        session: &str,
+        said: &[Said],
+        opening: Option<&str>,
+    ) -> String {
         let Some(me) = self.place(session).map(|place| &self.participants[place]) else {
             return String::new();
         };
@@ -472,11 +481,23 @@ impl Call {
             && placed["session"] == session
         {
             let word = |key: &str| placed[key].as_str().unwrap_or("");
-            lines.push(format!(
+            if placed["opening_mode"] == "listen_first" {
+                let opening = if opening == Some("initiative_started") {
+                    "They answered and you opened the conversation."
+                } else {
+                    "They answered and spoke first; respond to what they said."
+                };
+                lines.push(format!(
+                    "You called the user about: {}. {opening}",
+                    word("reason")
+                ));
+            } else {
+                lines.push(format!(
                 "You called the user about: {}. They answered and heard your opening line: \"{}\"",
                 word("reason"),
                 word("opening_line"),
             ));
+            }
         }
         let quotes = self.quotes(session, said);
         if !quotes.is_empty() {
@@ -555,6 +576,31 @@ impl Calls {
     /// One phone's calls, to be kept.
     pub fn of(&self, principal: &str) -> &[Call] {
         self.books.get(principal).map_or(&[], Vec::as_slice)
+    }
+
+    pub fn exact_recipient(
+        &self,
+        owner: &str,
+        call_id: &str,
+        session: &str,
+    ) -> Result<(), Refused> {
+        let call = self
+            .of(owner)
+            .iter()
+            .find(|call| call.call_id == call_id && call.state == "live")
+            .ok_or_else(|| refused_with(409, "call ended", json!({"call_id":call_id})))?;
+        if !call
+            .participants
+            .iter()
+            .any(|p| p.session == session && p.reachable())
+        {
+            return Err(refused_with(
+                409,
+                "wrong call",
+                json!({"reason":"not_reachable","session":session}),
+            ));
+        }
+        Ok(())
     }
 
     /// Any call, up or over, by its id, as an app reads it.

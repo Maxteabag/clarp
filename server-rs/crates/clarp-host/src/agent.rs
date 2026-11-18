@@ -119,6 +119,10 @@ pub enum Ask {
         answer: Answer<(Vec<Waiting>, QueueState)>,
     },
     /// What became of the turn that answers a message, by the message's id.
+    OpeningRow {
+        id: String,
+        answer: Answer<Value>,
+    },
     Fate {
         message_id: String,
         answer: Answer<TurnFate>,
@@ -360,6 +364,7 @@ pub struct View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub opening_gate: crate::calls::opening_launch::Gate,
     pub record: AgentRecord,
     pub profile: Profile,
     pub backend: Arc<dyn Backend>,
@@ -453,6 +458,14 @@ impl AgentHandle {
 
     /// What became of the turn that answers the message with this id: asked by whoever
     /// handed the agent that message and follows what comes of it.
+    pub async fn opening_row(&self, id: &str) -> Result<Value, Unavailable> {
+        self.ask(|answer| Ask::OpeningRow {
+            id: id.into(),
+            answer,
+        })
+        .await
+    }
+
     pub async fn fate(&self, message_id: String) -> Result<TurnFate, Unavailable> {
         self.ask(|answer| Ask::Fate { message_id, answer }).await
     }
@@ -779,6 +792,7 @@ pub(crate) fn never_ran() -> Status {
         waiting: Vec::new(),
         paused: false,
         queue_revision: 0,
+        stop_generation: 0,
         head_revision: 0,
         backend_session: None,
         label: String::new(),
@@ -1702,6 +1716,7 @@ impl Worker {
                 let waiting = actor.queue().map(|waiting| (waiting, actor.queue_state()));
                 return read(waiting, answer);
             }
+            Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
@@ -2030,10 +2045,63 @@ impl Worker {
                     pool.guard_turn(&mut order);
                 }
                 let launcher = self.setup.launcher.clone();
+                let opening_gate = self.setup.opening_gate.clone();
                 let (turn, attempt) = (order.turn, order.attempt);
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
+                        if let Some(opening) = order.opening.as_deref() {
+                            let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
+                            use crate::launcher::Launched;
+                            use clarp_kernel::rings::opening::Gate as Phase;
+                            loop {
+                                if !opening_gate.ask(Phase::Claim, opening, attempt)
+                                    || !opening_gate.ask(Phase::Parked, opening, attempt)
+                                {
+                                    tell(
+                                        &tx,
+                                        turn,
+                                        attempt,
+                                        Told::Failed("call opening is no longer authorized".into()),
+                                    );
+                                    return;
+                                }
+                                match launcher.launch(&order) {
+                                    Launched::NoShim(reason) => {
+                                        if !opening_gate.ask(Phase::ReleaseUnsent, opening, attempt)
+                                        {
+                                            tell(&tx, turn, attempt, Told::Failed(reason));
+                                            return;
+                                        }
+                                        std::thread::sleep(Duration::from_secs(1));
+                                    }
+                                    Launched::Failed(_) => {
+                                        opening_gate.failed(id, trace);
+                                        tell(&tx, turn, attempt, Told::Gone);
+                                        return;
+                                    }
+                                    Launched::SaidWhy => {
+                                        // The actor parks from the synced SpawnFailed record.
+                                        // Its next attempt presents that proof to the gate.
+                                        tell(&tx, turn, attempt, Told::SpoolChanged);
+                                        return;
+                                    }
+                                    Launched::TurnTaken => {
+                                        crate::launcher::follow(&order.socket, &|told| {
+                                            tell(&tx, turn, attempt, told)
+                                        });
+                                        return;
+                                    }
+                                    Launched::Ready(mut child) => {
+                                        crate::launcher::follow(&order.socket, &|told| {
+                                            tell(&tx, turn, attempt, told)
+                                        });
+                                        let _ = child.wait();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
                         launcher.launch_and_follow(&order, &|told| tell(&tx, turn, attempt, told))
                     })
             }
@@ -2287,6 +2355,22 @@ impl Worker {
             .as_ref()
             .filter(|live| Some(live.turn) != was_live.map(|was| was.turn));
         let ended = status.last.as_ref().filter(|_| turn_ended);
+        if let Some(last) = ended
+            && matches!(
+                last.outcome,
+                Outcome::Interrupted { .. } | Outcome::Failed { .. }
+            )
+            && let Ok(message) = actor.message_of(last)
+            && message.unminted
+            && message.client_id().starts_with("call-open:")
+            && let Some(trace) = message
+                .trace_id
+                .as_deref()
+                .filter(|s| s.starts_with("callopen-"))
+        {
+            self.setup.opening_gate.failed(message.client_id(), trace);
+        }
+
         let theirs = |origin: &Origin| attention::for_the_user(origin.name());
         if began.is_some_and(|live| theirs(&live.origin))
             || ended.is_some_and(|last| theirs(&last.origin))
@@ -2620,6 +2704,7 @@ fn refuse_for(
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
