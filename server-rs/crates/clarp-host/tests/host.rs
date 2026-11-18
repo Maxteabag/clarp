@@ -28679,18 +28679,28 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
     )["pack_id"]
         .clone();
     // Competing requests publish through one desk. Both edits must survive.
-    std::thread::scope(|scope|{
-        let adds:Vec<_>=["Quill","Wren"].into_iter().map(|name|{
-            let host=&host; let pk=&pk;
-            scope.spawn(move||host.post("/vocab/terms",json!({"pack_id":pk,"text":name})))
-        }).collect();
-        for add in adds{assert_eq!(add.join().unwrap()["added"],true);}
+    std::thread::scope(|scope| {
+        let adds: Vec<_> = ["Quill", "Wren"]
+            .into_iter()
+            .map(|name| {
+                let host = &host;
+                let pk = &pk;
+                scope.spawn(move || host.post("/vocab/terms", json!({"pack_id":pk,"text":name})))
+            })
+            .collect();
+        for add in adds {
+            assert_eq!(add.join().unwrap()["added"], true);
+        }
     });
-    let terms=host.get(&format!("/vocab/terms?pack_id={}",pk.as_str().unwrap()));
-    assert_eq!(terms["terms"].as_array().unwrap().len(),3);
-    let rejected=host.ask("POST","/vocab/profiles",Some(&json!({"name":"Abandoned","pack_ids":[pk,"missing"]})));
-    assert_eq!(rejected.0,404);
-    assert_eq!(host.get("/vocab/profiles")["profiles"],json!([]));
+    let terms = host.get(&format!("/vocab/terms?pack_id={}", pk.as_str().unwrap()));
+    assert_eq!(terms["terms"].as_array().unwrap().len(), 3);
+    let rejected = host.ask(
+        "POST",
+        "/vocab/profiles",
+        Some(&json!({"name":"Abandoned","pack_ids":[pk,"missing"]})),
+    );
+    assert_eq!(rejected.0, 404);
+    assert_eq!(host.get("/vocab/profiles")["profiles"], json!([]));
     let pf =
         host.post("/vocab/profiles", json!({"name":"Calls","pack_ids":[pk]}))["profile_id"].clone();
     assert_eq!(
@@ -28874,8 +28884,8 @@ fn vocabulary_packs_are_managed_compiled_recorded_and_heard() {
         false
     );
     let unretained = hear(&host, "unretained");
-    assert!(unretained["vocab_run_id"].as_i64().unwrap()>end["vocab_run_id"].as_i64().unwrap());
-    assert_eq!(host.get(&path),audit);
+    assert!(unretained["vocab_run_id"].as_i64().unwrap() > end["vocab_run_id"].as_i64().unwrap());
+    assert_eq!(host.get(&path), audit);
     let unretained = host.get(&format!(
         "/vocab/run?trace_id={}",
         unretained["trace_id"].as_str().unwrap()
