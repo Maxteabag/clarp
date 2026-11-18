@@ -370,6 +370,7 @@ def run() -> dict:
         step('make a janitor of it again', 'create', 'fourth', template_id='scheduled-prompt'),
         step('let one go to a successor that is named without its revision', 'release', 'fourth', expected_revision=2,
              successor_session='coder'),
+        step('put it back as it came, with a trigger its job seeds nothing for', 'reset', 'fourth', expected_revision=2),
         step('one made with options that are none', 'create', 'other', options={'detail_level': 1}),
         step('the list', 'list'),
     ]}, {'name': "the Host's own janitors", 'steps': [
@@ -398,6 +399,10 @@ def run() -> dict:
             {'attachment_id': 'builtin-goal-keeper-v1', 'trigger_id': 'agent-work-completed',
              'config': {'coalesce_seconds': 300}}]),
         step('put it back as it came, with its sweep off', 'reset', '{goal-keeper}', expected_revision=5),
+        # On a tool that cannot shut a run off, a reset gives it the plain way of running.
+        step('give it a tool that cannot shut a run off', 'configure', '{goal-keeper}', expected_revision=6,
+             backend='claude', execution={}),
+        step('put it back as it came on that tool', 'reset', '{goal-keeper}', expected_revision=7),
         step("let one of the Host's own go", 'release', '{quota-monitor}', expected_revision=1),
         step('take over a choice where none was made', 'adopt', '{message-delegator}', expected_revision=1,
              options={'detail_level': 1}),
