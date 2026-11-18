@@ -144,13 +144,30 @@ fn attempt_name(turn: TurnId, attempt: u32) -> String {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpeningOrder {
+    pub id: String,
+    pub trace: String,
+    pub previous_unsent: bool,
+}
+
+fn opening_message(message: &Message) -> bool {
+    message.unminted
+        && message.client_id().starts_with("call-open:")
+        && matches!(&message.origin, Origin::Trigger { name } if name == "automation")
+        && message
+            .trace_id
+            .as_deref()
+            .is_some_and(|t| t.starts_with("callopen-"))
+}
+
 /// Everything a shim needs to take a turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimOrder {
     pub before_stop: Option<(&'static str, u64)>,
     /// An initiative admitted by the Host. A user can reuse a name but cannot
     /// manufacture this provenance; the gate never intercepts a foreign turn.
-    pub opening: Option<Box<(String, String)>>,
+    pub opening: Option<Box<OpeningOrder>>,
     pub turn: TurnId,
     /// Which attempt of the turn the shim runs, from 1.
     pub attempt: u32,
@@ -463,6 +480,7 @@ struct Written {
 
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
+    opening: bool,
     turn: TurnId,
     /// The message this turn answers, and the id its app gave it.
     message_id: String,
@@ -1056,6 +1074,7 @@ impl Actor {
             let (turn, message_seq, attempt) = (parked.id, parked.message_seq, parked.attempts);
             let message = actor.message_at(message_seq)?;
             actor.live = Some(LiveTurn {
+                opening: opening_message(&message),
                 turn,
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
@@ -2619,15 +2638,39 @@ impl Actor {
         out: &mut Outputs,
     ) -> Result<(), ActorError> {
         let message = self.message_at(message_seq)?;
-        let opening = if message.unminted
-            && message.client_id().starts_with("call-open:")
-            && matches!(&message.origin,Origin::Trigger{name} if name=="automation")
-        {
-            message
-                .trace_id
-                .as_deref()
-                .filter(|trace| trace.starts_with("callopen-"))
-                .map(|trace| Box::new((message.client_id().into(), trace.into())))
+        let opening = if opening_message(&message) {
+            // A missing tool leaves only the shim's optional session record and
+            // SpawnFailed. A lost, damaged, or already invoked attempt has no
+            // evidence that can release its launch.
+            let previous_unsent = attempt > 1 && {
+                let path = self.profile.spool_path_of(turn, attempt - 1);
+                SpoolReader::new(path)
+                    .read_window(0, u64::MAX, 3)
+                    .is_ok_and(|read| {
+                        read.damaged.is_empty()
+                            && matches!(
+                                read.records.as_slice(),
+                                [clarp_spool::Record {
+                                    entry: Line::Shim(ShimEvent::SpawnFailed { .. }),
+                                    ..
+                                }] | [
+                                    clarp_spool::Record {
+                                        entry: Line::Shim(ShimEvent::Session { .. }),
+                                        ..
+                                    },
+                                    clarp_spool::Record {
+                                        entry: Line::Shim(ShimEvent::SpawnFailed { .. }),
+                                        ..
+                                    }
+                                ]
+                            )
+                    })
+            };
+            Some(Box::new(OpeningOrder {
+                id: message.client_id().to_string(),
+                trace: message.trace_id.clone().unwrap_or_default(),
+                previous_unsent,
+            }))
         } else {
             None
         };
@@ -2740,6 +2783,7 @@ impl Actor {
             None => (message.id.clone(), None, None, None, None),
         };
         self.live = Some(LiveTurn {
+            opening: opening.is_some(),
             turn,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
@@ -2921,6 +2965,7 @@ impl Actor {
             self.shown_revision = draft.revision;
         }
         self.live = Some(LiveTurn {
+            opening: opening_message(&message),
             turn,
             client_id: message.told_id().to_string(),
             message_id: message.id,
@@ -3192,6 +3237,20 @@ impl Actor {
                     Line::Shim(ShimEvent::SpawnFailed { error }) => {
                         let reason = error.clone();
                         let stopping = batch.agent().stopping().is_some();
+                        if live.opening && !stopping {
+                            let park = Command::TurnParked {
+                                turn,
+                                wait: Wait::Retry {
+                                    until_ms: t.saturating_add(1_000),
+                                },
+                                kind: failures::NOT_STARTED.into(),
+                                reason: reason.clone(),
+                            };
+                            if batch.command(park, t).is_ok() {
+                                live.over = true;
+                                continue;
+                            }
+                        }
                         let failed = batch
                             .command(Command::StartFailed { turn, reason }, t)
                             .is_ok();

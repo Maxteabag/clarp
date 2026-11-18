@@ -30288,9 +30288,20 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     );
     assert_eq!(answer(&host, &r, true).0, 409);
 
-    // The microphone's deadline requires both watermarks. The admitted
-    // initiative is the only turn, even if the phone repeats the claim.
-    let another = host.new_agent("Second");
+    // The microphone's deadline requires both watermarks. Make the scripted
+    // backend's working directory unavailable before its first spawn.
+    let second_cwd = place.root.join("second-work");
+    std::fs::create_dir(&second_cwd).unwrap();
+    let made = host.post(
+        "/agents",
+        json!({"name":"Second","backend":"scripted","cwd":second_cwd}),
+    );
+    let another = made["session"].as_str().unwrap().to_string();
+    let spool = place
+        .root
+        .join("data/agents")
+        .join(made["agent"]["agent_id"].as_str().unwrap())
+        .join("spool");
     let r = ring(&host, &another);
     let op = answer(&host, &r, true).1["opening"].clone();
     let short = claim(
@@ -30303,6 +30314,7 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     );
     assert_eq!(short.0, 400);
     let silence = json!({"at_ms":1250,"watermark_ms":1250});
+    std::fs::remove_dir(&second_cwd).unwrap();
     let silent = claim(&host, &phone, &op, "silence", "silence", silence.clone());
     assert_eq!(silent.0, 200, "{:?}", silent.1);
     assert_eq!(silent.1["opening"]["intent"]["gen"], 1);
@@ -30310,9 +30322,57 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         claim(&host, &phone, &op, "silence", "silence", silence).1["changed"],
         false
     );
-    wait_for("the launch gate commits the initiative", || {
-        show(&host, &r["ring_id"])["opening"]["state"] == "initiative_started"
+    // The shim recorded a pre-invocation failure. Restart the Host before
+    // restoring the directory. The same admission must run successfully once.
+    let spawn_records = || {
+        let mut records = Vec::new();
+        for path in std::fs::read_dir(&spool)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|f| f.path())
+        {
+            if path.extension().is_some_and(|ext| ext == "jsonl") {
+                let text = std::fs::read_to_string(path).unwrap();
+                for row in text
+                    .lines()
+                    .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                {
+                    if row["s"] == "shim"
+                        && let Some(event) = row["d"]["event"].as_str()
+                    {
+                        records.push(event.to_owned());
+                    }
+                }
+            }
+        }
+        records
+    };
+    wait_for(
+        "the shim has durable proof it never invoked the tool",
+        || spawn_records().iter().any(|event| event == "spawn-failed"),
+    );
+    drop(host);
+    std::fs::create_dir(&second_cwd).unwrap();
+    let host = place.start_in("test-only", &args, &env);
+    wait_for("the recovered initiative completes", || {
+        host.state(&another) == "done"
+            && host
+                .conversation(&another)
+                .iter()
+                .any(|(role, _)| role == "assistant")
     });
+    assert_eq!(
+        spawn_records()
+            .iter()
+            .filter(|event| event.as_str() == "spawned")
+            .count(),
+        1
+    );
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["state"],
+        "initiative_started"
+    );
     host.ask_as(
         &phone,
         "POST",

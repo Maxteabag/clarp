@@ -9,6 +9,8 @@ pub struct Request {
     phase: Phase,
     id: String,
     trace: String,
+    attempt: u32,
+    previous_unsent: bool,
     reply: oneshot::Sender<bool>,
 }
 #[derive(Clone)]
@@ -20,13 +22,15 @@ pub fn channel() -> (Gate, mpsc::UnboundedReceiver<Request>) {
 }
 
 impl Gate {
-    pub fn ask(&self, phase: Phase, id: &str, trace: &str) -> bool {
+    pub fn ask(&self, phase: Phase, opening: &clarp_actor::OpeningOrder, attempt: u32) -> bool {
         let (reply, rx) = oneshot::channel();
         self.0
             .send(Request {
                 phase,
-                id: id.into(),
-                trace: trace.into(),
+                id: opening.id.clone(),
+                trace: opening.trace.clone(),
+                attempt,
+                previous_unsent: opening.previous_unsent,
                 reply,
             })
             .is_ok()
@@ -41,6 +45,8 @@ impl Gate {
             phase: Phase::FailedAfterLaunch,
             id: id.into(),
             trace: trace.into(),
+            attempt: 0,
+            previous_unsent: false,
             reply,
         });
     }
@@ -54,27 +60,44 @@ pub async fn run(app: App, mut rx: mpsc::UnboundedReceiver<Request>) {
         phase,
         id,
         trace,
+        attempt,
+        previous_unsent,
         reply,
     }) = rx.recv().await
     {
         let _guard = app.calls.opening_turn.lock().await;
-        let answer=app.calls.rings(&app,|rings,calls,with,(out,_)|{
-            let Some((ring_id,_))=id.strip_prefix("call-open:").and_then(|id|id.rsplit_once(':')) else{return false;};
-            let now=with.at.now_ms;let generation=super::opening::proven(with);
-            rings.change_opening(ring_id,now,out,|ring,fx|{
-                let reason=with.world.opening.and_then(|proof|rules::fence(ring,calls,with.at.host_id,proof).map(str::to_owned));
-                let intent=&ring.opening["intent"];
-                // The actor has picked the row but the launch thread still
-                // holds it. On recovery a previously committed launch is a
-                // claim of unknown outcome, never a fresh queued row.
-                let status=if phase==Phase::Claim && intent["state"]=="admitted" {"queued"}else{"claimed"};
-                let row=json!({"status":status,"trace_id":trace,"claimed_at":if status=="claimed"{json!(now)}else{serde_json::Value::Null}});
-                let world=rules::World{now,host:with.at.host_id,generation:&generation,fence:reason.as_deref(),queue:&row,nonce:"",trace:""};
-                let mut dispatched=rules::Dispatch::default();
-                let result=rules::dispatch(phase,&mut ring.opening,&id,&trace,&world,&mut dispatched);
-                *fx=dispatched.opening;
-                result==true || result=="launch"
-            }).is_some_and(|(allowed,_)|allowed)
+        let answer = app.calls.rings(&app, |rings, calls, with, (out, _)| {
+            let Some((ring_id, _)) = id.strip_prefix("call-open:").and_then(|id| id.rsplit_once(':')) else {
+                return false;
+            };
+            let now = with.at.now_ms;
+            let generation = super::opening::proven(with);
+            rings.change_opening(ring_id, now, out, |ring, fx| {
+                let reason = with.world.opening.and_then(|proof| rules::fence(ring, calls, with.at.host_id, proof).map(str::to_owned));
+                let op = &mut ring.opening;
+                let dispatch = |phase, op: &mut serde_json::Value, fx: &mut rules::Effects| {
+                    let status = if phase == Phase::Claim && op["intent"]["state"] == "admitted" { "queued" } else { "claimed" };
+                    let row = json!({"status":status,"trace_id":trace,"claimed_at":if status=="claimed"{json!(now)}else{serde_json::Value::Null}});
+                    let world = rules::World{now,host:with.at.host_id,generation:&generation,fence:reason.as_deref(),queue:&row,nonce:"",trace:""};
+                    let mut dispatched = rules::Dispatch::default();
+                    let result = rules::dispatch(phase, op, &id, &trace, &world, &mut dispatched);
+                    *fx = dispatched.opening;
+                    result == true || result == "launch"
+                };
+                // An older attempt can release only its own committed claim.
+                // A replay of this attempt after a crash must never reuse that proof.
+                if phase == Phase::Claim && previous_unsent && attempt > 1
+                    && op["launch_attempt"] == attempt - 1 && op["intent"]["state"] == "started"
+                    && (!dispatch(Phase::ReleaseUnsent, op, fx) || op["intent"]["state"] != "admitted")
+                {
+                    return false;
+                }
+                let allowed = dispatch(phase, op, fx);
+                if allowed && phase == Phase::Claim {
+                    op["launch_attempt"] = json!(attempt);
+                }
+                allowed
+            }).is_some_and(|(allowed, _)| allowed)
         }).await.unwrap_or(false);
         let _ = reply.send(answer);
     }

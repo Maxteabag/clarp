@@ -2050,12 +2050,13 @@ impl Worker {
                 std::thread::Builder::new()
                     .name(format!("turn-{}", turn.0))
                     .spawn(move || {
-                        if let Some((id, trace)) = order.opening.as_deref() {
+                        if let Some(opening) = order.opening.as_deref() {
+                            let (id, trace) = (opening.id.as_str(), opening.trace.as_str());
                             use crate::launcher::Launched;
                             use clarp_kernel::rings::opening::Gate as Phase;
                             loop {
-                                if !opening_gate.ask(Phase::Claim, id, trace)
-                                    || !opening_gate.ask(Phase::Parked, id, trace)
+                                if !opening_gate.ask(Phase::Claim, opening, attempt)
+                                    || !opening_gate.ask(Phase::Parked, opening, attempt)
                                 {
                                     tell(
                                         &tx,
@@ -2067,19 +2068,21 @@ impl Worker {
                                 }
                                 match launcher.launch(&order) {
                                     Launched::NoShim(reason) => {
-                                        if !opening_gate.ask(Phase::ReleaseUnsent, id, trace) {
+                                        if !opening_gate.ask(Phase::ReleaseUnsent, opening, attempt)
+                                        {
                                             tell(&tx, turn, attempt, Told::Failed(reason));
                                             return;
                                         }
                                         std::thread::sleep(Duration::from_secs(1));
                                     }
-                                    Launched::Failed(reason) => {
+                                    Launched::Failed(_) => {
                                         opening_gate.failed(id, trace);
-                                        tell(&tx, turn, attempt, Told::Failed(reason));
+                                        tell(&tx, turn, attempt, Told::Gone);
                                         return;
                                     }
                                     Launched::SaidWhy => {
-                                        let _ = opening_gate.ask(Phase::ReleaseUnsent, id, trace);
+                                        // The actor parks from the synced SpawnFailed record.
+                                        // Its next attempt presents that proof to the gate.
                                         tell(&tx, turn, attempt, Told::SpoolChanged);
                                         return;
                                     }
