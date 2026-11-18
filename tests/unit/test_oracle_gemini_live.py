@@ -244,24 +244,68 @@ def test_go_away_resumes_on_a_new_connection_with_the_latest_handle(call):
     assert sum(e["type"] == "session.started" for e in call.down) == 1  # the phone sees one call
 
 
-@pytest.mark.parametrize("away", ["soon", 30, ["8s"], True])
-def test_a_go_away_that_is_not_an_object_keeps_the_deadline_held(monkeypatch, away):
-    """R69: such a goAway is passed over; it never raises out of recv()."""
+@pytest.mark.parametrize("away", [None, {}, {"timeLeft": None}, "soon", 30, ["8s"], True])
+def test_a_go_away_whose_time_left_cannot_be_read_takes_the_default_deadline(monkeypatch, away):
+    """R69: a goAway present means the server is going away; timeLeft when readable, else 5 s."""
     socket = FakeGemini()
     monkeypatch.setattr(oracle_gemini_live, "_connect", lambda _: socket)
-    upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v")
-    upstream.translate({"goAway": {"timeLeft": "20s"}})
-    held = upstream.reconnect_at
+    now = [100.0]
+    upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v", clock=lambda: now[0])
     upstream.translate({"goAway": away})
-    assert upstream.reconnect_at == held
+    assert upstream.reconnect_at == 100.0 + max(0.0, 5.0 - oracle_gemini_live.GOAWAY_MARGIN_SECONDS)
+    upstream.translate({"goAway": {"timeLeft": "20s"}})
+    assert upstream.reconnect_at == 100.0 + max(0.0, 20.0 - oracle_gemini_live.GOAWAY_MARGIN_SECONDS)
 
 
-def test_a_go_away_that_is_not_an_object_does_not_end_the_call(call):
+def test_a_go_away_that_is_not_an_object_still_resumes_the_call(call):
+    call.sockets[0].inbox.append({"sessionResumptionUpdate": {"newHandle": "h-1", "resumable": True}})
     call.sockets[0].inbox.append({"goAway": "soon"})
-    call.sockets[0].inbox.append({"setupComplete": {}})
+    call.sockets[1].inbox.append({"setupComplete": {}})
     pump(call)
-    assert not call.sockets[0].closed and len(call.opened) == 1
+    assert call.sockets[0].closed and len(call.opened) == 2
+    assert gemini(call, 1)[0]["setup"]["sessionResumption"] == {"handle": "h-1"}
     assert not call.c.stop.is_set()
+
+
+_SAID = {"outputTranscription": {"text": "Still here."}}
+_HEARD = {"inputTranscription": {"text": "Hello?"}}
+_CALL = {"id": "call-1", "name": "delegate_to_agent", "args": {"request": "Check the build."}}
+_AUDIO = pcm(240)
+
+
+def _said(seen):
+    return any(e.get("type") == "session.output_transcript.delta" and e.get("delta") == "Still here." for e in seen)
+
+
+@pytest.mark.parametrize("frame, handled", [
+    ({"serverContent": {"modelTurn": "x", **_SAID}}, _said),
+    ({"serverContent": {"modelTurn": {"parts": 5}, **_SAID}}, _said),
+    ({"serverContent": {"modelTurn": {"parts": [{"inlineData": "x"}, {"inlineData": {"data": _AUDIO}}]}}},
+     lambda seen: any(e.get("type") == "session.output_audio.delta" and e.get("delta") == _AUDIO for e in seen)),
+    ({"serverContent": {"inputTranscription": "x", **_SAID}}, _said),
+    ({"serverContent": {"outputTranscription": 7, **_HEARD}},
+     lambda seen: any(e.get("type") == "session.input_transcript.delta" and e.get("delta") == "Hello?" for e in seen)),
+    ({"toolCall": {"functionCalls": 5}, "serverContent": _SAID}, _said),
+    ({"toolCall": {"functionCalls": ["x", 7, _CALL]}},
+     lambda seen: any(e.get("type") == "session.delegation.created" and e["delegation"]["id"] == "call-1" for e in seen)),
+    ({"toolCall": {"functionCalls": [{**_CALL, "args": "x"}]}},
+     lambda seen: any(e.get("type") == "session.delegation.created" and e["delegation"]["request"] == "" for e in seen)),
+    ({"toolCallCancellation": {"ids": 5}, "serverContent": _SAID}, _said),
+    ({"toolCallCancellation": {"ids": [["call-1"], {"id": 1}, "call-9"]}, "serverContent": _SAID}, _said),
+    ({"usageMetadata": {"promptTokensDetails": 5, "responseTokensDetails": [{"modality": "AUDIO", "tokenCount": 7}]}},
+     lambda seen: any(e.get("type") == "session.usage.updated" for e in seen)),
+])
+def test_a_field_of_the_wrong_type_is_passed_over_and_the_rest_of_the_frame_handled(call, monkeypatch, frame, handled):
+    """R69: a server field of the wrong type never raises out of recv(); the call stays up."""
+    seen = []
+    receive = call.c.receive
+    monkeypatch.setattr(call.c, "receive", lambda event: (seen.append(event), receive(event))[1])
+    logged = []
+    monkeypatch.setattr(oracle_gemini_live, "log", lambda *a, **k: logged.append(a), raising=False)
+    call.sockets[0].inbox.append(frame)
+    pump(call)
+    assert handled(seen) and not call.c.stop.is_set() and len(call.opened) == 1
+    assert logged == []
 
 
 def test_lost_connection_without_a_handle_ends_the_call(monkeypatch):
