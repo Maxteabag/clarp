@@ -27,7 +27,7 @@ from . import agents as agents_db
 from . import events, identity
 from . import backends, config, eventlog, janitor_builtins, janitors, settings_store
 from .db import conn, now_ms
-from .log import log_exception
+from .log import log, log_exception
 from .prompt_admissions import PromptAdmission
 from .turn_dispatch import DispatchError
 from . import prompt_admissions
@@ -52,14 +52,18 @@ from .orchestrator_model import (  # noqa: E402,F401  (split_apply: orchestrator
     _model_prompt, _typesafe_questions, _typesafe_state, _call_typesafe, _extract_json,
     parse_decision, _public_decision,
 )
-NO_SUCH_AGENT = "I do not have an agent by that name."
-HELD_MESSAGE_GONE = "That message is no longer waiting. Please say it again."
-CANNOT_CHECK = "I cannot check on that agent from here."
-CANNOT_COMMAND = "I cannot do that for that agent from here."
-WHICH_AGENT = "Which agent did you mean?"
-UNSURE_COMMAND = "I am not sure what you wanted me to do."
-NO_VOICE_COMMANDS = "That agent does not accept voice commands."
-FORK_IN_APP = "Please fork agents from the app."
+from .orchestrator_phrases import KEY_OF as _FIXED_KEY, PHRASES  # noqa: E402
+
+NO_SUCH_AGENT = PHRASES["no_such_agent"]
+HELD_MESSAGE_GONE = PHRASES["held_message_gone"]
+CANNOT_CHECK = PHRASES["cannot_check"]
+CANNOT_COMMAND = PHRASES["cannot_command"]
+WHICH_AGENT = PHRASES["which_agent"]
+UNSURE_COMMAND = PHRASES["unsure_command"]
+NO_VOICE_COMMANDS = PHRASES["no_voice_commands"]
+FORK_IN_APP = PHRASES["fork_in_app"]
+NAME_TAKEN = PHRASES["name_taken"]
+COMMAND_REFUSED = PHRASES["command_refused"]
 
 
 def _fold(text: object) -> str:
@@ -74,6 +78,8 @@ def _agents_named(name: str) -> list[dict[str, Any]]:
     that one out of reach is told apart from one that does not exist)."""
     exact = identity.lookup(name)
     if exact is not None:
+        # An exact id or session wins before folding: "kai" is the session kai even when
+        # kai-2's display name folds to kai too (issue 360 review: kept as it is).
         return [exact]
     key = _fold(name)
     if not key:
@@ -698,7 +704,8 @@ class OrchestratorService:
                     decision, settings, sessions, requested_session)
                 if refusal:
                     decision = OrchestratorDecision(**{
-                        **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": refusal})
+                        **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": refusal,
+                        "phrase_key": _FIXED_KEY[refusal]})
                     final_action = FINAL_CLARIFY
                     if not fallback_request:
                         self._speak_as_session(refusal, requested_session)
@@ -753,7 +760,7 @@ class OrchestratorService:
                         final_action = FINAL_CLARIFY
                         decision = OrchestratorDecision(**{
                             **asdict(decision), "kind": DECISION_CLARIFY,
-                            "spoken_text": HELD_MESSAGE_GONE})
+                            "spoken_text": HELD_MESSAGE_GONE, "phrase_key": "held_message_gone"})
                         self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
                     else:
                         routed_admission = prompt_admission
@@ -832,7 +839,17 @@ class OrchestratorService:
             if final_action == FINAL_ERROR and decision.kind == DECISION_AGENT_CONTROL:
                 self._require_current(janitor_run_id)
                 final_action = FINAL_CONTROL
-                target = self._run_agent_control(decision, requested_session)
+                try:
+                    target = self._run_agent_control(decision, requested_session)
+                except Exception as refused:
+                    from .agent_lifecycle import AgentLifecycleError
+                    if not isinstance(refused, AgentLifecycleError):
+                        raise
+                    # The lifecycle refused (a name in use, a session in use, ...): said, never a
+                    # silent error (issue 360, R75). Nothing was done.
+                    final_action = FINAL_CLARIFY
+                    error = refused.code
+                    self._speak_as_session(COMMAND_REFUSED, requested_session)
             if final_action == FINAL_ERROR and decision.kind == DECISION_IGNORED:
                 final_action = FINAL_IGNORED
                 target = requested_session
@@ -911,6 +928,11 @@ class OrchestratorService:
         if decision.kind == DECISION_AGENT_CONTROL and action == "fork":
             return FORK_IN_APP, ""      # no fork source is trusted from the router (RTO-03)
         if decision.kind == DECISION_AGENT_CONTROL and action == "create":
+            # A new agent never takes a name the voice already gives an agent (archived ones
+            # count): the lifecycle compares exact names only (issue 360, R75).
+            given = (decision.control_payload or {}).get("name")
+            if isinstance(given, str) and given.strip() and _agents_named(given.strip()):
+                return NAME_TAKEN, ""
             return "", ""
         names = [decision.target_session.strip()]
         if decision.kind == DECISION_AGENT_CONTROL:
@@ -1049,17 +1071,13 @@ class OrchestratorService:
         target = decision.target_session or requested_session
         if action in {"repeat", "repeat_last", "say_again"}:
             if not self._replay_last_clip(target):
-                self._speak_as_session(
-                    "I do not have anything recent to replay.",
-                    requested_session,
-                    phrase_key="repeat_missing",
-                )
+                self._speak_as_session(PHRASES["repeat_missing"], requested_session)
             return
         if action in {"who_am_i_talking_to", "current_agent"}:
             persona = self._persona_for_session(requested_session) or requested_session
             self._speak_orchestrator(f"You are talking to {persona}.", settings)
             return
-        self._speak_orchestrator("I am not sure what control action you meant.", settings)
+        self._speak_orchestrator(PHRASES["control_unknown"], settings)
 
     def _run_agent_control(self, decision: OrchestratorDecision,
                            requested_session: str) -> str:
@@ -1083,7 +1101,7 @@ class OrchestratorService:
             return target
         if action in {"relaunch", "restart", "resume", "create"}:
             return self._lifecycle_action(decision, target)
-        self._speak_as_session("I am not sure how to do that yet.", requested_session)
+        self._speak_as_session(PHRASES["agent_control_unknown"], requested_session)
         return target
 
     def _lifecycle_action(self, decision: OrchestratorDecision, target: str) -> str:
@@ -1130,12 +1148,24 @@ class OrchestratorService:
             return f"{persona} is currently {state['kind']}."
         return f"{persona} is active, but I do not have recent work details yet."
 
+    @staticmethod
+    def _clip_key(text: str, phrase_key: str) -> tuple[str, str | None]:
+        """The cache key to try, and the text its clip must carry. A model-chosen key plays as it
+        did; one of the router's own sentences (lib.orchestrator_phrases) uses its own key and
+        plays a clip only of that very sentence (R76)."""
+        if phrase_key:
+            return phrase_key, None
+        key = _FIXED_KEY.get(text, "")
+        return key, (text if key else None)
+
     def _speak_orchestrator(self, text: str, settings: OrchestratorSettings,
                             *, phrase_key: str = "") -> None:
-        if phrase_key and self._play_cached_phrase(
-            phrase_key=phrase_key,
+        key, expected = self._clip_key(text, phrase_key)
+        if key and self._play_cached_phrase(
+            phrase_key=key,
             session="",
             voice_id=settings.voice_id,
+            expected_text=expected,
         ):
             return
         self.ctx.speak_announcement(text, settings.voice_id, session=None)
@@ -1144,16 +1174,18 @@ class OrchestratorService:
                           *, phrase_key: str = "") -> None:
         agent = identity.lookup(session)
         if agent:
-            if phrase_key and self._play_cached_phrase(
-                phrase_key=phrase_key,
+            key, expected = self._clip_key(text, phrase_key)
+            if key and self._play_cached_phrase(
+                phrase_key=key,
                 session=session,
                 voice_id=agent.get("voice_id") or "",
+                expected_text=expected,
             ):
                 return
             self.ctx.speak_announcement(text, agent.get("voice_id"), session=session)
 
     def _play_cached_phrase(self, *, phrase_key: str, session: str,
-                            voice_id: str) -> bool:
+                            voice_id: str, expected_text: str | None = None) -> bool:
         row = conn().execute(
             """SELECT audio_path, text
                  FROM orchestrator_phrase_cache
@@ -1170,6 +1202,10 @@ class OrchestratorService:
             (phrase_key, voice_id, session or "", phrase_key, voice_id),
         ).fetchone()
         if not row or not row["audio_path"]:
+            return False
+        if expected_text is not None and row["text"] != expected_text:
+            # A clip of another text never stands in for the sentence (R76): spoken instead.
+            log("orchestratorPhraseMismatch", f"key={phrase_key}")
             return False
         path = str(row["audio_path"])
         if not path.startswith("/audio/") and not os.path.exists(path):
