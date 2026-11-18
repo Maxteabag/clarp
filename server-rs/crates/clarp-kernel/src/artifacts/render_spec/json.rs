@@ -27,8 +27,9 @@ use super::{Ident, Refusal, STRUCTURAL_KEYS};
 pub const MAX_INTEGER: i128 = 9_007_199_254_740_991;
 /// How deep a value may nest before the canonical form refuses it.
 const DEEPEST: usize = 64;
-/// How deep a body may nest before this reader gives up on it. The Python Host's reader
-/// ends in an error of its interpreter somewhere near a thousand: `docs/differences.md`.
+/// How deep a body may nest before this reader refuses it, the outermost container the first
+/// level. The Python Host refuses past the same 512 on every route since its PR 438 (R73),
+/// counting the brackets of the bytes before it parses: `docs/differences.md`.
 pub const DEEPEST_READ: usize = 512;
 /// The most digits Python reads as one whole number (`sys.get_int_max_str_digits()`).
 const MOST_DIGITS: usize = 4300;

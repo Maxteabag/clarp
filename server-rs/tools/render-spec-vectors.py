@@ -151,6 +151,12 @@ def bodies():
     yield 'nested 64', b'[' * 64 + b']' * 64
     yield 'nested 66', b'[' * 66 + b']' * 66
     yield 'nested 300', b'[' * 300 + b']' * 300
+    yield 'nested 512', b'[' * 512 + b']' * 512
+    yield 'nested 513', b'[' * 513 + b']' * 513
+    yield 'an object nested 513', b'{"a":' * 513 + b'0' + b'}' * 513
+    yield 'nested 512 and 600 brackets in a text', b'[' * 511 + b'"' + b'[' * 600 + b'"' + b']' * 511
+    yield 'nested 512 and an escaped quote before brackets in a text', (b'[' * 511 + b'"\\"' + b'[' * 600 + b'"'
+                                                                        + b']' * 511)
 
 
 def describe(value):
@@ -827,6 +833,25 @@ def probes():
     return out
 
 
+def envelope_cases():
+    """(name, JSON text): the texts of a publication or an update, as given."""
+    half = chr(0xd800)
+    out = [('all of them text', json.dumps({key: 'text' for key in
+                                            ('session', 'title', 'summary', 'status', 'reference_id', 'artifact_id')})),
+           ('none given', '{}'), ('another key is not looked at', json.dumps({'type': 7}))]
+    for key in ('session', 'title', 'summary', 'status', 'reference_id', 'artifact_id'):
+        out.append((f'half a pair in {key}', json.dumps({key: 'text ' + half})))
+    for key in ('title', 'summary', 'status'):
+        for name, value in (('a number', 7), ('null', None), ('a list', ['ready']), ('a truth', True),
+                            ('an object', {'a': 1}), ('a fraction', 1.5), ('empty', '')):
+            out.append((f'{key} that is {name}', json.dumps({key: value})))
+    out.append(('the first fault in the contract\'s order', json.dumps({'status': 7, 'title': None})))
+    out.append(('the first fault in the contract\'s order, given the other way', json.dumps({'summary': None,
+                                                                                           'title': 7})))
+    out.append(('a pair joined is text', json.dumps({'title': chr(0x1f600)})))
+    return out
+
+
 # ---- running the rules ---------------------------------------------------------------------------------------------
 
 def run() -> dict:
@@ -839,7 +864,7 @@ def run() -> dict:
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
-    from lib import render_spec as rs, server_identity
+    from lib import json_depth, render_spec as rs, server_identity
     scen_spec = importlib.util.spec_from_file_location('render_spec_scenarios', FIXTURES / 'scenarios.py')
     scenarios = importlib.util.module_from_spec(scen_spec)
     scen_spec.loader.exec_module(scenarios)
@@ -848,6 +873,9 @@ def run() -> dict:
         return error.triple()
 
     def read(raw):
+        # As the Host's reader: a body nested deeper than its bound is refused before it is parsed.
+        if json_depth.too_deep(raw):
+            raise ValueError('too deep')
         return json.loads(raw, object_pairs_hook=rs.JsonObject)
 
     try:
@@ -915,6 +943,17 @@ def run() -> dict:
                 one['admitted'] = result
             answers.append(one)
 
+        # The texts besides the payload (render_spec.envelope).
+        envelopes = []
+        for name, texts in envelope_cases():
+            one = {'name': name, 'text': texts}
+            try:
+                rs.envelope(read(texts.encode()))
+                one['refused'] = None
+            except rs.Refusal as error:
+                one['refused'] = refusal(error)
+            envelopes.append(one)
+
         # The reference's own vectors, played through the rules as its store plays them.
         flows = []
         for scenario in scenarios.scenarios():
@@ -924,7 +963,35 @@ def run() -> dict:
             steps = []
             for step in scenario['steps']:
                 done = {'action': step['action'], 'http': step['http']}
-                if step['action'] in ('publish', 'validate'):
+                if 'envelope_text' in step or 'envelope' in step:
+                    # The texts besides the payload, checked first (R71, R72): a publication's as its
+                    # route makes them (str() of a value that is no text), an update's as given.
+                    texts = (read(step['envelope_text'].encode()) if 'envelope_text' in step
+                             else step['envelope'])
+                    if step['action'] == 'publish':
+                        texts = {key: value if isinstance(value, str) else str(value or '')
+                                 for key, value in texts.items()}
+                    done['envelope'] = json.dumps(texts)
+                    try:
+                        rs.envelope(texts)
+                    except rs.Refusal as error:
+                        done['refused'] = refusal(error)
+                        done['expected_error'] = step.get('error')
+                        done['stored_status'] = step['stored_status']
+                        steps.append(done)
+                        continue
+                if step['action'] == 'read':
+                    raw = step['body_text'].encode()
+                    done['text'] = step['body_text']
+                    try:
+                        read(raw)
+                        done['read'] = True
+                    except ValueError:
+                        done['read'] = False
+                    done['stored_status'] = step['stored_status']
+                    steps.append(done)
+                    continue
+                if step['action'] in ('publish', 'validate', 'update'):
                     text = step.get('payload_text') or dumps(step['payload'])
                     done['text'] = text
                     payload = read(text.encode())
@@ -942,7 +1009,7 @@ def run() -> dict:
                             stored = json.loads(json.dumps(stored))
                             status = 'ready'
                 else:
-                    text = dumps(step['body'])
+                    text = step.get('body_text') or dumps(step['body'])
                     done['text'] = text
                     data = read(text.encode())
                     sid = data.get('submission_id')
@@ -1034,7 +1101,8 @@ def run() -> dict:
             'catalog_sha256': 'c1:' + wire['catalog_sha256'], 'identifiers': idents,
             'probes': [dumps(probe) for probe in probes()],
             'without_a_catalog': without, 'canonical': canonical, 'reads': reads, 'payloads': payloads,
-            'answers': answers, 'flows': flows, 'messages': told, 'clients': seen, 'catalogs': loaded}
+            'answers': answers, 'flows': flows, 'messages': told, 'clients': seen, 'catalogs': loaded,
+            'envelopes': envelopes}
 
 
 def main() -> int:
@@ -1050,7 +1118,7 @@ def main() -> int:
     lines = ['{']
     for name in ('what', 'catalog_sha256', 'identifiers', 'probes', 'without_a_catalog', 'canonical'):
         lines.append(f' {json.dumps(name)}: {json.dumps(said[name], ensure_ascii=True)},')
-    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs')
+    sections = ('reads', 'payloads', 'answers', 'flows', 'messages', 'clients', 'catalogs', 'envelopes')
     for number, name in enumerate(sections):
         lines.append(f' {json.dumps(name)}: [')
         items = said[name]

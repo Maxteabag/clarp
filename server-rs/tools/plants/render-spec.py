@@ -365,6 +365,17 @@ PLANTS = [
     (L, 'host', 'the catalog is at another address', '        .route("/artifact-catalogs/clarp.form/1", get(render_spec::catalog))', '        .route("/artifact-catalogs/clarp.form/2", get(render_spec::catalog))'),
     (E, 'host', 'the contract is the one before', 'pub const HOST_CONTRACT: u64 = 102;', 'pub const HOST_CONTRACT: u64 = 101;'),
     (E, 'host', 'the feature came with the contract before', '    ("render_spec", 102),', '    ("render_spec", 101),'),
+    # The texts besides a payload (the reference's PR 438: R71, R72).
+    (R, 'vectors', 'a text of the envelope with half a pair is text', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(_))'),
+    (R, 'vectors', 'null is a text of the envelope', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(Text::Valid(_)) | J::Null)'),
+    (R, 'vectors', 'a number is a text of the envelope', '            && !matches!(value, J::Text(Text::Valid(_)))', '            && !matches!(value, J::Text(Text::Valid(_)) | J::Int(_))'),
+    (R, 'vectors', 'the summary is checked before the title', '    "session",\n    "title",\n    "summary",', '    "session",\n    "summary",\n    "title",'),
+    (R, 'vectors', 'a refusal of the envelope names no field', '            return refuse("invalid_json", &format!("/{key}"));', '            return refuse("invalid_json", "");'),
+    (H, 'host', "a publication's texts are not checked", '    if let Err(refusal) = spec::envelope(&texts) {', '    if let Err(refusal) = spec::envelope(&texts[..0]) {'),
+    (H, 'host', "a publication's value that is no text is checked as one", '        .filter(|(_, value)| matches!(value, J::Text(_)))\n', ''),
+    (H, 'host', "a revision's title, summary and status are not checked", '    if let Err(refusal) = spec::envelope(&given) {', '    if let Err(refusal) = spec::envelope(&given[..0]) {'),
+    (H, 'host', "a revision's title, summary or status not given is null", '        .filter_map(|key| Some((*key, data.get(key)?)))\n        .collect();\n    if let Err(refusal) = spec::envelope(&given) {', '        .map(|key| (*key, data.get(key).unwrap_or(&J::Null)))\n        .collect();\n    if let Err(refusal) = spec::envelope(&given) {'),
+    (J, 'vectors', 'a body may nest a level deeper', '                if self.depth > DEEPEST_READ {', '                if self.depth > DEEPEST_READ + 1 {'),
     # The agent's tool.
     (T, 'host', 'a conflict is printed as a failure', '            let told = matches!(error.status().as_u16(), 400 | 403 | 409);', '            let told = matches!(error.status().as_u16(), 400 | 403);'),
     (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
