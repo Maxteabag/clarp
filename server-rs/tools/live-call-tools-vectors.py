@@ -60,7 +60,55 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools)}
+
+
+def calls(root, tools):
+    from unittest.mock import patch
+    from itertools import count
+    from types import SimpleNamespace
+    scenarios = []
+    member = {'session':'test-member','name':'Theo','role':'fixture'}
+    for delivery in ('sent','refused','uncertain','closed'):
+        effects = []
+        def prompt(to, sender, message):
+            effects.append(['prompt', to, sender, message])
+            if delivery == 'refused':
+                raise tools.Refused('stand-in refusal')
+            if delivery == 'uncertain':
+                raise tools.Unconfirmed('stand-in uncertain')
+        def status(to):
+            effects.append(['status', to])
+            return {'state':'idle','last_said':'fixture'}
+        def transcript(to, limit):
+            effects.append(['transcript',to,limit])
+            return {'messages':[{'role':'assistant','text':'fixture'}]}
+        cfg = tools.frozen_config({'agent_session':'guard','live_tools':{'enabled':True,
+                                'agents':[member]}},'user_call')
+        snapshot = {'live_tools':cfg,'agent':{'session':'guard'},'profile':{'display_name':'Guard'},'host_id':'host-test'}
+        ns = count(100)
+        with patch.object(tools.time,'time_ns',side_effect=lambda:next(ns)), patch.object(tools.time,'time',return_value=10), patch.object(tools,'log'), patch.object(tools,'log_exception'):
+            ledger=tools.Ledger(root / delivery / 'ledger.json')
+            call=tools.CallTools(snapshot,'call-one',lambda *_:False,
+                                 effects=SimpleNamespace(status=status,transcript=transcript,prompt=prompt),
+                                 principal='phone-one',current=lambda:delivery!='closed',ledger=ledger)
+            steps=[]
+            def execute(name,args):
+                effects.clear()
+                result=call.execute(name,args)
+                steps.append(dict(name=name,args=args,result=result,effects=effects.copy()))
+            for agent in (None, '', 'outsider', 'test-member'):
+                execute('get_agent_status',{'agent':agent})
+                execute('unknown',{'agent':agent})
+            for limit in (None, False, True, 0, 1, 2, 5, 6, 2.0, '4'):
+                execute('read_agent_transcript',{'agent':'test-member','limit':limit})
+            for request in ('','   ','line one  line two','a'*tools.REQUEST_CHARS,'a'*(tools.REQUEST_CHARS+1)):
+                execute('delegate_to_agent',{'agent':'test-member','request':request})
+            for n in range(12):
+                execute('delegate_to_agent',{'agent':'test-member','request':'one more '+str(n)})
+            scenarios.append(dict(delivery=delivery,steps=steps))
+            call.close()
+    return scenarios
 
 
 if __name__ == '__main__':

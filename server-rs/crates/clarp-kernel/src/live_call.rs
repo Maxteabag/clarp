@@ -17,6 +17,7 @@
 //! those modules by `tests/fixtures/live-call-vectors.json`.
 
 pub mod receipts;
+pub mod team;
 
 use std::collections::BTreeMap;
 
