@@ -1324,8 +1324,8 @@ failed is told as that, and after the Host was killed the books are as they were
 
 **Grok and Muse** (18 Nov 2026). One CLI process serves each agent turn. Grok gets
 `--session-id` on its first turn and `--resume` thereafter. Muse takes `--session-id`
-for both. The shim syncs the assigned id to the turn spool before starting either
-child. The actor binds that id when it sees the child start, including after a Host
+for both. Under decision D26 the shim syncs the assigned session id to the turn spool
+before either child can read its prompt. The actor binds that id when it sees the child start, including after a Host
 restart. The shim hands a composed prompt above 64 KiB to the CLI in the turn's input
 file. Stop uses the same shim control socket as the other backends.
 

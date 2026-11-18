@@ -145,24 +145,6 @@ fn owner_of(app: &App, session: &str) -> Option<(String, String)> {
     Some((owner.record.agent_id.clone(), owner.record.session.clone()))
 }
 
-/// The transcript of a session to copy: under the project of `cwd`, else under any project.
-fn transcript_of(root: &Path, cwd: &str, session: &str) -> Option<PathBuf> {
-    let name = format!("{session}.jsonl");
-    let own = root.join(past::claude_project(cwd)).join(&name);
-    if own.is_file() {
-        return Some(own);
-    }
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .collect();
-    dirs.sort();
-    dirs.into_iter()
-        .map(|dir| dir.join(&name))
-        .find(|path| path.is_file())
-}
-
 /// The turns of a transcript as rows of the conversation of the agent that begins with
 /// them, in the shape this Host's own rows have. A row is named as the Python Host names
 /// the rows it reads from a transcript: `msg-` and twenty signs of a digest of the agent,
@@ -343,10 +325,11 @@ pub(crate) async fn begins(
         // A session is taken up where its tool will look for it: among those of the
         // directory the agent works in, and nowhere else. Claude Code finds a session only
         // under the directory it is started in.
-        let path = root
-            .join(past::claude_project(&cwd))
-            .join(format!("{session}.jsonl"));
-        let read = move || std::fs::read_to_string(path).ok();
+        let name = session.clone();
+        let read = move || {
+            let path = past::claude_transcript(&root, &cwd, &name, false)?;
+            std::fs::read_to_string(path).ok()
+        };
         let Some(transcript) = tokio::task::spawn_blocking(read).await.ok().flatten() else {
             let why = "Session is no longer available in this directory";
             return Err(refused(StatusCode::NOT_FOUND, why, why));
@@ -367,7 +350,7 @@ pub(crate) async fn begins(
     let session = ids::uuid();
     let (of, name, copy_as) = (cwd.clone(), source.clone(), session.clone());
     let copied = move || -> Result<String, StatusCode> {
-        let from = transcript_of(&root, &of, &name).ok_or(StatusCode::NOT_FOUND)?;
+        let from = past::claude_transcript(&root, &of, &name, true).ok_or(StatusCode::NOT_FOUND)?;
         let failed = |_| StatusCode::INTERNAL_SERVER_ERROR;
         let transcript = std::fs::read_to_string(from).map_err(failed)?;
         let copy = history::claude_forked(&transcript, &copy_as);

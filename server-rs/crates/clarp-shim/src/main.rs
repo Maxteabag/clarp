@@ -1,6 +1,6 @@
 //! `clarp-shim`: owns one tool process for as long as it lives.
 //!
-//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] -- PROGRAM [ARGS...]
+//!     clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--prompt-as-file] -- PROGRAM [ARGS...]
 //!
 //! It makes the turn's spool, starts PROGRAM in its own process group, appends every line it
 //! prints to the spool, listens on the socket for the server's few requests, and when the program
@@ -50,6 +50,7 @@ struct Args {
     socket: PathBuf,
     cwd: Option<PathBuf>,
     stdin_file: Option<PathBuf>,
+    prompt_as_file: bool,
     named_session: Option<String>,
     program: String,
     program_args: Vec<String>,
@@ -58,6 +59,7 @@ struct Args {
 fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
     let (mut spool, mut socket, mut cwd, mut stdin_file) = (None, None, None, None);
     let mut named_session = None;
+    let mut prompt_as_file = false;
     loop {
         match argv.next().as_deref() {
             Some("--spool") => spool = argv.next().map(PathBuf::from),
@@ -66,6 +68,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
                 named_session = Some(argv.next().ok_or("missing session id")?)
             }
             Some("--cwd") => cwd = argv.next().map(PathBuf::from),
+            Some("--prompt-as-file") => prompt_as_file = true,
             Some("--stdin-file") => stdin_file = argv.next().map(PathBuf::from),
             Some("--") => break,
             Some(other) => return Err(format!("unknown argument {other}")),
@@ -78,6 +81,7 @@ fn parse(mut argv: impl Iterator<Item = String>) -> Result<Args, String> {
         socket: socket.ok_or("missing --socket PATH")?,
         cwd,
         stdin_file,
+        prompt_as_file,
         named_session,
         program,
         program_args: argv.collect(),
@@ -371,7 +375,7 @@ fn listen(socket: &Path) -> std::io::Result<UnixListener> {
     UnixListener::bind(socket)
 }
 
-fn run(mut args: Args) -> Result<u8, String> {
+fn run(args: Args) -> Result<u8, String> {
     // A session of its own: what happens to the server's terminal or process group does not
     // reach a running turn.
     let _ = setsid();
@@ -387,7 +391,7 @@ fn run(mut args: Args) -> Result<u8, String> {
         Err(error) => return Err(format!("{}: {error}", args.spool.display())),
     };
     // From here on the turn is this shim's, and whatever goes wrong is said in the spool.
-    if let Some(id) = args.named_session.clone() {
+    if let Some(id) = args.named_session {
         let entry = Entry::Shim(ShimEvent::Session { id });
         writer
             .append(&Record { t: now_ms(), entry })
@@ -405,17 +409,18 @@ fn run(mut args: Args) -> Result<u8, String> {
     };
     // The actor already wrote the turn's input into its private file. A tool
     // which needs a seekable prompt file opens it by path until the turn ends.
-    let as_file = args
-        .program_args
-        .ends_with(&["--prompt-file".to_string(), "/dev/stdin".to_string()])
-        && args.named_session.is_some();
-    if as_file && let (Some(path), Some(arg)) = (&args.stdin_file, args.program_args.last_mut()) {
-        *arg = path.to_string_lossy().into_owned();
-    }
+    let prompt_path = if args.prompt_as_file {
+        let Some(path) = args.stdin_file.as_ref() else {
+            return not_started("--prompt-as-file requires --stdin-file".into());
+        };
+        Some(path)
+    } else {
+        None
+    };
     let message = match args
         .stdin_file
         .as_ref()
-        .filter(|_| !as_file)
+        .filter(|_| !args.prompt_as_file)
         .map(std::fs::read)
         .transpose()
     {
@@ -429,7 +434,8 @@ fn run(mut args: Args) -> Result<u8, String> {
     let mut command = Command::new(&args.program);
     command
         .args(&args.program_args)
-        .stdin(if as_file {
+        .args(prompt_path)
+        .stdin(if args.prompt_as_file {
             Stdio::null()
         } else {
             Stdio::piped()
@@ -551,7 +557,7 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("clarp-shim: {error}");
             eprintln!(
-                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] -- PROGRAM [ARGS...]"
+                "usage: clarp-shim --spool FILE --socket PATH [--cwd DIR] [--stdin-file FILE] [--prompt-as-file] -- PROGRAM [ARGS...]"
             );
             ExitCode::from(2)
         }

@@ -289,6 +289,7 @@ mod tests {
     /// A tool for one question that is a line of shell.
     fn shell(line: &str, question: &str) -> Launch {
         Launch {
+            prompt_as_file: false,
             program: "sh".to_string(),
             args: vec!["-c".to_string(), line.to_string()],
             env: vec![("ASKED_AS".to_string(), "a question".to_string())],

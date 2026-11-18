@@ -53,13 +53,15 @@ impl Backend for Adapter {
             None => spec.prompt.clone(),
         };
         let mut stdin = Vec::new();
-        if prompt.len() > 64 * 1024 {
-            args.extend(["--prompt-file".into(), "/dev/stdin".into()]);
+        let prompt_as_file = prompt.len() > 64 * 1024;
+        if prompt_as_file {
+            args.push("--prompt-file".into());
             stdin = prompt.into_bytes();
         } else {
             args.extend([self.tool.prompt_flag().into(), prompt]);
         }
         Launch {
+            prompt_as_file,
             program: self.program.clone(),
             args,
             stdin,
@@ -74,6 +76,7 @@ impl Backend for Adapter {
             &q.prompt,
         );
         Some(Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             stdin: Vec::new(),
@@ -420,15 +423,12 @@ mod tests {
                 let launch = adapter.launch(&spec);
                 assert_eq!(launch.program, "synthetic");
                 assert_eq!(launch.env, [(SESSION_ENV.into(), "my-session".into())]);
+                assert_eq!(launch.prompt_as_file, row["inline"] != true);
                 if row["inline"] == true {
                     assert!(launch.args.ends_with(&[tool.prompt_flag().into(), prompt]));
                     assert!(launch.stdin.is_empty());
                 } else {
-                    assert!(
-                        launch
-                            .args
-                            .ends_with(&["--prompt-file".into(), "/dev/stdin".into()])
-                    );
+                    assert!(launch.args.ends_with(&["--prompt-file".into()]));
                     assert_eq!(launch.stdin, prompt.as_bytes());
                 }
             }
