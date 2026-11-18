@@ -28,6 +28,7 @@ pub mod direct;
 pub mod edge;
 pub mod explain;
 pub mod faces;
+pub mod fcm;
 pub mod files;
 pub mod fleet;
 pub mod forks;

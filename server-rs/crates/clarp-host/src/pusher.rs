@@ -31,6 +31,8 @@ use crate::relay::{Outcome, Push, Relay};
 /// A finished turn the user is told of.
 #[derive(Debug, Clone, Default)]
 pub struct TurnDone {
+    pub badge: bool,
+    pub unread: bool,
     pub session: String,
     pub persona: String,
     pub notification_id: String,
@@ -168,6 +170,7 @@ pub fn pusher() -> (Pusher, Waiting) {
 
 /// What the pusher's thread works with.
 pub struct Works {
+    pub android: Arc<crate::fcm::Sender>,
     /// The way to the phones. `None`: this Host pushes nothing.
     pub relay: Option<Arc<Relay>>,
     pub fleet: FleetHandle,
@@ -353,7 +356,8 @@ fn deliver(works: &Works, job: &Job) -> Counted {
         relay.is_some_and(Relay::has_credential),
         key.is_some(),
     );
-    if !routes.enabled() {
+    let android = works.android.configured();
+    if !routes.enabled() && !android {
         return Counted::default();
     }
     let directory = works.fleet.directory();
@@ -404,16 +408,24 @@ fn deliver(works: &Works, job: &Job) -> Counted {
         Job::Ring(rung, _) => !row.principal.is_empty() && rung.without.contains(&row.principal),
         _ => false,
     };
-    let rows: Vec<&PushRow> = directory
+    let mut rows: Vec<&PushRow> = directory
         .push
         .active()
-        .filter(|row| row.provider != "fcm" && directory.can_receive(&row.principal))
+        .filter(|row| directory.can_receive(&row.principal))
+        .filter(|row| {
+            if row.provider == "fcm" {
+                android
+            } else {
+                routes.enabled()
+            }
+        })
         .filter(|row| !left_out(row))
         .collect();
     if rows.is_empty() {
         return counted;
     }
     let (mut sent, mut failed, mut disabled) = (0, 0, 0);
+    rows.sort_by_key(|row| row.provider == "fcm");
     for row in rows {
         // The face is fetched from where this phone reaches the Host.
         let face = face_for(row);
@@ -428,44 +440,63 @@ fn deliver(works: &Works, job: &Job) -> Counted {
             push_type: "alert",
             priority: "10",
         };
-        let delivery = routes.send(!row.push_grant.is_empty(), |path| match path {
-            Path::Grant => relay.map_or(Outcome::NoPath, |relay| {
-                relay.to_grant(&row.push_grant, &push)
-            }),
-            Path::Account => relay.map_or(Outcome::NoPath, |relay| {
-                relay.to_token(&row.token, &row.environment, &push)
-            }),
-            Path::Direct => key.as_ref().map_or(Outcome::NoPath, |key| {
-                let request = clarp_kernel::direct_push::Push {
-                    push_type: push.push_type,
-                    payload: push.payload,
-                    priority: push.priority,
-                    collapse_id: push.collapse_id,
-                    expiration: None,
-                };
-                match works.runtime.block_on(works.direct.push(
-                    key,
-                    (&row.token, &row.environment),
-                    &request,
-                )) {
-                    Ok((200, _, _)) => Outcome::Sent,
-                    Ok((status, reason, _)) => {
-                        let reason = reason.as_str().unwrap_or("");
-                        if status == 410
-                            || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason)
-                        {
-                            Outcome::Dead(reason.to_string())
-                        } else {
-                            Outcome::Refused {
-                                status,
-                                reason: reason.to_string(),
+        let delivery = if row.provider == "fcm" {
+            let mut context = serde_json::json!({"agent_id":agent_id});
+            if let Job::Turn(told) = job {
+                context["badge"] = serde_json::json!(told.badge);
+                context["unread"] = serde_json::json!(told.unread);
+            }
+            clarp_kernel::alert_routes::Delivery {
+                outcome: works.android.push(
+                    &row.token,
+                    &payload,
+                    &context,
+                    "10",
+                    &collapse_id,
+                    false,
+                ),
+                grant_revoked: false,
+            }
+        } else {
+            routes.send(!row.push_grant.is_empty(), |path| match path {
+                Path::Grant => relay.map_or(Outcome::NoPath, |relay| {
+                    relay.to_grant(&row.push_grant, &push)
+                }),
+                Path::Account => relay.map_or(Outcome::NoPath, |relay| {
+                    relay.to_token(&row.token, &row.environment, &push)
+                }),
+                Path::Direct => key.as_ref().map_or(Outcome::NoPath, |key| {
+                    let request = clarp_kernel::direct_push::Push {
+                        push_type: push.push_type,
+                        payload: push.payload,
+                        priority: push.priority,
+                        collapse_id: push.collapse_id,
+                        expiration: None,
+                    };
+                    match works.runtime.block_on(works.direct.push(
+                        key,
+                        (&row.token, &row.environment),
+                        &request,
+                    )) {
+                        Ok((200, _, _)) => Outcome::Sent,
+                        Ok((status, reason, _)) => {
+                            let reason = reason.as_str().unwrap_or("");
+                            if status == 410
+                                || clarp_kernel::direct_push::GONE_FOR_GOOD.contains(&reason)
+                            {
+                                Outcome::Dead(reason.to_string())
+                            } else {
+                                Outcome::Refused {
+                                    status,
+                                    reason: reason.to_string(),
+                                }
                             }
                         }
+                        Err(crate::direct::Unsent(why)) => Outcome::Down(why),
                     }
-                    Err(crate::direct::Unsent(why)) => Outcome::Down(why),
-                }
-            }),
-        });
+                }),
+            })
+        };
         if delivery.grant_revoked {
             works.fleet.pushed(row.token.clone(), Pushed::GrantRevoked);
         }
