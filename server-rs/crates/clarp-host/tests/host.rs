@@ -29898,6 +29898,17 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
                     .is_some_and(|s| s.contains("\nText:\n"))
             })
     });
+    assert!(
+        upstream
+            .of_kind("session.commentary.append")
+            .iter()
+            .any(|note| {
+                note["content"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("Sandra's own agent's reply (operation sandra-"))
+            }),
+        "the result identifies the configured contact"
+    );
     ask(
         &upstream,
         "Read it again",

@@ -757,6 +757,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         && !joined.principal.is_empty();
     let (reconciled, mut confirmations) = mpsc::unbounded_channel();
     let (replay, mut replays) = mpsc::unbounded_channel();
+    let (pacing, mut pacing_events) = mpsc::unbounded_channel();
     let mut worker = configured.then(|| super::tools::Worker {
         app: app.clone(),
         call: joined.clone(),
@@ -768,6 +769,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
         asked: Default::default(),
         answers: Default::default(),
         auto_decided: false,
+        pacing,
         reconciled,
     });
     let mut routing = clarp_kernel::live_call::routing::Routing::default();
@@ -916,6 +918,9 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                 }else{Some(false)};
                 let _=done.send(sent);
             }
+            Some((event,detail))=pacing_events.recv()=> {
+                if let Some(t)=&transcript {t.add("pacing",json!({"event":event,"detail":detail}),app.clock.now_ms());}
+            }
             Some(note)=confirmations.recv()=> {
                 if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) {
                     told.said.push(Said::Voice(json!({"type":"session.thinking.append","content":note,"delegation_id":Value::Null})));
@@ -1008,6 +1013,19 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     active.store(false, std::sync::atomic::Ordering::Release);
     drop(voice);
     if let Some(transcript) = transcript {
+        while let Ok((event, detail)) = pacing_events.try_recv() {
+            transcript.add(
+                "pacing",
+                json!({"event":event,"detail":detail}),
+                app.clock.now_ms(),
+            );
+        }
+        if let Some(owned) = worker
+            && !owned.asked.is_empty()
+        {
+            let ids = owned.asked.into_iter().collect::<Vec<_>>().join(",");
+            transcript.add("pacing",json!({"event":"agentLiveAskDropped","detail":format!("call={call_id} ops={ids} reason=call ended")}),app.clock.now_ms());
+        }
         transcript.finish().await;
     }
     desk.ended(&call_id).await;
