@@ -6739,16 +6739,22 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         (status, &renamed["artifact"]["title"]),
         (200, &json!("Renamed"))
     );
-    let mut gone = envelope("gone");
-    gone["expected_version"] = json!("build-1");
-    gone["payload"]["version"] = json!("build-2");
+    let (_, thrown) = ask("POST", "/artifacts", capable, Some(&envelope("thrown")));
+    let stamp = json!({ "expected_updated_at": thrown["artifact"]["updated_at"] });
     assert_eq!(
-        ask("POST", "/artifacts", capable, Some(&gone)),
+        ask("POST", "/artifacts/thrown/discard", capable, Some(&stamp)).0,
+        200
+    );
+    let mut again_thrown = envelope("thrown");
+    again_thrown["expected_version"] = json!("build-1");
+    again_thrown["payload"]["version"] = json!("build-2");
+    assert_eq!(
+        ask("POST", "/artifacts", capable, Some(&again_thrown)),
         (409, refusal("not_open", ""))
     );
     let (status, said) = ask(
         "POST",
-        "/artifacts/gone",
+        "/artifacts/thrown",
         capable,
         Some(&json!({ "payload": form })),
     );
