@@ -20,6 +20,7 @@ pub mod agy;
 pub mod catalogue;
 pub mod claude;
 pub mod codex;
+mod grok_muse;
 pub mod history;
 pub mod limits;
 pub mod past;
@@ -110,7 +111,9 @@ pub struct Launch {
     pub args: Vec<String>,
     /// Set on top of the environment the tool inherits.
     pub env: Vec<(String, String)>,
-    /// What the tool reads on its standard input, which is then closed.
+    /// Append the turn input file path to the arguments and give the tool null stdin.
+    pub prompt_as_file: bool,
+    /// Prompt bytes for the turn input file or the tool’s standard input.
     pub stdin: Vec<u8>,
 }
 
@@ -187,6 +190,11 @@ pub trait Backend: Send + Sync {
     fn id(&self) -> &'static str;
 
     fn launch(&self, spec: &TurnSpec) -> Launch;
+
+    /// The named session is usable as soon as the tool starts, even if it prints nothing.
+    fn binds_at_spawn(&self) -> bool {
+        false
+    }
 
     /// The interpreter of one turn's output. `name` is a name for the turn that no other turn
     /// of any agent on any Host has: what the interpreter builds the ids of its pieces from
@@ -282,6 +290,8 @@ pub fn program(id: &str) -> Option<String> {
     match id {
         "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
         "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
+        "grok" => Some(named("CLARP_GROK_PROGRAM").unwrap_or_else(|| "grok".into())),
+        "muse" => Some(named("CLARP_MUSE_PROGRAM").unwrap_or_else(|| "muse".into())),
         "agy" => Some(named(AGY_PROGRAM_ENV).unwrap_or_else(|| "agy".to_string())),
         _ => None,
     }
@@ -301,6 +311,14 @@ pub fn by_id(id: &str) -> Option<Arc<dyn Backend>> {
         "agy" => Some(Arc::new(match named(AGY_PROGRAM_ENV) {
             Some(program) => agy::Agy::with_program(program),
             None => agy::Agy::new(),
+        })),
+        "grok" | "muse" => Some(Arc::new(grok_muse::Adapter {
+            tool: if id == "grok" {
+                clarp_kernel::grok_muse::Tool::Grok
+            } else {
+                clarp_kernel::grok_muse::Tool::Muse
+            },
+            program: program(id)?,
         })),
         "scripted" => Some(Arc::new(scripted::Scripted::echo())),
         _ => None,

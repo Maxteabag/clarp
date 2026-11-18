@@ -124,6 +124,7 @@ impl Backend for Claude {
         let mut stdin = message.to_string().into_bytes();
         stdin.push(b'\n');
         Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
@@ -165,6 +166,7 @@ impl Backend for Claude {
             }
         }
         Some(Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: Vec::new(),

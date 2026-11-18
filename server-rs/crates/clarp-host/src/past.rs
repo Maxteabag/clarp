@@ -85,6 +85,18 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
             let index = codex.join("state_5.sqlite");
             past::codex_sessions(&codex.join("sessions"), Some(&index), &of, all, limit)
         }
+        "grok" => past::native_sessions(
+            clarp_kernel::grok_muse::Tool::Grok,
+            &home,
+            if all { "" } else { &of },
+            limit,
+        ),
+        "muse" => past::native_sessions(
+            clarp_kernel::grok_muse::Tool::Muse,
+            &home,
+            if all { "" } else { &of },
+            limit,
+        ),
         AGY => past::agy_sessions(&agy, if all { "" } else { &of }, limit),
         _ => past::claude_sessions(&root, &of, all, limit),
     };
@@ -131,24 +143,6 @@ fn owner_of(app: &App, session: &str) -> Option<(String, String)> {
     };
     let owner = directory.members.iter().find(owns)?;
     Some((owner.record.agent_id.clone(), owner.record.session.clone()))
-}
-
-/// The transcript of a session to copy: under the project of `cwd`, else under any project.
-fn transcript_of(root: &Path, cwd: &str, session: &str) -> Option<PathBuf> {
-    let name = format!("{session}.jsonl");
-    let own = root.join(past::claude_project(cwd)).join(&name);
-    if own.is_file() {
-        return Some(own);
-    }
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .collect();
-    dirs.sort();
-    dirs.into_iter()
-        .map(|dir| dir.join(&name))
-        .find(|path| path.is_file())
 }
 
 /// The turns of a transcript as rows of the conversation of the agent that begins with
@@ -285,6 +279,28 @@ pub(crate) async fn begins(
         let forks = fork.is_some();
         return begins_where_it_ran(app, asked, resume, forks, "Codex", read_of_codex).await;
     }
+    if tool.eq_ignore_ascii_case("grok") {
+        return begins_where_it_ran(app, asked, resume, fork.is_some(), "Grok", |id| {
+            let log = past::native_transcript(
+                clarp_kernel::grok_muse::Tool::Grok,
+                &crate::config::home(),
+                id,
+            )?;
+            Some((clarp_kernel::grok_muse_history::grok(&log), String::new()))
+        })
+        .await;
+    }
+    if tool.eq_ignore_ascii_case("muse") {
+        return begins_where_it_ran(app, asked, resume, fork.is_some(), "Muse Code", |id| {
+            let log = past::native_transcript(
+                clarp_kernel::grok_muse::Tool::Muse,
+                &crate::config::home(),
+                id,
+            )?;
+            Some((clarp_kernel::grok_muse_history::muse(&log), String::new()))
+        })
+        .await;
+    }
     if tool.eq_ignore_ascii_case(AGY) {
         let forks = fork.is_some();
         return begins_where_it_ran(app, asked, resume, forks, "Antigravity", read_of_agy).await;
@@ -309,10 +325,11 @@ pub(crate) async fn begins(
         // A session is taken up where its tool will look for it: among those of the
         // directory the agent works in, and nowhere else. Claude Code finds a session only
         // under the directory it is started in.
-        let path = root
-            .join(past::claude_project(&cwd))
-            .join(format!("{session}.jsonl"));
-        let read = move || std::fs::read_to_string(path).ok();
+        let name = session.clone();
+        let read = move || {
+            let path = past::claude_transcript(&root, &cwd, &name, false)?;
+            std::fs::read_to_string(path).ok()
+        };
         let Some(transcript) = tokio::task::spawn_blocking(read).await.ok().flatten() else {
             let why = "Session is no longer available in this directory";
             return Err(refused(StatusCode::NOT_FOUND, why, why));
@@ -333,7 +350,7 @@ pub(crate) async fn begins(
     let session = ids::uuid();
     let (of, name, copy_as) = (cwd.clone(), source.clone(), session.clone());
     let copied = move || -> Result<String, StatusCode> {
-        let from = transcript_of(&root, &of, &name).ok_or(StatusCode::NOT_FOUND)?;
+        let from = past::claude_transcript(&root, &of, &name, true).ok_or(StatusCode::NOT_FOUND)?;
         let failed = |_| StatusCode::INTERNAL_SERVER_ERROR;
         let transcript = std::fs::read_to_string(from).map_err(failed)?;
         let copy = history::claude_forked(&transcript, &copy_as);

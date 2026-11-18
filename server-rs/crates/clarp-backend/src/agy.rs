@@ -190,6 +190,7 @@ impl Backend for Agy {
         // Bound to its flag: a message that begins with a dash is no flag.
         args.push(format!("--print={prompt}"));
         Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: vec![
@@ -245,6 +246,7 @@ impl Backend for Agy {
         }
         args.push(format!("--print={}", question.prompt));
         Some(Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args,
             env: Vec::new(),
@@ -283,6 +285,7 @@ impl Backend for Agy {
         ));
         Some(Apart {
             launch: Launch {
+                prompt_as_file: false,
                 program: self.program.clone(),
                 args,
                 env: Vec::new(),
@@ -760,7 +763,7 @@ mod tests {
         assert!(!kept("c-2"));
         // What is no name of a file is not looked for.
         for odd in ["..", "../c-1", "a/b", "a\\b"] {
-            assert!(kept(odd), "{odd:?}");
+            assert!(!kept(odd), "{odd:?}");
         }
         std::fs::remove_dir_all(&root).unwrap();
     }

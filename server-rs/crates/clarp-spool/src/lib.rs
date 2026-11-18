@@ -25,6 +25,10 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "kebab-case")]
 pub enum ShimEvent {
+    /// The conversation assigned to the child, synced before the child can read the prompt.
+    Session {
+        id: String,
+    },
     Spawned {
         pid: u32,
     },

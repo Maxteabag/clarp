@@ -153,6 +153,8 @@ pub struct ShimOrder {
     pub spool: PathBuf,
     pub socket: PathBuf,
     pub stdin_file: PathBuf,
+    pub prompt_as_file: bool,
+    pub named_session: Option<String>,
     pub cwd: PathBuf,
     pub program: String,
     pub args: Vec<String>,
@@ -2631,6 +2633,15 @@ impl Actor {
             prompt
         };
         let told = self.profile.told.as_ref().filter(|_| !bare);
+        let named_session = self
+            .backend
+            .binds_at_spawn()
+            .then(|| {
+                backend_session
+                    .clone()
+                    .unwrap_or_else(|| self.profile.conversation_id.clone())
+            })
+            .filter(|id| !id.is_empty());
         let launch = self.backend.launch(&TurnSpec {
             agent_id: self.profile.agent_id.clone(),
             session: self.profile.session.clone(),
@@ -2713,6 +2724,8 @@ impl Actor {
             spool: self.profile.spool_path_of(turn, attempt),
             socket: self.profile.socket_path_of(turn, attempt),
             stdin_file,
+            prompt_as_file: launch.prompt_as_file,
+            named_session,
             cwd: self.profile.cwd.clone(),
             program: launch.program,
             args: launch.args,

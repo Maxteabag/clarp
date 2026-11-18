@@ -139,5 +139,5 @@ fn the_whole_answer_is_shaped_as_the_python_hosts() {
         .collect();
     assert_eq!(tools, ["claude", "codex"]);
     // A tool this Host does not run has no row.
-    assert_eq!(catalogue::row("grok", &Found::default(), AT), json!({}));
+    assert_eq!(catalogue::row("unknown", &Found::default(), AT), json!({}));
 }

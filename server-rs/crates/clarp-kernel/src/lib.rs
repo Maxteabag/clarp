@@ -24,6 +24,8 @@ pub mod explain;
 pub mod failures;
 pub mod fork;
 pub mod goals;
+pub mod grok_muse;
+pub mod grok_muse_history;
 pub mod heard;
 pub mod heartbeat;
 pub mod helpers;

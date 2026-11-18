@@ -381,3 +381,55 @@ fn a_shim_says_ready_when_the_turn_is_taken_and_the_tool_is_up() {
     assert_eq!(shim.wait().unwrap().code(), Some(0));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn prompt_delivery_is_selected_by_the_shim_flag() {
+    let root = std::env::temp_dir().join(format!("clarp-shim-prompt-{}", std::process::id()));
+    std::fs::create_dir_all(&root).unwrap();
+    for as_file in [false, true] {
+        for named in [false, true] {
+            let dir = root.join(format!("{as_file}-{named}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let input = dir.join("turn input");
+            let spool = dir.join("turn.jsonl");
+            std::fs::write(&input, "turn bytes").unwrap();
+            let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"));
+            shim.arg("--spool")
+                .arg(&spool)
+                .arg("--socket")
+                .arg(dir.join("s"))
+                .arg("--stdin-file")
+                .arg(&input);
+            if as_file {
+                shim.arg("--prompt-as-file");
+            }
+            if named {
+                shim.args(["--named-session", "session"]);
+            }
+            shim.args([
+                "--",
+                "python3",
+                "-c",
+                r#"import json, os, select, sys
+fd = os.readlink("/proc/self/fd/0")
+data = sys.stdin.read() if fd.startswith("pipe:") and select.select([0], [], [], 1)[0] else ""
+print(json.dumps([sys.argv[1:], fd == "/dev/null", data]))
+"#,
+            ]);
+            // These are ordinary child arguments, even for a named session.
+            shim.args(["--prompt-file", "/dev/stdin"]);
+            assert!(shim.stdout(Stdio::null()).status().unwrap().success());
+            let entries = records(&spool);
+            let said: serde_json::Value = serde_json::from_str(outs(&entries)[0]).unwrap();
+            let mut expected = vec!["--prompt-file", "/dev/stdin"];
+            if as_file {
+                expected.push(input.to_str().unwrap());
+            }
+            assert_eq!(
+                said,
+                serde_json::json!([expected, as_file, if as_file { "" } else { "turn bytes" }])
+            );
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -30,7 +30,7 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 3] = ["claude", "codex", "agy"];
+const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
 /// How long a tool has to answer one question about itself, where nothing else is declared
 /// of the question (Antigravity fetches its list of models, and is given longer).
 const WITHIN: Duration = Duration::from_millis(2_500);
@@ -42,7 +42,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// an app, and what an account has used is not read. Codex, beside those: a past session of
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app.
-const NOT_YET: [(&str, &[&str]); 3] = [
+const NOT_YET: [(&str, &[&str]); 4] = [
     (
         "claude",
         &[
@@ -64,6 +64,7 @@ const NOT_YET: [(&str, &[&str]); 3] = [
         ],
     ),
     ("agy", &["supports_compact"]),
+    ("grok", &["supports_compact", "supports_auth"]),
 ];
 
 /// What was found, with when, and under which logins.
@@ -171,6 +172,31 @@ async fn row_of(tool: &str, home: &Path, observed_at: &str) -> Value {
                         said.filter(|(exit, _)| *exit == 0).map(|(_, out)| out)
                     }
                     // Kept in a file of the tool's own.
+                    Some("directory") if tool == "muse" => {
+                        let root = clarp_backend::past::native_home(
+                            clarp_kernel::grok_muse::Tool::Muse,
+                            home,
+                        );
+                        tokio::task::spawn_blocking(move || {
+                            let mut paths: Vec<_> = std::fs::read_dir(root.join("model-catalog"))
+                                .ok()?
+                                .flatten()
+                                .map(|e| e.path())
+                                .filter(|p| p.extension().is_some_and(|e| e == "json"))
+                                .collect();
+                            paths.sort();
+                            let mut rows = Vec::new();
+                            for path in paths {
+                                let Some(raw) = text_of(&path) else { break };
+                                let data: Value = serde_json::from_str(&raw).unwrap_or_default();
+                                rows.extend(data["rows"].as_array().into_iter().flatten().cloned());
+                            }
+                            Some(json!({"rows":rows}).to_string())
+                        })
+                        .await
+                        .ok()
+                        .flatten()
+                    }
                     Some("file") => {
                         let file = claude_file(home);
                         let read = tokio::task::spawn_blocking(move || text_of(&file));

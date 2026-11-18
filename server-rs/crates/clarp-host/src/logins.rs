@@ -118,9 +118,11 @@ pub(crate) fn installed(program: &str) -> bool {
 
 /// The tools this Host runs that a person signs in to, as an app's screen of accounts names
 /// them: the tool, its name, and how one signs in to it.
-const TOOLS: [(&str, &str, &str); 2] = [
+const TOOLS: [(&str, &str, &str); 4] = [
     ("claude", "Claude", "cli"),
     ("codex", "Codex", "device_code"),
+    ("grok", "Grok", "device_code"),
+    ("muse", "Muse Code", "none"),
 ];
 
 /// A tool's sign-in as an app is told it (`GET /backend-auth`), in the Python Host's fields.
@@ -131,6 +133,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
     let files = files(home);
     let rows: Vec<Value> = TOOLS
         .iter()
+        .filter(|(tool, _, _)| every || matches!(*tool, "claude" | "codex"))
         .map(|(tool, name, login_kind)| {
             let mut row = json!({ "id": tool, "name": name, "login_kind": login_kind });
             if every {
@@ -140,6 +143,28 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 row["note"] = json!("Sign in with the tool itself on this Computer.");
             }
             let program = clarp_backend::program(tool).unwrap_or_default();
+            if *tool == "muse" {
+                let present = installed(&program);
+                row["installed"] = json!(present);
+                for key in ["logged_in", "credential_present", "can_logout"] {
+                    row[key] = json!(false);
+                }
+                for key in ["account", "method", "validation_error", "error"] {
+                    row[key] = json!("");
+                }
+                row["expires_at"] = json!(0);
+                row["state"] = json!(if present {
+                    "host_managed"
+                } else {
+                    "signed_out"
+                });
+                row["note"] = json!(if present {
+                    "Sign in to Muse Code on the Host."
+                } else {
+                    ""
+                });
+                return row;
+            }
             if !installed(&program) {
                 row["installed"] = json!(false);
                 row["logged_in"] = json!(false);
@@ -149,6 +174,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 .get(tool)
                 .map_or((false, 0), |file| credential(tool, file));
             let state = match (present, expires_at) {
+                _ if matches!(*tool, "muse" | "grok") => "unverified",
                 (false, _) => "signed_out",
                 (true, at) if at > 0 && at <= now_ms => "expired",
                 (true, _) => "unverified",
@@ -179,9 +205,55 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
     };
     let tasks: serde_json::Map<String, Value> = TOOLS
         .iter()
+        .filter(|(_, _, login_kind)| *login_kind != "none")
         .map(|(tool, _, _)| ((*tool).to_string(), idle(tool)))
         .collect();
     json!({ "backends": rows, "tasks": tasks })
+}
+
+/// Grok has no credential file to inspect. Its models command succeeds even when
+/// signed out, so both its exit code and its diagnostic matter.
+pub async fn probe_grok(row: &mut Value) {
+    let Some(program) = clarp_backend::program("grok") else {
+        return;
+    };
+    let mut command = tokio::process::Command::new(program);
+    command
+        .arg("models")
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
+    for key in crate::OWN_SECRETS {
+        command.env_remove(key);
+    }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), command.output()).await;
+    let (valid, error) = match result {
+        Ok(Ok(done)) => {
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&done.stdout),
+                String::from_utf8_lossy(&done.stderr)
+            );
+            let valid = done.status.success() && !said.to_lowercase().contains("not authenticated");
+            let error = if done.status.success() {
+                String::new()
+            } else {
+                format!("Grok status failed ({})", done.status)
+            };
+            (valid, error)
+        }
+        Ok(Err(error)) => (false, error.to_string()),
+        Err(_) => (false, "Grok status timed out".into()),
+    };
+    row["state"] = json!(if valid {
+        "valid"
+    } else if error.is_empty() {
+        "signed_out"
+    } else {
+        "error"
+    });
+    row["credential_present"] = json!(valid);
+    row["logged_in"] = json!(valid);
+    row["error"] = json!(error);
 }
 
 /// Looks at the logins every `every`, for as long as the Host runs, and tells the agents of

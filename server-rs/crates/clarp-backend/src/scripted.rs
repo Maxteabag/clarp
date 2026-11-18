@@ -61,6 +61,7 @@ impl Backend for Scripted {
         let mut stdin = spec.prompt.clone().into_bytes();
         stdin.push(b'\n');
         Launch {
+            prompt_as_file: false,
             program: self.program.clone(),
             args: self.args.clone(),
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],

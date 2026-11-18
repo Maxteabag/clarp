@@ -127,6 +127,11 @@ pub async fn read(
 ) -> Result<String, Unanswered> {
     let none = || Unanswered::NoSuchTool(backend.to_string());
     let tool = clarp_backend::by_id(backend).ok_or_else(none)?;
+    // These tools auto-approve actions for agent turns. A scratch cwd alone cannot
+    // make a janitor's reading of somebody else's text read-only.
+    if matches!(backend, "grok" | "muse") {
+        return Err(none());
+    }
     let place = a_place("reading")?;
     // A tool that answers in a home of its own has it here, and works beside it: what it
     // reads for is not where its login is linked.
@@ -284,6 +289,7 @@ mod tests {
     /// A tool for one question that is a line of shell.
     fn shell(line: &str, question: &str) -> Launch {
         Launch {
+            prompt_as_file: false,
             program: "sh".to_string(),
             args: vec!["-c".to_string(), line.to_string()],
             env: vec![("ASKED_AS".to_string(), "a question".to_string())],
