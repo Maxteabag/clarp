@@ -87,7 +87,8 @@ def _check_catalog(data, reasons):
                 or any(k not in declared or v not in shapes for k, v in component.get("reads", {}).items())):
             raise ValueError("catalog component")
         for key in component.get("bindings", {}):
-            if len(declared[key].get("required", ())) != 1:
+            # The file states the bind shape twice; the validator reads the prop's copy.
+            if declared[key] != shapes.get("$bindState"):
                 raise ValueError("binding shape")
     for rule in found:
         if not rule.keys() <= named or rule.get("type", "string") not in _TYPES:
