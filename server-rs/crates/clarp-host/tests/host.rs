@@ -12655,7 +12655,9 @@ fn a_connection_that_drops_is_tried_again_and_a_turn_that_never_gets_through_say
         "key=$(printf '%s' \"$message\" | cksum | cut -d' ' -f1)\n",
         &format!("file=\"{}/$key\"\n", counts.display()),
         "before=$(cat \"$file\" 2>/dev/null || echo 0)\n",
-        "echo $((before + 1)) > \"$file\"\n",
+        // The reader sums every file in counts. Stage outside it, on the same filesystem.
+        "next=\"${file%/*}.next.$$\"\n",
+        "echo $((before + 1)) > \"$next\" && mv \"$next\" \"$file\" || exit 1\n",
         "case \"$message\" in\n*once*) drops=1 ;;\n*always*) drops=9 ;;\n*) drops=0 ;;\nesac\n",
         "if [ \"$before\" -lt \"$drops\" ]; then\n",
         init,
