@@ -1521,16 +1521,14 @@ of this kind, counted there and read only). A ring may ask that its
 conversation be held live: the phone that answers talks to a voice model, which is told who it is and what
 the call is about, and no call of the ordinary kind starts. The owner may start such a call with an agent
 too (`POST /calls/live`). It is built in three layers, each held to the Python Host by that Host's own
-answers, and one landing of two: this one is the call, the next is the tools a profile may opt its calls
-into.
+answers. A profile may also opt individual stories into the call tools.
 *What a call is told* (`clarp-kernel` `live_call.rs`, by `agent_ring_live.py` and
 `agent_live_settings.py`; `tools/live-call-vectors.py`): the context a producer gives of an event
 (CONTEXT-v1: every field, its length, what a moment with a zone is, as CPython reads one: 5,298 moments),
 the profile an operator approved for an agent (its stories, each file pinned by its sum), the snapshot a
 ring is frozen with and its digest, what the voice is told from it, the context of a call the user starts,
 which agents take such calls (the folder of profiles read as far as it may be, and what is known kept
-through a moment in which a profile cannot be read), and the tools a profile opts into (170 profiles,
-which this Host reads and does not run yet).
+through a moment in which a profile cannot be read), and the tools a profile opts into (170 profile cases).
 *The ring* (`rings/live.rs`, by `agent_rings.py` and `agent_ring_live.py`; `tools/live-ring-vectors.py`,
 12 scripts of 585 steps): it is placed only where a phone that can hold such a call still receives rings,
 and never as an ordinary ring in its place; the same event rings once; it is shown to the phones that may
@@ -1562,9 +1560,16 @@ granted and not joined keeps its minute. The agent's own tool rings so too
 (`clarp-admin call ring --oracle --context-file FILE`). The features are advertised (`agent_ring_live`,
 `agent_call_live`, `agent_ring_device_optout`), and an agent's row says how it takes the user's call
 (`call_mode`).
-Not with this landing, each registered in `docs/differences.md`: the tools of a call (a profile that opts
-a call into them is refused in words until they are built, since a voice told that it has tools it has not
-would promise what nobody does), and pushes to Android phones. The push by which such a ring reaches a
+*The tools* (18 Nov 2026). The admitted call keeps its frozen team, caller and story. Its
+voice remains connected while a side router examines new speech and proposes up to eight
+actions. The Host checks team membership, records delegation attempts, asks the director
+or the scripted agent, and appends receipts to the admitted voice. The director owns the
+callback timer. An unclear callback can repeat once under the same operation id. A queued
+delegation is checked by one read of the director's intent. The contact's answer returns
+in bounded parts and is acknowledged after the voice transport accepts its first part.
+An opted-in transcript keeps text, receipts and pacing entries in the call's private directory.
+The receiver and sender flows are compared with `live-call-tools-vectors.json`.
+The push by which such a ring reaches a
 locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
 until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user
 starts needs no push. No test and no live check reaches the paid voice.

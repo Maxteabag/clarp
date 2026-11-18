@@ -849,20 +849,18 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             break;
         }
         let now = seconds(began);
-        if let (Some(owned), Some(key)) = (&worker, &key) {
-            if let Some(route) = routing.begin(
-                &owned.call.snapshot,
-                now,
-                &super::tools::time(app.clock.now_ms()),
-            ) && let Some(mut owned) = worker.take()
-            {
-                let completed = completed.clone();
-                let key = key.clone();
-                tokio::spawn(async move {
-                    let receipts = owned.route(&key, &route).await;
-                    let _ = completed.send((owned, route, receipts));
-                });
-            }
+        if let (Some(owned), Some(key)) = (&worker, &key)
+            && let Some(route) = routing.begin(&owned.call.snapshot, now, || {
+                super::tools::time(app.clock.now_ms())
+            })
+            && let Some(mut owned) = worker.take()
+        {
+            let completed = completed.clone();
+            let key = key.clone();
+            tokio::spawn(async move {
+                let receipts = owned.route(&key, &route).await;
+                let _ = completed.send((owned, route, receipts));
+            });
         }
         if let Some(owned) = worker.as_mut() {
             if !polling && !owned.asked.is_empty() && now - last_poll >= 2.0 {

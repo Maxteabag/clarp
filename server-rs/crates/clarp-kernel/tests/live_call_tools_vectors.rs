@@ -224,7 +224,7 @@ fn the_live_router_sees_only_new_user_requests_with_the_recent_conversation() {
         if matches!(
             event["type"].as_str(),
             Some("tick" | "session.delegation.created")
-        ) && let Some(route) = call.begin(&snapshot, at, "12:13")
+        ) && let Some(route) = call.begin(&snapshot, at, || "12:13".into())
         {
             bodies.push(route.body.clone());
             spoken = call.finish(route, &[], false);

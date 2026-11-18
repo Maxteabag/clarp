@@ -70,7 +70,12 @@ impl Routing {
         }
     }
 
-    pub fn begin(&mut self, snapshot: &Value, now: f64, local_time: &str) -> Option<Route> {
+    pub fn begin(
+        &mut self,
+        snapshot: &Value,
+        now: f64,
+        local_time: impl FnOnce() -> String,
+    ) -> Option<Route> {
         if self.in_flight
             || self.calls >= 30
             || (!self.waiting && (self.revision <= self.routed || now - self.last_user < 1.2))
@@ -100,7 +105,7 @@ impl Routing {
             .filter(|f| f.role == "user" && f.revision > self.routed)
             .map(|f| f.text.as_str())
             .collect();
-        let request = json!({"conversation":conversation,"current_user_requests":current,"actions_taken":self.taken,"now":local_time});
+        let request = json!({"conversation":conversation,"current_user_requests":current,"actions_taken":self.taken,"now":local_time()});
         self.in_flight = true;
         self.calls += 1;
         Some(Route {
