@@ -1476,7 +1476,8 @@ impl Actor {
         let Some(turn) = item.turn else {
             return Ok(Value::Null);
         };
-        let raw:Value=serde_json::from_slice(&item.body).map_err(|e|ActorError::Corrupt(e.to_string()))?;
+        let raw: Value =
+            serde_json::from_slice(&item.body).map_err(|e| ActorError::Corrupt(e.to_string()))?;
         let message = self.message_at(item.seq)?;
         let foreign = !message.unminted
             || !matches!(&message.origin,Origin::Trigger{name} if name=="automation");
@@ -2069,8 +2070,14 @@ impl Actor {
 
     /// File the Host's opening reservation in the same message as the
     /// assigned turn, so a crash cannot turn a matching client id into proof.
-    pub fn send_for_opening(&mut self,message:&Message,admission:Admission,reservation:serde_json::Value,now_ms:i64)->Result<(Sent, Outputs),ActorError>{
-        self.take(message,admission,Vec::new(),Some(reservation),now_ms)
+    pub fn send_for_opening(
+        &mut self,
+        message: &Message,
+        admission: Admission,
+        reservation: serde_json::Value,
+        now_ms: i64,
+    ) -> Result<(Sent, Outputs), ActorError> {
+        self.take(message, admission, Vec::new(), Some(reservation), now_ms)
     }
 
     /// Tells the agent something of the Host's own, and writes what belongs with it in the
@@ -2101,15 +2108,17 @@ impl Actor {
         message: &Message,
         admission: Admission,
         with: Vec<NewItem>,
-        reservation:Option<serde_json::Value>,
+        reservation: Option<serde_json::Value>,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        let encoded=if let Some(reservation)=reservation {
-            serde_json::to_value(message).and_then(|mut row|{
-                row["_call_opening"]=reservation;
+        let encoded = if let Some(reservation) = reservation {
+            serde_json::to_value(message).and_then(|mut row| {
+                row["_call_opening"] = reservation;
                 serde_json::to_vec(&row)
             })
-        } else {serde_json::to_vec(message)};
+        } else {
+            serde_json::to_vec(message)
+        };
         let body = encoded.map_err(|error| {
             ActorError::Corrupt(format!("a message could not be written: {error}"))
         })?;
