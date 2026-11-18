@@ -47,7 +47,7 @@ def reference(root):
     record(live,Budget('s','b','tokens',300,supports_prose=False))
     record([Pack('t',(Term('One','t'),Term('ONE','t'),Term('Two','t')),priority=-1.0)],Budget('s','b','terms',300))
     # Each component of the rank can decide an otherwise tied contest.
-    compete=[Pack('low',(Term('Rare','low',1,0), Term('Recent','low',0.5,1)),priority=1),
+    compete=[Pack('low',(Term('Rare','low',1.0,0.0), Term('Recent','low',0.5,1)),priority=1),
              Pack('high',(Term('Learned','high',0.5,0,True),),priority=2)]
     for n in (1,2,3):
         record(compete,Budget('s','test','terms',n))
