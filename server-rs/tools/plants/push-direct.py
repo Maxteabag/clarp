@@ -16,7 +16,7 @@ PLANTS = [
     (K, 'vectors', 'another phone retries the failed credential relay', 'self.base = Some(Path::Direct);', 'self.base = Some(Path::Account);'),
     (K, 'vectors', 'a grant outage repeats for each phone', 'self.grant_down = Some(why.clone());', 'self.grant_down = None;'),
     (K, 'vectors', 'only a key or credential enables alerts', 'base.is_some() || (relay && relay_allowed)', 'base.is_some()'),
-    (H, 'host', 'a permanent token rejection is temporary', 'if status == 410 ||', 'if status == 411 ||'),
+    (H, 'host', 'a permanent token rejection is temporary', 'if status == 410', 'if status == 411'),
 ]
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

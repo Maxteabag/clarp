@@ -5322,19 +5322,59 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
         relay.answers(relay_status, json!({"results": [{"status": 200}]}));
         let (key, public) = push_key(&place);
         let settings = place.root.join("push.toml");
-        std::fs::write(&settings, format!(
-            "[apns]\nmode = '{mode}'\nkey_path = '{}'\nkey_id = 'KEY'\nteam_id = 'TEAM'\n", key.display()
-        )).unwrap();
-        let host = place.start_in("admin-of-test", &["--push-relay", &format!("http://{}", relay.address), "--push-keys", settings.to_str().unwrap()], &[("CLARP_APNS_ENDPOINT", &service.address)]);
+        std::fs::write(
+            &settings,
+            format!(
+                "[apns]\nmode = '{mode}'\nkey_path = '{}'\nkey_id = 'KEY'\nteam_id = 'TEAM'\n",
+                key.display()
+            ),
+        )
+        .unwrap();
+        let host = place.start_in(
+            "admin-of-test",
+            &[
+                "--push-relay",
+                &format!("http://{}", relay.address),
+                "--push-keys",
+                settings.to_str().unwrap(),
+            ],
+            &[("CLARP_APNS_ENDPOINT", &service.address)],
+        );
         let agent = host.new_agent("Echo");
         let (phone, _) = pair(&host, "Phone", "full");
         let token = "ab".repeat(32);
-        let grant = format!("pg1.{}.{}.{}", "a".repeat(64), "b".repeat(16), "c".repeat(64));
-        assert_eq!(host.ask_as(&phone, "POST", "/devices", Some(&json!({"token": token, "push_grant": grant}))).0, 200);
-        let (status, rung) = host.ask("POST", "/calls/ring", Some(&json!({"agent": agent, "reason": "Water", "opening_line": "Hello"})));
+        let grant = format!(
+            "pg1.{}.{}.{}",
+            "a".repeat(64),
+            "b".repeat(16),
+            "c".repeat(64)
+        );
+        assert_eq!(
+            host.ask_as(
+                &phone,
+                "POST",
+                "/devices",
+                Some(&json!({"token": token, "push_grant": grant}))
+            )
+            .0,
+            200
+        );
+        let (status, rung) = host.ask(
+            "POST",
+            "/calls/ring",
+            Some(&json!({"agent": agent, "reason": "Water", "opening_line": "Hello"})),
+        );
         assert_eq!(status, 200, "{rung}");
         let delivery = &rung["delivery"];
-        assert_eq!((&delivery["sent"], &delivery["failed"], &delivery["disabled"]), (&json!(sent), &json!(failed), &json!(disabled)), "{mode} {rung}");
+        assert_eq!(
+            (
+                &delivery["sent"],
+                &delivery["failed"],
+                &delivery["disabled"]
+            ),
+            (&json!(sent), &json!(failed), &json!(disabled)),
+            "{mode} {rung}"
+        );
         assert_eq!(relay.taken().len(), relayed);
         let requests = service.handed();
         assert_eq!(requests.len(), handed);
@@ -5342,11 +5382,16 @@ fn an_alert_uses_the_hosts_key_in_direct_mode_and_when_the_relay_is_down_in_auto
             assert_eq!(path, &format!("/3/device/{token}"));
             assert_eq!(headers["apns-push-type"], "alert");
             assert_eq!(headers["apns-topic"], "com.maxteabag.clarp");
-            assert_eq!(read_push_token(&headers["authorization"], &public).1["iss"], "TEAM");
+            assert_eq!(
+                read_push_token(&headers["authorization"], &public).1["iss"],
+                "TEAM"
+            );
             assert_eq!(payload["ring_id"], rung["ring"]["ring_id"]);
         }
         if disabled > 0 {
-            wait_for("direct rejection disables the token", || host.get("/devices/push-tokens")["tokens"][0]["disabled_at"].is_number());
+            wait_for("direct rejection disables the token", || {
+                host.get("/devices/push-tokens")["tokens"][0]["disabled_at"].is_number()
+            });
         }
     }
 }
