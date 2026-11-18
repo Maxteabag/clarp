@@ -236,11 +236,6 @@ d90e2215ebd4  oracle-delegations: the answer to the delegation, before the agent
 # says which change of the reference it is, is dated, and goes with the landing of its port; a line
 # that stands here for more than a few days is a defect of the rebuild's own.
 #
-# The contract a Host says it speaks. The Python Host says 102 since its render_spec (PR 418, 18 Nov
-# 2026); this Host says the contract it has built, 101, until render_spec is built here (the branch
-# rebuild/render-spec).
-323e45582862  who-is-there: contract.host, 102 there and 101 here until render_spec is built
-
 # The words a cron number that is no plain number is refused in. The Python Host changed them on
 # 18 Nov 2026 (its PR 427, R66: ASCII digits only, in the words of its one refusal); this Host says the
 # older words until the port of that evening's fixes lands (the branch rebuild/oracle-r58).

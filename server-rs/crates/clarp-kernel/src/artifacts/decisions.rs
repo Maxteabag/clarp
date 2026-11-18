@@ -544,6 +544,7 @@ impl ArtifactBook {
             payload,
             artifact_id: String::new(),
             expected_version: None,
+            validate_only: false,
         };
         let mut artifact = self.make(maker, &new, ctx)?;
         decision.decision_id = new_id("decision", ctx);
