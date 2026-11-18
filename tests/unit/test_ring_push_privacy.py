@@ -112,3 +112,22 @@ def test_revoke_cleanup_failure_is_logged_and_leftover_cannot_receive(pushes, mo
     assert [entry["principal"] for entry in rings.voip_tokens()] == [owner]
     assert any(call.args[0] == "devicePairingVoipForgetFail" for call in failures.call_args_list)
     assert ring()["voip"]["sent"] == 0 and pushes[0] == []
+
+
+@pytest.mark.parametrize("show", [False, True])
+def test_ring_alert_reason_obeys_preference_in_both_fields(pushes, show, monkeypatch):
+    calls, _ = pushes
+    from tests.unit.test_agent_rings import Stream
+    stream = Stream()
+    monkeypatch.setitem(rings._context, "stream", stream)
+    apns.register_token(ALERT, owner=pair())
+    rings.update_settings({"show_reason": show})
+    assert ring()["sent"] == 1
+    [(kind, token, payload)] = calls
+    assert (kind, token) == ("alert", ALERT)
+    assert payload["aps"]["alert"]["body"] == (REASON if show else "Incoming call")
+    assert ("reason" in payload) is show
+    if show:
+        assert payload["reason"] == REASON
+    [event] = stream.of("agent-ring")
+    assert event["reason"] == REASON
