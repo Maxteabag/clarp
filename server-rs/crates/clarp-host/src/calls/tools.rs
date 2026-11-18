@@ -22,6 +22,10 @@ pub struct Worker {
     pub active: Arc<AtomicBool>,
     pub team: Team,
     pub taken: Vec<Value>,
+    pub asked: std::collections::BTreeSet<String>,
+    pub answers: clarp_kernel::live_call::answers::Answers,
+    pub auto_decided: bool,
+    pub reconciled:tokio::sync::mpsc::UnboundedSender<String>,
 }
 
 pub fn time(epoch_ms: i64) -> String {
@@ -29,6 +33,15 @@ pub fn time(epoch_ms: i64) -> String {
     clarp_kernel::oracle::threads::iso_time(epoch_ms, &zone)
         .and_then(|iso| iso.get(11..16).map(str::to_owned))
         .unwrap_or_else(|| "?".into())
+}
+
+impl super::Desk {
+    fn tool_slot(&self,slot:&str)->Arc<tokio::sync::Mutex<()>>{
+        let mut slots=self.tool_slots.lock().unwrap_or_else(|err|err.into_inner());
+        slots.retain(|_,slot|slot.strong_count()>0);
+        let slot=slots.entry(slot.into()).or_default();
+        slot.upgrade().unwrap_or_else(||{let active=Arc::new(tokio::sync::Mutex::new(()));*slot=Arc::downgrade(&active);active})
+    }
 }
 
 impl Worker {
@@ -69,15 +82,19 @@ impl Worker {
     async fn callback(&self, name: &str, args: &Value, explicit: bool) -> Value {
         let b = self.binding();
         let slot = b.slot();
+        let mutex=self.app.calls.tool_slot(&slot);
+        let _owner=mutex.lock().await;
         let known = self.app.fleet.kept("live_tools", slot.clone()).await;
         let mut row = match known {
-            Ok(Some(bytes)) => match serde_json::from_slice(&bytes) {
+            Ok(Some(bytes)) => match serde_json::from_slice::<Value>(&bytes) {
                 Ok(value) => value,
                 Err(_) => return failed(name),
             },
             Ok(None) => Value::Null,
             Err(_) => return failed(name),
         };
+        let now=self.app.clock.now_ms() as f64 / 1000.0;
+        if row["at"].as_f64().is_some_and(|at| now-at >= 86400.0){row=Value::Null;}
         let principal = self.call.principal.clone();
         let eligible = self
             .app
@@ -109,9 +126,108 @@ impl Worker {
         }
     }
 
+    async fn ask(&mut self, args: &Value) -> Value {
+        let question = args["question"]
+            .as_str()
+            .unwrap_or("")
+            .split(clarp_kernel::python::blank)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut receipt = json!({"tool":"ask_my_agent"});
+        if question.is_empty() || question.chars().count() > 4000 {
+            receipt["status"] = json!("refused");
+            receipt["reason"] = json!(if question.is_empty() {
+                "empty question"
+            } else {
+                "question too long"
+            });
+            return receipt;
+        }
+        let contact = &self.call.snapshot["live_tools"]["contact"];
+        let session = contact["session"].as_str().unwrap_or("");
+        let id = team::operation(
+            "sandra-",
+            &[
+                &self.app.server_id,
+                &self.call.principal,
+                &self.call.call_id,
+                session,
+                &question.to_lowercase(),
+            ],
+        );
+        if self.asked.contains(&id) || self.answers.contains(&id) {
+            return json!({"tool":"ask_my_agent","status":"already_asked","operation_id":id,"note":"already asked in this call; the answer comes back by itself (read_result replays it)"});
+        }
+        let name = self.call.snapshot["profile"]["display_name"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("the agent");
+        let request = format!(
+            "Spørsmål fra {name}s Live-samtale med Peter (svar kort og muntlig, på norsk; slå opp det som trengs med verktøyene dine): {question}"
+        );
+        let row = match crate::oracle::live_ask(
+            &self.app,
+            &self.call.principal,
+            (&id, session, &request),
+        )
+        .await
+        {
+            Ok(row) => row,
+            Err(_) => {
+                match crate::oracle::live_rows(&self.app, &[id.clone()].into_iter().collect()).await
+                {
+                    Ok(rows) => match rows.first() {
+                        Some(row) => row.told(),
+                        None => {
+                            return json!({"tool":"ask_my_agent","status":"failed","reason":"RuntimeError","note":"the question could not be sent; say so"});
+                        }
+                    },
+                    Err(_) => {
+                        return json!({"tool":"ask_my_agent","status":"unknown","operation_id":id,"reason":"RuntimeError","note":"not known whether the question went out; not resent; say so"});
+                    }
+                }
+            }
+        };
+        self.asked.insert(id.clone());
+        json!({"tool":"ask_my_agent","status":"asked","operation_id":id,"regi_status":Value::Null,"reason":if row["status"]=="failed"{row["error"].clone()}else{Value::Null},"note":"say briefly that you are checking (\"jeg sjekker\"); the answer comes back in parts"})
+    }
+
+    pub fn adopt(&mut self, rows: Vec<clarp_kernel::oracle::delegations::Delegation>) {
+        for row in rows {
+            if row.status.active()
+                || row.owner_principal != self.call.principal
+                || !self.asked.contains(&row.delegation_id)
+            {
+                continue;
+            }
+            let name = self.call.snapshot["live_tools"]["contact"]["name"].as_str();
+            if let Ok(base) = clarp_kernel::oracle::relay::result_relay(&row, name)
+                && self
+                    .answers
+                    .queue(
+                        &base.key,
+                        &base.label,
+                        &base.source,
+                        &base.text,
+                        &base.request,
+                    )
+                    .is_ok()
+            {
+                self.asked.remove(&row.delegation_id);
+            }
+        }
+    }
+
     pub async fn execute(&mut self, tool: &str, args: &Value, explicit: bool) -> Value {
         if !self.current().await {
             return team::ended(tool);
+        }
+        if tool == "ask_my_agent" {
+            return self.ask(args).await;
+        }
+        if tool == "read_result" {
+            return self.answers.read(args);
         }
         if matches!(tool, "schedule_callback" | "cancel_callback") {
             return self.callback(tool, args, explicit).await;
@@ -199,9 +315,48 @@ impl Worker {
                 });
                 row["receipt"] = receipt.clone();
                 let _ = self.save(&id, &row).await;
+                if let Some(intent)=receipt["intent"].as_str().filter(|s|!s.is_empty()) && !receipt["sesjon"].is_null() {
+                    let key=team::operation("dl-",&[b.host,b.principal,b.agent,proposed.session,intent]);
+                    let mutex=self.app.calls.tool_slot(&key);
+                    let _guard=mutex.lock().await;
+                    let mut known=row.clone();known["kind"]=json!("delegate_intent");known["request_id"]=json!(id);
+                    if self.save(&key,&known).await && receipt["status"]=="queued_at_regi" &&
+                        let Some(url)=live_call::on_this_machine(cfg["delegate"].get("reconcile_url")) {
+                        self.reconcile(key,url.into(),receipt.clone(),id,proposed.name.to_owned());
+                    }
+                }
                 receipt
             }
         }
+    }
+
+    fn reconcile(&self,key:String,url:String,receipt:Value,attempt:String,agent:String){
+        let (app,active,call)=(self.app.clone(),self.active.clone(),self.call.clone());
+        let notes=self.reconciled.clone();
+        tokio::spawn(async move{
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            if !active.load(Ordering::Acquire) || !app.calls.step(&app,(&call.call_id,call.call_epoch),|b|b.holds()).await.unwrap_or(false){return;}
+            let session=receipt["sesjon"].as_i64().or_else(||receipt["sesjon"].as_str()?.parse().ok());
+            let Some(session)=session else{return;};
+            let encode=|s:&str|clarp_kernel::portraits::quoted(s).replace("%20","+");
+            let url=format!("{url}?sesjon={session}&principal={}&intent={}",encode(&call.principal),encode(receipt["intent"].as_str().unwrap_or("")));
+            let answer=tokio::task::spawn_blocking(move || {
+                let agent:ureq::Agent=ureq::Agent::config_builder().proxy(None).max_redirects(0).timeout_global(Some(Duration::from_secs(30))).build().into();
+                let mut response=agent.get(&url).call().ok()?;
+                response.body_mut().with_config().limit(65536).read_json::<Value>().ok()
+            }).await.ok().flatten();
+            let Some(answer)=answer else{return;};
+            let mutex=app.calls.tool_slot(&key);
+            let _guard=mutex.lock().await;
+            let Some(mut row)=app.fleet.kept("live_tools",key.clone()).await.ok().flatten().and_then(|bytes|serde_json::from_slice::<Value>(&bytes).ok()) else{return;};
+            if row["request_id"]!=attempt{return;}
+            let status=match answer["intent_status"].as_str(){Some("sendt") if answer["sent"]==true=>"forwarded",Some("sender"|"venter")=>"queued_at_regi",Some("feil")=>"not_forwarded",_=>"unknown_delivery"};
+            row["status_text"]=json!(status);row["reconciled"]=json!(true);row["intent_status"]=answer["intent_status"].clone();
+            if app.fleet.keep("live_tools",key,Some(row.to_string().into_bytes())).await.is_ok() && status=="forwarded" && active.load(Ordering::Acquire){
+                let note=format!("Host note (reconciled, untrusted data): {} Mention it only if it matters.",clarp_kernel::python::dumps_ascii(&json!({"agent":agent,"status":"forwarded"})));
+                let _=notes.send(note);
+            }
+        });
     }
 
     pub async fn route(&mut self, key: &str, route: &Route) -> Option<Vec<Value>> {
@@ -245,6 +400,41 @@ impl Worker {
                 self.taken.push(receipt.clone());
             }
             receipts.push(receipt);
+        }
+        if receipts.iter().any(|r| {
+            matches!(
+                r["tool"].as_str(),
+                Some("schedule_callback" | "cancel_callback")
+            )
+        }) {
+            self.auto_decided = true;
+        }
+        let auto = &self.call.snapshot["live_tools"]["callback_on_delegation"];
+        if !auto.is_null()
+            && !self.auto_decided
+            && receipts.iter().any(|r| {
+                r["tool"] == "delegate_to_agent"
+                    && matches!(
+                        r["status"].as_str(),
+                        Some("forwarded" | "queued_at_regi" | "already_present")
+                    )
+            })
+        {
+            self.auto_decided = true;
+            let added = self
+                .execute(
+                    "schedule_callback",
+                    &json!({"minutes":auto["minutes"],"reason":"status etter utdeling"}),
+                    false,
+                )
+                .await;
+            if matches!(
+                added["status"].as_str(),
+                Some("scheduled" | "already_scheduled")
+            ) {
+                self.taken.push(added.clone());
+            }
+            receipts.push(added);
         }
         Some(receipts)
     }
@@ -309,8 +499,12 @@ impl callback::Director for Callback<'_> {
         ))
     }
     fn save(&mut self, row: &Value) -> Result<(), callback::Failure> {
+        let mut row=row.clone();
+        let now=self.worker.app.clock.now_ms() as f64/1000.0;
+        if row.get("at").is_none(){row["at"]=json!(now);}
+        row["updated_at"]=json!(now);
         self.rt
-            .block_on(self.worker.save(self.slot, row))
+            .block_on(self.worker.save(self.slot, &row))
             .then_some(())
             .ok_or(callback::Failure::Ledger)
     }

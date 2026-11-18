@@ -60,7 +60,7 @@ def record(root):
                        untrusted_data={'last_said':text})]*3)
     for size in (449,450,451,900):
         hear([dict(tool='X'*(size-len(tools._NOTE_HEAD)-len(': ok')),status='ok')])
-    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools),'routes':[routing(root,tools)]}
+    return {'outcomes':outcomes,'notes':notes,'calls':calls(root, tools),'callbacks':callbacks(root,tools),'transcripts':transcripts(root,tools),'routes':[routing(root,tools)],'answers':answers(root,tools)}
 
 
 def calls(root, tools):
@@ -183,6 +183,54 @@ def routing(root, tools):
             ids.append(recorded.index(body))
         step['body_ids']=ids
     return dict(config=cfg,steps=steps,bodies=recorded)
+
+
+def answers(root,tools):
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    cases=[]
+    for choice in ('accept','drop','uncertain','interrupted','short'):
+        now=[100.0]
+        sent=[];acks=[]; result=[True]
+        key='answer-one'
+        def speak(channel,text):
+            sent.append([channel,text])
+            if result[0] is None: raise OSError('uncertain')
+            return result[0]
+        cfg={'from':'guard','agents':[]}
+        snap={'agent':{'session':'guard'},'profile':{'display_name':'Guard'},'live_tools':cfg}
+        with patch.object(tools,'log'),patch.object(tools,'log_exception'):
+            call=tools.CallTools(snap,'test',speak,SimpleNamespace(acknowledge=lambda ident,principal:acks.append(ident)),
+                                 clock=lambda:now[0],principal='phone',ledger=tools.Ledger(root/'answers'/'ledger.json'))
+            text=('Short answer' if choice=='short' else ('A sentence. '+chr(0xe9)+' '*2)*180)
+            relay=tools._relay(key,'A sender','a source',text,'  a   question?  ',450)
+            relay.ack=key
+            call.pending_relays.append(relay)
+            steps=[]
+            def step(at,*,read=None,delivery=True,user=None,voice=None):
+                now[0]=at
+                sent.clear();acks.clear()
+                if voice is not None:call.last_output=voice
+                if user is not None:call.last_user=user
+                result[0]=delivery
+                receipt=call._read_result(read) if read is not None else None
+                if read is None:call._pace_relays()
+                steps.append(dict(at=at,user=call.last_user,voice=call.last_output,delivery=delivery,read=read,
+                                  receipt=receipt,spoken=sent.copy(),ack=acks.copy()))
+            step(100,read={'operation_id':'missing'})
+            step(100,delivery=False if choice=='drop' else None if choice=='uncertain' else True)
+            step(103.99)
+            step(104)
+            step(115)
+            step(115.01,user=114.5 if choice=='interrupted' else None)
+            step(116,read={'operation_id':key,'from_part':1,'verbatim':True})
+            for n in range(1,11):step(116+2*n,voice=116+2*n-1.5)
+            step(140,read={'operation_id':key})
+            step(141,read={'from_part':10000,'verbatim':False})
+            step(142,read={})
+            cases.append(dict(text=text,steps=steps))
+            call.close()
+    return cases
 
 
 def callbacks(root, tools):

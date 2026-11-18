@@ -93,6 +93,7 @@ struct Books {
 /// kept.
 #[derive(Default)]
 pub struct Desk {
+    tool_slots: std::sync::Mutex<HashMap<String,std::sync::Weak<tokio::sync::Mutex<()>>>>,
     books: tokio::sync::Mutex<Option<Books>>,
     /// One ring is placed at a time: from the moment it is admitted until it rings, while
     /// its opening line is voiced. Reading and answering wait for nobody's voice.

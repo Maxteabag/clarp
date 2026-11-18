@@ -58,6 +58,7 @@ pub fn run(app: &App) {
 }
 
 pub(crate) use call::zone_of_this_machine;
+pub(crate) use delegations::{acknowledge_live, handed as live_ask, rows_of as live_rows};
 pub(crate) use handoffs::put_through;
 pub(crate) use router::asked as route_voice;
 
