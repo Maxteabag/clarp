@@ -131,7 +131,11 @@ def validate_contract(payload: dict) -> None:
     except Exception as exc: raise ValueError('invalid answer schema') from exc
 
 
-def submit(artifact_id: str, data: dict) -> dict:
+def submit(artifact_id: str, data: dict, *, render_capable: bool = False, on_completed=None) -> dict:
+    kind = db.conn().execute("SELECT type FROM artifacts WHERE artifact_id=?", (artifact_id,)).fetchone()
+    if kind and kind["type"] == "render_spec":
+        from . import render_spec_store
+        return render_spec_store.submit(artifact_id, data, capable=render_capable, on_completed=on_completed)
     from jsonschema import Draft202012Validator
     from . import artifacts
     submission_id = data.get('submission_id')

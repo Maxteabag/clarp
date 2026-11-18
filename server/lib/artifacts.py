@@ -18,7 +18,7 @@ from .lifecycle import Edge, Lifecycle, WaitForever
 from .revisioned_cache import RevisionedCache
 from .voice_markup import strip_hidden_blocks
 
-TYPES = {"countdown", "html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
+TYPES = {"render_spec", "countdown", "html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
          "audio", "video", "file", "release", "directory", "workflow_run"}
 STATUSES = {"draft", "active", "ready", "failed", "completed", "cancelled", "expired"}
 _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
@@ -27,6 +27,7 @@ _VALID_ID = re.compile(r"^[A-Za-z0-9._:-]{1,180}$")
 # minimum needed for the native client to offer the type's defining interaction.
 # Existing rows created before this validation remain readable.
 _REQUIRED_FIELDS = {
+    "render_spec": ("catalog", "catalog_version", "version", "spec", "submit", "answer_schema"),
     "document": ("content",),
     "countdown": ("target_at", "time_zone"),
     "html_form": ("content", "version", "answer_schema"),
@@ -240,23 +241,37 @@ def _sanitize_json(value: Any) -> Any:
 
 def create(*, session: str, type: str, title: str, summary: str = "",
            status: str = "ready", reference_id: str = "", payload: Any = None,
-           artifact_id: str = "", expected_version: str | None = None) -> dict:
+           artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False) -> dict:
     if type.strip().lower() in {"decision", "question", "plan"}:
         raise ValueError(f"{type} must use its dedicated lifecycle endpoint")
     return _create(session=session, type=type, title=title, summary=summary,
                    status=status, reference_id=reference_id, payload=payload,
-                   artifact_id=artifact_id, expected_version=expected_version)
+                   artifact_id=artifact_id, expected_version=expected_version, validate_only=validate_only)
 
 
 def _create(*, session: str, type: str, title: str, summary: str = "",
             status: str = "ready", reference_id: str = "", payload: Any = None,
-            artifact_id: str = "", expected_version: str | None = None) -> dict:
-    agent = _agent(session)
+            artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False) -> dict:
     type, status = type.strip().lower(), status.strip().lower()
     title = strip_hidden_blocks(title).strip()
+    if type == "render_spec":
+        from . import render_spec_store, render_spec
+        agent = agents.get_by_session(session.strip())
+        if not agent:
+            raise render_spec.Refusal("not_open", "/session")
+        if not title:
+            raise render_spec.Refusal("missing_key", "/title")
+        ident = artifact_id.strip()
+        if ident and not _VALID_ID.fullmatch(ident):
+            raise render_spec.Refusal("element_id", "/artifact_id")
+        return render_spec_store.publish(agent, ident, title, summary, status, reference_id,
+                                         payload, expected_version, validate_only=validate_only)
+    agent = _agent(session)
     if type not in TYPES: raise ValueError("unsupported artifact type")
     if status not in STATUSES: raise ValueError("unsupported artifact status")
     if not title: raise ValueError("artifact title required")
+    if validate_only:
+        raise ValueError("validate-only requires a render spec")
     artifact_id = artifact_id.strip() or _new("artifact")
     if not _VALID_ID.fullmatch(artifact_id): raise ValueError("invalid artifact id")
     if type == "html_form":
@@ -309,6 +324,9 @@ def sync_plan(plan_id: str) -> None:
 def _public(row) -> dict:
     item = dict(row)
     item["pinned"] = item.get("pinned_at") is not None
+    if item["type"] == "render_spec":
+        from . import render_spec_store
+        return render_spec_store.public_row(item)
     try: item["payload"] = json.loads(item.pop("payload_json") or "{}")
     except json.JSONDecodeError: item["payload"] = {}
     for key in ("target_at", "url", "thumbnail_url", "mime_type", "file_name", "content",
@@ -356,7 +374,7 @@ REPRESENTATIONS = ("", "flat-v1", "summary-v1")
 
 
 def response_representation(item: dict, representation: str = "", *,
-                            budget: "SummaryBudget | None" = None) -> dict:
+                            budget: "SummaryBudget | None" = None, render_capable: bool = False) -> dict:
     """Opt-in wire projection; canonical storage and default clients keep payload.
 
     Flattening has already copied validated public fields, including large content,
@@ -366,6 +384,9 @@ def response_representation(item: dict, representation: str = "", *,
     ``plan.goal.history`` (``plan.goal.history_omitted``). Pass one ``budget``
     per request; without one each call gets its own.
     """
+    if item.get("type") == "render_spec":
+        from . import render_spec_store
+        return render_spec_store.summary(item, render_capable)
     if representation == "":
         return item
     if representation not in ("flat-v1", "summary-v1"):
@@ -709,6 +730,17 @@ def update(artifact_id: str, data: dict) -> dict:
     if not current: raise ValueError("artifact not found")
     if current["type"] in {"decision", "question", "plan"}:
         raise ValueError(f"{current['type']} must use its dedicated lifecycle endpoint")
+    if current["type"] == "render_spec":
+        from . import render_spec
+        render_spec.unique_object(data)
+        if "payload_patch" in data:
+            raise render_spec.Refusal("unknown_key", "/payload_patch")
+        if "payload" not in data:
+            raise render_spec.Refusal("missing_key", "/payload")
+        return create(session=current["session"], type="render_spec", artifact_id=artifact_id,
+                      title=data.get("title", current["title"]), summary=data.get("summary", current["summary"]),
+                      status=data.get("status", current["status"]), reference_id=current["reference_id"],
+                      payload=data["payload"], expected_version=data.get("expected_version"))
     if current["type"] == "html_form" and any(key in data for key in ("payload", "payload_patch")):
         from . import html_report_revisions
         return html_report_revisions.update(artifact_id, data)
@@ -1124,7 +1156,8 @@ def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
         con.execute("UPDATE artifacts SET deleted_at=?,updated_at=?,pinned_at=NULL WHERE artifact_id=?",
                     (now, now, artifact_id))
         con.execute("COMMIT")
-        return {**current, "deleted_at": now, "updated_at": now, "pinned_at": None}, True
+        current.update(deleted_at=now, updated_at=now, pinned_at=None)
+        return current, True
     except BaseException:
         con.execute("ROLLBACK"); raise
 

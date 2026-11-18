@@ -1,0 +1,41 @@
+{
+  "canonical": [
+    {
+      "value": {
+        "\ue000": 1,
+        "\ud800\udc00": "\u00f8",
+        "text": "e\u0301"
+      },
+      "utf8_hex": "7b2274657874223a2265cc81222c22f0908080223a22c3b8222c22ee8080223a317d",
+      "sha256": "ed8a90bab40a60e3253c43eefefc99712ef2842050b6e5fa64c34d4f6170a54e"
+    }
+  ],
+  "development_minimum": 74,
+  "clients": [
+    {
+      "header": null,
+      "capable": false
+    },
+    {
+      "header": "ios/12 contract=73",
+      "capable": false
+    },
+    {
+      "header": "ios/12 contract=74",
+      "capable": true
+    },
+    {
+      "header": "ios/12 contract=75",
+      "capable": true
+    },
+    {
+      "header": "ios/ contract=99",
+      "capable": false
+    },
+    {
+      "header": "ios/12 contract=99 garbage",
+      "capable": false
+    }
+  ],
+  "catalog_sha256": "c23d64120e6fcdeec9979ce3a08d90d3f785dda1129c6c848aba18b5f33af924"
+}

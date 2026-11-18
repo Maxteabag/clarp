@@ -1,0 +1,102 @@
+{
+  "version": "build-1",
+  "catalog": "clarp.form",
+  "catalog_version": 1,
+  "spec": {
+    "root": "root",
+    "elements": {
+      "root": {
+        "type": "stack",
+        "props": {},
+        "children": [
+          "topic",
+          "instructions",
+          "selection",
+          "comment",
+          "notify"
+        ]
+      },
+      "topic": {
+        "type": "heading",
+        "props": {
+          "text": "Build decision",
+          "level": 1
+        },
+        "children": []
+      },
+      "selection": {
+        "type": "choice",
+        "props": {
+          "value": {
+            "$bindState": "/choice"
+          },
+          "label": "Next step",
+          "options": [
+            {
+              "value": "send",
+              "label": "Send this build"
+            },
+            {
+              "value": "review",
+              "label": "Review first"
+            }
+          ]
+        },
+        "children": []
+      },
+      "comment": {
+        "type": "text_field",
+        "props": {
+          "label": "Comment",
+          "value": {
+            "$bindState": "/answer"
+          }
+        },
+        "children": []
+      },
+      "notify": {
+        "type": "toggle",
+        "props": {
+          "label": "Notify",
+          "value": {
+            "$bindState": "/notify"
+          }
+        },
+        "children": []
+      },
+      "instructions": {
+        "type": "text",
+        "props": {
+          "text": "Choose what should happen to this build."
+        }
+      }
+    },
+    "state": {}
+  },
+  "submit": {
+    "label": "Submit",
+    "intent": "submit_decision"
+  },
+  "answer_schema": {
+    "type": "object",
+    "properties": {
+      "choice": {
+        "type": "string",
+        "enum": [
+          "send",
+          "review"
+        ]
+      },
+      "answer": {
+        "type": "string",
+        "maxLength": 2000
+      },
+      "notify": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "choice"
+    ]
+  }
+}
