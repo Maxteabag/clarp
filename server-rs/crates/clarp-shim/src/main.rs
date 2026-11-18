@@ -285,19 +285,20 @@ enum StopStage {
     Ready,
     Asked,
     Signalled,
+    Finished,
 }
 
 struct BeforeStop {
     signal: Signal,
     wait: Duration,
-    stage: Mutex<StopStage>,
-    changed: Condvar,
 }
 
 struct Control {
     before_stop: Option<BeforeStop>,
     pid: u32,
-    exited: Arc<AtomicBool>,
+    leader_exited: AtomicBool,
+    stage: Mutex<StopStage>,
+    changed: Condvar,
     to_spool: Sender<ToSpool>,
     to_stdin: Sender<ToStdin>,
     /// The tool's standard output, when its order with the hooks can be kept.
@@ -348,40 +349,32 @@ impl Control {
     }
 
     fn stop(&self, grace_ms: u64) {
-        if self.exited.load(Ordering::SeqCst) {
+        let mut stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
+        if !matches!(*stage, StopStage::Ready) {
             return;
         }
-        if let Some(early) = &self.before_stop {
-            let mut stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-            if !matches!(*stage, StopStage::Ready) || self.exited.load(Ordering::SeqCst) {
-                return;
-            }
-            *stage = StopStage::Asked;
+        *stage = StopStage::Asked;
+        if let Some(early) = &self.before_stop
+            && !self.leader_exited.load(Ordering::SeqCst)
+        {
             let pid = Pid::from_raw(self.pid as i32);
             let _ = kill(pid, early.signal);
-            let (stage, _) = early
+            (stage, _) = self
                 .changed
-                .wait_timeout_while(stage, early.wait, |_| !self.exited.load(Ordering::SeqCst))
+                .wait_timeout_while(stage, early.wait, |_| {
+                    !self.leader_exited.load(Ordering::SeqCst)
+                })
                 .unwrap_or_else(PoisonError::into_inner);
-            Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
-            // This stop runs after the socket reply on a dedicated thread. Keep
-            // the process group reserved until every descendant has had its grace.
-            drop(stage);
-            std::thread::sleep(Duration::from_millis(grace_ms));
-            Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
-            let mut stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-            *stage = StopStage::Signalled;
-            early.changed.notify_all();
-            return;
         }
+        let term_at = Instant::now();
         Self::signal(self.pid, &self.to_spool, Signal::SIGTERM);
-        let (pid, exited, to_spool) = (self.pid, self.exited.clone(), self.to_spool.clone());
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(grace_ms));
-            if !exited.load(Ordering::SeqCst) {
-                Self::signal(pid, &to_spool, Signal::SIGKILL);
-            }
-        });
+        drop(stage);
+        // The deadline belongs to the whole group, even if its leader has exited.
+        std::thread::sleep(Duration::from_millis(grace_ms).saturating_sub(term_at.elapsed()));
+        Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
+        let mut stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
+        *stage = StopStage::Signalled;
+        self.changed.notify_all();
     }
 }
 
@@ -562,7 +555,6 @@ fn run(args: Args) -> Result<u8, String> {
         let _ = out.write_all(b"ready\n").and_then(|()| out.flush());
     }
 
-    let exited = Arc::new(AtomicBool::new(false));
     let (to_stdin, stdin_requests) = mpsc::channel();
     if let Some(stdin) = child.stdin.take() {
         std::thread::spawn(move || stdin_thread(stdin, stdin_requests));
@@ -594,14 +586,13 @@ fn run(args: Args) -> Result<u8, String> {
         }));
     }
     let control = Arc::new(Control {
-        before_stop: args.before_stop.map(|(signal, wait)| BeforeStop {
-            signal,
-            wait,
-            stage: Mutex::default(),
-            changed: Condvar::new(),
-        }),
+        before_stop: args
+            .before_stop
+            .map(|(signal, wait)| BeforeStop { signal, wait }),
         pid,
-        exited: exited.clone(),
+        leader_exited: AtomicBool::new(false),
+        stage: Mutex::default(),
+        changed: Condvar::new(),
         to_spool: to_spool.clone(),
         to_stdin,
         printed,
@@ -623,57 +614,42 @@ fn run(args: Args) -> Result<u8, String> {
         }
     });
 
-    if let Some(early) = &control.before_stop {
-        // Keep the process group reserved while the last kill is outstanding.
-        let observed = observe_exit(pid)?;
-        exited.store(true, Ordering::SeqCst);
-        {
-            let _stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-            early.changed.notify_all();
-        }
-        for pump in pumps {
-            let _ = pump.join();
-        }
-        let (done, wait) = mpsc::channel();
-        let entry = Entry::Shim(ShimEvent::Exited {
-            code: observed.code(),
-            signal: observed.signal(),
-        });
-        if to_spool.send(ToSpool::Last(entry, done)).is_ok() {
-            let _ = wait.recv();
-        }
-        let _ = std::fs::remove_file(&args.socket);
-        let stage = early.stage.lock().unwrap_or_else(PoisonError::into_inner);
-        drop(
-            early
-                .changed
-                .wait_while(stage, |s| matches!(s, StopStage::Asked))
-                .unwrap_or_else(PoisonError::into_inner),
-        );
-        child
-            .wait()
-            .map_err(|e| format!("reaping {}: {e}", args.program))?;
-        return Ok(observed
-            .code()
-            .and_then(|c| u8::try_from(c).ok())
-            .unwrap_or(1));
+    let observed = observe_exit(pid)?;
+    {
+        let _stage = control.stage.lock().unwrap_or_else(PoisonError::into_inner);
+        control.leader_exited.store(true, Ordering::SeqCst);
+        control.changed.notify_all();
     }
-    let status = child
-        .wait()
-        .map_err(|e| format!("waiting for {}: {e}", args.program))?;
-    exited.store(true, Ordering::SeqCst);
-    // Everything the tool printed before it went is in the spool before the record that says it went.
+    // A descendant can keep a pipe open after the leader has gone. Stop still
+    // owns the group until we have drained both pipes and committed Exited.
     for pump in pumps {
         let _ = pump.join();
     }
-    record_now(Entry::Shim(ShimEvent::Exited {
-        code: status.code(),
-        signal: status.signal(),
-    }));
+    let mut stage = control.stage.lock().unwrap_or_else(PoisonError::into_inner);
+    let (done, wait) = mpsc::channel();
+    let entry = Entry::Shim(ShimEvent::Exited {
+        code: observed.code(),
+        signal: observed.signal(),
+    });
+    if to_spool.send(ToSpool::Last(entry, done)).is_ok() {
+        let _ = wait.recv();
+    }
     let _ = std::fs::remove_file(&args.socket);
-    Ok(status
+    if matches!(*stage, StopStage::Ready) {
+        *stage = StopStage::Finished;
+    }
+    drop(
+        control
+            .changed
+            .wait_while(stage, |s| matches!(s, StopStage::Asked))
+            .unwrap_or_else(PoisonError::into_inner),
+    );
+    child
+        .wait()
+        .map_err(|e| format!("reaping {}: {e}", args.program))?;
+    Ok(observed
         .code()
-        .and_then(|code| u8::try_from(code).ok())
+        .and_then(|c| u8::try_from(c).ok())
         .unwrap_or(1))
 }
 
