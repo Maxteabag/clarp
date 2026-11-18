@@ -434,36 +434,54 @@ print(json.dumps([sys.argv[1:], fd == "/dev/null", data]))
     std::fs::remove_dir_all(root).unwrap();
 }
 
+// Compare the request with the writer's timestamp. The time when the test
+// thread next gets scheduled to read the spool is not the publication time.
+fn request_time_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+}
+
+fn assert_fast_end(spool: &Path, requested_ms: i64) {
+    let all = records(spool);
+    let elapsed = all.iter().find(|r| r.is_final()).unwrap().t - requested_ms;
+    assert!(
+        (0..500).contains(&elapsed),
+        "Exited was written after {elapsed} ms: {all:?}"
+    );
+}
+
 #[test]
 fn a_direct_child_can_abort_before_its_group_is_terminated() {
     for exits in [false, true] {
         let dir = std::env::temp_dir().join(format!("clarp-abort-{}-{exits}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let socket = dir.join("shim.sock");
-        let script = r#"import os,signal,sys,time
+        let script = r#"import os,signal,sys
 def note(s):
     with open("events","a") as f: f.write(s+"\n")
-def direct(sig,frame):
-    note("direct")
-    if sys.argv[1]=="true": sys.exit(0)
-def terminate(sig,frame):
-    note("group")
-    sys.exit(0)
-signal.signal(signal.SIGUSR1,direct)
+watched = {signal.SIGUSR1, signal.SIGTERM}
+# Queue signals before publishing readiness. sigwait consumes even a signal
+# that arrived between the readiness write and entering the wait.
+signal.pthread_sigmask(signal.SIG_BLOCK, watched)
 if os.fork()==0:
-    # In one case stderr stays open until KILL; in the other the pumps end early.
-    signal.signal(signal.SIGTERM,signal.SIG_IGN)
-    signal.signal(signal.SIGUSR1,lambda *_: note("wrong child"))
     for fd in ((0,1,2) if sys.argv[1]=="true" else (0,1)): os.close(fd)
     with open("stubborn","w") as f: f.write(str(os.getpid()))
     signal.alarm(12)
-    while True: signal.pause()
+    while True:
+        if signal.sigwait(watched)==signal.SIGUSR1: note("wrong child")
 if os.fork()==0:
-    signal.signal(signal.SIGUSR1,lambda *_: note("wrong child"))
-    signal.signal(signal.SIGTERM,terminate)
     note("ready")
-    while True: signal.pause()
-while True: signal.pause()
+    while signal.sigwait(watched)!=signal.SIGTERM: note("wrong child")
+    note("group")
+    os._exit(0)
+while True:
+    if signal.sigwait(watched)==signal.SIGTERM:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK,{signal.SIGTERM})
+        os.kill(os.getpid(),signal.SIGTERM)
+    note("direct")
+    if sys.argv[1]=="true": os._exit(0)
 "#;
         let mut shim = Command::new(env!("CARGO_BIN_EXE_clarp-shim"))
             .current_dir(&dir)
@@ -489,6 +507,7 @@ while True: signal.pause()
         });
         let start = Instant::now();
         let stop = Request::Stop { grace_ms: 2000 };
+        let requested_ms = request_time_ms();
         assert!(ask(&socket, &stop).ok);
         if !exits {
             wait_for("direct abort", || read().contains("direct"));
@@ -508,10 +527,7 @@ while True: signal.pause()
                     )
                 })
             });
-            assert!(
-                start.elapsed() < Duration::from_millis(500),
-                "Exited was held behind group escalation"
-            );
+            assert_fast_end(&dir.join("spool/turn.jsonl"), requested_ms);
             assert!(shim.try_wait().unwrap().is_none());
         } else {
             assert!(
@@ -556,13 +572,13 @@ mode=sys.argv[1]
 signal.alarm(10)
 if mode!="fast" and os.fork()==0:
     signal.alarm(10)
-    signal.signal(signal.SIGTERM,lambda *_:print("descendant TERM",flush=True))
-    def finish(*_):
-        print("background output",flush=True)
-        os._exit(0)
-    signal.signal(signal.SIGUSR2,finish)
+    watched = {signal.SIGTERM,signal.SIGUSR2}
+    signal.pthread_sigmask(signal.SIG_BLOCK, watched)
     print("child "+str(os.getpid()),flush=True)
-    while True: signal.pause()
+    while signal.sigwait(watched)==signal.SIGTERM:
+        print("descendant TERM",flush=True)
+    print("background output",flush=True)
+    os._exit(0)
 print("leader "+str(os.getpid()),flush=True)
 if mode in ("unstopped","already-exited"):
     sys.exit(23)
@@ -590,6 +606,7 @@ while True: signal.pause()
             assert!(!records(&run.spool).iter().any(Record::is_final));
         }
         let began = Instant::now();
+        let requested_ms = request_time_ms();
         if mode == "unstopped" {
             nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(pid("child ").unwrap()),
@@ -610,7 +627,7 @@ while True: signal.pause()
             records(&run.spool).iter().any(Record::is_final)
         });
         if mode == "fast" {
-            assert!(began.elapsed() < Duration::from_millis(500));
+            assert_fast_end(&run.spool, requested_ms);
             assert!(run.shim.try_wait().unwrap().is_none());
         } else if mode != "unstopped" {
             assert!(
