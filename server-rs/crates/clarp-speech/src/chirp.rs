@@ -149,7 +149,7 @@ fn to_base64(bytes: &[u8]) -> String {
 
 /// Names and values as a form is sent: what is no letter, digit or one of `_.-~` by its
 /// number, a space as a plus.
-fn form_encoded(fields: &[(&str, &str)]) -> String {
+pub(crate) fn form_encoded(fields: &[(&str, &str)]) -> String {
     let encoded = |text: &str| -> String {
         let mut out = String::with_capacity(text.len());
         for byte in text.bytes() {
@@ -217,29 +217,90 @@ fn refused(what: &str, status: u16, said: &str) -> String {
     format!("{what} HTTP {status}: {detail}")
 }
 
+pub(crate) fn pcm_decoder() -> Vec<String> {
+    [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        "pipe:0",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-f",
+        "s16le",
+        "pipe:1",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+/// A clip as plain sound, whatever it was recorded as.
+pub(crate) fn pcm(decoder: &[String], audio: &[u8]) -> Result<Vec<u8>, String> {
+    let Some((program, given)) = decoder.split_first() else {
+        return Err("ffmpeg is not installed".to_string());
+    };
+    let started = Command::new(program)
+        .args(given)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let mut child = match started {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err("ffmpeg is not installed".to_string());
+        }
+        Err(error) => return Err(format!("could not decode audio: {error}")),
+    };
+    let (mut to, mut from, mut complaints) =
+        match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
+            (Some(to), Some(from), Some(complaints)) => (to, from, complaints),
+            _ => return Err("could not decode audio: the decoder has no pipes".to_string()),
+        };
+    let (done, is_done) = mpsc::channel();
+    let outcome = std::thread::scope(|scope| {
+        // The clip goes in while the sound comes out: neither waits for the other.
+        scope.spawn(move || {
+            let _ = to.write_all(audio);
+        });
+        scope.spawn(move || {
+            let mut sound = Vec::new();
+            let read = from.read_to_end(&mut sound).map(|_| sound);
+            let mut said = String::new();
+            let _ = complaints.read_to_string(&mut said);
+            let _ = done.send((read, said));
+        });
+        let outcome = is_done.recv_timeout(Duration::from_secs(30));
+        if outcome.is_err() {
+            // It takes too long: it is ended, which ends both pipes.
+            let _ = child.kill();
+        }
+        outcome
+    });
+    let ended = child.wait();
+    match (outcome, ended) {
+        (Ok((Ok(sound), _)), Ok(status)) if status.success() => Ok(sound),
+        (Ok((_, said)), Ok(_)) => {
+            let said: String = strip(&said).chars().take(200).collect();
+            Err(format!("could not decode audio: {said}"))
+        }
+        (Err(_), _) => Err("could not decode audio: timed out".to_string()),
+        (_, Err(error)) => Err(format!("could not decode audio: {error}")),
+    }
+}
+
 impl Chirp {
     pub fn new(model: impl Into<String>, account: Asks) -> Self {
-        let decoder = [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            "pipe:0",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-f",
-            "s16le",
-            "pipe:1",
-        ];
         Self {
             account,
             model: model.into(),
             token_url: TOKEN_URL.to_string(),
             speech_at: None,
-            decoder: decoder.iter().map(|word| (*word).to_string()).collect(),
+            decoder: pcm_decoder(),
             piece_seconds: PIECE_SECONDS,
             timeout: Duration::from_secs(60),
             tokens: Mutex::default(),
@@ -276,6 +337,7 @@ impl Chirp {
         what: &str,
     ) -> Result<Value, String> {
         let config = ureq::Agent::config_builder()
+            .max_redirects(0)
             .timeout_global(Some(timeout))
             .http_status_as_error(false)
             .build();
@@ -312,6 +374,18 @@ impl Chirp {
         {
             return Ok(token.clone());
         }
+        let (token, lasts) = Self::refresh_token(credentials, &self.token_url)?;
+        let runs_out = Instant::now() + Duration::from_secs_f64(lasts.unwrap_or(3_600.0));
+        self.tokens()
+            .insert(credentials.to_path_buf(), (token.clone(), runs_out));
+        Ok(token)
+    }
+
+    /// Exchange an authorized-user ADC refresh token for a short-lived access token.
+    pub(crate) fn refresh_token(
+        credentials: &Path,
+        token_url: &str,
+    ) -> Result<(String, Option<f64>), String> {
         let read = std::fs::read_to_string(credentials)
             .map_err(|error| error.to_string())
             .and_then(|text| {
@@ -333,7 +407,7 @@ impl Chirp {
         ]);
         let kind = [("Content-Type", "application/x-www-form-urlencoded")];
         let bought = Self::post(
-            &self.token_url,
+            token_url,
             &kind,
             form.as_bytes(),
             Duration::from_secs(15),
@@ -346,65 +420,7 @@ impl Chirp {
             return Err("Google token response had no access_token".to_string());
         };
         let lasts = bought["expires_in"].as_f64().filter(|lasts| *lasts > 0.0);
-        let runs_out = Instant::now() + Duration::from_secs_f64(lasts.unwrap_or(3_600.0));
-        self.tokens()
-            .insert(credentials.to_path_buf(), (token.to_string(), runs_out));
-        Ok(token.to_string())
-    }
-
-    /// A clip as plain sound, whatever it was recorded as.
-    fn decoded(&self, audio: &[u8]) -> Result<Vec<u8>, String> {
-        let Some((program, given)) = self.decoder.split_first() else {
-            return Err("ffmpeg is not installed".to_string());
-        };
-        let started = Command::new(program)
-            .args(given)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match started {
-            Ok(child) => child,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Err("ffmpeg is not installed".to_string());
-            }
-            Err(error) => return Err(format!("could not decode audio: {error}")),
-        };
-        let (mut to, mut from, mut complaints) =
-            match (child.stdin.take(), child.stdout.take(), child.stderr.take()) {
-                (Some(to), Some(from), Some(complaints)) => (to, from, complaints),
-                _ => return Err("could not decode audio: the decoder has no pipes".to_string()),
-            };
-        let (done, is_done) = mpsc::channel();
-        let outcome = std::thread::scope(|scope| {
-            // The clip goes in while the sound comes out: neither waits for the other.
-            scope.spawn(move || {
-                let _ = to.write_all(audio);
-            });
-            scope.spawn(move || {
-                let mut sound = Vec::new();
-                let read = from.read_to_end(&mut sound).map(|_| sound);
-                let mut said = String::new();
-                let _ = complaints.read_to_string(&mut said);
-                let _ = done.send((read, said));
-            });
-            let outcome = is_done.recv_timeout(Duration::from_secs(30));
-            if outcome.is_err() {
-                // It takes too long: it is ended, which ends both pipes.
-                let _ = child.kill();
-            }
-            outcome
-        });
-        let ended = child.wait();
-        match (outcome, ended) {
-            (Ok((Ok(sound), _)), Ok(status)) if status.success() => Ok(sound),
-            (Ok((_, said)), Ok(_)) => {
-                let said: String = strip(&said).chars().take(200).collect();
-                Err(format!("could not decode audio: {said}"))
-            }
-            (Err(_), _) => Err("could not decode audio: timed out".to_string()),
-            (_, Err(error)) => Err(format!("could not decode audio: {error}")),
-        }
+        Ok((token.to_string(), lasts))
     }
 
     /// The text of one piece. A token that is refused is bought anew once, and a request
@@ -487,7 +503,7 @@ impl Listener for Chirp {
             let none = "[google_stt] project is not configured";
             return Err(Deaf::Failed(none.to_string()));
         }
-        let sound = self.decoded(clip.audio).map_err(Deaf::Failed)?;
+        let sound = pcm(&self.decoder, clip.audio).map_err(Deaf::Failed)?;
         let seconds = sound.len() as f64 / BYTES_PER_SECOND as f64;
         if sound.is_empty() {
             return Ok(Heard::default());

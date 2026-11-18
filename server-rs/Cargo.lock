@@ -259,8 +259,10 @@ dependencies = [
 name = "clarp-speech"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "regex",
  "serde_json",
+ "tungstenite",
  "ureq",
 ]
 
@@ -1583,6 +1585,7 @@ dependencies = [
  "rustls-pki-types",
  "sha1",
  "thiserror",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

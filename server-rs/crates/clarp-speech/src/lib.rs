@@ -14,10 +14,16 @@
 
 pub mod cartesia;
 pub mod chirp;
+pub mod deepgram_voice;
+pub mod eleven_voice;
 pub mod gemini;
+pub mod google_voice;
 pub mod listen;
 pub mod markup;
 pub mod nova;
 pub mod scribe;
 pub mod speak;
 pub mod whisper;
+
+pub mod ink;
+mod speech_socket;
