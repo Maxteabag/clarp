@@ -1835,6 +1835,30 @@ following; the way back by a call that names it, with its cue and the word to th
 answers failing in ten seconds, asked for with the agent's tool; and the tool's own words where it is
 asked wrongly.
 
+**The Oracle: the words an owner prepared for its contact** (18 Nov 2026). An owner can prepare, for the
+agent that is the Oracle's contact, the names and words that occur in what is said to it: a small file that
+names the contact, the text the words were taken from (by its path and its digest) and the words. Where such
+a file is named (`CLARP_ORACLE_VOICE_CONTEXT_FILE` in the Host's environment, else `[openai]
+oracle_voice_context_file` in the owner's own file; the environment's word is the first, and an empty one
+is none), a call of the Oracle reads it when its contact is known and before anything else is asked of the
+call. The voice of a call with that contact is told the words, after who the agents are and who its contact
+is, as reference for hearing and saying them and no change to what it may do. A file that is not as it must
+be is no call: it is refused in words (400) before the voice is reached, and so is a call that has another
+contact, or none, while the file is named. Which file is one is the kernel's rule (`oracle/voice.rs`,
+`prepared`: the Python Host's `oracle_voice_context.load`, run as it is on files of the generator's own,
+`tools/oracle-vocabulary-vectors.py`: 63 cases): at most 16,384 bytes of JSON that is an object of the first
+version for this contact; the text at a whole path, a file of at most two mebibytes whose digest is the one
+written; one to sixty-four words, each a text of one to 160 signs on one line that stands in the text
+whatever the case of its letters (folded as Python folds them), 3,000 signs together at most. The words
+are told as they stand in the file, in its order. The kernel is handed the bytes of the small file and
+something that reads a text at a path; the Host reads both on a thread of their own, and never more of
+either than it may have and a byte. Where the Python Host refuses in the words of its language (a file
+that is not there or is no JSON, a path that is no text, a text that is not UTF-8), this Host says in
+words of its own what could not be read; and a small file that is JSON to Python's reader alone is none
+here (`docs/differences.md`). The Host's test holds a call with the words told, each refusal at the door
+with the voice not reached, the two bounds from both sides, a path from where the Host stands, what is no
+file, the owner's file in place of the environment and the environment before it.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
@@ -1858,7 +1882,11 @@ and the 78 of what agents finished run again there. Its first runs missed ten: t
 Python Host's module that nothing can reach are not in the kernel, four cases got stories (a phone that
 rolls back while it prepares, one that says it is ready too early, two talks with agents at once, an older
 talk given up at its older number), and three got a place in the Host's test (a held call routes nothing,
-a plain failure tells the voice no word, the first frames of a call that goes to the contact alone).
+a plain failure tells the voice no word, the first frames of a call that goes to the contact alone). With
+the words an owner prepared came a list of 53 (40 for the kernel's rule, 13 for the Host's reading), every
+one caught. Writing it showed three things the vectors did not hold yet, and they do now: a version that
+is a no, a word counted in signs and not in bytes, and this Host's own words where the Python Host speaks
+its language's.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
@@ -2505,18 +2533,35 @@ connection relay under the name the phone is paired with. Each of these is true 
 
 | Role | Session | Owns |
 |---|---|---|
-| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions, sign-offs |
+| Lead | `maximus-6c37` | this brief, the ports, the workspace, decisions; the split of what is left, the briefs, review, integration, the gates, landings and the installed Host |
+| Builders | helper agents of the lead, one for each piece | their piece, on a branch and in a worktree of their own, to the lead's brief |
 
-**Stage 1 is built by the lead alone** (Peter's decision of 15 Nov 2026, from three options: "Maximus alone
-through stage 1"). Builders and reviewers are staffed for stage 2, on the models and accounts Peter decides then.
-The one exception to "alone" is the proof that the conformance suite can fail: its plants must also come from a
-reviewer who did not write the suite, so that review is requested from Peter when stage 1 reaches its gate.
-Reviewers use a different model family from the authors and never edit sources.
+Stage 1 was built by the lead alone (Peter's decision of 15 Nov 2026), and so was most of what followed.
+**Since 18 Nov 2026 the lead builds nothing himself** (Peter, 16:47 that day, through his front desk: "spawn
+Astra 6.2 agents on high to work in parallel to speed up. He is now just coordinator"). What is left is split
+into pieces. Each is built by a helper on Codex (`gpt-6.2-astra`, effort high), started through
+`clarp-sub-agents` as a Clarp helper agent of the lead's with a worktree of its own
+(`~/GIT/clarp-worktrees/<piece>`, branch `rebuild/<piece>`). The lead writes the brief, reviews what comes
+back, puts the pieces together, runs the gates, lands and installs. A helper pushes its own branch and nothing
+else, installs nothing, messages nobody but the lead, and asks him when its brief does not say. The helpers'
+guide (what the method is, where to compile, the limits) is `/var/tmp/maximus/helpers/GUIDE.md` on elitebook;
+where it and this document differ, the guide is the newer.
+
+Out of scope by the owner's word of the same day: dreaming ("discard dreaming. It's an old feature"). In
+scope by his word of 17 Nov 2026: every backend the Python Host offers, not only Claude Code, Codex and
+Antigravity ("we need all the backends"), and asking a provider how much of an account is left, with his
+logins ("Of course Max can ask how much it is left").
+
+Reviewers use a different model family from the authors and never edit sources; the owner decides when they
+come ("We will wait with reviewers", 16 Nov 2026).
 
 ## 9. How to work
 
 - One worktree per agent under `~/GIT/clarp-worktrees/`, one branch per slice. Commit after every meaningful step.
-- Your compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
+- A helper's compiler is `server-rs/tools/build check`, `clippy` and `fmt`, and its tests run in GitHub Actions on
+  its branch: the build machine has one slot and a small disk, and a test build of every helper's checkout does
+  not fit on it (18 Nov 2026: 99 percent full; one checkout's test build had grown to 82 GB). The lead's
+  compiler is `server-rs/tools/build check` (seconds once warm), then `test`, `clippy`, `fmt`; `status` shows
   who holds the queue. It works from any checkout on elitebook or laptopstudio and runs on the XPS 15. Write the
   crate first (D13); a queue with one slot is fast only if nobody compiles after every function.
 - The merge gate is the `Server (Rust)` workflow, and it never starts by itself: Peter does not want tests that

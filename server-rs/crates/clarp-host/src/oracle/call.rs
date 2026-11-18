@@ -47,8 +47,12 @@ use crate::edge::{App, Principal};
 use crate::ids;
 use crate::library;
 use crate::line::{self, ENDED_WELL, Heard, Line, Socket, Told};
-use crate::owner::OwnerFile;
+use crate::owner::{self, OwnerFile};
 
+/// What names the file of a vocabulary the owner prepared for the Oracle's contact: this
+/// variable of the Host's environment, else the owner's own file
+/// (`[openai] oracle_voice_context_file`).
+const VOCABULARY_FILE: &str = "CLARP_ORACLE_VOICE_CONTEXT_FILE";
 /// How long a call that a phone still has is given to end, when the phone opens another.
 const TAKES_OVER_WITHIN: Duration = Duration::from_secs(3);
 /// How long a phone may say nothing: it streams its microphone, and asks whether the Host
@@ -163,6 +167,56 @@ struct Asked {
     handoff: bool,
     /// The handoff this call is the way back of, when it is one.
     handoff_id: String,
+    /// What the owner prepared of names and words for this call's contact, where a file of
+    /// it is named: what the voice is told them from.
+    vocabulary: Option<Value>,
+}
+
+/// As much of a file as may be read of it: its bytes, of which there are one more than
+/// `most` where the file is larger. `None`: there is no such file to read.
+fn read_at_most(path: &std::path::Path, most: u64) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut held = Vec::new();
+    let file = std::fs::File::open(path).ok()?;
+    file.take(most + 1).read_to_end(&mut held).ok()?;
+    Some(held)
+}
+
+/// The text a vocabulary was taken from, at the path its file names it by: its bytes, or
+/// nothing where the path is not whole, names no file, or names one too large to be such a
+/// text.
+fn bound_text(path: &str) -> Option<Vec<u8>> {
+    let path = std::path::Path::new(path);
+    if !path.is_absolute() || !path.is_file() {
+        return None;
+    }
+    let held = read_at_most(path, voice::VOCABULARY_TEXT_MOST)?;
+    (held.len() as u64 <= voice::VOCABULARY_TEXT_MOST).then_some(held)
+}
+
+/// The vocabulary the owner prepared for the contact of a call, read now: nothing where no
+/// file of one is named. `Err`: why there is no call, in the words a phone is told: a file
+/// that is named and is not as it must be for this contact refuses the call.
+async fn vocabulary(app: &App, contact: &str) -> Result<Option<Value>, String> {
+    let owners = OwnerFile::new(app.config.speech_keys.clone());
+    let contact = contact.to_string();
+    let read = move || {
+        let named = std::env::var(VOCABULARY_FILE).ok();
+        let named = named.filter(|path| !path.is_empty()).or_else(|| {
+            let file = owners.read()?;
+            owner::text_at(&file, &["openai", "oracle_voice_context_file"])
+        });
+        let Some(path) = named else {
+            return Ok(None);
+        };
+        let most = voice::VOCABULARY_FILE_MOST as u64;
+        let Some(file) = read_at_most(std::path::Path::new(&path), most) else {
+            return Err(voice::NO_VOCABULARY.to_string());
+        };
+        voice::prepared(&contact, &file, bound_text).map(Some)
+    };
+    let read = tokio::task::spawn_blocking(read).await;
+    read.unwrap_or_else(|_| Err(voice::NO_VOCABULARY.to_string()))
 }
 
 /// The values a request names a thing with, in their order: a thing may be named more than
@@ -202,6 +256,9 @@ impl Asked {
             // A contact that names no agent any more is let go, as when it is asked for.
             let _ = keep(app, CONTACT_KEY, String::new()).await;
         }
+        // What the owner prepared for this contact is read before anything else is asked
+        // of the call: a file that is not as it must be is told first.
+        let vocabulary = vocabulary(app, &contact).await?;
         if !named(query, "podcast_artifact").is_empty() {
             return Err("Podcast detours are not available on this Host".to_string());
         }
@@ -240,6 +297,7 @@ impl Asked {
             fresh,
             handoff: !named(query, "handoff").is_empty(),
             handoff_id: handoff_id.to_string(),
+            vocabulary,
         })
     }
 }
@@ -751,10 +809,12 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
             "operator_model_called": false,
         }));
     }
+    // Of what the owner prepared for the contact, the voice is told the words.
+    let prepared = call.asked.vocabulary.as_ref();
     let beginning = Beginning {
         roster: Some(&roster),
         direct,
-        vocabulary: None,
+        vocabulary: prepared.map(|context| &context["terms"]),
         history: history.as_array().map_or(&[][..], Vec::as_slice),
         languages: &languages,
     };
