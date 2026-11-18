@@ -171,7 +171,13 @@ async fn serve(config: Config) -> Result<(), String> {
         &config.apns_endpoint,
         clock.clone(),
     ));
+    let android = Arc::new(clarp_host::fcm::Sender::new(
+        OwnerFile::new(config.push_keys.clone()),
+        Arc::new(clarp_host::fcm::Http::new(config.fcm_endpoint.clone())),
+        clock.clone(),
+    ));
     to_push.run(pusher::Works {
+        android: android.clone(),
         relay: relay.clone(),
         fleet: fleet.clone(),
         desks: desks.clone(),

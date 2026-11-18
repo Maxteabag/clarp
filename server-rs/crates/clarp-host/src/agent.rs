@@ -2449,6 +2449,8 @@ impl Worker {
                 // sound when the agent still waits for an answer from the user.
                 if told["push"] == true {
                     self.setup.pusher.turn_done(TurnDone {
+                        badge: told["badge"] == true,
+                        unread: told["unread"] == true,
                         session: record.session.clone(),
                         persona: record.persona.clone(),
                         notification_id: id.clone(),
