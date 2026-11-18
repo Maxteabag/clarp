@@ -329,8 +329,8 @@ impl Rings {
         androids.filter(|phone| self.receives(phone)).collect()
     }
 
-    pub fn callback_recipient(&self, principal:&str, world:&World)->bool {
-        self.rung_live(world).iter().any(|phone|phone==principal)
+    pub fn callback_recipient(&self, principal: &str, world: &World) -> bool {
+        self.rung_live(world).iter().any(|phone| phone == principal)
     }
 
     /// The phones a live ring can ring: capable, and receiving rings.

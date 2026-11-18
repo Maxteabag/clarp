@@ -57,8 +57,8 @@ pub fn run(app: &App) {
     handoffs::run(app);
 }
 
-pub(crate) use handoffs::put_through;
 pub(crate) use call::zone_of_this_machine;
+pub(crate) use handoffs::put_through;
 pub(crate) use router::asked as route_voice;
 
 /// The agents of this Host, as a contact is held against them. Its janitors are apart from
@@ -231,6 +231,19 @@ pub fn routes() -> Router<App> {
 
 /// Read the same fleet status or transcript the Oracle would show. The live
 /// call has already selected this session from its own frozen team.
-pub(crate) async fn live_read(app:&App, principal:&str, tool:&str, session:&str, limit:usize)->Value{
-    tools::execute(app,(principal,""),(tool,&json!({"agent":session,"limit":limit}),"")).await.receipt.unwrap_or_else(||json!({"error":"agent not running"}))
+pub(crate) async fn live_read(
+    app: &App,
+    principal: &str,
+    tool: &str,
+    session: &str,
+    limit: usize,
+) -> Value {
+    tools::execute(
+        app,
+        (principal, ""),
+        (tool, &json!({"agent":session,"limit":limit}), ""),
+    )
+    .await
+    .receipt
+    .unwrap_or_else(|| json!({"error":"agent not running"}))
 }

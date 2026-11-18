@@ -180,7 +180,7 @@ pub(super) fn androids(directory: &Directory) -> Vec<Android> {
 /// A session that runs: how it is told that its call was ended beside it, and how it is
 /// known that it is over.
 pub struct Running {
-    active:std::sync::Arc<std::sync::atomic::AtomicBool>,
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stops: mpsc::UnboundedSender<String>,
     over: watch::Receiver<bool>,
 }
@@ -188,7 +188,8 @@ pub struct Running {
 impl Running {
     /// The call was retired on its ring: its session is to stop, for this reason.
     pub(super) fn stop(&self, reason: &str) {
-        self.active.store(false,std::sync::atomic::Ordering::Release);
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
         let _ = self.stops.send(reason.to_string());
     }
 }
@@ -749,16 +750,37 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let call_id = joined.call_id.clone();
     let call = (call_id.as_str(), joined.call_epoch);
     let principal = joined.principal.clone();
-    let active=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let configured=joined.snapshot["live_tools"].is_object() && joined.snapshot["live_tools"]["from"]==joined.snapshot["agent"]["session"] && joined.principal!=joined.snapshot["agent"]["session"] && !joined.principal.is_empty();
-    let mut worker=configured.then(||super::tools::Worker {app:app.clone(),call:joined.clone(),active:active.clone(),team:Default::default(),taken:Vec::new()});
-    let mut routing=clarp_kernel::live_call::routing::Routing::default();
-    let (completed,mut results)=mpsc::unbounded_channel::<(super::tools::Worker,clarp_kernel::live_call::routing::Route,Option<Vec<Value>>)>();
+    let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let configured = joined.snapshot["live_tools"].is_object()
+        && joined.snapshot["live_tools"]["from"] == joined.snapshot["agent"]["session"]
+        && joined.principal != joined.snapshot["agent"]["session"]
+        && !joined.principal.is_empty();
+    let mut worker = configured.then(|| super::tools::Worker {
+        app: app.clone(),
+        call: joined.clone(),
+        active: active.clone(),
+        team: Default::default(),
+        taken: Vec::new(),
+    });
+    let mut routing = clarp_kernel::live_call::routing::Routing::default();
+    let (completed, mut results) = mpsc::unbounded_channel::<(
+        super::tools::Worker,
+        clarp_kernel::live_call::routing::Route,
+        Option<Vec<Value>>,
+    )>();
     let transcript = super::transcript::Transcript::start(app, &joined);
     let mut machine = Session::new(joined, &ids::hex(16), seconds(began));
     let (stops, mut stopped) = mpsc::unbounded_channel::<String>();
     let (is_over, over) = watch::channel(false);
-    desk.began(&call_id, Running { stops, over,active:active.clone() }).await;
+    desk.began(
+        &call_id,
+        Running {
+            stops,
+            over,
+            active: active.clone(),
+        },
+    )
+    .await;
     // The voice is reached with the owner's key, where the Host has one.
     let key = app.ears.key("openai");
     let mut voice = match &key {
@@ -814,12 +836,18 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             break;
         }
         let now = seconds(began);
-        if let (Some(owned),Some(key))=(&worker,&key) {
-            if let Some(route)=routing.begin(&owned.call.snapshot,now,&super::tools::time(app.clock.now_ms())) && let Some(mut owned)=worker.take() {
-                let completed=completed.clone();let key=key.clone();
+        if let (Some(owned), Some(key)) = (&worker, &key) {
+            if let Some(route) = routing.begin(
+                &owned.call.snapshot,
+                now,
+                &super::tools::time(app.clock.now_ms()),
+            ) && let Some(mut owned) = worker.take()
+            {
+                let completed = completed.clone();
+                let key = key.clone();
                 tokio::spawn(async move {
-                    let receipts=owned.route(&key,&route).await;
-                    let _=completed.send((owned,route,receipts));
+                    let receipts = owned.route(&key, &route).await;
+                    let _ = completed.send((owned, route, receipts));
                 });
             }
         }
@@ -909,7 +937,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             }
         }
     }
-    active.store(false,std::sync::atomic::Ordering::Release);
+    active.store(false, std::sync::atomic::Ordering::Release);
     drop(voice);
     if let Some(transcript) = transcript {
         transcript.finish().await;
