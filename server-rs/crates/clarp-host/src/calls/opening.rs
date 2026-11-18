@@ -18,6 +18,7 @@ use clarp_kernel::{
 };
 use serde_json::{Value, json};
 
+#[derive(Clone, Copy)]
 pub(crate) enum Change<'a> {
     Claim(&'a Value),
     Greeting {
@@ -262,6 +263,52 @@ impl Desk {
             .unwrap_or(Value::Null);
         let row = self.queue_row(app, &original).await?;
         let mut applied = self.apply_opening(app, owner, change, &row).await?;
+        if applied.status == 404
+            && let Change::Claim(claim) = change
+            && let Some(token) = body["token"].as_str().filter(|t| t.starts_with("opn_"))
+            && let Some(kept) = app.fleet.kept("opening_history", token.into()).await?
+        {
+            let mut op: Value =
+                serde_json::from_slice(&kept).map_err(|err| Unavailable(err.to_string()))?;
+            let queue = self.queue_row(app, &op).await?;
+            let g = super::generation::read(&app.config.data_dir);
+            let generation = if g == super::generation::read(&app.config.data_dir) {
+                g
+            } else {
+                Value::Null
+            };
+            let now = app.clock.now_ms();
+            let nonce = format!("own_{}", crate::ids::hex(16));
+            let trace = format!("callopen-{}", crate::ids::hex(6));
+            let world = rules::World {
+                generation: &generation,
+                now,
+                host: &app.server_id,
+                fence: Some("ring_changed"),
+                queue: &queue,
+                nonce: &nonce,
+                trace: &trace,
+            };
+            let mut effects = rules::Effects::default();
+            let (status, answer) = rules::claim(&mut op, owner, claim, &world, &mut effects);
+            if effects.dirty {
+                op["updated_at"] = json!(now);
+                app.fleet
+                    .keep(
+                        "opening_history",
+                        token.into(),
+                        Some(op.to_string().into_bytes()),
+                    )
+                    .await?;
+            }
+            return Ok(Applied {
+                status,
+                answer,
+                admit: false,
+                withdraw: false,
+                state: op,
+            });
+        }
         if applied.withdraw
             && row["foreign"] != true
             && row["trace_id"] == original["intent"]["trace_id"]

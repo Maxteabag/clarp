@@ -144,5 +144,46 @@ for what,old,new in [
 ]:
     PLANTS.append((H,'host',what,old,new))
 
+RUNS['openings']=['test','--test','listen_first_vectors']
+O='clarp-kernel/src/rings/opening.rs'
+for what,old,new in [
+    ('fallback exposes the owner nonce','if secret && python::truthy(&op["token"])','if python::truthy(&op["token"])'),
+    ('renew omits the old epoch check','op["epoch"] != body["expected_epoch"]','false'),
+    ('renew ignores owner nonce','op["owner_nonce"] != body["owner_nonce"]','false'),
+    ('another device may claim','if op["principal"] != owner','if false'),
+    ('a stale claim is admitted','else if op["epoch"] != body["epoch"]','else if false'),
+    ('accept an empty claim id','python::strip(id).is_empty()','false'),
+    ('a 128-character id is refused','id.chars().count() > 128','id.chars().count() >= 128'),
+    ('a 129-character id is accepted','id.chars().count() > 128','id.chars().count() > 129'),
+    ('different retry accepted','prior["fingerprint"] != fp','false'),
+    ('replay count grows again','"opening":shown,"changed":false','"opening":shown,"changed":true'),
+    ('drop a stored claim too early','requests.len() > 64','requests.len() >= 64'),
+    ('drop a stored claim too late','requests.len() > 64','requests.len() > 65'),
+    ('newest request evicted first','.min_by_key(|(_, v)| v["at"].as_i64())','.max_by_key(|(_, v)| v["at"].as_i64())'),
+    ('renew reuses nonce','op["owner_nonce"] = json!(w.nonce)','op["owner_nonce"] = json!("old")'),
+    ('intent overwrites previous generation','op["intent"]["gen"].as_i64().unwrap_or(0) + 1','1'),
+    ('silence at deadline is refused','< op["silence_ms"].as_i64().unwrap_or(1250)','<= op["silence_ms"].as_i64().unwrap_or(1250)'),
+    ('late watermark unnecessary','["at_ms", "watermark_ms"].iter().any','["at_ms"].iter().any'),
+    ('clock unnecessary','["at_ms", "watermark_ms"].iter().any','["watermark_ms"].iter().any'),
+    ('abandon rejects empty capture','Some("empty_capture" | "capture_aborted")','Some("capture_aborted")'),
+    ('abandon rejects capture abort','Some("empty_capture" | "capture_aborted")','Some("empty_capture")'),
+    ('second onset changes the latch','changed = false;','changed = true;'),
+    ('late greeting is not ordinary','shown["greeting"] = json!("ordinary")','shown["greeting"] = json!("greeting")'),
+    ('intent with no row went out','_ if row.is_null() => "cancelled"','_ if row.is_null() => "started"'),
+    ('mismatched trace cancels a different row','_ if row["trace_id"] != intent["trace_id"] => "unknown"','_ if row["trace_id"] != intent["trace_id"] => "cancelled"'),
+    ('an intended launch already ran','Some("intended") => "cancelled"','Some("intended") => "started"'),
+    ('a started intent is withdrawn','Some("started") => return "started"','Some("started") => return "cancelled"'),
+    ('a cancelled intent is considered unknown','Some("cancelled") => return "cancelled"','Some("cancelled") => return "unknown"'),
+    ('queued row is left behind','effects.withdraw = true;', 'effects.withdraw = false;'),
+    ('an earlier claim may be replaced','Some("queued" | "parked") if row["claimed_at"].is_null()', 'Some("queued" | "parked")'),
+    ('a greeting from the wrong phone is accepted','if op["principal"] != g.principal','if false'),
+    ('a greeting may go to any call','|| op["call_id"] != g.call',''),
+    ('a greeting may go to another session','op["session"] != g.session ||',''),
+    ('greeting may use old epoch','if op["epoch"] != *g.epoch','if false'),
+    ('the wrong message confirms a greeting','op["greeting"]["client_msg_id"] == id','false'),
+    ('a greeting is marked confirmed on ambiguous send','if ok { "confirmed" } else { "unknown" }','if ok { "confirmed" } else { "confirmed" }'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
+
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
