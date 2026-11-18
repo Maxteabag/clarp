@@ -142,10 +142,12 @@ def test_a_copy_that_would_land_out_of_the_store_is_not_written(tmp_path):
     assert list(elsewhere.iterdir()) == []
 
 
-def test_a_new_id_the_rule_refuses_writes_nothing(tmp_path):
+@pytest.mark.parametrize("new_id", ["../../escaped", "a*b", "-x"])
+def test_a_new_id_the_rule_refuses_writes_nothing(tmp_path, new_id):
+    """Also inside the store: an id the rule refuses is never written, wherever it would land."""
     projects = tmp_path / "projects"
     _seed_jsonl(projects, "/home/example", "abc", [{"sessionId": "abc"}])
     before = _files(projects, tmp_path)
     with pytest.raises(ValueError, match="cannot fork that session"):
-        fork_session("abc", "/home/example", projects_root=projects, new_id="../../escaped")
+        fork_session("abc", "/home/example", projects_root=projects, new_id=new_id)
     assert _files(projects, tmp_path) == before
