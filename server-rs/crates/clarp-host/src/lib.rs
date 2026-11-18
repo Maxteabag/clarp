@@ -34,6 +34,7 @@ pub mod files;
 pub mod fleet;
 pub mod forks;
 pub mod goaltool;
+mod google_voice_guard;
 pub mod heard;
 pub mod heartbeat;
 pub mod hub;

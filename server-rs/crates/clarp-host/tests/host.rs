@@ -14233,11 +14233,7 @@ fn a_person_speaks_and_the_clip_becomes_text() {
             400,
             "transcription model not installed: nothing-of-the-kind",
         ),
-        (
-            "cartesia:ink-2",
-            400,
-            "transcription model not installed: cartesia:ink-2",
-        ),
+        ("cartesia:ink-2", 500, "cartesia API key is not configured"),
         ("deepgram:nova-3", 500, "deepgram API key is not configured"),
         (
             "elevenlabs:scribe_v9",
@@ -26045,6 +26041,457 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
     wait_for("the engine's socket to be closed", || {
         engine.open.load(Ordering::SeqCst) == 0
     });
+}
+
+#[test]
+fn the_other_speech_engines_answer_the_apps() {
+    let place = Place::new("speech-engines");
+    let (http, requests) = answers(vec![
+        ("/v1/text-to-speech/e-file", "200 OK", "File voice".into()),
+        ("/v2/speak?", "200 OK", "Flux sound".into()),
+        (
+            "/v1/speak?model=declined&",
+            "429 Test Failure",
+            "declined".into(),
+        ),
+        ("/v1/speak?", "200 OK", "Aura sound".into()),
+        (
+            "/token",
+            "200 OK",
+            json!({"access_token":"fixture-token","expires_in":3600}).to_string(),
+        ),
+        (
+            "/tts",
+            "200 OK",
+            json!({"audioContent":"Z29vZ2xl"}).to_string(),
+        ),
+    ]);
+    let listen = TcpListener::bind("127.0.0.1:0").unwrap();
+    let eleven = format!("http://{}", listen.local_addr().unwrap());
+    let frames = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let received = frames.clone();
+    let serving = std::thread::spawn(move || {
+        let (stream, _) = listen.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let mut socket = tungstenite::accept(stream).unwrap();
+        for _ in 0..3 {
+            let text = socket.read().unwrap().into_text().unwrap();
+            received
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(&text).unwrap());
+        }
+        for event in [
+            json!({"audio":"YWJj"}),
+            json!({"audio":"ZA==","isFinal":true}),
+        ] {
+            socket
+                .send(tungstenite::Message::Text(event.to_string().into()))
+                .unwrap();
+        }
+    });
+    let account = place.root.join("fixture-account.json");
+    std::fs::write(&account,json!({"type":"authorized_user","refresh_token":"token","client_id":"id","client_secret":"secret"}).to_string()).unwrap();
+    let owners = place.root.join("speech.toml");
+    std::fs::write(&owners,format!("[tts]\nprovider='deepgram'\n[deepgram]\napi_key='dg-unit'\n[elevenlabs]\napi_key='el-unit'\n[google_tts]\nproject='unit'\ncredentials='{}'\n",account.display())).unwrap();
+    let (cartesia, cart_requests) = answers(vec![
+        (
+            "/voices",
+            "200 OK",
+            json!({"data":[{"id":"sample","name":"Sample","gender":"neutral","language":"en"}]})
+                .to_string(),
+        ),
+        ("/tts/bytes", "503 Busy", "".into()),
+    ]);
+    let cart_url = format!("{cartesia}/tts/bytes");
+    let (ink, ink_requests) = answers(vec![(
+        "/stt",
+        "200 OK",
+        json!({"text":"Ink heard.","duration":"1.25"}).to_string(),
+    )]);
+    let token = format!("{http}/token");
+    let synth = format!("{http}/tts");
+    let world = [
+        ("CLARP_DEEPGRAM_VOICE_ENDPOINT", http.as_str()),
+        ("CLARP_ELEVEN_VOICE_ENDPOINT", eleven.as_str()),
+        ("CLARP_GOOGLE_TOKEN_ENDPOINT", token.as_str()),
+        ("CLARP_GOOGLE_VOICE_ENDPOINT", synth.as_str()),
+        ("CLARP_GOOGLE_SPEECH_ENDPOINT", http.as_str()),
+        ("CARTESIA_API_KEY", "cart-unit"),
+        ("CLARP_CARTESIA_ENDPOINT", cart_url.as_str()),
+        ("CLARP_INK_ENDPOINT", ink.as_str()),
+        ("CLARP_CHIRP_DECODER", "cat"),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+    ];
+    let host = place.start_in("", &["--speech-keys", owners.to_str().unwrap()], &world);
+    let catalog = host.get("/voice-catalog");
+    let providers = catalog["providers"].as_array().unwrap();
+    let preview = |provider: &str, id: &str| {
+        fetch(
+            &host,
+            "",
+            "GET",
+            &format!("/voice-preview?provider={provider}&id={id}"),
+            &[],
+            b"",
+        )
+    };
+    let voice = |provider: &str, prefix: &str| -> String {
+        let row = providers.iter().find(|r| r["id"] == provider).unwrap();
+        assert_eq!(row["available"], true);
+        row["voices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v["id"].as_str())
+            .find(|v| v.starts_with(prefix))
+            .unwrap()
+            .into()
+    };
+    for (provider, prefix, expected) in [
+        ("deepgram", "flux-", "Flux sound"),
+        ("deepgram", "aura-", "Aura sound"),
+        ("elevenlabs", "", "abcd"),
+        ("google", "nb-NO-Chirp3-HD-", "google"),
+    ] {
+        let id = voice(provider, prefix);
+        let spoken = preview(provider, &id);
+        assert_eq!(
+            (
+                spoken.status,
+                spoken.header("content-type"),
+                spoken.text().as_str()
+            ),
+            (200, "audio/mpeg", expected)
+        );
+        assert_eq!(preview(provider, &id).text(), expected);
+    }
+    assert_eq!(preview("google", "not-a-voice").status, 404);
+    serving.join().unwrap();
+    let said = frames.lock().unwrap();
+    assert_eq!(said[0]["xi_api_key"], "el-unit");
+    assert_eq!(said[0]["voice_settings"]["speed"], 1.0);
+    assert!(said[1]["text"].as_str().unwrap().contains("Hello"));
+    assert_eq!(said[2], json!({"text":""}));
+    let reads = requests.lock().unwrap();
+    assert_eq!(reads.len(), 4);
+    assert!(reads[0].contains("encoding=mp3&container=none"));
+    assert!(
+        reads[0]
+            .to_lowercase()
+            .contains("authorization: token dg-unit")
+    );
+    assert!(reads[2].contains("grant_type=refresh_token"));
+    assert!(
+        reads[3]
+            .to_lowercase()
+            .contains("x-goog-user-project: unit")
+    );
+    let google_body: Value =
+        serde_json::from_str(reads[3].split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(google_body["voice"]["languageCode"], "nb-NO");
+    assert_eq!(google_body["audioConfig"]["audioEncoding"], "MP3");
+    assert!(
+        google_body["input"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Hello, I'm ")
+    );
+    drop(reads);
+    let choose = |provider: &str, fallback: &str| {
+        host.post(
+            "/tts/providers",
+            json!({"provider":provider,"fallback":fallback,"voice":"local fixture"}),
+        )
+    };
+    let chosen = choose("cartesia", "deepgram");
+    assert_eq!(chosen["provider"], "cartesia");
+    assert_eq!(chosen["fallback"], "deepgram");
+    assert_eq!(chosen["voice"], "local fixture");
+    assert_eq!(chosen["restart_scheduled"], false);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/tts/providers",
+            Some(&json!({"provider":"unknown"}))
+        )
+        .0,
+        400
+    );
+    let old = host.get("/cartesia-voices?force=true");
+    assert_eq!(old["available"], true);
+    let row = &old["voices"][0];
+    assert_eq!(row["name"], "Sample");
+    assert_eq!(row["selection_value"], r#"{"cartesia":"sample"}"#);
+    let old_url = row["preview_url"].as_str().unwrap();
+    assert_eq!(
+        fetch(&host, "", "GET", old_url, &[], b"").text(),
+        "Flux sound"
+    );
+    assert_eq!(
+        fetch(&host, "", "GET", old_url, &[("Range", "bytes=1-3")], b"").text(),
+        "lux"
+    );
+    assert_eq!(
+        cart_requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.starts_with("POST /tts/bytes"))
+            .count(),
+        2
+    );
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            "/cartesia-voice-preview?id=missing",
+            &[],
+            b""
+        )
+        .status,
+        404
+    );
+    assert_eq!(
+        host.ask("POST", "/preview", Some(&json!({"text":"test"})))
+            .0,
+        400
+    );
+    let legacy = place.root.join("tts-adapters.d");
+    std::fs::create_dir(&legacy).unwrap();
+    let manifest = legacy.join("legacy.json");
+    std::fs::write(&manifest, r#"{"id":"google"}"#).unwrap();
+    for (method, path, body) in [
+        ("GET", "/voice-preview?provider=google&id=missing", None),
+        ("POST", "/tts/providers", Some(json!({"provider":"google"}))),
+    ] {
+        let (status, answer) = host.ask(method, path, body.as_ref());
+        assert_eq!(status, 409);
+        assert_eq!(answer["error"], "google_id_collision");
+    }
+    std::fs::write(&manifest, "not-json").unwrap();
+    let (status, error) = host.ask(
+        "POST",
+        "/tts/providers",
+        Some(&json!({"provider":"deepgram","fallback":"google"})),
+    );
+    assert_eq!(status, 409);
+    assert_eq!(error["error"], "google_id_unverifiable");
+    std::fs::remove_file(manifest).unwrap();
+    choose("cartesia", "deepgram");
+    let (status,answer)=host.ask("POST","/preview",Some(&json!({"voice_id":r#"{"cartesia":"sample","deepgram":"declined"}"#,"text":"both fail"})));
+    assert_eq!(status, 500);
+    assert!(
+        answer["error"].as_str().unwrap().contains("503"),
+        "{answer}"
+    );
+    assert!(
+        requests
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .starts_with("POST /v1/speak?model=declined&")
+    );
+    choose("cartesia", "gemini");
+    let (status, answer) = host.ask(
+        "POST",
+        "/preview",
+        Some(&json!({"voice_id":r#"{"cartesia":"sample"}"#,"text":"cannot speak"})),
+    );
+    assert_eq!(status, 500);
+    assert!(
+        answer["error"].as_str().unwrap().contains("503"),
+        "{answer}"
+    );
+    let selected = choose("deepgram", "none");
+    assert_eq!(selected["provider"], "deepgram");
+    let agent = host.new_agent("Echo");
+    let heard = host.listen();
+    let say = |id: &str, words: &str| {
+        host.post("/send",json!({"session":agent,"text":format!("<speak>{words}</speak>"),"client_msg_id":id,"synthesize_audio":true}));
+    };
+    say("voice-first", "First engine speaks.");
+    wait_for("speech on the configured engine", || {
+        requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.contains("First engine speaks."))
+    });
+    let playback = host.post(
+        "/preview",
+        json!({"voice_id":"flux-haley-en","text":"test playback","session":"echo"}),
+    );
+    assert_eq!(playback["ok"], true, "{playback}");
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            playback["url"].as_str().unwrap(),
+            &[],
+            b""
+        )
+        .text(),
+        "Flux sound"
+    );
+    let map = r#"{"deepgram":"aura-2-test-en","elevenlabs":"unused"}"#;
+    let audition = host.post(
+        "/preview",
+        json!({"voice_id":map,"text":"[happy] mapped speech","session":"echo"}),
+    );
+    let bytes = fetch(
+        &host,
+        "",
+        "GET",
+        audition["url"].as_str().unwrap(),
+        &[],
+        b"",
+    );
+    assert_eq!(bytes.text(), "Aura sound");
+    let last = requests.lock().unwrap().last().unwrap().clone();
+    assert!(last.starts_with("POST /v1/speak?model=aura-2-test-en&"));
+    let body: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(body["text"], "mapped speech");
+    let reply = fetch(
+        &host,
+        "",
+        "POST",
+        "/transcribe",
+        &[
+            ("Content-Type", "audio/mp4"),
+            ("X-Transcription-Model", "cartesia:ink-whisper"),
+        ],
+        b"fixture clip",
+    );
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply.body).unwrap()["text"],
+        "Ink heard."
+    );
+    let sent = ink_requests.lock().unwrap()[0].clone();
+    assert!(
+        sent.to_lowercase()
+            .contains("authorization: bearer cart-unit")
+    );
+    assert!(sent.to_lowercase().contains("cartesia-version: 2026-08-14"));
+    assert!(sent.contains("ink-whisper") && sent.contains("fixture clip"));
+    assert!(!sent.contains("keyterm"));
+    wait_for("the text preview's audio event", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "audio" && e["preview"] == true && e["url"] == playback["url"])
+    });
+    // Neither engine can start. The Host still announces a clip, then its failure.
+    let unavailable_account = account.with_extension("unavailable");
+    std::fs::rename(&account, &unavailable_account).unwrap();
+    choose("google", "gemini");
+    let before = heard.lock().unwrap().len();
+    say("voice-missing", "No engine can say this.");
+    wait_for("registered clip to report failure", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .skip(before)
+            .any(|e| e["type"] == "tts-error" && e["session"] == agent)
+    });
+    let relevant: Vec<String> = heard
+        .lock()
+        .unwrap()
+        .iter()
+        .skip(before)
+        .filter(|e| e["session"] == agent && (e["type"] == "audio" || e["type"] == "tts-error"))
+        .filter_map(|e| e["type"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(relevant, ["audio", "tts-error"]);
+    std::fs::rename(unavailable_account, &account).unwrap();
+    choose("deepgram", "none");
+    host.kill();
+
+    // Ink-2 uses a socket, streams the decoded sound in 100 ms pieces, and joins
+    // only final transcripts. The same Host data retains the chosen speaker.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let mut socket_world = world.to_vec();
+    socket_world.retain(|(key, _)| *key != "CLARP_INK_ENDPOINT");
+    socket_world.push(("CLARP_INK_ENDPOINT", address.as_str()));
+    socket_world.retain(|(key, _)| *key != "CLARP_ELEVEN_VOICE_ENDPOINT");
+    socket_world.push(("CLARP_ELEVEN_VOICE_ENDPOINT", http.as_str()));
+    let host = place.start_in(
+        "",
+        &["--speech-keys", owners.to_str().unwrap()],
+        &socket_world,
+    );
+    assert_eq!(host.get("/tts/providers")["provider"], "deepgram");
+    host.post(
+        "/tts/providers",
+        json!({"provider":"elevenlabs","fallback":"none"}),
+    );
+    let file_preview = host.post(
+        "/preview",
+        json!({"voice_id":r#"{"deepgram":"unused","elevenlabs":"e-file"}"#,"text":format!("[happy] {}","a".repeat(201))}),
+    );
+    assert_eq!(
+        fetch(
+            &host,
+            "",
+            "GET",
+            file_preview["url"].as_str().unwrap(),
+            &[],
+            b""
+        )
+        .text(),
+        "File voice"
+    );
+    let last = requests.lock().unwrap().last().unwrap().clone();
+    assert!(last.starts_with("POST /v1/text-to-speech/e-file "));
+    let file_request: Value = serde_json::from_str(last.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(file_request["text"], "a".repeat(192));
+    assert_eq!(file_request["model_id"], "eleven_flash_v2_5");
+    assert_eq!(file_request["voice_settings"]["speed"], 1.2);
+    let served = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(15)))
+            .unwrap();
+        let mut ws = tungstenite::accept(stream).unwrap();
+        assert_eq!(ws.read().unwrap().into_data().len(), 3200);
+        assert_eq!(ws.read().unwrap().into_data().len(), 1);
+        for op in ["finalize", "close"] {
+            assert_eq!(ws.read().unwrap().into_text().unwrap().as_str(), op);
+        }
+        for e in [
+            json!({"type":"transcript","text":"discard","is_final":false}),
+            json!({"type":"transcript","text":"first ","is_final":true}),
+            json!({"type":"transcript","text":"second","is_final":true}),
+            json!({"type":"done"}),
+        ] {
+            ws.send(tungstenite::Message::Text(e.to_string().into()))
+                .unwrap();
+        }
+    });
+    let reply = fetch(
+        &host,
+        "",
+        "POST",
+        "/transcribe",
+        &[("X-Transcription-Model", "cartesia:ink-2")],
+        &vec![1; 3201],
+    );
+    assert_eq!(reply.status, 200, "{}", reply.text());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&reply.body).unwrap()["text"],
+        "first second"
+    );
+    served.join().unwrap();
 }
 
 #[test]

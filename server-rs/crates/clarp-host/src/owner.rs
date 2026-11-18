@@ -202,40 +202,35 @@ pub fn google_speech(file: &Table) -> Option<clarp_speech::chirp::Account> {
 /// owner who wrote a `[google_tts]` section is held to it; else the account of the engine
 /// that listens is the one. `None`: they could be used.
 pub fn google_voice_error(file: &Table) -> Option<&'static str> {
-    let home = || std::env::var_os("HOME").map(PathBuf::from);
-    let readable = |named: Option<String>, otherwise: Option<PathBuf>| -> bool {
-        let named = named.map(|named| named.trim().to_string());
-        let path = match named.filter(|named| !named.is_empty()) {
-            Some(named) => match named.strip_prefix("~/") {
-                Some(rest) => home().map(|home| home.join(rest)),
-                None => Some(PathBuf::from(named)),
-            },
-            None => otherwise,
-        };
-        path.is_some_and(|path| path.is_file() && std::fs::File::open(&path).is_ok())
-    };
-    let own = file.get("google_tts").and_then(Value::as_table);
-    let (has_file, project) = match own {
-        Some(_) => (
-            readable(text_at(file, &["google_tts", "credentials"]), None),
-            text_at(file, &["google_tts", "project"]),
-        ),
-        None => {
-            let named = text_at(file, &["google_stt", "credentials"])
-                .or_else(|| std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok());
-            let usual =
-                home().map(|home| home.join(".config/gcloud/application_default_credentials.json"));
-            (
-                readable(named, usual),
-                text_at(file, &["google_stt", "project"]),
-            )
+    google_voice_account(file).err()
+}
+
+pub fn google_voice_account(file: &Table) -> Result<(PathBuf, String), &'static str> {
+    let own = file.get("google_tts").and_then(Value::as_table).is_some();
+    let section = if own { "google_tts" } else { "google_stt" };
+    let named = text_at(file, &[section, "credentials"]).or_else(|| {
+        if own {
+            None
+        } else {
+            std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok()
         }
+    });
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let path = match named.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(name) => match name.strip_prefix("~/") {
+            Some(tail) => home().map(|p| p.join(tail)),
+            None => Some(PathBuf::from(name)),
+        },
+        None if !own => {
+            home().map(|p| p.join(".config/gcloud/application_default_credentials.json"))
+        }
+        None => None,
     };
-    match (has_file, project) {
-        (false, _) => Some("google_credentials_missing"),
-        (true, None) => Some("google_project_missing"),
-        (true, Some(_)) => None,
-    }
+    let path = path
+        .filter(|p| p.is_file() && std::fs::File::open(p).is_ok())
+        .ok_or("google_credentials_missing")?;
+    let project = text_at(file, &[section, "project"]).ok_or("google_project_missing")?;
+    Ok((path, project))
 }
 
 /// Which of Cartesia's models speaks.
@@ -246,6 +241,23 @@ pub fn cartesia_model(file: &Table) -> String {
 impl OwnerFile {
     pub fn new(path: Option<PathBuf>) -> Self {
         Self { path }
+    }
+
+    /// The operator's adapter directory beside the chosen configuration, or its explicit override.
+    pub fn google_refusal(&self, file: &Table) -> Option<&'static str> {
+        let root = std::env::var_os("CLARP_TTS_ADAPTERS_DIR")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("CLARP_CONFIG_DIR")
+                    .map(|p| PathBuf::from(p).join("tts-adapters.d"))
+            })
+            .or_else(|| {
+                self.path
+                    .as_ref()?
+                    .parent()
+                    .map(|p| p.join("tts-adapters.d"))
+            })?;
+        crate::google_voice_guard::refusal(&root, file)
     }
 
     /// The file as it is now. `None`: no file was named, it is not there, or what is in it

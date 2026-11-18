@@ -27,6 +27,7 @@ const VOICES_VERSION: &str = "2026-08-14";
 /// one before was refused (the Python Host's `cartesia_voices.py`).
 pub fn voices(key: &str, endpoint: &str) -> Result<Vec<serde_json::Value>, String> {
     let config = ureq::Agent::config_builder()
+        .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(15)))
         .http_status_as_error(false)
         .build();
@@ -126,6 +127,7 @@ impl Speaker for Cartesia {
             "output_format": { "container": "mp3", "sample_rate": 44_100, "bit_rate": 128_000 },
         });
         let config = ureq::Agent::config_builder()
+            .max_redirects(0)
             .timeout_connect(Some(Duration::from_secs(10)))
             .timeout_recv_response(Some(self.timeout))
             .timeout_recv_body(Some(Duration::from_secs(600)))
