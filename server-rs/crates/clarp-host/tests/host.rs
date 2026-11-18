@@ -26863,6 +26863,18 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         ["d-3", "d-2", "d-1"]
     );
 
+    // The session of the agent's tool is kept with a delegation: as it is when the turn is
+    // admitted, and for a delegation taken before the tool had one, as soon as it has.
+    let (status, taken) = hand(&host, asked("d-s", r#"{"session": "tool-session-1"}"#));
+    assert_eq!(
+        (status, &taken["delegation"]["backend_session_id"]),
+        (200, &json!(""))
+    );
+    wait_for("the turn in which the tool names its session", || {
+        of(&host, "d-s")["status"] == "failed"
+    });
+    assert_eq!(of(&host, "d-s")["backend_session_id"], "tool-session-1");
+
     // Whoever asks is told of a delegation as it is now, whether or not anybody read the
     // book since its turn ended: asked for again, said to be had, called off by its id.
     let answered = |text: &str| {
@@ -26881,6 +26893,7 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         wait_for("the agent to rest", || host.state(&theo) == "done");
     }
     let (status, again) = hand(&host, asked("e-1", "Look once."));
+    assert_eq!(again["delegation"]["backend_session_id"], "tool-session-1");
     assert_eq!(
         (
             status,

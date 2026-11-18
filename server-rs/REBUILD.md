@@ -1657,6 +1657,8 @@ turns and is there after a restart, so no delegation is ended by a guess: a turn
 was killed is the agent's to finish when the Host comes back, and its delegation ends with its answer,
 stamped with the moment the turn ended. A stop for the Oracle stops the agent first and calls off only
 then, so that a stop that fails leaves every delegation as it was; what waited is taken out of the queue.
+The session of the agent's tool is kept with a delegation as it is when the turn is admitted, and for an
+agent that had not run yet, from the moment its tool has one.
 Tested: the kernel by its vectors; and through a real Host process: every refusal in its words, work
 handed on and answered, asked again and told as it is, the same id with other work, the phone's word that
 it has a result, a turn that fails (in the tool's words) and one that ends with nothing said, the two
@@ -1664,6 +1666,21 @@ listings and their order, work that waits behind a busy agent, a stop that calls
 that ends the delegated turn, a phone's own delegations that nobody else is shown, two results that came
 unread told in the order their turns ended, and a turn cut off by a kill of the Host whose delegation
 ends with its answer after the Host is back, with every other row as it was kept.
+
+**The Oracle: a long text relayed to its voice in parts** (18 Nov 2026; the kernel's rules, which nothing
+of the Host uses until the Oracle's conversation is built). A voice model takes a bounded piece of text at
+a time, and an agent's answer is often longer. The Python Host cuts such a text into numbered parts without
+losing a sign, hands the voice one part, waits until it was spoken, and hands it the next; each part says
+which it is, how much remains and how it is to be read, and only the last says that it is the end; a relay
+keeps where it is, so that a reply can be continued or read again from the text that is kept and the agent
+is not asked twice. The rules are ported as they are (`oracle/relay.rs`, by that Host's `oracle_relay.py`
+and `oracle_context.context_chunks` themselves; `tools/oracle-relay-vectors.py`: 174 cuttings of 19 texts,
+9 relays with 144 parts, 52 answers, 10 conversations): how a text is cut (after the last blank of a piece
+that leaves it at least half full, else where the bytes run out; a sign of several bytes is never cut),
+how a relay is sized (the longest head a part of it can have, and its text, fit into one piece for the
+voice), what the head of a part says for every way it can be handed over, what a relay says of how far it
+came, what of an answer is relayed (what the agent marked to be spoken, where it marked anything), what of
+a request is said with it, and the relay of an agent's recent conversation.
 
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and

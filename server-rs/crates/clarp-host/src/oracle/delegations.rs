@@ -69,15 +69,18 @@ async fn written(app: &App, book: &mut Book) -> Result<(), Unavailable> {
     Ok(())
 }
 
-/// What became of the turn of a delegation, as the agent it was handed to says. An agent
-/// that is no longer there has no turns.
-async fn fate_of(app: &App, row: &Delegation) -> Result<TurnFate, Unavailable> {
+/// What became of the turn of a delegation, as the agent it was handed to says, and the
+/// session of that agent's tool as it is now. An agent that is no longer there has no
+/// turns.
+async fn fate_of(app: &App, row: &Delegation) -> Result<(TurnFate, String), Unavailable> {
     let directory = app.fleet.directory();
     let Some(member) = directory.named(&row.agent_id) else {
-        return Ok(TurnFate::Gone);
+        return Ok((TurnFate::Gone, String::new()));
     };
     let (message_id, _) = Message::filed(&row.client_msg_id);
-    member.agent.fate(message_id).await
+    let fate = member.agent.fate(message_id).await?;
+    let tool_session = member.agent.view().status.backend_session.clone();
+    Ok((fate, tool_session.unwrap_or_default()))
 }
 
 /// The delegations that are not over are held against what became of their turns: one
@@ -89,7 +92,10 @@ async fn looked_again(app: &App, book: &mut Book) -> Result<(), Unavailable> {
     let open: Vec<Delegation> = open.cloned().collect();
     let mut fates = Vec::new();
     for row in open {
-        let fate = fate_of(app, &row).await?;
+        let (fate, tool_session) = fate_of(app, &row).await?;
+        // A delegation taken before the agent's tool had a session is told with it from
+        // the moment the tool has one.
+        book.tool_session(&row.delegation_id, &tool_session);
         fates.push((row, fate));
     }
     let now = app.clock.now_ms();

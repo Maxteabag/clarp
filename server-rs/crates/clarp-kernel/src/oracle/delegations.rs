@@ -390,6 +390,20 @@ impl Book {
         self.get(id)
     }
 
+    /// The agent's tool has a session now: it is kept with a delegation that was taken
+    /// before the tool had one, without a new stamp. Answers whether anything was kept.
+    pub fn tool_session(&mut self, delegation_id: &str, session: &str) -> bool {
+        let found = self.rows.iter().position(|row| {
+            row.delegation_id == delegation_id && row.backend_session_id.is_empty()
+        });
+        let Some(at) = found.filter(|_| !session.is_empty()) else {
+            return false;
+        };
+        self.rows[at].backend_session_id = session.to_string();
+        self.changed.push(at);
+        true
+    }
+
     /// A turn that waited in the queue has begun.
     pub fn started(&mut self, trace_id: &str, now_ms: i64) -> bool {
         let trace = python::strip(trace_id);
