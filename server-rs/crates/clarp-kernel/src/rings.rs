@@ -290,6 +290,9 @@ pub struct Effects {
 /// left for calls.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rings {
+    // Only the archived openings requested by this transaction. Never
+    // included in public ring history, rate limits or the next transaction.
+    archived: Vec<Ring>,
     rings: Vec<Ring>,
     audit: Vec<Value>,
     enabled: bool,
@@ -302,6 +305,7 @@ pub struct Rings {
 impl Default for Rings {
     fn default() -> Self {
         Self {
+            archived: Vec::new(),
             rings: Vec::new(),
             audit: Vec::new(),
             // Rings are on until the owner turns them off; why an agent calls is not
@@ -387,6 +391,7 @@ impl Rings {
     /// From what is kept. `settings` is what [`Rings::settings`] gave.
     pub fn kept(rings: Vec<Ring>, audit: Vec<Value>, settings: &Value, voip: Vec<Value>) -> Self {
         Self {
+            archived: Vec::new(),
             rings,
             audit,
             enabled: settings["enabled"].as_bool().unwrap_or(true),

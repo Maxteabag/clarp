@@ -1575,7 +1575,10 @@ instance, call, pairing and Stop generation again before starting the shim. A cr
 can reconstruct an intended admission by its reserved id. The group call and its opening
 are committed together before the answer or event. Older phones receive the original
 spoken line. A clip for the opening carries its token, epoch and admission id, and the
-voice worker skips synthesis once its authority has been withdrawn.
+voice worker skips synthesis once its authority has been withdrawn. A ring can leave the public history
+while its call continues. Its answering phone can still send a greeting, and closing the
+call or revoking the pairing retires its audio. A shim that recorded a failure to spawn
+lets the same admission try again. Its proof applies to that attempt alone.
 The push by which such a ring reaches a
 locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
 until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user

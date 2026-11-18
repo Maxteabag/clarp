@@ -194,3 +194,37 @@ fn opening_dispatch_requires_positive_evidence_for_a_release_or_a_launch() {
     }
     assert_eq!(count, 424);
 }
+
+#[test]
+fn admission_checks_the_stored_channel_and_both_traces() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/listen-first-vectors.json")).unwrap();
+    let mut counts = [0usize; 3];
+    for case in fixture["admissions"].as_array().unwrap() {
+        let mut op = case["before"].clone();
+        let mut fx = rules::Effects::default();
+        let w = World {
+            now: 3000,
+            host: "test",
+            generation: &case["generation"],
+            queue: &case["row"],
+            fence: (case["guard"] == "stopped_after_answer").then_some("stopped_after_answer"),
+            nonce: "",
+            trace: "",
+        };
+        let result = rules::admit(&mut op, &case["existing"], false, &w, &mut fx);
+        assert_eq!(result, case["result"], "{case}");
+        assert_eq!(op, case["after"], "{case}");
+        assert_eq!(
+            result == "admitted",
+            case["effects"] == json!(["create", "record", "enqueue", "allow_paused"])
+        );
+        counts[match result {
+            "admitted" => 0,
+            "adopted" => 1,
+            "fenced" => 2,
+            _ => unreachable!(),
+        }] += 1;
+    }
+    assert_eq!(counts, [2, 2, 236]);
+}

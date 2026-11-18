@@ -99,6 +99,17 @@ pub struct Effects {
     pub announce: bool,
 }
 
+impl Effects {
+    /// Dropping a queued initiative cannot affect an ordinary send which
+    /// happened to use the same id. A claimed turn is fenced by its launcher.
+    pub fn takes_waiter(&self, row: &Value, trace: &Value) -> bool {
+        (self.withdraw || self.unknown)
+            && row["foreign"] != true
+            && row["trace_id"] == *trace
+            && matches!(row["status"].as_str(), Some("queued" | "parked"))
+    }
+}
+
 fn int(value: &Value) -> Value {
     if value.is_i64() || value.is_u64() {
         value.clone()
@@ -524,6 +535,7 @@ pub fn record(new: Record<'_>, proof: &dyn Proof) -> Value {
 /// in a denial. The newer Stop wins even if the mailbox was already paused.
 pub fn fence<'a>(
     ring: &'a super::Ring,
+    present: bool,
     calls: &crate::calls::Calls,
     host: &str,
     proof: &dyn Proof,
@@ -536,7 +548,11 @@ pub fn fence<'a>(
         return Some("host_changed");
     }
     let owner = op["principal"].as_str().unwrap_or("");
-    if ring.state != "answered" || ring.answered_by != owner || op["call_id"] != ring.call_id {
+    if !present
+        || ring.state != "answered"
+        || ring.answered_by != owner
+        || op["call_id"] != ring.call_id
+    {
         return Some("ring_changed");
     }
     if !calls
@@ -565,9 +581,24 @@ pub fn fence<'a>(
 }
 
 impl super::Rings {
+    pub fn opening_records(&self) -> impl Iterator<Item = &super::Ring> {
+        self.rings
+            .iter()
+            .chain(self.archived.iter())
+            .filter(|r| !r.opening.is_null())
+    }
+
+    pub fn attach_opening(&mut self, ring: super::Ring) {
+        self.archived.push(ring);
+    }
+
+    pub fn detach_openings(&mut self) -> Vec<super::Ring> {
+        std::mem::take(&mut self.archived)
+    }
+
     pub fn by_opening_token(&self, token: &Value) -> Option<&super::Ring> {
         let token = token.as_str().filter(|s| s.starts_with("opn_"))?;
-        self.rings.iter().find(|r| r.opening["token"] == token)
+        self.opening_records().find(|r| r.opening["token"] == token)
     }
 
     /// A refusal may itself change the opening (e.g. an identity breach).
@@ -579,9 +610,11 @@ impl super::Rings {
         out: &mut super::Effects,
         apply: impl FnOnce(&mut super::Ring, &mut Effects) -> T,
     ) -> Option<(T, Effects)> {
+        let archived = self.archived.iter().any(|r| r.ring_id == id);
         let ring = self
             .rings
             .iter_mut()
+            .chain(self.archived.iter_mut())
             .find(|r| r.ring_id == id && !r.opening.is_null())?;
         let mut changed = Effects::default();
         let answer = apply(ring, &mut changed);
@@ -589,7 +622,7 @@ impl super::Rings {
             ring.opening["updated_at"] = json!(now);
             out.changed.rings = true;
         }
-        if changed.announce {
+        if changed.announce && !archived {
             out.events.push(ring.event(now));
         }
         Some((answer, changed))
@@ -623,6 +656,46 @@ pub fn header(op: &Value) -> String {
         "<clarp-call-opening>\n[Group call] You called the user about: {}.\n{cause}\nOpen the conversation briefly in your own words; do not assume what they said.\n</clarp-call-opening>",
         op["reason"].as_str().unwrap_or("")
     )
+}
+
+/// Adopt only an admission written for the call with its own trace. A row
+/// from an ordinary client remains that client's, even under a reserved id.
+/// The Host may have committed the intent immediately before its actor append.
+pub fn admit(
+    op: &mut Value,
+    admission: &Value,
+    recover: bool,
+    w: &World<'_>,
+    fx: &mut Effects,
+) -> &'static str {
+    if op.is_null() || identity(op, w, fx).is_some() {
+        return "fenced";
+    }
+    let intent = &op["intent"];
+    if !(intent["state"] == "intended" || recover && intent["state"] == "admitted")
+        || !op["retired"].is_null()
+    {
+        return "fenced";
+    }
+    if let Some(reason) = w.fence {
+        retire(op, reason, w, fx);
+        return "fenced";
+    }
+    let trace = &intent["trace_id"];
+    fx.dirty = true;
+    if !admission.is_null() && (admission["channel"] != "call" || &admission["trace_id"] != trace)
+        || !w.queue.is_null() && &w.queue["trace_id"] != trace
+    {
+        op["intent"]["state"] = json!("unknown");
+        op["state"] = json!("unknown");
+        return "fenced";
+    }
+    op["intent"]["state"] = json!("admitted");
+    if admission.is_null() {
+        "admitted"
+    } else {
+        "adopted"
+    }
 }
 
 /// A generation breach preserves terminal history, even during retirement.

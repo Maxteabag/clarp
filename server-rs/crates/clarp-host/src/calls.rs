@@ -255,6 +255,34 @@ impl Desk {
         Ok(())
     }
 
+    async fn attach_opening(
+        app: &App,
+        rings: &mut Rings,
+        originals: &mut HashMap<String, Value>,
+        id: &str,
+    ) -> Result<(), Unavailable> {
+        if !rings.opening_records().any(|r| r.ring_id == id)
+            && let Some(raw) = app.fleet.kept("opening_history", id.into()).await?
+        {
+            let ring: rings::Ring =
+                serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string()))?;
+            originals.insert(id.into(), ring.opening.clone());
+            rings.attach_opening(ring);
+        }
+        Ok(())
+    }
+
+    async fn with_opening<T>(
+        &self,
+        app: &App,
+        id: &str,
+        ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
+    ) -> Result<T, Unavailable> {
+        let (answer, pushes) = self.ask_rings(app, Some(id), ask).await?;
+        self.push(app, pushes).await;
+        Ok(answer)
+    }
+
     /// One request on the rings. `ask` is given the rings, the calls an answer starts one
     /// in, what a request needs to know, and where to put what it does beside its answer.
     /// What it did is done before this answers: kept, told, noted; and the phones are told
@@ -263,11 +291,16 @@ impl Desk {
     async fn ask_rings<T>(
         &self,
         app: &App,
+        opening_id: Option<&str>,
         ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
     ) -> Result<(T, Vec<rings::Pushed>), Unavailable> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
         let mut rings = books.rings.clone();
+        let mut archived = HashMap::new();
+        if let Some(id) = opening_id {
+            Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+        }
         let mut calls = books.calls.clone();
         let directory = app.fleet.directory();
         let roster = roster(&directory);
@@ -325,13 +358,24 @@ impl Desk {
             .filter(|event| event["state"] == "ended")
         {
             let ended = &event["call_id"];
-            let Some(ring) = rings.rings().iter().find(|r| {
-                ended == &r.call_id && !r.opening.is_null() && r.opening["retired"].is_null()
-            }) else {
+            if !rings.opening_records().any(|r| ended == &r.call_id)
+                && let Some(id) = app
+                    .fleet
+                    .kept("opening_by_call", ended.as_str().unwrap_or("").into())
+                    .await?
+                && let Ok(id) = std::str::from_utf8(&id)
+            {
+                Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+            }
+            let Some(ring) = rings
+                .opening_records()
+                .find(|r| ended == &r.call_id && r.opening["retired"].is_null())
+            else {
                 continue;
             };
             let id = ring.ring_id.clone();
             let session = ring.session.clone();
+            let trace = ring.opening["intent"]["trace_id"].clone();
             let evidence = self.queue_row(app, &ring.opening).await?;
             let reason = format!("call_{}", event["reason"].as_str().unwrap_or("ended"));
             let first = generation::read(&app.config.data_dir);
@@ -351,8 +395,7 @@ impl Desk {
             };
             if let Some((_, fx)) = rings.change_opening(&id, now_ms, &mut out, |r, fx| {
                 fx.announce = rings::opening::retire_current(&mut r.opening, &reason, &world, fx);
-            }) && fx.withdraw
-                && evidence["foreign"] != true
+            }) && fx.takes_waiter(&evidence, &trace)
                 && let Some(turn) = evidence["turn"].as_u64()
             {
                 withdrawals.push((session, turn, reason));
@@ -414,13 +457,14 @@ impl Desk {
         // A clip may be synthesized after the opening changes. Keep a trace
         // index with the state change, so the voice worker needs one lookup.
         if out.changed.rings {
-            for ring in rings.rings().iter().filter(|r| !r.opening.is_null()) {
+            for ring in rings.opening_records() {
                 let previous = books
                     .rings
                     .rings()
                     .iter()
                     .find(|r| r.ring_id == ring.ring_id)
-                    .map(|r| &r.opening);
+                    .map(|r| &r.opening)
+                    .or_else(|| archived.get(&ring.ring_id));
                 if previous == Some(&ring.opening) {
                     continue;
                 }
@@ -452,11 +496,30 @@ impl Desk {
             }) {
                 if let Some(token) = dropped.opening["token"].as_str().filter(|s| !s.is_empty()) {
                     rows.push((
+                        "opening_by_token",
+                        token.into(),
+                        dropped.ring_id.as_bytes().to_vec(),
+                    ));
+                    rows.push((
+                        "opening_by_call",
+                        dropped.call_id.clone(),
+                        dropped.ring_id.as_bytes().to_vec(),
+                    ));
+                    rows.push((
                         "opening_history",
-                        token.to_owned(),
-                        dropped.opening.to_string().into_bytes(),
+                        dropped.ring_id.clone(),
+                        serde_json::to_vec(dropped).map_err(|e| Unavailable(e.to_string()))?,
                     ));
                 }
+            }
+        }
+        for ring in rings.detach_openings() {
+            if archived.get(&ring.ring_id) != Some(&ring.opening) {
+                rows.push((
+                    "opening_history",
+                    ring.ring_id.clone(),
+                    serde_json::to_vec(&ring).map_err(|e| Unavailable(e.to_string()))?,
+                ));
             }
         }
         app.fleet.keep_together(rows).await?;
@@ -528,7 +591,7 @@ impl Desk {
         app: &App,
         ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
     ) -> Result<T, Unavailable> {
-        let (answer, pushes) = self.ask_rings(app, ask).await?;
+        let (answer, pushes) = self.ask_rings(app, None, ask).await?;
         self.push(app, pushes).await;
         Ok(answer)
     }
@@ -560,7 +623,7 @@ impl Desk {
             event_context: &said["event_context"],
             opening_mode: said.get("opening_mode"),
         };
-        let admitted = self.ask_rings(app, |rings, _, with, (out, _)| {
+        let admitted = self.ask_rings(app, None, |rings, _, with, (out, _)| {
             let now = with.at.now_ms;
             let admission = rings.admit(&asked, with.people(), &with.world, now, out)?;
             Ok(match admission {
@@ -592,7 +655,7 @@ impl Desk {
                     None => None,
                 };
                 let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
-                let placed = self.ask_rings(app, |rings, _, with, (out, _)| {
+                let placed = self.ask_rings(app, None, |rings, _, with, (out, _)| {
                     let now = with.at.now_ms;
                     let ring = rings.place(admitted, &voiced, with.new_id, now, out);
                     live::placed(rings, ring, &with.world)

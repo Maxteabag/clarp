@@ -30491,14 +30491,42 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         "started"
     );
     assert_eq!(host.turns(&recovered), before);
-    // Fill the disposable ring history to its normal cap. Eviction on the next
-    // ring must keep the old opening's owner checks and terminal answer.
-    host.ask_as(
-        &phone,
+    // A client message may already own an initiative's proposed admission id.
+    // Keep that message and its provenance. The Host records an unknown intent.
+    let (retiring, device_id) = pair(&host, "Retiring", "full");
+    let fourth = host.new_agent("Fourth");
+    let fourth_ring = ring(&host, &fourth);
+    let (status, answered) = host.ask_as(
+        &retiring,
         "POST",
-        "/calls/end",
-        Some(&json!({"call_id":op["call_id"]})),
+        "/calls/ring/answer",
+        Some(&json!({"ring_id":fourth_ring["ring_id"],"opening_mode":"listen_first"})),
     );
+    assert_eq!(status, 200, "{answered}");
+    let fourth_op = answered["opening"].clone();
+    let foreign_id = format!("call-open:{}:1", fourth_ring["ring_id"].as_str().unwrap());
+    host.send(&fourth, "Fixture client message", &foreign_id);
+    let (status, collision) = claim(
+        &host,
+        &retiring,
+        &fourth_op,
+        "no_mic",
+        "collision",
+        json!({}),
+    );
+    assert_eq!(status, 200, "{collision}");
+    assert_eq!(collision["opening"]["intent"]["state"], "unknown");
+    wait_for(
+        "the scripted agent handles the client's original message",
+        || {
+            host.conversation(&fourth)
+                .iter()
+                .any(|(role, text)| role == "assistant" && text == "Fixture client message")
+        },
+    );
+
+    // Fill the history with old rings while both real calls remain live.
+    // Their openings must survive eviction for their respective devices.
     drop(host);
     {
         let mut db = clarp_store_sqlite::SqliteKeyValue
@@ -30511,12 +30539,20 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
             .find(|v| v["ring_id"] == r["ring_id"])
             .unwrap()
             .clone();
-        let mut history = vec![saved.clone()];
-        for n in 1..50 {
+        let fourth_saved = current
+            .iter()
+            .find(|v| v["ring_id"] == fourth_ring["ring_id"])
+            .unwrap()
+            .clone();
+        let mut history = vec![saved.clone(), fourth_saved];
+        for n in 2..50 {
             let mut older = saved.clone();
             for k in ["_opening", "opening_mode", "_host_gen"] {
                 older.as_object_mut().unwrap().remove(k);
             }
+            older["created_at"] = json!(n);
+            older["expires_at"] = json!(n + 45_000);
+            older["ended_at"] = json!(n + 1);
             older["state"] = json!("cancelled");
             older["ring_id"] = json!(format!("archived-{n}"));
             history.push(older);
@@ -30525,9 +30561,11 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
             .unwrap();
     }
     let host = place.start_in("test-only", &args, &env);
-    let evictor = host.new_agent("Archive");
-    let fresh = ring(&host, &evictor);
-    host.post("/calls/ring/cancel", json!({"ring_id":fresh["ring_id"]}));
+    for name in ["Archive One", "Archive Two"] {
+        let evictor = host.new_agent(name);
+        let fresh = ring(&host, &evictor);
+        host.post("/calls/ring/cancel", json!({"ring_id":fresh["ring_id"]}));
+    }
     assert_eq!(
         host.ask_as(
             &phone,
@@ -30537,6 +30575,35 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         )
         .0,
         404
+    );
+    // The late greeting takes the ordinary route to this exact participant
+    // and prevents any later initiative audio before the call closes.
+    let late = json!({"session":recovered,"text":"Hello after eviction","client_msg_id":"archived-hello",
+        "trace_id":"test-archive-greeting","call_id":op["call_id"],"call_opening":{"token":op["token"],"epoch":op["epoch"]}});
+    let (status, answered) = host.ask_as(&phone, "POST", "/send", Some(&late));
+    assert_eq!(status, 200, "{answered}");
+    assert_eq!(answered["opening"]["greeting"], "ordinary");
+    assert_eq!(answered["session"], recovered);
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let tagged: Value = serde_json::from_slice(
+        &db.get("kept.opening_audio", "callopen-test-recovery")
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(tagged["skip"], true);
+    drop(db);
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "POST",
+            "/calls/end",
+            Some(&json!({"call_id":op["call_id"]}))
+        )
+        .0,
+        200
     );
     let archived = claim(
         &host,
@@ -30553,31 +30620,29 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         403
     );
 
-    // A different full device cannot use the revoked device's outstanding
-    // token. Its stored opening records the revocation before the reply.
-    let (retiring, device_id) = pair(&host, "Retiring", "full");
-    let owner = host.new_agent("Fourth");
-    let r = ring(&host, &owner);
-    let (_, answered) = host.ask_as(
-        &retiring,
-        "POST",
-        "/calls/ring/answer",
-        Some(&json!({"ring_id":r["ring_id"],"opening_mode":"listen_first"})),
-    );
-    let op = answered["opening"].clone();
+    // Revocation retires the other archived opening. Only its former owner
+    // loses the pairing. The surviving phone cannot retrieve its private token.
     host.post("/paired-devices/revoke", json!({"device_id":device_id}));
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let archived: Value = serde_json::from_slice(
+        &db.get(
+            "kept.opening_history",
+            fourth_ring["ring_id"].as_str().unwrap(),
+        )
+        .unwrap()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(archived["_opening"]["retired"]["reason"], "auth_revoked");
     assert_eq!(
-        show(&host, &r["ring_id"])["opening"]["retired"],
-        "auth_revoked"
-    );
-    assert_eq!(
-        claim(&host, &retiring, &op, "no_mic", "revoked", json!({})).0,
+        claim(&host, &retiring, &fourth_op, "no_mic", "revoked", json!({})).0,
         401
     );
-    assert_eq!(
-        claim(&host, &other, &op, "no_mic", "other", json!({})).0,
-        403
-    );
+    let (status, forbidden) = claim(&host, &other, &fourth_op, "no_mic", "other", json!({}));
+    assert_eq!(status, 403);
+    assert!(forbidden["opening"].get("token").is_none());
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its

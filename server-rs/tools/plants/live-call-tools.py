@@ -223,5 +223,13 @@ for file,what,old,new in [
     ('clarp-host/src/calls/opening_launch.rs','the gate forgets which attempt claimed the initiative','op["launch_attempt"] = json!(attempt);','op["launch_attempt"] = json!(0);'),
 ]:
     PLANTS.append((file,'host',what,old,new))
+for what,old,new in [
+    ('a client admission may become the initiative','admission["channel"] != "call"','admission["channel"] == "never"'),
+    ('adoption disregards the admission trace','&admission["trace_id"] != trace','&admission["trace_id"] == &serde_json::Value::Null'),
+    ('an unrelated queued trace may be adopted','&w.queue["trace_id"] != trace','&w.queue["trace_id"] == &serde_json::Value::Null'),
+    ('a committed admission is created again','if admission.is_null() {','if !admission.is_null() {'),
+    ('a matching admission ignores the retained fence','retire(op, reason, w, fx);\n        return "fenced";','return "fenced";'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

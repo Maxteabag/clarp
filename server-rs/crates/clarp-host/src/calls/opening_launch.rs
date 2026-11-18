@@ -66,14 +66,19 @@ pub async fn run(app: App, mut rx: mpsc::UnboundedReceiver<Request>) {
     }) = rx.recv().await
     {
         let _guard = app.calls.opening_turn.lock().await;
-        let answer = app.calls.rings(&app, |rings, calls, with, (out, _)| {
-            let Some((ring_id, _)) = id.strip_prefix("call-open:").and_then(|id| id.rsplit_once(':')) else {
-                return false;
-            };
+        let Some((ring_id, _)) = id
+            .strip_prefix("call-open:")
+            .and_then(|id| id.rsplit_once(':'))
+        else {
+            let _ = reply.send(false);
+            continue;
+        };
+        let answer = app.calls.with_opening(&app,ring_id, |rings, calls, with, (out, _)| {
+            let present = rings.rings().iter().any(|r| r.ring_id == ring_id);
             let now = with.at.now_ms;
             let generation = super::opening::proven(with);
             rings.change_opening(ring_id, now, out, |ring, fx| {
-                let reason = with.world.opening.and_then(|proof| rules::fence(ring, calls, with.at.host_id, proof).map(str::to_owned));
+                let reason = with.world.opening.and_then(|proof| rules::fence(ring, present, calls, with.at.host_id, proof).map(str::to_owned));
                 let op = &mut ring.opening;
                 let dispatch = |phase, op: &mut serde_json::Value, fx: &mut rules::Effects| {
                     let status = if phase == Phase::Claim && op["intent"]["state"] == "admitted" { "queued" } else { "claimed" };
