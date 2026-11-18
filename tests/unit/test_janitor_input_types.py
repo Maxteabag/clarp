@@ -31,3 +31,12 @@ def test_a_text_schedule_and_provider_still_pass():
         "agent-1", "scheduled-prompt")
     assert out["config"]["cron"] == "0 9 * * *"
     assert janitors._execution("goal-keeper", {"provider": "agy", "isolated": True}, "agy")["provider"] == "agy"
+
+
+@pytest.mark.parametrize("cron", ["０ 9 * * *", "0 ٩ * * *"])
+def test_a_schedule_with_digits_outside_ascii_is_refused_as_a_bad_value(cron):
+    """R66: the existing 400 for a schedule that is not five fields of cron."""
+    with pytest.raises(janitors.JanitorError) as refused:
+        janitors._attachment_values([{"trigger_id": "schedule", "config": {"cron": cron, "timezone": "UTC"}}],
+                                    "agent-1", "scheduled-prompt")
+    assert (str(refused.value), refused.value.status) == ("Use a valid five-field schedule and IANA timezone", 400)

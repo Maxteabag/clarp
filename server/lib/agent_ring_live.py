@@ -447,6 +447,7 @@ def _owned(records: list[dict], principal: str, data: Any) -> dict:
         raise CallError(400, REQUEST_INVALID)
     ring = next((r for r in records if r.get("_live_call_id") == call_id), None)
     if (ring is None or ring.get("answered_by") != principal
+            or not nonce.isascii()  # compare_digest raises on a str outside ASCII: such a nonce is simply wrong
             or not hmac.compare_digest(str(ring.get("_live_owner_nonce") or ""), nonce)
             or ring.get("_live_attempt_id") != attempt):
         raise CallError(409, OWNER_CONFLICT)
