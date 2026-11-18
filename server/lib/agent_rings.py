@@ -133,6 +133,21 @@ def _settle(records: list[dict], missed: list[dict]) -> list[dict]:
     return now_missed
 
 
+def recover_joined_live_calls() -> int:
+    """Retire calls whose joined socket belonged to the previous Host process."""
+    from . import agent_ring_live as live
+    with _lock:
+        records = _load()
+        count = 0
+        for ring in records:
+            if ring.get("_live_phase") in ("connecting", "ready", "active"):
+                live.retire(ring, live.HOST_RESTART)
+                count += 1
+        if count:
+            _save(records)
+        return count
+
+
 def expire_due() -> list[str]:
     """Settle every overdue ring now; returns the ring ids that became missed."""
     with _settling() as missed:
