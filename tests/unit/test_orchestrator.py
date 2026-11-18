@@ -703,7 +703,9 @@ def test_call_model_routes_grok_through_its_runner(monkeypatch):
     assert cmd[0] == "grok" and "--output-format" in cmd
     assert cmd[cmd.index("--model") + 1] == "grok-4.6"
     assert cmd[cmd.index("--reasoning-effort") + 1] == "low"
-    assert cmd[-2] == "-p"
+    # The prompt goes in a private prompt file, never on the command line (issue 360, R35).
+    assert cmd[-2] == "--prompt-file"
+    assert not any("noise" in part for part in cmd)
 
 
 def test_call_model_routes_opencode_through_its_runner(monkeypatch):
