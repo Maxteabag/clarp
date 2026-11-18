@@ -61,6 +61,7 @@ webpki-roots = "1"
 # gave it, by the provider of cryptography that TLS already brings.
 h2 = "0.4"
 http = "1"
+http-body-util = "0.1"
 bytes = "1"
 ring = "0.17"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
