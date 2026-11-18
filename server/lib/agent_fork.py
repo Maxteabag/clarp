@@ -29,6 +29,7 @@ from typing import Callable
 from . import agents as agents_db
 from . import backends, identity
 from .backend.base import Unsupported
+from .fork import ForkRefused
 from .log import log, log_exception
 from .trace import new_trace_id
 
@@ -248,6 +249,9 @@ def _native_fork(parent: _Parent, backend: str, cwd: str) -> str:
     try:
         return backends.get(backend).fork_conversation(
             parent.conversation, source_cwd=parent.cwd, cwd=cwd)
+    except ForkRefused as exc:
+        # A stored id (or its file) the shared rule refuses: this child is not made.
+        raise ForkError(400, "cannot_fork_session", str(exc)) from exc
     except (Unsupported, FileNotFoundError, OSError, RuntimeError, TimeoutError) as exc:
         log_exception("forkNativeFail", exc, detail=f"{parent.session} -> {cwd}")
         return ""

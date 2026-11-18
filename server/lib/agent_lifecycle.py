@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from . import agents as agents_db
 from . import backends, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agent
+from .fork import ForkRefused
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
@@ -166,6 +167,8 @@ class AgentLifecycleService:
             resumed = fork_session(spec.fork_id, spec.cwd, backend=spec.backend)
             log("forkOk", f"{spec.fork_id} -> {resumed} in {spec.cwd}")
             return resumed
+        except ForkRefused as e:
+            raise AgentLifecycleError(400, str(e)) from e
         except FileNotFoundError as e:
             log_exception("forkSourceMissing", e, detail=spec.fork_id)
             raise AgentLifecycleError(404, "fork source not found") from e
@@ -237,6 +240,12 @@ class AgentLifecycleService:
                 agents_db.end_current_runtime(agent["agent_id"])
                 log_exception("agentResumeBindConflict", e, detail=session)
                 raise AgentLifecycleError(409, "session in use") from e
+            except ValueError as e:
+                # An id the binding refuses (R70; the request's own is refused at 400 before
+                # this, a forked one is minted): refused the same way, never a 500.
+                agents_db.end_current_runtime(agent["agent_id"])
+                log("agentResumeBindRefused", session)
+                raise AgentLifecycleError(400, "invalid session id") from e
         agents_db.record_path_usage(spec.cwd)
         return agent
 

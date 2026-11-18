@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 from dataclasses import replace
 from . import agents as agents_db
-from . import backends, db, error_classify, eventlog
+from . import backends, db, error_classify, eventlog, transcript_paths
 from . import message_store, origins, team_store, turn_queue
 from . import launch_receipts, turn_lifecycle
 from . import events
@@ -208,6 +208,14 @@ class AdmissionMixin:
         # Only a binding nothing is using: a turn that is starting or running
         # writes its transcript only once its CLI has begun, so a disk miss
         # then is not a ghost (TP-05).
+        if backend_session_id and not transcript_paths.session_id_ok(backend_session_id):
+            # A binding stored before the shared rule (R70) that fails it is never handed
+            # to a CLI: one line naming the backend, and the turn starts a fresh session.
+            # Restore cleans every restored agent at boot; this covers the rest (the
+            # Janitors that run on demand are not restored).
+            transcript_paths.refused(backend)
+            agents_db.end_current_runtime(agent_id)
+            backend_session_id = ""
         if (backend_session_id and not self._turn_in_flight(agent_id)
                 and backends.by_id(backend).resume_target(
                     backend_session_id, str(cwd), self.home) is None):

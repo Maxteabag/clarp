@@ -2057,3 +2057,14 @@ def test_hotseat_desk_routes_require_full_device_scope_while_status_stays_readab
     handler._send = lambda code, *_a, **_k: responses.append(code)
     getattr(handler, f"do_{method}")()
     assert responses == [limited_status]
+
+
+def test_a_resume_command_is_offered_only_for_an_id_by_the_shared_rule():
+    """R70 review: the desk's resume command is copied into a shell; an id outside the shared rule
+    gets none."""
+    from lib import hotseat_desk
+    assert hotseat_desk._resume_command("claude", "0b1c2d3e-0000-4000-8000-000000000001") == \
+        "claude --resume 0b1c2d3e-0000-4000-8000-000000000001"
+    for bad in ("--last", "x; rm -rf ~", "$(id)", "../x", ""):
+        assert hotseat_desk._resume_command("claude", bad) is None, bad
+        assert hotseat_desk._resume_command("codex", bad) is None, bad

@@ -145,3 +145,26 @@ def test_claude_partial_index_merges_unindexed_transcript(tmp_path):
         item["id"] for item in session_catalog.list_claude_sessions(
             "/repo", projects_root=root)
     } == {"indexed", "unindexed"}
+
+
+def test_the_index_offers_only_ids_by_the_shared_rule_and_paths_inside_the_store(tmp_path):
+    """R70 review: an id from sessions-index.json is offered for resume and fork only when it is one
+    path component, and its declared fullPath only counts inside the projects store."""
+    root = tmp_path / "projects"
+    project = root / "-repo"
+    project.mkdir(parents=True)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("{}\n")
+    (project / "good-uuid.jsonl").write_text("{}\n")
+    (project / "*.jsonl").write_text("{}\n")
+    (project / "sessions-index.json").write_text(json.dumps({"version": 1, "entries": [
+        {"sessionId": "good-uuid", "projectPath": "/repo", "fileMtime": 1},
+        {"sessionId": "*", "projectPath": "/repo", "fileMtime": 2},
+        {"sessionId": "--last", "projectPath": "/repo", "fileMtime": 3, "fullPath": str(outside)},
+        {"sessionId": "elsewhere", "projectPath": "/repo", "fileMtime": 4, "fullPath": str(outside)},
+    ]}))
+    for scope in (False, True):
+        listed = {item["id"] for item in session_catalog.list_claude_sessions(
+            "/repo", projects_root=root, all_projects=scope)}
+        assert "good-uuid" in listed
+        assert not listed & {"*", "--last", "elsewhere"}, scope

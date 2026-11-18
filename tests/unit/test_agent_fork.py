@@ -298,3 +298,18 @@ def test_count_with_a_worktree_gives_each_sibling_its_own_branch():
                                  "worktree": {"repo": "/r", "branch": "fix/x"}})
     assert [(c.name, c.repo, c.branch) for c in children] == [
         ("probe-1", "/r", "fix/x-1"), ("probe-2", "/r", "fix/x-2")]
+
+
+def test_a_parent_whose_stored_conversation_id_fails_the_rule_forks_no_child(tmp_path, home):
+    """A stored id from before the shared rule (R70): the native copy is refused, that child is
+    not made and the request answers in the fork's own error form."""
+    from lib import db
+    parent, _cwd = _claude_parent(tmp_path, home)
+    db.conn().execute("UPDATE runtimes SET backend_session_id = ? WHERE agent_id = ? AND ended_at IS NULL",
+                      ("*", parent["agent_id"]))
+    before = {row["session"] for row in agents_db.list_agents()}
+    out = agent_fork.fork(_ctx(tmp_path), "boss", {"children": [
+        {"name": "stream-a", "task": "Do part A."}]}, dispatch=_Inbox())
+    [child] = out["children"]
+    assert child.get("error") == "cannot_fork_session" and child.get("message") == "cannot fork that session"
+    assert {row["session"] for row in agents_db.list_agents()} == before
