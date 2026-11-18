@@ -111,7 +111,9 @@ pub struct Launch {
     pub args: Vec<String>,
     /// Set on top of the environment the tool inherits.
     pub env: Vec<(String, String)>,
-    /// What the tool reads on its standard input, which is then closed.
+    /// Append the turn input file path to the arguments and give the tool null stdin.
+    pub prompt_as_file: bool,
+    /// Prompt bytes for the turn input file or the tool’s standard input.
     pub stdin: Vec<u8>,
 }
 

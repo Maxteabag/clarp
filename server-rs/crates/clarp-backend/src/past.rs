@@ -525,16 +525,41 @@ pub fn codex_sessions(
     listed
 }
 
+/// Claude resumes in the current project. A fork can also take its source
+/// from another project in the same store.
+pub fn claude_transcript(
+    projects: &Path,
+    cwd: &str,
+    session: &str,
+    other_projects: bool,
+) -> Option<PathBuf> {
+    if !one_name(session) {
+        return None;
+    }
+    let root = projects.canonicalize().ok()?;
+    let name = format!("{session}.jsonl");
+    let own = root.join(claude_project(cwd)).join(&name);
+    confined(&root, &own).or_else(|| {
+        if !other_projects {
+            return None;
+        }
+        files_of(&root)
+            .into_iter()
+            .find_map(|dir| confined(&root, &dir.join(&name)))
+    })
+}
+
 /// The rollout of a session of Codex: the newest file under `sessions` whose name ends with
 /// the session's.
 pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
-    if session.is_empty() || !sessions.is_dir() {
+    if !one_name(session) || !sessions.is_dir() {
         return None;
     }
+    let root = sessions.canonicalize().ok()?;
     let ending = format!("{session}.jsonl");
     let named = files_under(sessions, &|name| name.ends_with(&ending));
     let mut newest: Option<(SystemTime, PathBuf)> = None;
-    for path in named {
+    for path in named.into_iter().filter_map(|p| confined(&root, &p)) {
         let Some(at) = written(&path).0 else {
             continue;
         };
@@ -567,23 +592,29 @@ fn one_name(name: &str) -> bool {
 /// Whether agy still has the conversation of this name. It lets go of all but the newest
 /// few hundred, and what it lets go of leaves its transcript behind: only the conversation's
 /// own file counts. Where agy has no store at all on this machine nothing is known, and the
-/// conversation counts as kept (`conversation_exists`); so does a name that is no name of a
-/// file.
+/// conversation counts as kept (`conversation_exists`). Malformed names are refused.
 pub fn agy_kept(base: &Path, conversation: &str) -> bool {
-    if conversation.contains(['/', '\\']) || conversation == ".." {
-        return true;
+    if !one_name(conversation) {
+        return false;
     }
     let store = base.join("conversations");
-    !store.is_dir() || store.join(format!("{conversation}.db")).exists()
+    if !store.is_dir() {
+        return true;
+    }
+    base.canonicalize()
+        .is_ok_and(|root| confined(&root, &store.join(format!("{conversation}.db"))).is_some())
 }
 
 /// The transcript of a conversation of agy, where there is one (`find_latest_jsonl`).
 pub fn agy_transcript(base: &Path, conversation: &str) -> Option<PathBuf> {
+    if !one_name(conversation) {
+        return None;
+    }
     let path = base
         .join("brain")
         .join(conversation)
         .join(".system_generated/logs/transcript.jsonl");
-    (one_name(conversation) && path.is_file()).then_some(path)
+    confined(&base.canonicalize().ok()?, &path)
 }
 
 /// A text of a URI with every `%` and two digits read as the byte they stand for
@@ -822,8 +853,16 @@ pub fn native_transcript(
     home: &Path,
     id: &str,
 ) -> Option<String> {
+    native_transcript_in(tool, &native_home(tool, home).join("sessions"), id)
+}
+
+fn native_transcript_in(
+    tool: clarp_kernel::grok_muse::Tool,
+    sessions: &Path,
+    id: &str,
+) -> Option<String> {
     use clarp_kernel::grok_muse::Tool;
-    if id.is_empty() || Path::new(id).file_name()?.to_str()? != id {
+    if !one_name(id) {
         return None;
     }
     if tool == Tool::Muse
@@ -832,10 +871,7 @@ pub fn native_transcript(
     {
         return None;
     }
-    let base = native_home(tool, home)
-        .join("sessions")
-        .canonicalize()
-        .ok()?;
+    let base = sessions.canonicalize().ok()?;
     let mut dirs = roots(tool, &base);
     if tool == Tool::Muse {
         dirs.reverse();
@@ -936,4 +972,63 @@ pub fn native_sessions(
     sessions.sort_by_key(|s| std::cmp::Reverse(s["mtime"].as_i64().unwrap_or(0)));
     sessions.truncate(limit);
     sessions
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod confinement {
+    use super::*;
+    use clarp_kernel::grok_muse::Tool;
+
+    #[test]
+    fn all_native_session_lookups_require_one_name_and_a_file_in_the_store() {
+        let root = std::env::temp_dir().join(format!("clarp-native-lookup-{}", std::process::id()));
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&outside, "fixture").unwrap();
+        let id = "00000000-1234-4321-abcd-000000000001";
+        for tool in ["claude", "codex", "agy", "grok", "muse"] {
+            let store = root.join(tool);
+            let file = match tool {
+                "claude" => store
+                    .join(claude_project("/work"))
+                    .join(format!("{id}.jsonl")),
+                "codex" => store.join(format!("rollout-{id}.jsonl")),
+                "agy" => store
+                    .join("brain")
+                    .join(id)
+                    .join(".system_generated/logs/transcript.jsonl"),
+                "grok" => store.join(id).join("chat_history.jsonl"),
+                "muse" => store.join("2026/11/18").join(id).join("session.jsonl"),
+                _ => unreachable!(),
+            };
+            let lookup = |name: &str| match tool {
+                "claude" => claude_transcript(&store, "/work", name, false).is_some(),
+                "codex" => codex_rollout(&store, name).is_some(),
+                "agy" => agy_transcript(&store, name).is_some(),
+                "grok" => native_transcript_in(Tool::Grok, &store, name).is_some(),
+                "muse" => native_transcript_in(Tool::Muse, &store, name).is_some(),
+                _ => unreachable!(),
+            };
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, "fixture").unwrap();
+            assert!(lookup(id), "{tool}");
+            for invalid in ["two/components", ".."] {
+                assert!(!lookup(invalid), "{tool} {invalid}");
+            }
+            std::fs::remove_file(&file).unwrap();
+            std::os::unix::fs::symlink(&outside, &file).unwrap();
+            assert!(!lookup(id), "{tool} accepted an outside file");
+            if tool == "claude" {
+                assert!(claude_transcript(&store, "/different", id, true).is_none());
+            }
+            if tool == "agy" {
+                let db = store.join("conversations").join(format!("{id}.db"));
+                std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+                std::os::unix::fs::symlink(&outside, db).unwrap();
+                assert!(!agy_kept(&store, id));
+            }
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

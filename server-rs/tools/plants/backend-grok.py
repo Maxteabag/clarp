@@ -4,6 +4,7 @@ import runner
 
 RUNS = {
     'vectors': ['test', '--test', 'backend_grok_vectors'],
+    'shim': ['test', '--test', 'shim', '--', 'prompt_delivery_is_selected_by_the_shim_flag'],
     'bounds': ['test', '-p', 'clarp-backend', '--lib', 'composed_prompt_byte_bounds_match'],
     'stream': ['test', '-p', 'clarp-backend', '--lib', 'recorded_streams_follow'],
     'catalogue': ['test', '-p', 'clarp-backend', '--lib', 'model_lists_match'],
@@ -92,7 +93,7 @@ for why,before,after in [
     change(C,'catalogue',why,before,after)
 
 for why,before,after in [
-        ('long prompts use the wrong file flag','args.extend(["--prompt-file".into(),','args.extend(["--wrong-file".into(),'),
+        ('long prompts use the wrong file flag','args.push("--prompt-file".into());','args.push("--wrong-file".into());'),
         ('tool result text is discarded','call.output = Some(shorten(&text, 4000));','call.output = None;'),
         ('a completed tool reports failure','call.status = if ok','call.status = if !ok'),
         ('resumed sessions are fresh','spec.backend_session.is_none(),','spec.backend_session.is_some(),')]:
@@ -134,6 +135,19 @@ for why,before,after in [
         ('an assigned session is not recorded','fn binds_at_spawn(&self) -> bool {\n        true','fn binds_at_spawn(&self) -> bool {\n        false'),
         ('a Muse lock has no recovery classification','muse_session_locked: Muse session','session_busy: Muse session')]:
     change(B,'host',why,before,after)
+
+S = 'clarp-shim/src/main.rs'
+for why,before,after in [
+        ('a file prompt is the default','let mut prompt_as_file = false;', 'let mut prompt_as_file = true;'),
+        ('the shim ignores its file flag','=> prompt_as_file = true,','=> prompt_as_file = false,'),
+        ('a file prompt needs a named session','if let Some(id) = args.named_session {','if args.prompt_as_file && args.named_session.is_none() { return Err(String::from("session required")); }\n    if let Some(id) = args.named_session {'),
+        ('the turn input path is appended twice','.args(prompt_path)','.args(prompt_path).args(prompt_path)'),
+        ('the wrong path is appended','.args(prompt_path)','.args(prompt_path.map(|path| path.with_extension("wrong")))'),
+        ('the file flag selects piped stdin','.stdin(if args.prompt_as_file {','.stdin(if !args.prompt_as_file {'),
+        ('ordinary stdin loses the turn bytes','.filter(|_| !args.prompt_as_file)','.filter(|_| args.prompt_as_file)')]:
+    change(S,'shim',why,before,after)
+change('clarp-actor/src/lib.rs','host','the actor drops file delivery','prompt_as_file: launch.prompt_as_file,','prompt_as_file: false,')
+change('clarp-host/src/launcher.rs','host','the launcher omits the file flag','if order.prompt_as_file {','if !order.prompt_as_file {')
 
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
