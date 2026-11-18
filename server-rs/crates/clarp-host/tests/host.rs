@@ -29309,6 +29309,10 @@ fn a_call_of_the_oracle_is_told_the_words_its_owner_prepared_for_its_contact() {
     let directory = json!({ "path": place.root.to_str().unwrap(), "sha256": digest(b"") });
     prepare(&theo, json!({ "prepared_context": directory }));
     assert_eq!(refused(&to(&theo)), (400, NO_TEXT.to_string()));
+    // Nor is what can be read and is no file, though it reads as a text of nothing.
+    let no_file = json!({ "path": "/dev/null", "sha256": digest(b"") });
+    prepare(&theo, json!({ "prepared_context": no_file }));
+    assert_eq!(refused(&to(&theo)), (400, NO_TEXT.to_string()));
     // A text may be so large and not a byte larger.
     let most = usize::try_from(words::VOCABULARY_TEXT_MOST).unwrap();
     let long = place.root.join("long.md");

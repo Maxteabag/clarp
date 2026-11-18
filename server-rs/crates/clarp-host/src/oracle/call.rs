@@ -809,14 +809,12 @@ async fn carried(app: &App, mut line: Line, mut voice: Voice, call: Call) {
             "operator_model_called": false,
         }));
     }
+    // Of what the owner prepared for the contact, the voice is told the words.
+    let prepared = call.asked.vocabulary.as_ref();
     let beginning = Beginning {
         roster: Some(&roster),
         direct,
-        vocabulary: call
-            .asked
-            .vocabulary
-            .as_ref()
-            .map(|context| &context["terms"]),
+        vocabulary: prepared.map(|context| &context["terms"]),
         history: history.as_array().map_or(&[][..], Vec::as_slice),
         languages: &languages,
     };
