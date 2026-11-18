@@ -1,0 +1,1060 @@
+{
+ "ages": [
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": false,
+   "done": false,
+   "now": 1900000000000
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000000000
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": false,
+   "done": false,
+   "now": 1900000000001
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000000001
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": false,
+   "done": false,
+   "now": 1900000299999
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000299999
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": false,
+   "done": false,
+   "now": 1900000300000
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000300000
+  },
+  {
+   "active": "account-one",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000300001
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": false,
+   "now": 1900000300001
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": false,
+   "done": true,
+   "now": 1900000000000
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000000000
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": true,
+   "done": true,
+   "now": 1900000000001
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000000001
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": true,
+   "done": true,
+   "now": 1900000299999
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000299999
+  },
+  {
+   "active": "account-one",
+   "claude": false,
+   "codex": true,
+   "done": true,
+   "now": 1900000300000
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000300000
+  },
+  {
+   "active": "account-one",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000300001
+  },
+  {
+   "active": "another",
+   "claude": true,
+   "codex": true,
+   "done": true,
+   "now": 1900000300001
+  }
+ ],
+ "at": 1900000000000,
+ "cases": [
+  {
+   "due": false,
+   "now": 1900000000000,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": false,
+   "now": 1900000059999,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "fresh",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": false,
+   "now": 1900000060000,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": false,
+   "now": 1900000299999,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": false,
+   "now": 1900000300000,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": true,
+   "now": 1900000300001,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": true,
+   "now": 1900003599999,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": true,
+   "now": 1900003600000,
+   "provider": {
+    "freshness": "fresh",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "fresh",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "normal"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  },
+  {
+   "due": true,
+   "now": 1900003600001,
+   "provider": {
+    "freshness": "stale",
+    "observed_at": "2030-03-17T17:46:40Z",
+    "provider_id": "agy",
+    "provider_instance_id": "a-host:agy",
+    "source": {
+     "detail": "agy-usage-command",
+     "kind": "provider_reported"
+    },
+    "windows": [
+     {
+      "freshness": "stale",
+      "kind": "five_hour",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-17T17:47:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 37.5,
+      "window_id": "puw-28fef5a3e21f7e33fa26e3a70fe4f9e4"
+     },
+     {
+      "freshness": "stale",
+      "kind": "seven_day",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": "2030-03-24T17:46:40Z",
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-33526349c972f4baff0c7c1e66764173"
+     },
+     {
+      "freshness": "stale",
+      "kind": "unknown",
+      "label": "Example",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 100.0,
+      "window_id": "puw-7d9857b265f4ef624de6084c01dfba4b"
+     },
+     {
+      "freshness": "stale",
+      "kind": "seven_day",
+      "label": "",
+      "limit": {
+       "episode_id": null,
+       "provider_limit_event_id": null,
+       "state": "unknown"
+      },
+      "observed_at": "2030-03-17T17:46:40Z",
+      "resets_at": null,
+      "scope": "model_group",
+      "source": {
+       "detail": "agy-usage-command",
+       "kind": "provider_reported"
+      },
+      "unit": "percent",
+      "used_percentage": 0.0,
+      "window_id": "puw-e8492cf7cce4403e7d04ab9c7390bd8e"
+     }
+    ]
+   }
+  }
+ ],
+ "direct": {
+  "rate_limit": {
+   "primary_window": {
+    "limit_window_seconds": 18000,
+    "reset_at": 1900005000,
+    "used_percent": 100
+   }
+  }
+ },
+ "payload": {
+  "command": {
+   "data": {
+    "groups": [
+     {
+      "buckets": [
+       {
+        "id": "alpha",
+        "remaining_fraction": 0.625,
+        "reset_time": "2030-03-17T17:47:40Z",
+        "window": "5h"
+       },
+       {
+        "remaining_fraction": 1.0,
+        "reset_time": "2030-03-24T17:46:40Z",
+        "window": "weekly"
+       },
+       {
+        "remaining_fraction": 0.0,
+        "window": "other"
+       },
+       {
+        "remaining_fraction": "0.75",
+        "window": "5h"
+       }
+      ],
+      "name": "Example"
+     },
+     {
+      "buckets": [
+       {
+        "remaining_fraction": true,
+        "window": "weekly"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}
