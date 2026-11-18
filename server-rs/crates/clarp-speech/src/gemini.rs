@@ -252,6 +252,8 @@ impl Gemini {
 }
 
 impl Speaker for Gemini {
+    fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.speak(line,sink)}
+
     fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
         let Some(key) = (self.key)().filter(|key| !key.is_empty()) else {
             return Err(Mute::Unavailable("api_key required".to_string()));

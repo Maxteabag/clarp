@@ -150,6 +150,13 @@ for why,old,new in [
         ('Google conflict applies only to the primary','provider == "google" || fallback == "google"','provider == "google" && fallback == "google"')]:
     wrong(R,'host',why,old,new)
 
+for why,old,new in [
+        ('text previews pass the whole provider map as a voice','name.is_some() || provider=="google"','name.is_none() || provider=="google"'),
+        ('text preview sent as supplied to file engine','let direct=name.is_some();','let direct=true;'),
+        ('the selected fallback gets the primary voice','let chosen=resolve(fallback);','let chosen=resolve(provider);')]:
+    wrong(V,'host',why,old,new)
+wrong(S,'fallback','live speech keeps emotion tags for every engine','match engine.speak_turn(Line { text, voice }, sink)','match engine.speak(Line { text, voice }, sink)')
+
 # A mutation must not allow a stand-in to be replaced by a real speech or token endpoint.
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

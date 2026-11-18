@@ -313,7 +313,7 @@ impl Mouth {
         if provider == "none" {
             return Err("server audio is disabled: no voice provider".into());
         }
-        let preview = self.preview(&provider, voice, text, None).await?;
+        let preview = self.preview(&provider, voice, text, Audition::Text(session)).await?;
         let Preview::Temporary(bytes) = preview else {
             return Err("text preview unexpectedly cached".into());
         };
@@ -336,8 +336,10 @@ impl Mouth {
         provider: &str,
         voice: &str,
         text: &str,
-        name: Option<&str>,
+        audition: Audition<'_>,
     ) -> Result<Preview, String> {
+        let (name, session)=match audition { Audition::Catalogue(key)=>(Some(key),""), Audition::Text(session)=>(None,session) };
+
         if name.is_some()
             && self
                 .previews
@@ -374,37 +376,20 @@ impl Mouth {
         let voices = owner::voices(&owners);
         let route = said::Route {
             provider: provider.into(),
-            voice: Some(voice.into()),
+            voice: (name.is_some() || provider=="google").then(||voice.to_string()),
             fallback: voices.fallback.clone(),
         };
+        let directory=self.fleet.directory();
+        let persona=directory.named(session).map_or("",|m|m.record.persona.as_str());
+        let clip=voices.for_clip(Some(voice), Who { name:persona,persona,session }, &route);
+        let resolve=|engine:&str| resolved_voice(&owners,&voices,&clip,Some(voice),&route,engine);
         let fallback = route.fallback.as_str();
         let fallback = if fallback != provider
             && fallback != "none"
             && !fallback.is_empty()
             && self.has_key(fallback, &owners)
         {
-            let clip = voices.for_clip(
-                Some(voice),
-                Who {
-                    name: "",
-                    persona: "",
-                    session: "",
-                },
-                &route,
-            );
-            let chosen = match fallback {
-                said::CARTESIA => clip.cartesia,
-                said::ELEVENLABS => clip.elevenlabs,
-                said::GEMINI => clip
-                    .gemini
-                    .map(|v| voices.gemini_voice_at(&v, owner::gemini(&owners).vertex)),
-                "deepgram" => Some(
-                    owner::text_at(&owners, &["deepgram", "model"])
-                        .unwrap_or_else(|| "flux-haley-en".into()),
-                ),
-                "google" => Some("nb-NO-Chirp3-HD-Kore".into()),
-                _ => None,
-            };
+            let chosen=resolve(fallback);
             self.engine(
                 &owners,
                 fallback,
@@ -418,23 +403,17 @@ impl Mouth {
         } else {
             None
         };
-        let voice = if provider == said::GEMINI {
-            voices.gemini_voice_at(voice, owner::gemini(&owners).vertex)
-        } else {
-            voice.to_string()
-        };
+        let voice=resolve(provider).unwrap_or_default();
+        let direct=name.is_some();
         let text = text.to_string();
         let dir = self.previews.clone();
         let _slot = self.at_once.acquire().await;
         tokio::task::spawn_blocking(move || {
             let mut bytes = Vec::new();
-            if let Err(error) = primary.speak(
-                clarp_speech::speak::Line {
-                    text: &text,
-                    voice: &voice,
-                },
-                &mut |part| bytes.extend_from_slice(part),
-            ) {
+            let line=clarp_speech::speak::Line{text:&text,voice:&voice};
+            let mut collect=|part:&[u8]|bytes.extend_from_slice(part);
+            let result=if direct {primary.speak(line,&mut collect)} else {primary.speak_turn(line,&mut collect)};
+            if let Err(error)=result {
                 let why = match error {
                     Mute::Unavailable(why) | Mute::Failed { why, .. } => why,
                 };
@@ -445,7 +424,7 @@ impl Mouth {
                 {
                     bytes.clear();
                     if engine
-                        .speak(
+                        .speak_turn(
                             clarp_speech::speak::Line {
                                 text: &text,
                                 voice: &voice,
@@ -494,6 +473,8 @@ enum SpeechUse {
     VoicePreview,
     TextPreview,
 }
+
+pub(crate) enum Audition<'a>{ Catalogue(&'a str), Text(&'a str) }
 
 pub(crate) enum Preview {
     Cached(PathBuf),
@@ -624,6 +605,35 @@ enum Chosen {
     By(Vec<(String, String)>),
 }
 
+fn resolved_voice(file:&Table,voices:&said::Voices,clip:&said::ClipVoices,stored:Option<&str>,route:&said::Route,provider:&str)->Option<String>{
+    let vertex = owner::gemini(file).vertex;
+
+        let voice = match provider {
+            said::CARTESIA => clip.cartesia.clone(),
+            said::GEMINI => {
+                let voice = clip.gemini.as_deref();
+                voice.map(|voice| voices.gemini_voice_at(voice, vertex))
+            }
+            said::ELEVENLABS => clip.elevenlabs.clone(),
+            "google" => said::voice_for(stored, route, "google")
+                .or_else(|| {
+                    stored
+                        .map(str::trim)
+                        .filter(|v| clarp_kernel::voices::google_has(v))
+                        .map(str::to_string)
+                })
+                .or_else(|| Some("nb-NO-Chirp3-HD-Kore".into())),
+            "deepgram" => said::voice_for(stored, route, "deepgram").or_else(|| {
+                Some(
+                    owner::text_at(file, &["deepgram", "model"])
+                        .unwrap_or_else(|| "flux-haley-en".into()),
+                )
+            }),
+            _ => None,
+        };
+        voice.filter(|voice| !voice.is_empty())
+}
+
 /// Which engines say an agent's line, and in which voices: the engine the owner chose for
 /// it and the one he chose to be tried after, each when it is built into this Host, has a
 /// voice for the agent and has its key.
@@ -640,33 +650,6 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
     }
     let stored = Some(record.voice_id.as_str()).filter(|voice| !voice.is_empty());
     let clip = voices.for_clip(stored, who, &route);
-    let vertex = owner::gemini(file).vertex;
-    let voice_of = |provider: &str| -> Option<String> {
-        let voice = match provider {
-            said::CARTESIA => clip.cartesia.clone(),
-            said::GEMINI => {
-                let voice = clip.gemini.as_deref();
-                voice.map(|voice| voices.gemini_voice_at(voice, vertex))
-            }
-            said::ELEVENLABS => clip.elevenlabs.clone(),
-            "google" => said::voice_for(stored, &route, "google")
-                .or_else(|| {
-                    stored
-                        .map(str::trim)
-                        .filter(|v| clarp_kernel::voices::google_has(v))
-                        .map(str::to_string)
-                })
-                .or_else(|| Some("nb-NO-Chirp3-HD-Kore".into())),
-            "deepgram" => said::voice_for(stored, &route, "deepgram").or_else(|| {
-                Some(
-                    owner::text_at(file, &["deepgram", "model"])
-                        .unwrap_or_else(|| "flux-haley-en".into()),
-                )
-            }),
-            _ => None,
-        };
-        voice.filter(|voice| !voice.is_empty())
-    };
     let mut by: Vec<(String, String)> = Vec::new();
     // Why the engine the owner chose cannot say it, when it cannot.
     let mut first: Option<(String, bool)> = None;
@@ -674,7 +657,7 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
         if matches!(provider, "" | "none") || by.iter().any(|(known, _)| known == provider) {
             continue;
         }
-        let cannot = match voice_of(provider) {
+        let cannot = match resolved_voice(file,&voices,&clip,stored,&route,provider) {
             None => {
                 let persona = python::text(&record.persona);
                 Some((

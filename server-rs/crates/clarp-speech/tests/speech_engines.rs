@@ -153,11 +153,11 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
     struct Speaks {
         name: String,
         mode: String,
-        calls: Arc<Mutex<Vec<String>>>,
+        calls: Arc<Mutex<Vec<Value>>>,
     }
     impl Speaker for Speaks {
-        fn speak(&self, _: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
-            self.calls.lock().unwrap().push(self.name.clone());
+        fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute> {
+            self.calls.lock().unwrap().push(json!([self.name,line.text]));
             if self.mode != "failed" {
                 sink(b"x");
             }
@@ -171,6 +171,11 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
             }
         }
     }
+    struct Gemini(Speaks);
+    impl Speaker for Gemini {
+        fn speak(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.0.speak(line,sink)}
+        fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{self.speak(line,sink)}
+    }
     for case in vectors()["ladders"].as_array().unwrap() {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let engine = |id: &str, key: &str| Speaks {
@@ -179,23 +184,17 @@ fn an_engine_may_take_over_only_before_the_first_audio() {
             calls: calls.clone(),
         };
         let first = engine("deepgram", "primary");
-        let next = engine("gemini", "second");
+        let next = Gemini(engine("gemini","second"));
         let mut engines: Vec<(&dyn Speaker, &str)> = vec![(&first, "")];
         if case["fallback"] == "gemini" {
             engines.push((&next, ""));
         }
         let mut chunks = Vec::new();
-        let result = said_by_the_first_that_can(&engines, "sound", &mut |b| {
+        let result = said_by_the_first_that_can(&engines, "[happy] sound", &mut |b| {
             chunks.push(String::from_utf8(b.into()).unwrap())
         });
         assert_eq!(json!(chunks), case["chunks"]);
-        let names: Vec<_> = case["calls"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c[0].as_str().unwrap())
-            .collect();
-        assert_eq!(*calls.lock().unwrap(), names);
+        assert_eq!(json!(*calls.lock().unwrap()),case["calls"]);
         match result {
             Ok((_, n)) => assert_eq!(case["size"], n),
             Err(Mute::Failed { why, .. }) => assert_eq!(case["error"], why),

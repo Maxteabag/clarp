@@ -45,6 +45,12 @@ pub trait Speaker: Send + Sync {
     /// is how many bytes it was. It takes as long as the line takes to make, so it is never
     /// called where nothing may wait.
     fn speak(&self, line: Line<'_>, sink: &mut dyn FnMut(&[u8])) -> Result<u64, Mute>;
+    /// Gemini interprets emotion tags; ordinary synthesis strips them.
+    fn speak_turn(&self,line:Line<'_>,sink:&mut dyn FnMut(&[u8])) -> Result<u64,Mute>{
+        let text=crate::markup::strip_emotion_tags(line.text);
+        self.speak(Line{text:&text,..line},sink)
+    }
+
 }
 
 /// Says a line with the first of these engines that can: the next is tried when the one
@@ -57,7 +63,7 @@ pub fn said_by_the_first_that_can(
 ) -> Result<(usize, u64), Mute> {
     let mut last = Mute::Unavailable("no engine that speaks is configured".to_string());
     for (place, (engine, voice)) in engines.iter().enumerate() {
-        match engine.speak(Line { text, voice }, sink) {
+        match engine.speak_turn(Line { text, voice }, sink) {
             Ok(bytes) => return Ok((place, bytes)),
             Err(mute) => {
                 let another = mute.may_be_said_by_another();
