@@ -308,5 +308,110 @@
    "headers": [],
    "asks": false
   }
+ ],
+ "terminals": [
+  {
+   "tool": "claude",
+   "session": "",
+   "program": "claude",
+   "args": [
+    "--dangerously-skip-permissions",
+    "--plugin-dir",
+    "<plugin>"
+   ]
+  },
+  {
+   "tool": "claude",
+   "session": "a-session-of-the-tool",
+   "program": "claude",
+   "args": [
+    "--dangerously-skip-permissions",
+    "--resume",
+    "a-session-of-the-tool",
+    "--plugin-dir",
+    "<plugin>"
+   ]
+  },
+  {
+   "tool": "codex",
+   "session": "",
+   "program": "codex",
+   "args": []
+  },
+  {
+   "tool": "codex",
+   "session": "a-session-of-the-tool",
+   "program": "codex",
+   "args": [
+    "resume",
+    "a-session-of-the-tool"
+   ]
+  },
+  {
+   "tool": "agy",
+   "session": "",
+   "program": "agy",
+   "args": [
+    "--dangerously-skip-permissions"
+   ]
+  },
+  {
+   "tool": "agy",
+   "session": "a-session-of-the-tool",
+   "program": "agy",
+   "args": [
+    "--dangerously-skip-permissions",
+    "--conversation",
+    "a-session-of-the-tool"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "none": "no interactive terminal for the grok backend"
+  },
+  {
+   "tool": "grok",
+   "session": "a-session-of-the-tool",
+   "none": "no interactive terminal for the grok backend"
+  },
+  {
+   "tool": "opencode",
+   "session": "",
+   "none": "no interactive terminal for the opencode backend"
+  },
+  {
+   "tool": "opencode",
+   "session": "a-session-of-the-tool",
+   "none": "no interactive terminal for the opencode backend"
+  },
+  {
+   "tool": "deepseek",
+   "session": "",
+   "none": "no interactive terminal for the deepseek backend"
+  },
+  {
+   "tool": "deepseek",
+   "session": "a-session-of-the-tool",
+   "none": "no interactive terminal for the deepseek backend"
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "program": "muse",
+   "args": [
+    "--yolo"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "a-session-of-the-tool",
+   "program": "muse",
+   "args": [
+    "--yolo",
+    "resume",
+    "a-session-of-the-tool"
+   ]
+  }
  ]
 }

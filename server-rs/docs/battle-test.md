@@ -1160,6 +1160,36 @@ before, and the tool does not ask a provider twice that soon. The Python Host's 
 of such a read. What this does not show: a reading while nobody else reads the tool, and a read that
 fails on the real tool.
 
+## The Host's own terminal, at its door and through the real relay
+
+18 Nov 2026, 03:05, on elitebook, build `94021214` installed a minute before. The check opens the
+terminal as an app does, twice: at the Host's door with the administrator's token, and through the
+real connection relay with a device of the check's own (two were paired through the relay's address,
+one of full scope and one of limited scope, and both were revoked at the end). The shell is the owner's
+login shell. The check tells it first to keep no history of what is typed, types three harmless lines,
+and leaves; nothing the shell printed is written down, here or anywhere.
+
+| Step | At the door | Through the relay |
+|---|---|---|
+| The terminal is opened | at once | 0.04 s |
+| A line is typed and the shell answers it | 0.44 s (the shell starting) | 0.11 s |
+| A size is set (132 by 43) and the shell reads it back | so | so |
+| A side that is not named is the side a terminal starts with (100 by 24) | so | so |
+| What the shell prints | comes as bytes | comes as bytes |
+| The shell is left | the socket closes, 1000 | the socket closes, 1000, `Host connection closed`: the connector's own word |
+
+What is refused: a request that asks for no socket (426, `upgrade required (websocket)`), nobody
+without a token and nobody with a token that is no one's (401, at the door). Through the relay, a
+device of limited scope, a token that is no one's, and an agent's terminal (not built in this build)
+were each closed by the relay with its code 4011: what the relay makes, for a phone, of a socket the
+Host closed as failed (1011, `Host WebSocket failed`). The Host's journal has the two terminals, each
+started and closed, and no loss of the relay. The Host listed `server_home_terminal` (48), and had the
+paired devices it had before.
+
+What this does not show: a program that prints much through the real relay, a phone that says more
+than a line holds there, and a session with the relay that is lost while a terminal is open. Those are
+held by the Host's tests against a stand-in for the relay.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

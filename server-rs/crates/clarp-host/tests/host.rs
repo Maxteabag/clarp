@@ -23672,3 +23672,280 @@ fn a_terminal_is_carried_through_the_relay_as_it_is_at_the_door() {
     drop(session);
     wait_for("the shell of a lost session to be gone", || is_gone(&shell));
 }
+
+/// A stand-in for Claude Code that is the tool of an agent's turns and of its terminal: with
+/// a terminal before it, it says how it was started and does what it is typed; else it
+/// notes that a turn of it ran and answers as a turn does.
+fn tool_with_a_terminal(place: &Place) -> (PathBuf, PathBuf) {
+    let ran = place.root.join("turns-that-ran");
+    let tool = place.root.join("claude-with-a-terminal");
+    let script = [
+        "#!/bin/sh\nif [ -t 0 ]; then\n",
+        "  echo \"terminal: args=[$*] cwd=[$(pwd)] agent=[$CLAUDE_PWA_SESSION] ",
+        "tools=[${CLARP_TOOL_TOKEN:+told}] hosts=[${CLARP_HOST_TOKEN:+told}] term=[$TERM] .\"\n",
+        "  while IFS= read -r line; do\n",
+        "    case \"$line\" in bye) echo leaving; exit 0 ;; *) echo \"typed: $line\" ;; esac\n",
+        "  done\n  exit 0\nfi\nread message\n",
+        &format!("echo ran >> \"{}\"\n", ran.display()),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    program(&tool, &script);
+    (tool, ran)
+}
+
+/// What an agent's terminal at the door printed so far.
+struct ToolScreen {
+    socket: Door,
+    printed: String,
+}
+
+impl ToolScreen {
+    fn open(host: &Host, token: &str, session: &str) -> Self {
+        let socket = socket_at(host, token, &format!("/terminal/{session}"));
+        let mut screen = Self {
+            socket: socket.expect("an agent's terminal is opened"),
+            printed: String::new(),
+        };
+        screen.until(" .\r\n");
+        screen
+    }
+
+    fn until(&mut self, what: &str) {
+        while !self.printed.contains(what) {
+            match self.socket.read() {
+                Ok(tungstenite::Message::Binary(bytes)) => {
+                    self.printed.push_str(&String::from_utf8_lossy(&bytes));
+                }
+                other => panic!(
+                    "waiting for {what:?} the terminal said {other:?}, after {:?}",
+                    self.printed
+                ),
+            }
+        }
+    }
+
+    /// What stands in brackets after a name in what the stand-in said of itself.
+    fn said(&self, name: &str) -> String {
+        let from = self.printed.find(&format!(" {name}=[")).unwrap() + name.len() + 3;
+        let rest = &self.printed[from..];
+        rest[..rest.find(']').unwrap()].to_string()
+    }
+
+    /// Leaves the tool, and reads to the socket's end: the code it closed with.
+    fn leave(mut self) -> Option<u16> {
+        let bye = tungstenite::Message::Binary(b"bye\n".to_vec().into());
+        self.socket.send(bye).unwrap();
+        let mut code = None;
+        loop {
+            match self.socket.read() {
+                Ok(tungstenite::Message::Close(frame)) => {
+                    code = frame.map(|frame| u16::from(frame.code));
+                }
+                Ok(_) => {}
+                Err(_) => return code,
+            }
+        }
+    }
+}
+
+#[test]
+fn an_agents_own_tool_is_spoken_to_in_a_terminal_and_its_turns_wait_meanwhile() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("terminal-agent");
+    let home = place.root.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let (tool, ran) = tool_with_a_terminal(&place);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", tool.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
+    ];
+    let host = place.start_in(ADMIN, &[], &world);
+    let turns_ran = || std::fs::read_to_string(&ran).map_or(0, |ran| ran.lines().count());
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let work = std::fs::canonicalize(place.root.join("work")).unwrap();
+    let path = format!("/terminal/{agent}");
+
+    // What is asked that is no terminal of an agent: in the order the Python Host asks.
+    for asked in [path.as_str(), "/terminal/nobody"] {
+        let plain = fetch(&host, ADMIN, "GET", asked, &[], b"");
+        assert_eq!(
+            (plain.status, plain.text().as_str()),
+            (426, "upgrade required (websocket)"),
+            "{asked}"
+        );
+    }
+    let nobody = asked_for_a_socket(&host, ADMIN, "/terminal/nobody");
+    assert_eq!(
+        (
+            nobody.status,
+            nobody.text().as_str(),
+            nobody.header("content-type")
+        ),
+        (404, "no such agent", "text/plain")
+    );
+    let echo = host.new_agent("Echo");
+    let none = asked_for_a_socket(&host, ADMIN, &format!("/terminal/{echo}"));
+    assert_eq!(
+        (none.status, none.text().as_str()),
+        (501, "no interactive terminal for the scripted backend")
+    );
+    let asked = json!({
+        "name": "Night Sweeper", "backend": "codex", "cwd": work, "request_id": "request-one",
+        "template_id": "scheduled-prompt", "options": { "instructions": "Sweep." },
+        "attachments": [{
+            "attachment_id": "nightly", "trigger_id": "schedule",
+            "config": { "cron": "15 3 * * *", "timezone": "Europe/Oslo" },
+        }],
+    });
+    let (status, janitor) = host.ask("POST", "/janitors", Some(&asked));
+    assert_eq!(status, 200, "{janitor}");
+    let janitor = janitor["janitor"]["session"].as_str().unwrap().to_string();
+    let looked_at = asked_for_a_socket(&host, ADMIN, &format!("/terminal/{janitor}"));
+    assert_eq!(
+        (looked_at.status, looked_at.text().as_str()),
+        (
+            403,
+            "Janitors are inspection-only. Use their Pause or Configure controls."
+        )
+    );
+    let (limited, _) = pair(&host, "A limited phone", "limited");
+    assert_eq!(asked_for_a_socket(&host, &limited, &path).status, 403);
+
+    // An agent that has no session of its tool yet: the tool is started anew, where the
+    // agent works, told whose tool it is and where its tools find their Host, and never
+    // the Host's own token.
+    let terminal = ToolScreen::open(&host, ADMIN, &agent);
+    assert_eq!(terminal.said("args"), "--dangerously-skip-permissions");
+    assert_eq!(terminal.said("cwd"), work.to_str().unwrap());
+    assert_eq!(terminal.said("agent"), agent);
+    assert_eq!(
+        (
+            terminal.said("tools"),
+            terminal.said("hosts"),
+            terminal.said("term")
+        ),
+        (
+            "told".to_string(),
+            String::new(),
+            "xterm-256color".to_string()
+        )
+    );
+
+    // While it is open no turn of the agent is started: the message is taken, and its
+    // tool waits for the terminal to be closed. Another agent's turn runs as ever.
+    host.send(&agent, "wait for the terminal", "m1");
+    host.send(&echo, "meanwhile", "e1");
+    wait_for("the other agent's turn", || host.state(&echo) == "done");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(turns_ran(), 0);
+    assert_eq!(host.conversation(&agent).len(), 1);
+    // The terminal is closed: the turn that waited runs, and answers.
+    let mut terminal = terminal;
+    terminal
+        .socket
+        .send(tungstenite::Message::Binary(b"hello\n".to_vec().into()))
+        .unwrap();
+    terminal.until("typed: hello");
+    assert_eq!(terminal.leave(), Some(1000));
+    wait_for("the turn that waited", || {
+        host.conversation(&agent).len() == 2 && host.state(&agent) == "done"
+    });
+    assert_eq!(turns_ran(), 1);
+
+    // The agent has a session of its tool now: its terminal takes that up. Two terminals
+    // may be open on it: a turn waits until the last is closed.
+    let first = ToolScreen::open(&host, ADMIN, &agent);
+    let taken_up = first.said("args");
+    let session = taken_up.strip_prefix("--dangerously-skip-permissions --resume ");
+    assert!(
+        session.is_some_and(|session| !session.is_empty() && !session.contains(' ')),
+        "{taken_up}"
+    );
+    let second = ToolScreen::open(&host, ADMIN, &agent);
+    host.send(&agent, "wait for both", "m2");
+    assert_eq!(first.leave(), Some(1000));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(turns_ran(), 1, "a terminal is still open");
+    assert_eq!(second.leave(), Some(1000));
+    wait_for("the turn that waited for both", || {
+        turns_ran() == 2 && host.state(&agent) == "done"
+    });
+    assert_eq!(turns_ran(), 2);
+
+    // A turn that waits for a terminal and is stopped has no tool to stop: it is over at
+    // once, and nothing of it starts when the terminal is closed.
+    let terminal = ToolScreen::open(&host, ADMIN, &agent);
+    host.send(&agent, "this one is stopped", "m3");
+    wait_for("the turn to be the agent's", || {
+        host.state(&agent) != "done"
+    });
+    host.post("/stop", json!({ "session": agent }));
+    wait_for("the stopped turn to be over", || {
+        host.state(&agent) == "interrupted"
+    });
+    assert_eq!(terminal.leave(), Some(1000));
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(turns_ran(), 2);
+
+    // A client that goes without a word closes its terminal as well: what waited runs.
+    let terminal = ToolScreen::open(&host, ADMIN, &agent);
+    host.send(&agent, "after the client left", "m4");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(turns_ran(), 2);
+    drop(terminal);
+    wait_for("the turn that waited for a client that left", || {
+        turns_ran() == 3
+    });
+
+    // Where the agent worked is gone: its terminal starts in the home.
+    wait_for("the agent to rest", || host.state(&agent) == "done");
+    let elsewhere = place.root.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Mover", "backend": "claude", "cwd": elsewhere }),
+    );
+    let mover = made["session"].as_str().unwrap().to_string();
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+    let terminal = ToolScreen::open(&host, ADMIN, &mover);
+    assert_eq!(
+        terminal.said("cwd"),
+        std::fs::canonicalize(&home).unwrap().to_str().unwrap()
+    );
+    assert_eq!(terminal.leave(), Some(1000));
+
+    // An agent is named with or without a stroke after its name, and one that was removed
+    // is nobody.
+    let stroked = socket_at(&host, ADMIN, &format!("/terminal/{mover}/"));
+    let mut stroked = ToolScreen {
+        socket: stroked.expect("a stroke after the name is no part of it"),
+        printed: String::new(),
+    };
+    stroked.until(" .\r\n");
+    assert_eq!(stroked.said("agent"), mover);
+    assert_eq!(stroked.leave(), Some(1000));
+    let (status, _) = host.ask("DELETE", &format!("/agents/{mover}"), None);
+    assert_eq!(status, 200);
+    let removed = asked_for_a_socket(&host, ADMIN, &format!("/terminal/{mover}"));
+    assert_eq!(
+        (removed.status, removed.text().as_str()),
+        (404, "no such agent")
+    );
+
+    // A machine that has not the agent's tool has no terminal for it.
+    let other = Place::new("terminal-agent-none");
+    let bare = other.start_in(
+        ADMIN,
+        &[],
+        &[("CLARP_CLAUDE_PROGRAM", "/nowhere/is/claude")],
+    );
+    let made = bare.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let named = made["session"].as_str().unwrap();
+    let none = asked_for_a_socket(&bare, ADMIN, &format!("/terminal/{named}"));
+    assert_eq!(
+        (none.status, none.text().as_str()),
+        (500, "/nowhere/is/claude not on PATH")
+    );
+}
