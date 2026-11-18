@@ -146,21 +146,21 @@ def revoke(device_id: str) -> bool:
             from . import apns
             apns.disable_tokens(owner=device_id.strip(), reason="device-revoked")
         except Exception as exc:  # noqa: BLE001 - the revoke stands; sends also skip a revoked owner
-            from .log import log_exception
-            log_exception("devicePairingPushTokensDisableFail", exc, device_id.strip())
+            from .log import log_exception_type
+            log_exception_type("devicePairingPushTokensDisableFail", type(exc).__name__, device_id.strip())
         # Its request for the agents-working summary by FCM goes too (it would never be sent to).
         try:
             from . import live_activity_fcm
             live_activity_fcm.forget(device_id.strip())
         except Exception as exc:  # noqa: BLE001 - the revoke stands; sends also skip a revoked owner
-            from .log import log_exception
-            log_exception("devicePairingLiveActivityForgetFail", exc, device_id.strip())
+            from .log import log_exception_type
+            log_exception_type("devicePairingLiveActivityForgetFail", type(exc).__name__, device_id.strip())
         try:
             from . import agent_rings
             agent_rings.register_voip_token(device_id.strip(), "")
         except Exception as exc:  # noqa: BLE001 - delivery rechecks the pairing
-            from .log import log_exception
-            log_exception("devicePairingVoipForgetFail", exc, device_id.strip())
+            from .log import log_exception_type
+            log_exception_type("devicePairingVoipForgetFail", type(exc).__name__, device_id.strip())
         # A listen-first opening answered on this device loses its authority.
         try:
             from . import agent_rings

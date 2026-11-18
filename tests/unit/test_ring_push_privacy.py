@@ -99,18 +99,33 @@ def test_revoke_then_repair_replaces_call_registration(pushes):
     assert [(kind, token) for kind, token, _ in calls] == [("voip", CALL)]
 
 
-def test_revoke_cleanup_failure_is_logged_and_leftover_cannot_receive(pushes, monkeypatch):
-    from lib import log as host_log
-    from unittest.mock import Mock
+@pytest.mark.parametrize(("cleanup", "event"), [
+    ("disable_tokens", "devicePairingPushTokensDisableFail"),
+    ("forget", "devicePairingLiveActivityForgetFail"),
+    ("register_voip_token", "devicePairingVoipForgetFail"),
+])
+def test_revoke_failure_reports_only_device_and_error_type(pushes, monkeypatch, capfd, cleanup, event):
+    from lib import diagnostics_settings, live_activity_fcm, telemetry
 
     owner = pair()
     register(owner)
-    failures = Mock()
-    monkeypatch.setattr(host_log, "log_exception", failures)
-    monkeypatch.setattr(rings, "register_voip_token", Mock(side_effect=RuntimeError("synthetic")))
+    token, reason = "fe" * 32, "Synthetic private call reason"
+    def fail(*args, **kwargs):
+        raise ValueError(f"{token}: {reason}")
+
+    source = {"disable_tokens": apns, "forget": live_activity_fcm, "register_voip_token": rings}[cleanup]
+    monkeypatch.setattr(source, cleanup, fail)
+    monkeypatch.setattr(diagnostics_settings, "allows_event", lambda **_: True)
     assert device_pairing.revoke(owner)
-    assert [entry["principal"] for entry in rings.voip_tokens()] == [owner]
-    assert any(call.args[0] == "devicePairingVoipForgetFail" for call in failures.call_args_list)
+    err = capfd.readouterr().err
+    rows = telemetry.conn().execute(
+        "SELECT event,detail FROM diagnostic_events WHERE event=?", (event,)).fetchall()
+    assert len(rows) == 1
+    for sink in (err, " ".join(rows[0])):
+        assert event in sink and owner in sink and "ValueError" in sink
+        assert token not in sink and reason not in sink
+    if cleanup == "register_voip_token":
+        assert [entry["principal"] for entry in rings.voip_tokens()] == [owner]
     assert ring()["voip"]["sent"] == 0 and pushes[0] == []
 
 
