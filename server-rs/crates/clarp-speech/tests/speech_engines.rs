@@ -1,0 +1,116 @@
+//! Recorded engine exchanges with disposable loopback peers.
+#![allow(clippy::unwrap_used,clippy::expect_used)]
+use std::net::{TcpListener,TcpStream};
+use std::sync::{Arc,Mutex};
+use std::time::Duration;
+use clarp_speech::{
+    eleven_voice::ElevenVoice,ink::Ink,
+    listen::{Asked,Clip,Listener,Deaf},speak::{Line,Mute,Speaker,said_by_the_first_that_can},
+};
+use serde_json::{Value,json};
+use tungstenite::Message;
+
+fn vectors()->Value{
+    serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/speech-engines-vectors.json")).unwrap()
+}
+
+fn peer(f:impl FnOnce(TcpStream)+Send+'static)->(String,std::thread::JoinHandle<()>) {
+    let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+    let base=format!("http://{}",listener.local_addr().unwrap());
+    (base,std::thread::spawn(move|| {
+        let (socket,_)=listener.accept().unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        socket.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+        f(socket)
+    }))
+}
+
+#[test]
+fn elevenlabs_reads_every_recorded_sequence() {
+    let fixture=vectors();
+    for case in fixture["eleven"].as_array().unwrap(){
+        let events=case["events"].as_array().unwrap().clone();
+        let sent=case["sent"].clone();
+        let (base,running)=peer(move|s|{
+            let mut ws=tungstenite::accept(s).unwrap();
+            for expected in sent.as_array().unwrap(){
+                let line=ws.read().unwrap().into_text().unwrap();
+                assert_eq!(serde_json::from_str::<Value>(&line).unwrap(),*expected);
+            }
+            for e in events{
+                let raw=e.as_str().map(str::to_string).unwrap_or_else(||e.to_string());
+                ws.send(Message::Text(raw.into())).unwrap();
+            }
+        });
+        let engine=ElevenVoice{key:Box::new(||Some("unit".into())),model:"model".into(),speed:1.1,file:false,base};
+        let mut chunks=Vec::new();
+        use base64::{Engine,engine::general_purpose::STANDARD};
+        let result=engine.speak(Line{text:"A line.",voice:"example"},&mut |b|chunks.push(json!([chunks.len(),STANDARD.encode(b)])));
+        assert_eq!(json!(chunks),case["chunks"]);
+        if let Some(size)=case["size"].as_u64(){assert_eq!(result,Ok(size));}
+        else {
+            let err=result.unwrap_err();
+            assert_eq!(err.may_be_said_by_another(),chunks.is_empty());
+            let Mute::Failed{why,..}=err else{panic!("expected transport failure")};
+            let raw=case["error"].as_str().unwrap();
+            let expected=if raw.starts_with("server sent non-JSON"){"server sent non-JSON frame"}
+                else if raw.starts_with("bad base64") {"bad base64 from server"}
+                else if matches!(raw,"busy"|"rejected"|"closed") {"ElevenLabs refused synthesis"} else {raw};
+            assert_eq!(why,expected);
+        }
+        running.join().unwrap();
+    }
+}
+
+#[test]
+fn ink_sends_the_recorded_chunks_and_interprets_socket_messages(){
+    for case in vectors()["ink_streams"].as_array().unwrap(){
+        let messages=case["events"].as_array().unwrap().clone();
+        let sent=case["sent"].as_array().unwrap().clone();
+        let (base,server)=peer(move |s|{
+            let mut ws=tungstenite::accept(s).unwrap();
+            for expected in sent{
+                let frame=ws.read().unwrap();
+                if let Some(size)=expected.as_u64(){assert!(frame.is_binary());assert_eq!(frame.len(),size as usize);}
+                else{assert_eq!(frame.into_text().unwrap().as_str(),expected.as_str().unwrap());}
+            }
+            for e in messages{
+                let raw=e.as_str().map(str::to_string).unwrap_or_else(||e.to_string());
+                ws.send(Message::Text(raw.into())).unwrap();
+            }
+            let _=ws.close(None);
+        });
+        let ink=Ink::new("ink-2",Box::new(||Some("unit".into())),base,"cat");
+        let audio=vec![b'I';case["bytes"].as_u64().unwrap() as usize];
+        let seen=ink.hear(Clip{audio:&audio,content_type:"audio/webm"},Asked{language:Some("nb"),listen_for:"one,two",wait:Duration::from_secs(2)});
+        if let Some(why)=case["error"].as_str(){assert_eq!(seen.unwrap_err(),Deaf::Failed(why.into()));}
+        else{assert_eq!(seen.unwrap().segments[0].text,case["result"]);}
+        server.join().unwrap();
+    }
+}
+
+#[test]
+fn an_engine_may_take_over_only_before_the_first_audio() {
+    struct Speaks {name:String,mode:String,calls:Arc<Mutex<Vec<String>>>}
+    impl Speaker for Speaks{
+        fn speak(&self,_:Line<'_>,sink:&mut dyn FnMut(&[u8]))->Result<u64,Mute>{
+            self.calls.lock().unwrap().push(self.name.clone());
+            if self.mode!="failed"{sink(b"x");}
+            if self.mode=="success"{Ok(1)}else{Err(Mute::Failed{why:format!("{} refused",self.name),begun:self.mode=="partial"})}
+        }
+    }
+    for case in vectors()["ladders"].as_array().unwrap(){
+        let calls=Arc::new(Mutex::new(Vec::new()));
+        let engine=|id:&str,key:&str|Speaks{name:id.into(),mode:case[key].as_str().unwrap().into(),calls:calls.clone()};
+        let first=engine("deepgram","primary");
+        let next=engine("gemini","second");
+        let mut engines:Vec<(&dyn Speaker,&str)>=vec![(&first,"")];
+        if case["fallback"]=="gemini"{engines.push((&next,""));}
+        let mut chunks=Vec::new();
+        let result=said_by_the_first_that_can(&engines,"sound",&mut |b|chunks.push(String::from_utf8(b.into()).unwrap()));
+        assert_eq!(json!(chunks),case["chunks"]);
+        let names:Vec<_>=case["calls"].as_array().unwrap().iter().map(|c|c[0].as_str().unwrap()).collect();
+        assert_eq!(*calls.lock().unwrap(),names);
+        match result{Ok((_,n))=>assert_eq!(case["size"],n),Err(Mute::Failed{why,..})=>assert_eq!(case["error"],why),Err(e)=>panic!("{e:?}")}
+    }
+}
