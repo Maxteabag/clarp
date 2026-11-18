@@ -94,6 +94,14 @@ def open_thread(owner, contact, *, thread_id=None, connection_id, fresh=False):
     return ThreadStore(thread_id, owner, connection_id)
 
 
+# The checkpoint's bound; a save over it is refused and the call goes on without it.
+CHECKPOINT_MAX_BYTES = 2 * 1024 * 1024
+
+
+class CheckpointTooLarge(ValueError):
+    """A checkpoint over CHECKPOINT_MAX_BYTES: not saved, never fatal to a call."""
+
+
 class ThreadStore:
     def __init__(self, thread_id, owner, connection_id):
         self.thread_id, self.owner, self.connection_id = thread_id, owner, connection_id
@@ -111,7 +119,7 @@ class ThreadStore:
 
     def save(self, state):
         encoded = _json(state)
-        if len(encoded.encode()) > 2*1024*1024: raise ValueError("Oracle checkpoint exceeded its bound")
+        if len(encoded.encode()) > CHECKPOINT_MAX_BYTES: raise CheckpointTooLarge("Oracle checkpoint exceeded its bound")
         changed = db.conn().execute("UPDATE oracle_threads SET state_json=?,revision=?,updated_at=? WHERE thread_id=? AND owner_principal=? AND active_connection=?",
             (encoded, state["revision"], db.now_ms(), self.thread_id, self.owner, self.connection_id)).rowcount
         if not changed: raise ValueError("Stale Oracle connection cannot replace current context")

@@ -824,6 +824,23 @@ def test_a_checkpoint_keeps_only_this_calls_work(lab):
     assert list(saved["forwarded_findings"]) == [f"finding-{i}" for i in range(100, mod.FORWARDED_FINDINGS_KEPT + 100)]
 
 
+def test_a_checkpoint_that_cannot_be_saved_does_not_end_the_call(lab, monkeypatch):
+    from lib import oracle_memory
+    faults = []
+    monkeypatch.setattr(mod, "log_fault", lambda code, exc, **kw: faults.append((code, type(exc).__name__)))
+    monkeypatch.setattr(oracle_memory, "CHECKPOINT_MAX_BYTES", 10)
+    store = oracle_memory.open_thread("owner", "theo", connection_id="connection-1")
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120}
+    call = lab(rows=[row])
+    call.conv.memory = store
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    _tell_on(call, 3)
+    assert len(call.parts()) == 4 and not call.conv.stop.is_set()
+    assert faults == [("oracleCheckpointNotSaved", "CheckpointTooLarge")]
+
+
 def test_a_stop_holds_across_three_calls_and_the_answer_stays_readable(lab):
     row = {**_theo_row(), "result_text": "The old reading."}
     call = lab(rows=[row])
