@@ -732,3 +732,46 @@ def test_on_request_delivery_also_satisfies_a_matching_native_finding(lab):
     call.conv.tick()
     assert [_body(p) for p in call.parts()] == ["All clear."]
     assert _cues(call) == []
+
+
+def _tell_on(call, rounds):
+    """Let the telling run: each round the voice speaks the part it was given and goes quiet."""
+    for _ in range(rounds):
+        _oracle_says(call, "Reading it out.")
+        call.now[0] += mod.QUIET_AFTER_SECONDS + 1
+        call.conv.tick()
+
+
+def test_a_stop_during_the_stopped_agents_own_telling_sends_no_further_part(lab):
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120}
+    call = lab(rows=[row])
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    ident = row["delegation_id"]
+    relay = call.conv.relays[ident]
+    assert relay.total > 2 and [_body(p) for p in call.parts()] == relay.chunks[:1]
+    call.conv.supersede(row["session"])
+    _tell_on(call, 4)
+    assert [_body(p) for p in call.parts()] == relay.chunks[:1]
+    call.conv.read_result(ident)
+    assert _body(call.parts()[-1]) == relay.chunks[1]
+    assert _cues(call) == ["result"]
+
+
+def test_an_alias_arriving_mid_telling_neither_cues_nor_interrupts_the_first_answer(lab):
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * 120,
+           "backend_session_id": "thread", "result_message_id": "m"}
+    alias = {**row, "delegation_id": "alias"}
+    call = lab(rows=[row])
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    relay = call.conv.relays[row["delegation_id"]]
+    assert 2 < relay.total <= mod.oracle_relay.AUTO_PARTS
+    call.tools.rows.append(alias)
+    call.tools.delegations.add(alias["delegation_id"])
+    _tell_on(call, relay.total + 2)
+    assert [_body(p) for p in call.parts()] == relay.chunks
+    assert _cues(call) == ["result"]
+    assert {row["delegation_id"], alias["delegation_id"]} <= call.conv.results_sent
