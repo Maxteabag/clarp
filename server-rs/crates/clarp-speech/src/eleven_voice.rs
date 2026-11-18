@@ -50,8 +50,10 @@ impl Speaker for ElevenVoice {
             why: why.into(),
             begun,
         };
-        let request=tungstenite::client::IntoClientRequest::into_client_request(url.as_str()).map_err(|_|failed("invalid ElevenLabs endpoint",false))?;
-        let mut ws=crate::speech_socket::open(request,Duration::from_secs(30)).map_err(|why|failed(why,false))?;
+        let request = tungstenite::client::IntoClientRequest::into_client_request(url.as_str())
+            .map_err(|_| failed("invalid ElevenLabs endpoint", false))?;
+        let mut ws = crate::speech_socket::open(request, Duration::from_secs(30))
+            .map_err(|why| failed(why, false))?;
         for frame in frames(line.text, &key, self.speed) {
             ws.send(Message::Text(frame.to_string().into()))
                 .map_err(|_| failed("WS send failed", false))?;
