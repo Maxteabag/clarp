@@ -88,6 +88,27 @@ pub fn canonical(value: &Value) -> String {
     }
 }
 
+/// A value as Python's `json.dumps(value, ensure_ascii=False, separators=(',', ':'))` writes
+/// it: its fields in the order they were put in, nothing between them, letters of every
+/// alphabet as themselves, a fraction as Python writes one.
+pub fn compact(value: &Value) -> String {
+    match value {
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(compact).collect();
+            format!("[{}]", items.join(","))
+        }
+        Value::Object(fields) => {
+            let fields: Vec<String> = fields
+                .iter()
+                .map(|(key, value)| format!("{}:{}", Value::String(key.clone()), compact(value)))
+                .collect();
+            format!("{{{}}}", fields.join(","))
+        }
+        Value::Number(written) => number(written),
+        plain => plain.to_string(),
+    }
+}
+
 /// A fraction as Python writes one (`repr(float)`): the fewest digits that are this number
 /// and no other, written out between a ten-thousandth and ten thousand million million, and
 /// with an exponent of at least two digits and its sign outside of that.

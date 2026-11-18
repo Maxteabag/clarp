@@ -227,3 +227,7 @@ c3b1b59e98c4  past-sessions: the file it is named after
 f85f0a1fc780  past-sessions: its file, with a message after
 4bee9b170f22  past-sessions: the conversation in the agent's row
 
+# What the Oracle hands to an agent that has not run a turn yet is answered without the session of
+# that agent's tool: this Host learns the session when the first turn runs, and the delegation has
+# it from then on (docs/differences.md, registered one by one).
+d90e2215ebd4  oracle-delegations: the answer to the delegation, before the agent's first turn

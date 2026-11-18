@@ -18087,3780 +18087,5940 @@
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": " nadia ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "theo-97e5",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "theo-97e5",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "nadia-11aa",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "nadia-11aa",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "the usual",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "bella-2",
     "uses": "bella-2",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "bella-2",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "theo-97e5",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "theo-97e5",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "answer": "bella-2",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "theo-97e5",
-    "kept": "theo-97e5"
+    "kept": "theo-97e5",
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "bella-2",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "bella-2",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "bella-2",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "bella-2",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "two of a name",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "Mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "Mike",
     "uses": "theo",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "theo",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "mike-86db",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "mike-86db",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a name that is another one's session",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names of other alphabets",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a helper that is the only one of its name",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "nobody",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "only what is put away",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "names that are numbers",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "",
     "requested": "NORA-AB12",
     "uses": "Nora-AB12",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "Nora-AB12",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "theo-97e5",
     "requested": "NORA-AB12",
     "uses": "Nora-AB12",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "Nora-AB12",
+     "kept": "theo-97e5"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "gone-1",
     "requested": "NORA-AB12",
     "uses": "Nora-AB12",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "Nora-AB12",
+     "kept": "gone-1"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": null,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Select a primary contact before using direct-to-primary mode",
+     "kept": null
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "Mike",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "mike-86db",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "gone-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "bella",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "bella-2",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "old-0001",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": 5,
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": " nadia ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "nadia-11aa                                                                                                                                                                                                        ",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "nadia                                                                                                                                                            x",
     "uses": "",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "refused": "Direct-to-primary mode requires a valid selected contact",
+     "kept": "bella"
+    }
    },
    {
     "roster": "a session written large, and an agent with no name",
     "stored": "bella",
     "requested": "NORA-AB12",
     "uses": "Nora-AB12",
-    "kept": null
+    "kept": null,
+    "direct": {
+     "answer": "Nora-AB12",
+     "kept": "bella"
+    }
    }
   ]
  },

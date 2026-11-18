@@ -103,6 +103,8 @@ pub struct Config {
     pub flux_endpoint: String,
     /// The same for the voice of a ring held as a live voice call, which is a socket too.
     pub live_endpoint: String,
+    /// Where the router of the Oracle's calls is asked, in a test: an address on this machine.
+    pub router_endpoint: String,
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
@@ -430,6 +432,7 @@ impl Config {
             let not_here = format!("CLARP_LIVE_ENDPOINT {live_endpoint}: a socket on this machine");
             return Err(not_here);
         }
+        let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
         let cartesia_endpoint = stand_in("CLARP_CARTESIA_ENDPOINT")?;
         let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
@@ -504,6 +507,7 @@ impl Config {
             nova_endpoint,
             flux_endpoint,
             live_endpoint,
+            router_endpoint,
             cartesia_endpoint,
             apns_endpoint,
             gemini_endpoint,

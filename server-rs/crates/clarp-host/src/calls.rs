@@ -40,6 +40,8 @@ use crate::pairing::Scope;
 
 pub mod live;
 
+pub(crate) use live::{Voice, dial};
+
 /// What became of a request to ring, under the desk's lock.
 enum Placing {
     /// It is answered already: the ring its event rang before.

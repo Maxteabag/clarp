@@ -63,42 +63,6 @@
   "provider": "openai",
   "reason": "Making pictures is not built on this Host yet"
  },
- "/oracle/status": {
-  "available": false,
-  "model": "gpt-realtime-2.1",
-  "transport": "clarp-websocket-proxy",
-  "v2": {
-   "available": false,
-   "context_memory": false,
-   "context_reset": false,
-   "direct_contact": false,
-   "direct_contact_available": false,
-   "model": "gpt-live-1",
-   "podcast": false,
-   "podcast_history": false,
-   "voice": "marin",
-   "voice_provider": "openai",
-   "voice_providers": [
-    "openai"
-   ]
-  },
-  "v2_tinkered": {
-   "available": false,
-   "context_memory": false,
-   "context_reset": false,
-   "direct_contact": false,
-   "direct_contact_available": false,
-   "mode": "api",
-   "model": "gpt-live-1",
-   "podcast": false,
-   "podcast_history": false,
-   "router": "api",
-   "voice": "marin",
-   "webrtc": false
-  },
-  "voice": "cedar",
-  "webrtc": false
- },
  "/orchestrator/settings": {
   "settings": {
    "enabled": false,

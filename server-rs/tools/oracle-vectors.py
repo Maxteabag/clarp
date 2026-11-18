@@ -22,7 +22,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 OUT = REPO / 'server-rs' / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'oracle-vectors.json'
 sys.path.insert(0, str(REPO / 'server'))
 
-from lib import oracle_contact, oracle_voice_provider  # noqa: E402
+from lib import oracle_contact, oracle_strategy, oracle_voice_provider  # noqa: E402
 
 SHARP_S, LONG_S, FI = chr(0xdf), chr(0x17f), chr(0xfb01)
 SIGMA, FINAL_SIGMA, BIG_SIGMA = chr(0x3c3), chr(0x3c2), chr(0x3a3)
@@ -120,8 +120,12 @@ def contacts() -> dict:
                               ' nadia ', 'nadia-11aa' + ' ' * 200, 'nadia' + ' ' * 156 + 'x', 'NORA-AB12']:
                 kept.held = {oracle_contact.KEY: stored} if stored else {}
                 answer = oracle_contact.effective(requested, source='a-test')
-                used.append({'roster': roster_name, 'stored': stored, 'requested': requested, 'uses': answer,
-                             'kept': kept.held.get(oracle_contact.KEY)})
+                row = {'roster': roster_name, 'stored': stored, 'requested': requested, 'uses': answer,
+                       'kept': kept.held.get(oracle_contact.KEY)}
+                # And in a call in which everything goes to the contact: a contact that is none is no call.
+                kept.held = {oracle_contact.KEY: stored} if stored else {}
+                direct = tried(lambda: oracle_strategy.contact(requested, strategy='direct_contact', source='a-test'))
+                used.append({**row, 'direct': {**direct, 'kept': kept.held.get(oracle_contact.KEY)}})
         ROSTERS[roster_name] = {'agents': agents, 'live': live}
     return {'key': oracle_contact.KEY, 'longest': oracle_contact.MAX_LENGTH, 'rosters': ROSTERS, 'found': found,
             'visible': visible, 'read': read, 'set': taken, 'used': used}
