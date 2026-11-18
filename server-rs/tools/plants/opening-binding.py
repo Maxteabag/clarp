@@ -12,7 +12,11 @@ PLANTS=[(K,'stories',label,old,new) for label,old,new in [
     ('a replaced initiative may speak','intent["admission_id"] != self.admission_id','false'),
     ('prune just before the day is over','>= 86_400_000','>= 86_399_999'),
     ('keep an opening at its deadline','>= 86_400_000','> 86_400_000'),
-    ('prune without retirement','retired_at.is_some_and(|retired| retired <= now)','true'),
+    ('prune without retirement','let Some(retired) = retired_at else','let Some(retired) = retired_at.or(Some(0)) else'),
+    ('count only from the call end','retired.max(ended)','ended'),
+    ('count only from retirement','retired.max(ended)','retired'),
+    ('keep retired records with no end forever','CallEnd::Unknown => retired','CallEnd::Unknown => return false'),
+    ('prune while a call is live','CallEnd::Live => return false','CallEnd::Live => retired'),
 ]]
 RUNS['reads']=['test','-p','clarp-host','--lib','ordinary_audio_reads_at_most_one_key']
 RUNS['wire']=['test','--test','host','a_live_call_uses_its_frozen_team']
