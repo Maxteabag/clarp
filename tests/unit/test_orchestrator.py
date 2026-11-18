@@ -161,8 +161,8 @@ def test_call_model_uses_claude_code_for_default_provider(monkeypatch):
         calls.append((cmd, kwargs))
         return SimpleNamespace(
             returncode=0,
-            stdout='{"kind":"ignored","confidence":1,"reason":"test"}',
-            stderr="",
+            stdout='{"kind":"ignored","confidence":1,"reason":"test"}'.encode(),
+            stderr=b"",
         )
 
     monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)
@@ -195,8 +195,8 @@ def test_call_model_supports_codex_model_and_effort(monkeypatch):
                 '{"type":"thread.started","thread_id":"t1"}\n'
                 '{"type":"item.completed","item":{"type":"agent_message",'
                 '"text":"{\\"kind\\":\\"ignored\\",\\"confidence\\":1}"}}\n'
-            ),
-            stderr="",
+            ).encode(),
+            stderr=b"",
         )
 
     monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)
@@ -223,8 +223,8 @@ def test_call_model_passes_antigravity_effort(monkeypatch):
         "lib.orchestrator.subprocess.run",
         lambda cmd, **kwargs: calls.append((cmd, kwargs)) or SimpleNamespace(
             returncode=0,
-            stdout='{"kind":"ignored","confidence":1}',
-            stderr="",
+            stdout='{"kind":"ignored","confidence":1}'.encode(),
+            stderr=b"",
         ),
     )
 
@@ -689,8 +689,8 @@ def test_call_model_routes_grok_through_its_runner(monkeypatch):
                 '{"type":"turn_started"}\n'
                 '{"type":"assistant","role":"assistant","content":"{\\"kind\\":\\"ignored\\","}\n'
                 '{"type":"assistant","role":"assistant","content":"\\"confidence\\":1}"}\n'
-            ),
-            stderr="",
+            ).encode(),
+            stderr=b"",
         )
 
     monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)
@@ -716,8 +716,8 @@ def test_call_model_routes_opencode_through_its_runner(monkeypatch):
         calls.append(cmd)
         return SimpleNamespace(
             returncode=0,
-            stdout='{"type":"text","part":{"text":"{\\"kind\\":\\"ignored\\",\\"confidence\\":1}"}}\n',
-            stderr="",
+            stdout='{"type":"text","part":{"text":"{\\"kind\\":\\"ignored\\",\\"confidence\\":1}"}}\n'.encode(),
+            stderr=b"",
         )
 
     monkeypatch.setattr("lib.orchestrator.subprocess.run", fake_run)

@@ -133,7 +133,8 @@ def decision_model(packet,run):
         from .launch_paths import existing_workspace_path
         from .routing_input import prepared
         with prepared(adapter.id,cmd,prompt) as call:
-            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
+            p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
@@ -171,7 +172,8 @@ def model_json(run,prompt,request_suffix=''):
         from .launch_paths import existing_workspace_path
         from .routing_input import prepared
         with prepared(adapter.id,cmd,prompt) as call:
-            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
+            p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     answer=model_fallbacks.execute(run['agent_id'],run['run_id']+':'+(request_suffix or 'call'),primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
