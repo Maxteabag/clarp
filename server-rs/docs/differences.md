@@ -67,7 +67,7 @@ Host's first day says there what this Host must not say of itself.
 | Podcasts (`GET /podcast-history`, `/podcast-history/sources`) | none | none |
 | The vocabulary (`GET /vocab/packs`, `/vocab/terms`, `/vocab/profiles`, `/vocab/profile`, `/vocab/assignments`, `/vocab/runs`) | no packs, terms, profiles, assignments or runs | refused. `/vocab/budgets` is not answered yet |
 | A ring that listens first (`/calls/ring/opening`) | nothing: it has no screen that is read | refused in words (501). Calls, the ring whose opening line is said, the ring held as a live voice call and a phone's own switch for rings are built: see below |
-| The Oracle (`GET /oracle/status`, `/oracle/contact`, `/oracle/delegations`, `/oracle/calls/status`) | not available, and nothing it could do is claimed; nobody is put through; nothing was handed on | refused |
+| The Oracle (`GET /oracle/status`, `/oracle/delegations`, `/oracle/calls/status`) | not available, and nothing it could do is claimed; nobody is put through; nothing was handed on | refused. Its contact and the choice of its voice are built (`/oracle/contact`, `/oracle/voice-provider`): what is chosen is kept for the day its conversation is |
 | The tools' logins (`GET /backend-auth`) | whether each tool this Host runs (Claude Code, Codex) is installed and has a login, read off the file the tool keeps it in; a login that is there is told as not verified, because this Host asks no provider; no account's name | signing in or out from an app is refused: it is done with the tool itself |
 | How much of an account is used (`GET /backend-usage`) | what this Host's own turns used on each tool over the last five hours and the last seven days (turns, tokens in and out), counted as the Python Host counts its turns. How much of an account is left is shown for Codex and for Claude, from what each tool says of itself: Codex writes it into its conversation's record with every count of tokens, and Claude Code prints it as it runs; both are read when a turn of the tool ends on this Host. Shown are the windows of five hours and of a week, how old the word of them is, and for Codex, as events too (`provider-limit`), a warning at four fifths of the five hours, a hard limit, and when either is over or no longer known. This Host asks no provider: of an account that no turn ran on since, the word grows old and is said to be old. Of Antigravity nothing is shown | asking the providers, only where the owner turns it on |
 | The Host's software (`GET /server-update`) | who it is, that nobody looked for a newer one, and that it is not updated from an app | refused: whoever installed it updates it with the installer |
@@ -87,7 +87,7 @@ listed).
 
 Not answered yet, each "no such route": how an engine is told what to listen for
 (`/transcription-guidance`), the budgets of the vocabulary, dreaming's
-settings and runs (an app asks for them only of a Host that lists `dreaming`), the Oracle's voice.
+settings and runs (an app asks for them only of a Host that lists `dreaming`).
 
 ## Compared as what a client may rely on
 

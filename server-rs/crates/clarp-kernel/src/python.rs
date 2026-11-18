@@ -6,6 +6,23 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{Number, Value};
 
+mod folds;
+
+/// A text with its case folded as Python folds it (`str.casefold()`), by that interpreter's
+/// own table: what two names are compared by where their case is not to matter. It is not
+/// Rust's lower-casing: a sign with no single small form becomes more than one (`ß` is
+/// `ss`), and a sign has the same folding wherever it stands in a word.
+pub fn casefold(text: &str) -> String {
+    let mut folded = String::with_capacity(text.len());
+    for sign in text.chars() {
+        match folds::FOLDS.binary_search_by_key(&u32::from(sign), |(from, _)| *from) {
+            Ok(at) => folded.push_str(folds::FOLDS[at].1),
+            Err(_) => folded.push(sign),
+        }
+    }
+    folded
+}
+
 /// A value as Python's `json.dumps` writes it: a space after every comma and colon, and
 /// letters of every alphabet as themselves.
 pub fn dumps(value: &Value) -> String {

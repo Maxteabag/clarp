@@ -1604,6 +1604,38 @@ planted against, being second places for the rule that a live ring has no alert:
 rule is planted where it is, in the pusher by the kernel's function. On the mended code the 17 rules that
 touch what was mended were planted again, and all were caught.
 
+**The Oracle: its contact and the voice it speaks with** (18 Nov 2026). The Oracle is the voice the owner
+speaks with hands-free; what it is asked to look into it hands to one agent, its contact. This is the first
+of its parts on this Host, and the smallest: who the contact is (`GET` and `POST /oracle/contact`) and the
+owner's choice between the two voice models a call of it can run on (`GET` and `POST
+/oracle/voice-provider`), both kept among the Host's settings under the names the Python Host keeps them
+under (`oracle.contact_session`, `oracle.voice_provider`). The rules are the kernel's (`oracle.rs`, by that
+Host's `oracle_contact.py` and `oracle_voice_provider.py` themselves; `tools/oracle-vectors.py`: 630 names
+looked for in 9 sets of agents, 153 readings of what is kept, 1,260 choosings, 540 calls, 112 settings of
+the voice): a name means the one agent that has it as its session or is called it, whatever the case of
+the letters; a contact that names no agent any more is let go and said to be stale once, so that an app
+can ask its user to choose again; a name that is nobody's is refused in that Host's words and never kept;
+and a voice that cannot run here (the second, without a key for it) falls back to the first and says why.
+Names are compared as Python compares them where the case is not to matter (`str.casefold()`, which is not
+lower-casing: `python::casefold`, by that interpreter's own table of 1,530 signs, written down by
+`tools/casefold-table.py`). The Host's part (`clarp-host` `oracle.rs`): the contact is held against the
+roster as it is when it is asked (a janitor is no agent of it), the owner's file is read where it is each
+time the voice is asked (`[oracle] voice_provider`, `gemini_model`, `gemini_voice`; the key and the voices
+of `[gemini_tts]`), and one request at a time reads and writes what is kept, so that a contact chosen
+while a stale one is let go is not let go with it. With it, a rule of the Python Host's that this Host
+lacked: a Host without a token, which asks nobody who they are, answers nothing of the Oracle (401
+`Oracle requires authenticated full-device access`, for `/oracle` and everything under it). The Oracle's
+conversation is not built yet: `/oracle/status` still says that no call is held, an app that reads it
+offers none, and what is chosen here is kept for the day it is. Wrong rules were planted one at a time, 82
+of them (53 into the kernel's rules, 2 into the folding of case, 20 into the Host's part, 7 into the rule
+for a Host without a token), after the vectors had got the cases a rule had none for: all 82 were caught.
+Tested: the kernel by its vectors; and
+through a real Host process: a contact chosen by name and by session and kept over a restart, the
+refusals in their words, a janitor that is nobody's contact, a contact put away that is let go and said
+once, and the voice with a file that names the second voice without a key, a phone's choice over the
+file, a key written into the file while the Host runs, the voice the owner names, and the choice kept
+over a restart; and a Host without a token refuses each of the Oracle's routes.
+
 **Schedules** (16 Nov 2026). A prompt an agent is sent at times a cron expression names, in UTC: the owner
 or an agent makes one for an agent (`POST /agent-schedules`, `clarp-admin schedule add`), turns it off and
 on, changes and removes it, and a runner looks every fifteen seconds for what is due, moves each schedule

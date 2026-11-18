@@ -2574,4 +2574,46 @@ SCENARIOS.append({
     ],
 })
 
+CONTACT = '/oracle/contact'
+VOICE = '/oracle/voice-provider'
+
+SCENARIOS.append({
+    'id': 'oracle-contact',
+    'what': "the Oracle's contact and the voice it speaks with: a contact chosen by what an agent is called and "
+            'by its session, a name that is nobody\'s refused in words and never kept, a contact cleared; the '
+            "voice a phone chooses over the owner's file, one this Host cannot run, one there is not",
+    'steps': [
+        get(CONTACT, 'the contact of a Host that has none'),
+        post(CONTACT, {'session': f'  {AGENT.upper()} '}, 'a contact chosen by what the agent is called, in large letters'),
+        get(CONTACT, 'the contact that is kept'),
+        post(CONTACT, {'session': 'nobody-there'}, "a name that is nobody's"),
+        post(CONTACT, {'session': "it's nobody"}, 'a name with a mark in it'),
+        post(CONTACT, {'session': 'say "nobody"'}, 'a name with other marks in it'),
+        post(CONTACT, {'session': 5}, 'a number for a name'),
+        post(CONTACT, {'session': [AGENT]}, 'a list for a name'),
+        post(CONTACT, {'session': 'n' * 161 + ' ' + AGENT}, 'a name that is too long'),
+        {'op': 'post', 'path': CONTACT, 'name': 'a contact said as a list',
+         'raw': {'bytes': f'["{AGENT}"]', 'content_type': 'application/json'}},
+        get(CONTACT, 'the contact, which stays what it was'),
+        post(CONTACT, {'session': AGENT}, 'the contact chosen by its session'),
+        post(CONTACT, {'session': HELPER}, 'an agent that is not there yet'),
+        post(CONTACT, {'session': '   '}, 'no contact chosen'),
+        get(CONTACT, 'the contact that was cleared'),
+        post(CONTACT, {'session': AGENT}, 'chosen again'),
+        post(CONTACT, {}, 'nothing said, which clears it too'),
+        get(CONTACT, 'no contact at the end'),
+        get(VOICE, 'the voice a call of the Oracle runs on'),
+        post(VOICE, {'provider': ' Gemini '}, 'the second voice chosen, for which the Host has no key'),
+        get(VOICE, 'the choice that is kept, and the voice that speaks'),
+        post(VOICE, {'provider': 'gemini live'}, 'a voice there is not'),
+        post(VOICE, {}, 'no voice named'),
+        post(VOICE, {'provider': 5}, 'a number for a voice'),
+        {'op': 'post', 'path': VOICE, 'name': 'a voice said as a text',
+         'raw': {'bytes': '"gemini"', 'content_type': 'application/json'}},
+        get(VOICE, 'the choice, which stays what it was'),
+        post(VOICE, {'provider': 'OPENAI'}, 'the first voice chosen'),
+        get(VOICE, 'the voice at the end'),
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

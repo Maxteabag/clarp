@@ -219,6 +219,8 @@ pub struct App {
     pub router: Arc<crate::router::Desk>,
     /// The explainer of the use of tools: what it learned, and what waits for its model.
     pub explain: Arc<crate::explain::Desk>,
+    /// The Oracle's desk: its contact and the voice it speaks with are read and written in turn.
+    pub oracle: Arc<crate::oracle::Desk>,
     /// The Goal keeper: its own state of the goals it keeps, and its receipts.
     pub keeper: Arc<crate::keeper::Desk>,
     /// The audio bookkeeper: what was seen of clips, written down or not yet.
@@ -429,6 +431,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::places::routes())
+        .merge(crate::oracle::routes())
         .merge(crate::calendar::routes())
         .merge(crate::models::routes())
         .merge(crate::usage::routes())
@@ -638,6 +641,13 @@ const FULL_ONLY: &[&str] = &[
     "/calls",
 ];
 
+/// Whether a request is one of the Oracle's: `/oracle` and what is under it, read or done.
+fn of_the_oracle(request: &Request, path: &str) -> bool {
+    let method = request.method();
+    let read_or_done = method == Method::GET || method == Method::POST;
+    read_or_done && (path == "/oracle" || path.starts_with("/oracle/"))
+}
+
 /// Whether this caller is kept from this request by its scope.
 fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     // An agent's own tools are asked for from this machine, with the token a turn was given
@@ -761,6 +771,12 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 too_many.unwrap_or_else(|| {
                     ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized").into_response()
                 })
+            }
+            // A Host without a token is open to whoever is on its machine, and nobody there
+            // has said who they are: the Oracle, which speaks for its user, is not for that.
+            Some(_) if app.config.auth_token.is_empty() && of_the_oracle(&request, &path) => {
+                let why = "Oracle requires authenticated full-device access";
+                ApiError::new(StatusCode::UNAUTHORIZED, why).into_response()
             }
             Some(principal) if out_of_scope(&principal, request.method(), &path) => {
                 let why = if matches!(principal, Principal::Tools) {

@@ -1,0 +1,473 @@
+{
+ "error": null,
+ "http": [
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "the contact of a Host that has none"
+  },
+  {
+   "body": {
+    "persona": "Claire",
+    "session": "claire",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "a contact chosen by what the agent is called, in large letters"
+  },
+  {
+   "body": {
+    "persona": "Claire",
+    "session": "claire",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "the contact that is kept"
+  },
+  {
+   "body": {
+    "error": "'nobody-there' is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a name that is nobody's"
+  },
+  {
+   "body": {
+    "error": "\"it's nobody\" is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a name with a mark in it"
+  },
+  {
+   "body": {
+    "error": "'say \"nobody\"' is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a name with other marks in it"
+  },
+  {
+   "body": {
+    "error": "'5' is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a number for a name"
+  },
+  {
+   "body": {
+    "error": "\"['claire']\" is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a list for a name"
+  },
+  {
+   "body": {
+    "error": "'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn' is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "a name that is too long"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 400,
+   "step": "a contact said as a list"
+  },
+  {
+   "body": {
+    "persona": "Claire",
+    "session": "claire",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "the contact, which stays what it was"
+  },
+  {
+   "body": {
+    "persona": "Claire",
+    "session": "claire",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "the contact chosen by its session"
+  },
+  {
+   "body": {
+    "error": "'helper-one' is not a live agent; choose a contact from the roster"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 409,
+   "step": "an agent that is not there yet"
+  },
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "no contact chosen"
+  },
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "the contact that was cleared"
+  },
+  {
+   "body": {
+    "persona": "Claire",
+    "session": "claire",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "chosen again"
+  },
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "nothing said, which clears it too"
+  },
+  {
+   "body": {
+    "persona": "",
+    "session": "",
+    "stale": ""
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/contact",
+   "status": 200,
+   "step": "no contact at the end"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": null,
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "openai"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the voice a call of the Oracle runs on"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": "Gemini Live needs a Gemini API key on this Host",
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the second voice chosen, for which the Host has no key"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": "Gemini Live needs a Gemini API key on this Host",
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the choice that is kept, and the voice that speaks"
+  },
+  {
+   "body": {
+    "error": "voice provider must be one of: openai, gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 400,
+   "step": "a voice there is not"
+  },
+  {
+   "body": {
+    "error": "voice provider must be one of: openai, gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 400,
+   "step": "no voice named"
+  },
+  {
+   "body": {
+    "error": "voice provider must be one of: openai, gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 400,
+   "step": "a number for a voice"
+  },
+  {
+   "body": {
+    "error": "bad json"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 400,
+   "step": "a voice said as a text"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": "Gemini Live needs a Gemini API key on this Host",
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "gemini"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the choice, which stays what it was"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": null,
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "openai"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "POST",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the first voice chosen"
+  },
+  {
+   "body": {
+    "available": [
+     "openai"
+    ],
+    "default": "openai",
+    "fallback_reason": null,
+    "gemini": {
+     "model": "gemini-3.8-live",
+     "voice": "Kore"
+    },
+    "provider": "openai",
+    "selected": "openai"
+   },
+   "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json"
+   },
+   "method": "GET",
+   "path": "/oracle/voice-provider",
+   "status": 200,
+   "step": "the voice at the end"
+  }
+ ],
+ "live": {
+  "log": {},
+  "stream": {}
+ },
+ "scenario": "oracle-contact",
+ "sse": [
+  {
+   "data": {
+    "event_id": "<eid:server-version#1@78ab33>",
+    "ts": "<time>",
+    "type": "server-version",
+    "version": "1700000000"
+   },
+   "event": null,
+   "id": "<eid:server-version#1@78ab33>"
+  },
+  {
+   "data": {
+    "type": "agent-roster"
+   },
+   "event": null,
+   "id": null
+  }
+ ]
+}

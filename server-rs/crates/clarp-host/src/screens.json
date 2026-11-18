@@ -99,11 +99,6 @@
   "voice": "cedar",
   "webrtc": false
  },
- "/oracle/contact": {
-  "persona": "",
-  "session": "",
-  "stale": ""
- },
  "/orchestrator/settings": {
   "settings": {
    "enabled": false,

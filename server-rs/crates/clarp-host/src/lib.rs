@@ -47,6 +47,7 @@ pub mod logins;
 pub mod media;
 pub mod models;
 pub mod once;
+pub mod oracle;
 pub mod owner;
 pub mod pairing;
 pub mod past;
