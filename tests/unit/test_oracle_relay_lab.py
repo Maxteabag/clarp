@@ -853,3 +853,25 @@ def test_a_stop_holds_across_three_calls_and_the_answer_stays_readable(lab):
         assert call.parts(-1) == [] and _cues(call) == []
     call.conv.read_result(row["delegation_id"])
     assert _body(call.parts(-1)[-1]) == row["result_text"]
+
+
+def test_a_checkpoint_keeps_no_silenced_id_of_earlier_work(lab):
+    earlier = {**_theo_row(), "delegation_id": "earlier", "result_text": "A paragraph about the pump. " * 600}
+    call = lab(prior_rows=[earlier])
+    call.conv.memory = FakeMemory()
+    call.conv.read_result("earlier")
+    _tell_on(call, mod.oracle_relay.AUTO_PARTS + 2)
+    assert "earlier" in call.conv.silenced_results     # paused at the limit while read on request
+    call.conv.checkpoint()
+    assert "silenced_results" not in call.conv.memory.state
+
+
+def test_a_save_refused_because_another_connection_took_the_thread_still_ends_the_call(lab):
+    from lib import oracle_memory
+    store = oracle_memory.open_thread("owner", "theo", connection_id="connection-1")
+    call = lab()
+    call.conv.memory = store
+    call.conv.checkpoint()
+    oracle_memory.open_thread("owner", "theo", connection_id="connection-2")
+    with pytest.raises(ValueError, match="Stale Oracle connection"):
+        call.conv.checkpoint()
