@@ -53,12 +53,23 @@ fn a_prepared_vocabulary_is_taken_and_refused_as_the_python_host_does() {
                 assert_eq!(case["refused"], why.as_str(), "{name}");
                 refused += 1;
             }
-            // The Python language's own words for a file it cannot read: refused here too.
-            (Err(_), None, Some(false)) => otherwise += 1,
+            // The Python language's own words for a file it cannot read: refused here too,
+            // in this Host's words for what it was that could not be read.
+            (Err(why), None, Some(false)) => {
+                let own = match case["refused"].as_str().unwrap() {
+                    "JSONDecodeError" => voice::NO_VOCABULARY,
+                    "TypeError" | "UnicodeDecodeError" => {
+                        "Prepared voice context source is missing or invalid"
+                    }
+                    other => panic!("{name}: {other}"),
+                };
+                assert_eq!(why, own, "{name}");
+                otherwise += 1;
+            }
             (got, expected, _) => panic!("{name}: {got:?}, and the Python Host: {expected:?}"),
         }
     }
-    assert_eq!((taken, refused, otherwise, alone), (13, 37, 6, 5));
+    assert_eq!((taken, refused, otherwise, alone), (14, 38, 6, 5));
     assert_eq!(vectors["without_a_file"], serde_json::json!([null, ""]));
     assert_eq!(voice::VOCABULARY_FILE_MOST, 16_384);
     assert_eq!(voice::VOCABULARY_TEXT_MOST, 2 * 1024 * 1024);

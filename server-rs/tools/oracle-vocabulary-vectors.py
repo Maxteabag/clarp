@@ -83,6 +83,7 @@ CASES = [
     case('a version that is a text', version='1'),
     case('a version with a point', version=1.0),
     case('a version that is a yes', version=True),
+    case('a version that is a no', version=False),
     case('no version', version='~drop'),
     case('a file of another contact', primary_session='mike'),
     case('a file that names its contact in other letters', primary_session='Theo'),
@@ -100,7 +101,7 @@ CASES = [
     case('a path from where the Host stands', {'path': 'text.txt'}),
     case('a path where nothing is', text=None),
     case('a path where a directory is', text=...),
-    case('a text that is no UTF-8', text=b'Drammen \xff valve'),
+    case('a text that is no UTF-8', text=b'Drammen \xff valve', terms=['Drammen', 'valve']),
     case('a digest of another text', {'sha256': digest('another text')}),
     case('a digest in large letters', {'sha256': digest(TEXT).upper()}),
     case('no digest', {'sha256': '~drop'}),
@@ -115,6 +116,7 @@ CASES = [
     case('a word that is empty', terms=['Drammen', '']),
     case('a word of one sign', terms=['4']),
     case('a word that is a sign too long', terms=['a' * 161]),
+    case('a word of many signs of two bytes each', text=chr(0xf8) * 120, terms=[chr(0xf8) * 100]),
     case('a word of two lines, as the text has it', terms=['gauge.\naaa']),
     case('a word with a return in it, as the text has it', text='Drammen\rfeeds', terms=['Drammen\rfeeds']),
     case('the two halves of such a word', text='Drammen\rfeeds', terms=['Drammen', 'feeds']),
@@ -179,9 +181,10 @@ def run() -> dict:
             sidecar = folder / 'vocabulary.json'
             sidecar.write_bytes(small)
             # What a Host's reader finds at the path the file names: the text's bytes, or nothing where the path
-            # is not whole, names no file, or names one too large to be a text of this kind.
+            # is not whole, names no file, or names one too large to be a text of this kind. A small file that
+            # is bytes of the case's own names no path.
             named = held.get('prepared_context') if isinstance(held.get('prepared_context'), dict) else {}
-            path = named.get('path') if isinstance(named, dict) else None
+            path = named.get('path') if isinstance(named, dict) and one['raw'] is None else None
             found = None
             if isinstance(path, str) and pathlib.Path(path).is_absolute() and pathlib.Path(path).is_file():
                 found = base64.b64encode(pathlib.Path(path).read_bytes()).decode('ascii')
