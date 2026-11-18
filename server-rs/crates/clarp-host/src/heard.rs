@@ -674,6 +674,15 @@ fn long_form_threshold(directory: &Directory) -> i64 {
     kept.and_then(|kept| kept.parse().ok()).unwrap_or(30)
 }
 
+async fn vocabulary_budgets(State(app): State<App>) -> Json<Value> {
+    let directory = app.fleet.directory();
+    Json(json!({
+        "budgets": *clarp_kernel::vocabulary::BUDGETS,
+        "engine": app.ears.default_engine(&directory),
+        "models": cloud_models(&app.ears),
+    }))
+}
+
 /// The settings of speech in, as an app's screen draws them.
 fn status(app: &App) -> Value {
     let ears = &app.ears;
@@ -850,6 +859,7 @@ pub fn routes() -> Router<App> {
         .route("/transcribe", post(transcribe))
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
+        .route("/vocab/budgets", get(vocabulary_budgets))
         .route(
             "/transcription-providers",
             get(providers).post(set_providers),
