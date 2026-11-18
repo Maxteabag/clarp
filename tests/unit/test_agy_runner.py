@@ -1388,3 +1388,67 @@ def test_a_turn_agy_refuses_before_opening_a_conversation_reports_agys_reason(
     assert results == [] and len(errors) == 1
     assert "insufficient authentication scopes" in errors[0]
     assert error_classify.classify_error(errors[0]) == error_classify.AUTH
+
+
+@pytest.mark.parametrize("fresh", [False, True])
+@pytest.mark.parametrize("sequence", [
+    "repeat", "missing", "late", "late-plus-second", "usage-then-missing", "conflict",
+])
+def test_accounting_uses_done_steps_or_reports_terminal_fallback(fake_agy, tmp_path, monkeypatch,
+                                                                  fresh, sequence):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from lib import db, log as host_log, turn_lifecycle
+    from lib.turn_launcher import LauncherMixin
+
+    # A continued conversation: the second terminal includes the first turn.
+    per_step = {"input_tokens": 4969, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 4049}
+    if sequence == "repeat":
+        per_step["thinking_tokens"] = 2
+    cumulative = {"input_tokens": 13774, "output_tokens": 3, "thinking_tokens": 0, "cache_read_tokens": 4049}
+    rows = [json.loads(line) for line in _stream("Acknowledged", usage=per_step).splitlines()]
+    done = next(r for r in rows if r.get("step_update", {}).get("usage"))
+    index = rows.index(done)
+    def notification(step_index, usage):
+        update = {**done["step_update"], "step_index": step_index}
+        if usage is None:
+            del update["usage"]
+        else:
+            update["usage"] = usage
+        return {"event": "step_update", "step_update": update}
+
+    missing = notification(2, None)
+    other = {"input_tokens": 17, "output_tokens": 4}
+    updates = {"repeat": [done, done], "missing": [missing], "late": [missing, done],
+               "late-plus-second": [missing, done, notification(3, other)],
+               "usage-then-missing": [done, missing], "conflict": [done, notification(2, other)]}
+    rows[index:index + 1] = updates[sequence]
+    rows[-1]["result"]["usage"] = cumulative
+    fake_agy("\n".join(json.dumps(r) for r in rows))
+    agent_id = _make_agy_agent()
+    trace = _open_owned_turn(agent_id, "usage-test")
+    results = []
+    handle = AGY.start_turn(text="Synthetic turn", cwd=tmp_path, agent_id=agent_id,
+                            session="elli", trace_id=trace, on_result=results.append)
+    handle.wait(timeout=8)
+    assert _wait_for(lambda: len(results) == 1)
+    logs = []
+    monkeypatch.setattr(host_log, "log", lambda event, detail: logs.append((event, detail)))
+    published = Mock()
+    monkeypatch.setattr(turn_lifecycle, "try_transition", published)
+    launcher = Mock()
+    launcher._superseded.return_value = False
+    spec = SimpleNamespace(agent_id=agent_id, trace_id=trace, context=None, backend="agy",
+                           origin="user", janitor_run_id="", is_new_session=fresh)
+    _, finish, _ = LauncherMixin._attempt_callbacks(launcher, spec, 1, {})
+    finish(results[0])
+    detail = published.call_args.args[2]
+    row = db.conn().execute("SELECT tokens_in,tokens_out FROM turn_usage WHERE trace_id=?", (trace,)).fetchone()
+    assert tuple(row) == (detail["tokens_in"], detail["tokens_out"])
+    assert (detail["tokens_in"], detail["tokens_out"]) == {
+        "missing": (17823, 3), "late-plus-second": (9035, 5), "repeat": (9018, 3),
+    }.get(sequence, (9018, 1))
+    steps = 2 if sequence == "late-plus-second" else 1
+    assert results[0]["agy_reported_usage"]["step_duration_seconds_sum"] == pytest.approx(1.2 * steps)
+    assert [item for item in logs if item[0] == "agyTurnUsageFallback"] == ([] if fresh or sequence != "missing" else [
+        ("agyTurnUsageFallback", "reason=no_step_usage")])

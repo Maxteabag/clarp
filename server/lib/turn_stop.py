@@ -32,6 +32,23 @@ def _result_error_text(event: Any) -> str:
     return "error result"
 
 
+def _agy_accounting_event(event: dict, *, fresh_session: bool) -> dict:
+    """Select turn-local usage from the evidence attached by the agy runner."""
+    reported = event.get("agy_reported_usage")
+    if not reported:
+        return event
+    steps = reported.get("normalized_step_sum")
+    if steps:
+        # The runner already deduplicated DONE steps by index. Its terminal
+        # aggregate can include earlier turns in this conversation.
+        usage = {**steps, "output_tokens": steps.get("output_tokens", 0) + steps.get("thinking_tokens", 0)}
+        return {**event, "usage": usage}
+    if not fresh_session:
+        from .log import log
+        log("agyTurnUsageFallback", "reason=no_step_usage")
+    return event
+
+
 def _result_detail(event: dict, *, trace_id: str) -> dict:
     usage = (event.get("usage") or {}) if isinstance(event, dict) else {}
     detail: dict = {"dispatch": "clarp", "trace_id": trace_id}
