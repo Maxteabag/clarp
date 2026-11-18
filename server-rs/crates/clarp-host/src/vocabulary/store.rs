@@ -103,7 +103,9 @@ pub(crate) struct Desk {
 }
 
 async fn run(fleet: &FleetHandle, id: i64) -> Result<Run> {
-    load(fleet, RUNS, &id.to_string()).await?.ok_or_else(unavailable)
+    load(fleet, RUNS, &id.to_string())
+        .await?
+        .ok_or_else(unavailable)
 }
 
 impl Desk {
@@ -124,7 +126,10 @@ impl Desk {
         let (next, response) = book
             .change(action, data, now, &crate::ids::hex(6), known)
             .map_err(rejected)?;
-        fleet.keep(BOOK, "book".into(), Some(encode(&next)?)).await.map_err(|_| unavailable())?;
+        fleet
+            .keep(BOOK, "book".into(), Some(encode(&next)?))
+            .await
+            .map_err(|_| unavailable())?;
         Ok(response)
     }
 
@@ -175,7 +180,10 @@ impl Desk {
         if !record.trace.is_empty() {
             writes.push((TRACES, record.trace.clone(), encode(&id)?));
         }
-        fleet.keep_together(writes).await.map_err(|_| unavailable())?;
+        fleet
+            .keep_together(writes)
+            .await
+            .map_err(|_| unavailable())?;
         Ok(id)
     }
 
