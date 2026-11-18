@@ -607,3 +607,128 @@ def test_a_reconnect_within_the_grace_continues_the_calls_relay(monkeypatch, aft
     finally:
         conv.stop.set(); conv.pool.shutdown(wait=True)
 
+
+
+@pytest.mark.parametrize("status", ["accepted", "queued", "running"])
+def test_reading_unfinished_work_returns_its_status_then_reads_the_real_result(lab, monkeypatch, status):
+    row = {**_theo_row(), "status": status, "result_text": ""}
+    ident = row["delegation_id"]
+    call = lab(rows=[row])
+    monkeypatch.setattr(mod.oracle_delegations, "get", lambda key: row if key == ident else None)
+    call.conv.read_result(ident)
+    assert call.parts() == [] and status in call.appends()[-1]["content"]
+    assert ident not in call.conv.relay_cursors
+    row.update(status="completed", result_text="The pump is ready.")
+    call.conv.read_result(ident)
+    assert [_body(part) for part in call.parts()] == [row["result_text"]]
+
+
+def _resume_relay_lab(call):
+    memory = call.conv.memory
+    memory.rows = call.tools.rows
+    call.conv.checkpoint()
+    call.conv.stop.set()
+    call.conv.pool.shutdown(wait=True)
+    call.upstreams.append(FakeUpstream())
+    call.conv = mod.Conversation(call.upstreams[-1], call.down.append, call.tools, "key",
+                                 clock=lambda: call.now[0], delegation_strategy=call.conv.delegation_strategy,
+                                 memory=memory)
+    call.down.clear()
+
+
+@pytest.mark.parametrize("reconnect", [False, True])
+@pytest.mark.parametrize("partial", [False, True])
+def test_requested_read_delivers_remaining_parts_once(lab, reconnect, partial):
+    row = {**_theo_row(), "result_text": "A paragraph about the pump. " * (120 if partial else 1)}
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    # The result is already pending, held back while the user is speaking.
+    call.conv.last_input = call.now[0]
+    call.conv.tick()
+    ident = row["delegation_id"]
+    call.conv.read_result(ident)
+    assert len(call.parts()) == 1
+    relay = call.conv.relays[ident]
+    assert (relay.total > 1) == partial
+    if reconnect:
+        _resume_relay_lab(call)
+    call.now[0] += mod.RELAY_STALL_SECONDS + 10
+    call.conv.tick()
+    parts = call.parts(-1) if reconnect else call.parts()[1:]
+    assert [_body(part) for part in parts] == (relay.chunks[1:2] if partial else [])
+    assert _cues(call) == (["result"] if partial else [])
+    if not partial:
+        assert ident in call.conv.results_sent
+
+
+def test_shared_finding_never_cues_without_a_delivery(lab):
+    row = {**_theo_row(), "result_text": "All clear.", "backend_session_id": "thread", "result_message_id": "m"}
+    second = {**row, "delegation_id": "other"}
+    call = lab(rows=[row, second])
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    assert [_body(part) for part in call.parts()] == ["All clear."]
+    assert _cues(call) == ["result"]
+
+
+@pytest.mark.parametrize("already_pending", [True, False])
+def test_stop_remembers_only_the_stopped_operations_across_calls(lab, already_pending):
+    row = {**_theo_row(), "result_text": "The old reading."}
+    call = lab(rows=[row])
+    call.conv.memory = FakeMemory()
+    if already_pending:
+        call.conv.last_input = call.now[0]
+        call.conv.tick()
+    call.conv.supersede(row["session"])
+    _resume_relay_lab(call)
+    follow = {**row, "result_text": "The new reading.", "delegation_id": "follow-on"}
+    call.tools.rows.append(follow)
+    call.tools.delegations.add(follow["delegation_id"])
+    call.now[0] += 10
+    call.conv.tick()
+    call.now[0] += 10
+    call.conv.tick()
+    assert [_body(part) for part in call.parts(-1)] == [follow["result_text"]]
+    assert _cues(call) == ["result"]
+    call.conv.read_result(row["delegation_id"])
+    assert _body(call.parts(-1)[-1]) == row["result_text"]
+
+
+@pytest.mark.parametrize("lands", ["between_read_and_lock", "after_stop"])
+def test_a_result_landing_around_a_stop_is_told_later_once(lab, lands):
+    row = {**_theo_row(), "result_text": "The old reading."}
+    late = {**row, "delegation_id": "late", "status": "running", "result_text": "The late reading."}
+    call = lab(rows=[row, late])
+    call.conv.memory = FakeMemory()
+    read = call.tools.results
+
+    def read_then_land():
+        rows = read()
+        late["status"] = "completed"
+        return rows
+    if lands == "between_read_and_lock":
+        call.tools.results = read_then_land
+    call.conv.supersede(row["session"])
+    call.tools.results = read
+    late["status"] = "completed"
+    for _ in range(4):
+        call.now[0] += 10
+        call.conv.tick()
+    assert [_body(part) for part in call.parts()] == [late["result_text"]]
+    assert _cues(call) == ["result"]
+    _resume_relay_lab(call)
+    for _ in range(2):
+        call.now[0] += 10
+        call.conv.tick()
+    assert call.parts(-1) == []
+
+
+def test_on_request_delivery_also_satisfies_a_matching_native_finding(lab):
+    row = {**_theo_row(), "result_text": "All clear.", "backend_session_id": "thread", "result_message_id": "m"}
+    call = lab(rows=[row, {**row, "delegation_id": "alias"}])
+    call.conv.read_result(row["delegation_id"])
+    call.now[0] += 10
+    call.conv.tick()
+    assert [_body(p) for p in call.parts()] == ["All clear."]
+    assert _cues(call) == []

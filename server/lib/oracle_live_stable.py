@@ -359,6 +359,7 @@ class Conversation:
         # Lossless relays of long replies and transcripts, keyed by operation
         # id; the cursor survives reconnects through the checkpoint.
         self.relays = {}
+        self.result_findings = {}  # Delegation relay keys and their optional native finding identity.
         self.relay_cursors = {}
         self.active_relay = None
         self.narration = "on"
@@ -396,6 +397,7 @@ class Conversation:
         self.routing = 0
         self.seen = set()
         self.results_seen = set()
+        self.silenced_results = set()
         # Context notifications are owned by this Oracle thread. Native
         # decisions and unread user-directed completions share one dedup set;
         # the durable table extends ownership across normal reconnects.
@@ -429,7 +431,8 @@ class Conversation:
             self.revision = self.resume_revision = saved.get("revision", 0)
             self.routed_revision = saved.get("routed_revision", self.resume_revision)
             self.results_sent = set(saved.get("results_sent", []))
-            self.results_seen = set(self.results_sent)
+            self.silenced_results = set(saved.get("silenced_results", []))
+            self.results_seen = self.results_sent | self.silenced_results
             self.forwarded_findings = saved.get("forwarded_findings", {})
             self.relay_cursors = dict(saved.get("relay_cursors", {}))
             self.narration = saved.get("narration", "on")
@@ -443,13 +446,16 @@ class Conversation:
     def checkpoint(self):
         if self.memory:
             with self.lock:
-                self.memory.save({"revision": self.revision, "fragments": self.fragments,
+                state = {"revision": self.revision, "fragments": self.fragments,
                     "results_sent": sorted(self.results_sent), "forwarded_findings": self.forwarded_findings,
                     "provider_session": self.provider_session,
                     "relay_cursors": self.relay_cursors, "narration": self.narration,
                     "earcons": self.earcons,
                     "routed_revision": self.routed_revision,
-                    "call_active_ms": wall_ms(), "call_work": self.call_work()})
+                    "call_active_ms": wall_ms(), "call_work": self.call_work()}
+                if self.silenced_results:
+                    state["silenced_results"] = sorted(self.silenced_results)
+                self.memory.save(state)
 
     def call_work(self):
         """Operations delegated in this call."""
@@ -481,9 +487,21 @@ class Conversation:
         journal.record(kind, fields)
 
     def supersede(self, session):
+        # Read outside the lock: a result landing after this read is not
+        # silenced; tick takes it up later and tells it once.
+        finished = self.tools.results()
         with self.lock:
             self.superseded.add(session)
+            stopped = {row["delegation_id"] for row in (*self.pending, *finished)
+                       if row["session"] == session and row.get("status") != "cancelled"}
+            stopped.difference_update(self.results_sent, self.background_work)
+            self.silenced_results.update(stopped)
+            self.results_seen.update(stopped)
             self.pending = [row for row in self.pending if row["session"] != session]
+            if self.active_relay and self.active_relay.key in stopped:
+                self.active_relay.held = True
+            if stopped:
+                self.checkpoint()
 
     def send(self, event):
         with self.send_lock:
@@ -808,23 +826,23 @@ class Conversation:
                 return
             row = self.pending.pop(0)
             self.last_append = now
+        ident = row["delegation_id"]
         relay = self.relay_for(row)
-        if row["status"] == "completed" and relay.next == 0:
-            self.cue("result")
-        if self.delegation_strategy == "direct_contact":
-            key = oracle_strategy.native_finding_identity(row)
-            if key and key in self.forwarded_findings:
-                if self.journal:
-                    self.journal.record("result.shared_native_finding", {"operation_id":row["delegation_id"],
-                        "same_finding_as":self.forwarded_findings[key], "provider_reinjected":False})
-                self.results_sent.add(row["delegation_id"])
-                self.checkpoint()
-                return
-            self.relay(relay, now)
-            if key:self.forwarded_findings[key] = row["delegation_id"]
+        key = self.result_findings[ident]
+        previous = self.forwarded_findings.get(key) if key else None
+        if previous and previous != ident:
+            if self.journal:
+                self.journal.record("result.shared_native_finding", {"operation_id": ident,
+                    "same_finding_as": previous, "provider_reinjected": False})
+            self.results_sent.add(ident)
+        elif relay.remaining:
+            if row["status"] == "completed":
+                self.cue("result")
+            self.relay(relay, now, start=relay.next, resumed=relay.next > 0)
+            if key:
+                self.forwarded_findings[key] = ident
         else:
-            self.relay(relay, now)
-        self.results_sent.add(row["delegation_id"])
+            self.results_sent.add(ident)
         self.checkpoint()
 
     # ---- lossless relay ----------------------------------------------------
@@ -836,6 +854,8 @@ class Conversation:
             relay = self.relays.get(ident)
             if relay is None:
                 relay = self.relays[ident] = oracle_relay.result_relay(row)
+                self.result_findings[ident] = (oracle_strategy.native_finding_identity(row)
+                                               if self.delegation_strategy == "direct_contact" else None)
                 cursor = self.relay_cursors.get(ident)
                 if isinstance(cursor, int):
                     relay.next = relay.sent = min(max(cursor, 0), relay.total)
@@ -881,6 +901,14 @@ class Conversation:
                     self.relay_cursors.pop(next(iter(self.relay_cursors)))
             pause_after = relay.auto >= oracle_relay.AUTO_PARTS
         self.append("commentary", relay.part(index, served=served, resumed=resumed, pause_after=pause_after))
+        with self.lock:
+            if index + 1 == relay.total and relay.key in self.result_findings:
+                self.results_sent.add(relay.key)
+                self.results_seen.add(relay.key)
+                self.pending = [row for row in self.pending if row["delegation_id"] != relay.key]
+                finding = self.result_findings[relay.key]
+                if finding:
+                    self.forwarded_findings.setdefault(finding, relay.key)
         if self.journal:
             self.journal.record("relay.part_sent", {"key": relay.key, "part": index + 1,
                 "total": relay.total, "verbatim": relay.verbatim, "served": served})
@@ -914,18 +942,8 @@ class Conversation:
                 return False
         return self.send_part(relay, now)
 
-    def latest_relay(self, operation_id=None):
-        """The relay a meta request refers to: named, active, or newest result."""
-        if operation_id:
-            with self.lock:
-                if operation_id in self.relays:
-                    return self.relays[operation_id]
-            with self.tools.lock:
-                owned = operation_id in self.tools.delegations
-            row = oracle_delegations.get(operation_id) if owned else None
-            if row is None:
-                row = next((r for r in self.tools.results() if r["delegation_id"] == operation_id), None)
-            return self.relay_for(row) if row else None
+    def latest_relay(self):
+        """The active relay or the newest terminal result in this conversation."""
         with self.lock:
             if self.active_relay is not None:
                 return self.active_relay
@@ -936,7 +954,21 @@ class Conversation:
 
     def read_result(self, operation_id=None, from_part=None, *, verbatim=None):
         """The router's read_result: continue or replay stored text; never re-delegates."""
-        relay = self.latest_relay(operation_id)
+        if operation_id:
+            with self.lock:
+                relay = self.relays.get(operation_id)
+            if relay is None:
+                with self.tools.lock:
+                    owned = operation_id in self.tools.delegations
+                row = oracle_delegations.get(operation_id) if owned else None
+                if row is None:
+                    row = next((r for r in self.tools.results() if r["delegation_id"] == operation_id), None)
+                if row and row["status"] not in oracle_delegations.TERMINAL:
+                    self.append("thinking", f"The requested operation is {row['status']}. Its result is not ready.")
+                    return True
+                relay = self.relay_for(row) if row else None
+        else:
+            relay = self.latest_relay()
         if relay is None:
             self.append("thinking", "There is no stored agent reply to read in this call yet.")
             return False
