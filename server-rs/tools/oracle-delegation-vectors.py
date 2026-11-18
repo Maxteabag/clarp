@@ -224,7 +224,7 @@ STORIES = [
                    'd-4': [('final', '   ', 2), ('other', 'not of the turn', 9)],
                    'd-5': [('final', '\n\t', 4)]}),
           op('recent'),
-          op('orphans', admitted=['d-6', 'd-7'], live=[], said={}),
+          op('orphans', admitted=['d-2', 'd-6', 'd-7', 'd-8'], live=[], said={}),
           op('recent')),
 ]
 AGENTS = [('Theo', 'theo', False), ('Mike', 'mike', False), ('Sweeper', 'sweep', True)]

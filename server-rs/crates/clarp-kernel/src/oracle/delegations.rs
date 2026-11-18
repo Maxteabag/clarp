@@ -451,19 +451,20 @@ impl Book {
         let mut ended = 0;
         for at in open {
             let row = self.rows[at].clone();
-            let said = match fate(&row) {
+            match fate(&row) {
                 Fate::NotAdmitted | Fate::Live => continue,
                 Fate::Said {
                     message_id,
                     text,
                     at_ms,
-                } => self.completed(&row.trace_id, &message_id, &text, at_ms),
-                Fate::Lost => false,
-            };
-            // An answer that says nothing is none: the delegation failed.
-            if !said {
-                self.fail(&row.delegation_id, INTERRUPTED, now_ms);
+                } => {
+                    self.completed(&row.trace_id, &message_id, &text, at_ms);
+                }
+                Fate::Lost => {}
             }
+            // What did not end with an answer failed: its turn is gone, or what it left
+            // says nothing. (One that ended a moment ago is over, and stays as it ended.)
+            self.fail(&row.delegation_id, INTERRUPTED, now_ms);
             ended += 1;
         }
         ended
