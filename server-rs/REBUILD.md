@@ -1512,9 +1512,7 @@ is told to the apps (`agent-ring`), pushed to the owner's phones whether or not 
 incoming call breaks through Focus and has Answer and Decline; what became of it takes its place), and
 noted quietly in the agent's conversation. An agent rings as itself with its own tool (`clarp-admin call
 ring --reason .. --say .. [--wait]`, `ring-status`, `ring-cancel`, `rings on|off|status`); the next thing its
-user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). Not
-built with it, and refused in words that say how to ring instead: a ring that listens first
-(`docs/differences.md`).
+user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). The listen-first opening is described below.
 
 **A ring held as a live voice call** (18 Nov 2026; the owner uses it: most of the rings his Host keeps are
 of this kind, counted there and read only). A ring may ask that its

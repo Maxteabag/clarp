@@ -138,7 +138,7 @@ fn opening_dispatch_requires_positive_evidence_for_a_release_or_a_launch() {
         let row = if status.is_null() {
             Value::Null
         } else {
-            json!({"status":status,"trace_id":"trace","claimed_at":if status=="claimed"{json!(100)}else{Value::Null}})
+            json!({"foreign":case["breach"]=="foreign","status":status,"trace_id":"trace","claimed_at":if status=="claimed"{json!(100)}else{Value::Null}})
         };
         let mut generation = op["fence"]["host_gen"].clone();
         if case["breach"] == "reboot" {
@@ -151,7 +151,9 @@ fn opening_dispatch_requires_positive_evidence_for_a_release_or_a_launch() {
             queue: &row,
             trace: "unused",
             nonce: "unused",
-            fence: if case["breach"] == "stopped_after_answer" {
+            fence: if case["breach"] == "retired" {
+                Some("call_ended")
+            } else if case["breach"] == "stopped_after_answer" {
                 Some("stopped_after_answer")
             } else {
                 None
@@ -190,5 +192,5 @@ fn opening_dispatch_requires_positive_evidence_for_a_release_or_a_launch() {
         }
         count += 1;
     }
-    assert_eq!(count, 360);
+    assert_eq!(count, 424);
 }

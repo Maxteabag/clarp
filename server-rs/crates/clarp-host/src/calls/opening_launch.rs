@@ -62,14 +62,14 @@ pub async fn run(app: App, mut rx: mpsc::UnboundedReceiver<Request>) {
             let Some((ring_id,_))=id.strip_prefix("call-open:").and_then(|id|id.rsplit_once(':')) else{return false;};
             let now=with.at.now_ms;let generation=super::opening::proven(with);
             rings.change_opening(ring_id,now,out,|ring,fx|{
-                let reason=with.world.opening.and_then(|proof|rules::fence(ring,calls,with.at.host_id,proof));
+                let reason=with.world.opening.and_then(|proof|rules::fence(ring,calls,with.at.host_id,proof).map(str::to_owned));
                 let intent=&ring.opening["intent"];
                 // The actor has picked the row but the launch thread still
                 // holds it. On recovery a previously committed launch is a
                 // claim of unknown outcome, never a fresh queued row.
                 let status=if phase==Phase::Claim && intent["state"]=="admitted" {"queued"}else{"claimed"};
                 let row=json!({"status":status,"trace_id":trace,"claimed_at":if status=="claimed"{json!(now)}else{serde_json::Value::Null}});
-                let world=rules::World{now,host:with.at.host_id,generation:&generation,fence:reason,queue:&row,nonce:"",trace:""};
+                let world=rules::World{now,host:with.at.host_id,generation:&generation,fence:reason.as_deref(),queue:&row,nonce:"",trace:""};
                 let mut dispatched=rules::Dispatch::default();
                 let result=rules::dispatch(phase,&mut ring.opening,&id,&trace,&world,&mut dispatched);
                 *fx=dispatched.opening;

@@ -30139,6 +30139,10 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         ("GEMINI_API_KEY", ""),
     ];
     let host = place.start_in("test-only", &args, &env);
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["agent_ring_listen_first"],
+        74
+    );
     let (phone, _) = pair(&host, "Phone", "full");
     let (other, _) = pair(&host, "Other", "full");
     let alma = host.new_agent("Alma");
@@ -30224,7 +30228,7 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
 
     // The captured speech goes to the agent that rang, bypassing hands-free
     // selection. Replaying that client message leaves a single greeting.
-    let body = json!({"session":alma,"text":"Hello from the user","trace_id":"test-greeting","client_msg_id":"greet-1",
+    let body = json!({"session":alma,"text":"<speak>Hello from the user.</speak>","trace_id":"test-greeting","client_msg_id":"greet-1",
         "hands_free":true,"call_id":op["call_id"],"call_opening":{"token":op["token"],"epoch":2}});
     let (status, greeted) = host.ask_as(&phone, "POST", "/send", Some(&body));
     assert_eq!(status, 200, "{greeted}");
@@ -30234,10 +30238,44 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     wait_for("one greeting reaches the scripted agent", || {
         host.conversation(&alma)
             .iter()
-            .filter(|(role, text)| role == "user" && text == "Hello from the user")
+            .filter(|(role, text)| role == "user" && text == "<speak>Hello from the user.</speak>")
             .count()
             == 1
     });
+    let db = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap();
+    let rings: Vec<Value> =
+        serde_json::from_slice(&db.get("kept.ring", "rings").unwrap().unwrap()).unwrap();
+    let stored = &rings
+        .iter()
+        .find(|row| row["ring_id"] == r["ring_id"])
+        .unwrap()["_opening"];
+    assert_eq!(stored["greeting"]["admission"], "confirmed");
+    assert_eq!(
+        stored["fence"]["auth"]["token_hash"],
+        clarp_host::pairing::digest(&phone)
+    );
+    drop(db);
+    // The scripted answer repeats the marked speech. The recovered audio
+    // event must identify this greeting, its epoch and its client admission.
+    let clip = || {
+        host.get(&format!("/clips/recoverable?session={alma}"))["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["trace_id"] == "test-greeting")
+            .cloned()
+    };
+    wait_for("the greeting reply has a recoverable tagged clip", || {
+        clip().is_some()
+    });
+    let clip = clip().unwrap();
+    assert_eq!(clip["call_id"], op["call_id"]);
+    assert_eq!(
+        clip["opening"],
+        json!({"ring_id":r["ring_id"],"token":op["token"],"epoch":2,"kind":"greeting_reply","admission_id":"greet-1"})
+    );
     host.ask_as(
         &phone,
         "POST",
@@ -30393,6 +30431,93 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         "started"
     );
     assert_eq!(host.turns(&recovered), before);
+    // Fill the disposable ring history to its normal cap. Eviction on the next
+    // ring must keep the old opening's owner checks and terminal answer.
+    host.ask_as(
+        &phone,
+        "POST",
+        "/calls/end",
+        Some(&json!({"call_id":op["call_id"]})),
+    );
+    drop(host);
+    {
+        let mut db = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap();
+        let current: Vec<Value> =
+            serde_json::from_slice(&db.get("kept.ring", "rings").unwrap().unwrap()).unwrap();
+        let saved = current
+            .iter()
+            .find(|v| v["ring_id"] == r["ring_id"])
+            .unwrap()
+            .clone();
+        let mut history = vec![saved.clone()];
+        for n in 1..50 {
+            let mut older = saved.clone();
+            for k in ["_opening", "opening_mode", "_host_gen"] {
+                older.as_object_mut().unwrap().remove(k);
+            }
+            older["state"] = json!("cancelled");
+            older["ring_id"] = json!(format!("archived-{n}"));
+            history.push(older);
+        }
+        db.put("kept.ring", "rings", &serde_json::to_vec(&history).unwrap())
+            .unwrap();
+    }
+    let host = place.start_in("test-only", &args, &env);
+    let evictor = host.new_agent("Archive");
+    let fresh = ring(&host, &evictor);
+    host.post("/calls/ring/cancel", json!({"ring_id":fresh["ring_id"]}));
+    assert_eq!(
+        host.ask_as(
+            &phone,
+            "GET",
+            &format!("/calls/ring?ring_id={}", r["ring_id"].as_str().unwrap()),
+            None
+        )
+        .0,
+        404
+    );
+    let archived = claim(
+        &host,
+        &phone,
+        &op,
+        "renew",
+        "archived",
+        json!({"expected_epoch":op["epoch"],"owner_nonce":op["owner_nonce"]}),
+    );
+    assert_eq!(archived.0, 409);
+    assert_eq!(archived.1["reason"], "call_ended");
+    assert_eq!(
+        claim(&host, &other, &op, "no_mic", "archive-other", json!({})).0,
+        403
+    );
+
+    // A different full device cannot use the revoked device's outstanding
+    // token. Its stored opening records the revocation before the reply.
+    let (retiring, device_id) = pair(&host, "Retiring", "full");
+    let owner = host.new_agent("Fourth");
+    let r = ring(&host, &owner);
+    let (_, answered) = host.ask_as(
+        &retiring,
+        "POST",
+        "/calls/ring/answer",
+        Some(&json!({"ring_id":r["ring_id"],"opening_mode":"listen_first"})),
+    );
+    let op = answered["opening"].clone();
+    host.post("/paired-devices/revoke", json!({"device_id":device_id}));
+    assert_eq!(
+        show(&host, &r["ring_id"])["opening"]["retired"],
+        "auth_revoked"
+    );
+    assert_eq!(
+        claim(&host, &retiring, &op, "no_mic", "revoked", json!({})).0,
+        401
+    );
+    assert_eq!(
+        claim(&host, &other, &op, "no_mic", "other", json!({})).0,
+        403
+    );
 }
 
 /// What the stand-in for the push service was handed for one push: where it went, what its
