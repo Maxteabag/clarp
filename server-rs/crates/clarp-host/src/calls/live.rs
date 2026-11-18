@@ -180,6 +180,7 @@ pub(super) fn androids(directory: &Directory) -> Vec<Android> {
 /// A session that runs: how it is told that its call was ended beside it, and how it is
 /// known that it is over.
 pub struct Running {
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     stops: mpsc::UnboundedSender<String>,
     over: watch::Receiver<bool>,
 }
@@ -187,6 +188,8 @@ pub struct Running {
 impl Running {
     /// The call was retired on its ring: its session is to stop, for this reason.
     pub(super) fn stop(&self, reason: &str) {
+        self.active
+            .store(false, std::sync::atomic::Ordering::Release);
         let _ = self.stops.send(reason.to_string());
     }
 }
@@ -308,14 +311,14 @@ impl Desk {
             device_ok: &paired,
             host_id: &app.server_id,
             has_key: true,
-            runs_tools: false,
+            runs_tools: true,
         };
         books.rings.sees(ring, principal, &world)
     }
 
     /// One step of a session: its ring is written on under the desk's lock, and kept where
     /// it changed, before anything of the step is told to either side.
-    async fn step<T>(
+    pub(super) async fn step<T>(
         &self,
         app: &App,
         call: (&str, i64),
@@ -747,10 +750,47 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let call_id = joined.call_id.clone();
     let call = (call_id.as_str(), joined.call_epoch);
     let principal = joined.principal.clone();
+    let active = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let configured = joined.snapshot["live_tools"].is_object()
+        && joined.snapshot["live_tools"]["from"] == joined.snapshot["agent"]["session"]
+        && joined.principal != joined.snapshot["agent"]["session"]
+        && !joined.principal.is_empty();
+    let (reconciled, mut confirmations) = mpsc::unbounded_channel();
+    let (replay, mut replays) = mpsc::unbounded_channel();
+    let (pacing, mut pacing_events) = mpsc::unbounded_channel();
+    let mut worker = configured.then(|| super::tools::Worker {
+        app: app.clone(),
+        call: joined.clone(),
+        active: active.clone(),
+        team: Default::default(),
+        began,
+        replay,
+        taken: Vec::new(),
+        asked: Default::default(),
+        answers: Default::default(),
+        auto_decided: false,
+        pacing,
+        reconciled,
+    });
+    let mut routing = clarp_kernel::live_call::routing::Routing::default();
+    let (completed, mut results) = mpsc::unbounded_channel::<(
+        super::tools::Worker,
+        clarp_kernel::live_call::routing::Route,
+        Option<Vec<Value>>,
+    )>();
+    let transcript = super::transcript::Transcript::start(app, &joined);
     let mut machine = Session::new(joined, &ids::hex(16), seconds(began));
     let (stops, mut stopped) = mpsc::unbounded_channel::<String>();
     let (is_over, over) = watch::channel(false);
-    desk.began(&call_id, Running { stops, over }).await;
+    desk.began(
+        &call_id,
+        Running {
+            stops,
+            over,
+            active: active.clone(),
+        },
+    )
+    .await;
     // The voice is reached with the owner's key, where the Host has one.
     let key = app.ears.key("openai");
     let mut voice = match &key {
@@ -771,6 +811,11 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     let idle = Duration::from_secs_f64(rules::PHONE_IDLE_S);
     let mut phone_spoke = Instant::now();
     let mut signs_seen = line.signs_of_life();
+    let (found, mut discoveries) = mpsc::channel(1);
+    let mut polling = false;
+    let mut last_poll = 0.0;
+    let mut last_user = f64::NEG_INFINITY;
+    let mut last_output = f64::NEG_INFINITY;
     loop {
         // What the step before this told is said now, in its order, the books let go of.
         for said in std::mem::take(&mut told.said) {
@@ -806,6 +851,57 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             break;
         }
         let now = seconds(began);
+        if let (Some(owned), Some(key)) = (&worker, &key)
+            && let Some(route) = routing.begin(&owned.call.snapshot, now, || {
+                super::tools::time(app.clock.now_ms())
+            })
+            && let Some(mut owned) = worker.take()
+        {
+            let completed = completed.clone();
+            let key = key.clone();
+            tokio::spawn(async move {
+                let receipts = owned.route(&key, &route).await;
+                let _ = completed.send((owned, route, receipts));
+            });
+        }
+        if let Some(owned) = worker.as_mut() {
+            if !polling && !owned.asked.is_empty() && now - last_poll >= 2.0 {
+                polling = true;
+                last_poll = now;
+                let (app, ids, found) = (app.clone(), owned.asked.clone(), found.clone());
+                tokio::spawn(async move {
+                    let rows = crate::oracle::live_rows(&app, &ids)
+                        .await
+                        .unwrap_or_default();
+                    let _ = found.send(rows).await;
+                });
+            }
+            if let Some(append) = owned.answers.due(now, last_user, last_output) {
+                let sent = if machine.accepts_tool_note()
+                    && owned.current().await
+                    && let Some(voice) = voice.as_mut()
+                {
+                    let msg = json!({"type":format!("session.{}.append",append.channel),"content":append.text,"delegation_id":Value::Null});
+                    voice
+                        .send(Message::Text(
+                            clarp_kernel::python::dumps_ascii(&msg).into(),
+                        ))
+                        .await
+                        .ok()
+                        .map(|_| true)
+                } else {
+                    Some(false)
+                };
+                if owned.answers.delivered(&append, sent, seconds(began))
+                    && owned.current().await
+                    && crate::oracle::acknowledge_live(app, &append.id, &principal)
+                        .await
+                        .unwrap_or(false)
+                {
+                    owned.answers.acknowledged(&append.id);
+                }
+            }
+        }
         let from_voice = async {
             match voice.as_mut() {
                 Some(voice) => voice.next().await,
@@ -816,6 +912,36 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             biased;
             // A request ended the call on its ring: that is why the session is over.
             Some(reason) = stopped.recv() => machine.stopped(&mut told, &reason),
+            Some((msg,done))=replays.recv()=> {
+                let sent=if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) && let Some(voice)=voice.as_mut() {
+                    voice.send(Message::Text(python::dumps_ascii(&msg).into())).await.ok().map(|_|true)
+                }else{Some(false)};
+                let _=done.send(sent);
+            }
+            Some((event,detail))=pacing_events.recv()=> {
+                if let Some(t)=&transcript {t.add("pacing",json!({"event":event,"detail":detail}),app.clock.now_ms());}
+            }
+            Some(note)=confirmations.recv()=> {
+                if machine.accepts_tool_note() && active.load(std::sync::atomic::Ordering::Acquire) {
+                    told.said.push(Said::Voice(json!({"type":"session.thinking.append","content":note,"delegation_id":Value::Null})));
+                }
+            }
+            Some(rows)=discoveries.recv(), if worker.is_some()=>{
+                polling=false;
+                if let Some(owned)=worker.as_mut() && owned.current().await{owned.adopt(rows);}
+            }
+            Some((owned,route,results))=results.recv()=>{
+                routing.taken=owned.taken.clone();
+                let failed=results.is_none();let receipts=results.unwrap_or_default();
+                if let Some(transcript)=&transcript {
+                    for r in &receipts {transcript.add("receipt",json!({"receipt":r}),app.clock.now_ms());}
+                }
+                let notes=routing.finish(route,&receipts,failed);
+                if machine.accepts_tool_note() && owned.current().await {
+                    for (kind,text) in notes {told.said.push(Said::Voice(json!({"type":format!("session.{kind}.append"),"content":text,"delegation_id":Value::Null})));}
+                }
+                worker=Some(owned);
+            }
             said = from_voice => {
                 let event = match said {
                     Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(text.as_str()).ok(),
@@ -829,6 +955,19 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
                     Some(Ok(_)) => None,
                 };
                 if let Some(event) = event.filter(Value::is_object) {
+                    if configured {
+                        routing.observe(&event,seconds(began));
+                        if event["type"]=="session.input_transcript.delta" && event["delta"].as_str().is_some_and(|s|!python::strip(s).is_empty()){last_user=seconds(began);}
+                        if event["type"]=="session.output_audio.delta" && event["delta"].as_str().and_then(python::b64decode).is_some_and(|s|clarp_kernel::oracle::conversation::audible(&s)){last_output=seconds(began);}
+                    }
+                    if let Some(transcript)=&transcript && let Some(delta)=event["delta"].as_str().filter(|text| !python::strip(text).is_empty()) {
+                        let role=match event["type"].as_str(){
+                            Some("session.input_transcript.delta")=>Some("user"),
+                            Some("session.output_transcript.delta")=>Some("assistant"),
+                            _=>None,
+                        };
+                        if let Some(role)=role {transcript.add("text",json!({"role":role,"text":delta}),app.clock.now_ms());}
+                    }
                     let said = desk.step(app, call, |book| machine.voice(&event, book, &mut told, now));
                     let _ = said.await;
                 }
@@ -871,7 +1010,24 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
             }
         }
     }
+    active.store(false, std::sync::atomic::Ordering::Release);
     drop(voice);
+    if let Some(transcript) = transcript {
+        while let Ok((event, detail)) = pacing_events.try_recv() {
+            transcript.add(
+                "pacing",
+                json!({"event":event,"detail":detail}),
+                app.clock.now_ms(),
+            );
+        }
+        if let Some(owned) = worker
+            && !owned.asked.is_empty()
+        {
+            let ids = owned.asked.into_iter().collect::<Vec<_>>().join(",");
+            transcript.add("pacing",json!({"event":"agentLiveAskDropped","detail":format!("call={call_id} ops={ids} reason=call ended")}),app.clock.now_ms());
+        }
+        transcript.finish().await;
+    }
     desk.ended(&call_id).await;
     let _ = is_over.send(true);
 }

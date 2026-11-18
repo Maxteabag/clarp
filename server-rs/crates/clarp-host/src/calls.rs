@@ -39,6 +39,8 @@ use crate::ids;
 use crate::pairing::Scope;
 
 pub mod live;
+mod tools;
+mod transcript;
 
 pub(crate) use live::{Voice, dial};
 
@@ -91,6 +93,7 @@ struct Books {
 /// kept.
 #[derive(Default)]
 pub struct Desk {
+    tool_slots: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     books: tokio::sync::Mutex<Option<Books>>,
     /// One ring is placed at a time: from the moment it is admitted until it rings, while
     /// its opening line is voiced. Reading and answering wait for nobody's voice.
@@ -273,8 +276,7 @@ impl Desk {
                 device_ok: &paired,
                 host_id: &app.server_id,
                 has_key: app.ears.key("openai").is_some(),
-                // The tools of a live call are not built here yet.
-                runs_tools: false,
+                runs_tools: true,
             };
             let known = |agent_id: &str| -> Option<rings::Caller> {
                 let mut members = directory.members.iter();

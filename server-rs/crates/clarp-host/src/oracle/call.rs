@@ -686,7 +686,7 @@ impl Session<'_> {
 
 /// The name of the zone the clocks of this machine show: what it was told (`TZ`), else what
 /// its own time is linked to. Nothing where neither names one: the world's own time.
-fn zone_of_this_machine() -> String {
+pub(crate) fn zone_of_this_machine() -> String {
     let told = std::env::var("TZ").unwrap_or_default();
     let told = told.trim_start_matches(':');
     if !told.is_empty() {

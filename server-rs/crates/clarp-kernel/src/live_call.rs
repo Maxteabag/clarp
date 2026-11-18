@@ -16,6 +16,13 @@
 //! folder, a clock or a key: a profile and its files are given as they were read. Held to
 //! those modules by `tests/fixtures/live-call-vectors.json`.
 
+pub mod answers;
+pub mod callback;
+pub mod receipts;
+pub mod routing;
+pub mod team;
+pub mod transcript;
+
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value, json};
@@ -577,7 +584,7 @@ fn given<'a>(fields: &'a Map<String, Value>, name: &str) -> Option<&'a Value> {
 /// An address of a director on this machine: plain `http` to `127.0.0.1` or `::1` by their
 /// numbers, with no name to look up, nobody's name or password, no question and no
 /// fragment. Read as Python reads an address (`urllib.parse.urlsplit`).
-fn on_this_machine(value: Option<&Value>) -> Option<&str> {
+pub fn on_this_machine(value: Option<&Value>) -> Option<&str> {
     let given = value?.as_str()?;
     if given.chars().count() > 300 {
         return None;

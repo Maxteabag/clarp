@@ -182,7 +182,7 @@ async fn hand(
 /// Work is handed to an agent under a name, for the one who asks: a turn of the agent's,
 /// sent as the Oracle's. Taken once however often it is asked. Says the delegation as it is
 /// told.
-pub(super) async fn handed(
+pub(crate) async fn handed(
     app: &App,
     owner: &str,
     (id, session, request): (&str, &str, &str),
@@ -367,7 +367,7 @@ pub(super) async fn called_off(
 
 /// The delegations of these names, as the book has them now: in the order they ended, or
 /// were taken where they are not over. What a call of the Oracle tells of its own work.
-pub(super) async fn rows_of(
+pub(crate) async fn rows_of(
     app: &App,
     ids: &BTreeSet<String>,
 ) -> Result<Vec<Delegation>, ApiError> {
@@ -382,6 +382,13 @@ pub(super) async fn rows_of(
             ended.then_with(|| one.delegation_id.cmp(&other.delegation_id))
         });
         Ok(rows)
+    })
+    .await
+}
+
+pub(crate) async fn acknowledge_live(app: &App, id: &str, owner: &str) -> Result<bool, ApiError> {
+    with_book(app, async |book| {
+        Ok(book.acknowledge(id, owner, app.clock.now_ms()))
     })
     .await
 }
