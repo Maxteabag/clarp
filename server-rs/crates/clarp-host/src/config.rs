@@ -109,6 +109,7 @@ pub struct Config {
     pub router_endpoint: String,
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
+    pub deepgram_voice_endpoint: String,
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
     /// Empty: the push service itself.
     pub apns_endpoint: String,
@@ -422,6 +423,14 @@ impl Config {
             }
         };
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
+        let deepgram_voice_endpoint = stand_in("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        if !deepgram_voice_endpoint.is_empty() {
+            let uri=deepgram_voice_endpoint.parse::<axum::http::Uri>().map_err(|_|"invalid Deepgram voice endpoint")?;
+            let authority=uri.authority().ok_or("missing Deepgram stand-in address")?;
+            if authority.as_str().contains('@') || !matches!(authority.host(),"127.0.0.1"|"[::1]"|"localhost") {
+                return Err("Deepgram stand-in must be on loopback".into());
+            }
+        }
         let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
         let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
@@ -538,6 +547,7 @@ impl Config {
             live_endpoint,
             router_endpoint,
             cartesia_endpoint,
+            deepgram_voice_endpoint,
             apns_endpoint,
             fcm_endpoint,
             gemini_endpoint,

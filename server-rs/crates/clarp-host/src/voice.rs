@@ -81,7 +81,7 @@ const KEPT_BYTES: u64 = 256 * 1024 * 1024;
 const SPEECH_OFF: &str = "speech out is turned off on this Host";
 
 /// The engines that speak which are built into this Host.
-const BUILT: [&str; 2] = [said::CARTESIA, said::GEMINI];
+pub(crate) const BUILT: [&str; 3] = [said::CARTESIA, said::GEMINI,"deepgram"];
 
 /// The way to the one that speaks. Telling it never waits.
 #[derive(Clone)]
@@ -167,6 +167,7 @@ pub struct Mouth {
     language: String,
     /// Stand-ins on this machine in place of the engines' own addresses. Empty: the real.
     cartesia_at: String,
+    deepgram_at: String,
     gemini_at: String,
     /// The clips that are being made now, by their number.
     growing: Mutex<HashMap<u64, Arc<Growing>>>,
@@ -331,6 +332,7 @@ impl Waiting {
             audio,
             language: works.config.speech_language.clone(),
             cartesia_at: works.config.cartesia_endpoint.clone(),
+            deepgram_at: works.config.deepgram_voice_endpoint.clone(),
             gemini_at: works.config.gemini_endpoint.clone(),
             growing: Mutex::default(),
             at_once: Semaphore::new(AT_ONCE),
@@ -433,6 +435,7 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
                 voice.map(|voice| voices.gemini_voice_at(voice, vertex))
             }
             said::ELEVENLABS => clip.elevenlabs.clone(),
+            "deepgram" => said::voice_for(stored,&route,"deepgram").or_else(|| Some(owner::text_at(file,&["deepgram","model"]).unwrap_or_else(||"flux-haley-en".into()))),
             _ => None,
         };
         voice.filter(|voice| !voice.is_empty())
@@ -477,6 +480,7 @@ fn chosen(file: &Table, record: &AgentRecord, has_key: &dyn Fn(&str) -> bool) ->
 fn key_of(provider: &str, file: &Table) -> &'static str {
     match provider {
         said::CARTESIA => "cartesia",
+        "deepgram" => "deepgram",
         said::GEMINI if owner::gemini(file).vertex => "vertex",
         said::GEMINI => "gemini",
         _ => "",
@@ -513,6 +517,7 @@ impl Mouth {
         let key = key_of(provider, file);
         let read = Box::new(move || keys.key(key));
         match provider {
+            "deepgram" => Some(Box::new(clarp_speech::deepgram_voice::DeepgramVoice { key:read, base:self.deepgram_at.clone() })),
             said::CARTESIA => {
                 let engine = Cartesia::new(owner::cartesia_model(file), &self.language, read);
                 Some(Box::new(match self.cartesia_at.as_str() {
