@@ -37,8 +37,12 @@ pub struct SendRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
     /// The phone's greeting, tied to one listen-first ring and its epoch.
-    #[serde(default,deserialize_with="present_value",skip_serializing_if="Option::is_none")]
-    pub call_opening:Option<Value>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub call_opening: Option<Value>,
     /// Wait behind a running turn instead of taking its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue_if_busy: Option<bool>,
@@ -97,6 +101,6 @@ pub struct CreateAgentRequest {
     pub avatar_base64: Option<String>,
 }
 
-fn present_value<'de,D:serde::Deserializer<'de>>(decoder:D)->Result<Option<Value>,D::Error>{
+fn present_value<'de, D: serde::Deserializer<'de>>(decoder: D) -> Result<Option<Value>, D::Error> {
     Value::deserialize(decoder).map(Some)
 }

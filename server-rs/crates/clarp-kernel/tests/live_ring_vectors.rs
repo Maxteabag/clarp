@@ -347,6 +347,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             let world = World {
                 profiles: &shelf,
                 android: &rows,
+                opening: None,
                 can_push_android,
                 device_ok: &device_ok,
                 host_id: "host-1",

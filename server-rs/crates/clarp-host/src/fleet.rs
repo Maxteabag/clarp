@@ -422,6 +422,7 @@ pub enum Pushed {
 
 /// What every agent of a Host is given.
 pub struct Works {
+    pub opening_gate: crate::calls::opening_launch::Gate,
     pub config: Arc<Config>,
     pub engine: Arc<dyn LogEngine>,
     pub codecs: CodecSet,
@@ -1023,6 +1024,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         epoch: works.hub.epoch().to_string(),
     };
     Ok(Setup {
+        opening_gate: works.opening_gate.clone(),
         record: record.clone(),
         profile,
         backend,

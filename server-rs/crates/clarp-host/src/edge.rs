@@ -1822,25 +1822,67 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         .chars()
         .take(64)
         .collect();
-    if let Some(opening)=request.call_opening.take() && !python::strip(&request.text).is_empty() {
-        if !opening["token"].is_string() || call_id.is_empty(){return ApiError::new(StatusCode::BAD_REQUEST,"bad call_opening").into_response();}
-        let owner=match crate::calls::caller(principal){Ok(owner)=>owner,Err(why)=>return why.into_response()};
-        let trace=request.trace_id.as_deref().map(python::strip).filter(|s|!s.is_empty()).map_or_else(||ids::hex(8),str::to_owned);
-        let message=request.client_msg_id.as_deref().map(python::strip).filter(|s|!s.is_empty()).unwrap_or(&trace).to_owned();
-        let change=crate::calls::opening::Change::Greeting{body:&opening,message:&message,trace:&trace,session:&request.session,call:&call_id};
-        let result=match app.calls.greeting(app,&owner,change).await{
-            Ok(Ok(answer))=>answer,
-            Ok(Err(refused))=>return (StatusCode::from_u16(refused.status).unwrap_or(StatusCode::CONFLICT),Json(refused.body)).into_response(),
-            Err(failed)=>return ApiError::from(failed).into_response()
-        };
-        request.force_session=Some(true);request.trace_id=Some(trace);request.client_msg_id=Some(message.clone());
-        let sent=send_message(app,request).await;
-        if result["route"]=="greeting" && let Some(id)=result["opening"]["ring_id"].as_str(){
-            let _=app.calls.greeting_admitted(app,id,&message,sent.is_ok()).await;
+    if let Some(opening) = request.call_opening.take()
+        && !python::strip(&request.text).is_empty()
+    {
+        if !opening["token"].is_string() || call_id.is_empty() {
+            return ApiError::new(StatusCode::BAD_REQUEST, "bad call_opening").into_response();
         }
-        return match sent{Ok(answer)=>{
-            let mut body=json!(answer);body["opening"]=result["opening"].clone();Json(body).into_response()
-        },Err(why)=>why.into_response()};
+        let owner = match crate::calls::caller(principal) {
+            Ok(owner) => owner,
+            Err(why) => return why.into_response(),
+        };
+        let trace = request
+            .trace_id
+            .as_deref()
+            .map(python::strip)
+            .filter(|s| !s.is_empty())
+            .map_or_else(|| ids::hex(8), str::to_owned);
+        let message = request
+            .client_msg_id
+            .as_deref()
+            .map(python::strip)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&trace)
+            .to_owned();
+        let change = crate::calls::opening::Change::Greeting {
+            body: &opening,
+            message: &message,
+            trace: &trace,
+            session: &request.session,
+            call: &call_id,
+        };
+        let result = match app.calls.greeting(app, &owner, change).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(refused)) => {
+                return (
+                    StatusCode::from_u16(refused.status).unwrap_or(StatusCode::CONFLICT),
+                    Json(refused.body),
+                )
+                    .into_response();
+            }
+            Err(failed) => return ApiError::from(failed).into_response(),
+        };
+        request.force_session = Some(true);
+        request.trace_id = Some(trace);
+        request.client_msg_id = Some(message.clone());
+        let sent = send_message(app, request).await;
+        if result["route"] == "greeting"
+            && let Some(id) = result["opening"]["ring_id"].as_str()
+        {
+            let _ = app
+                .calls
+                .greeting_admitted(app, id, &message, sent.is_ok())
+                .await;
+        }
+        return match sent {
+            Ok(answer) => {
+                let mut body = json!(answer);
+                body["opening"] = result["opening"].clone();
+                Json(body).into_response()
+            }
+            Err(why) => why.into_response(),
+        };
     }
     // The caller, and those of the call who can take speech, for a message that carries one.
     let mut in_call: Option<(&str, Vec<String>)> = None;

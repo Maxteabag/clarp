@@ -41,6 +41,7 @@ use crate::pairing::Scope;
 pub mod generation;
 pub mod live;
 pub(crate) mod opening;
+pub mod opening_launch;
 mod tools;
 mod transcript;
 
@@ -95,6 +96,7 @@ struct Books {
 /// kept.
 #[derive(Default)]
 pub struct Desk {
+    opening_turn: tokio::sync::Mutex<()>,
     tool_slots: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     books: tokio::sync::Mutex<Option<Books>>,
     /// One ring is placed at a time: from the moment it is admitted until it rings, while
@@ -1085,7 +1087,7 @@ pub fn routes() -> Router<App> {
         .route("/calls", get(snapshot).post(start))
         .route("/calls/ring", get(ring_look).post(ring))
         .route("/calls/ring/answer", post(ring_answer))
-        .route("/calls/ring/opening",post(opening::claim))
+        .route("/calls/ring/opening", post(opening::claim))
         .route("/calls/ring/decline", post(ring_decline))
         .route("/calls/ring/cancel", post(ring_cancel))
         .route(

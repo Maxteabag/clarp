@@ -231,6 +231,7 @@ mod tests {
 
     fn order() -> ShimOrder {
         ShimOrder {
+            opening: None,
             named_session: None,
             prompt_as_file: false,
             before_stop: None,
