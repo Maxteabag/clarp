@@ -181,6 +181,13 @@ lists every field and fixed string.
   `session.close` retire the call's authority first, then the upstream.
   `POST /calls/ring/live/fallback` switches to the classic call once, only
   before the opening was admitted and before user audio went upstream.
+- **Host restart.** The phone loses the joined socket when the Host stops.
+  The old socket cannot deliver a final frame, and recovery sends no push or
+  ring event. Before accepting new requests, the Host retires calls left
+  connecting, ready or active and preserves their answered history. A fresh
+  `POST /calls/live` from the phone can then succeed immediately. The old grant
+  cannot start a classic fallback. An unanswered agent ring still follows its
+  ringing deadline, and an unconsumed join ticket keeps its original expiry.
 - **No tools.** The Live model has no tools, roster, shell or Oracle memory,
   and never reads or changes a global Oracle setting.
 

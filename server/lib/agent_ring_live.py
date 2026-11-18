@@ -365,6 +365,7 @@ def snapshot_of(ring_id: str) -> dict | None:
 REQUEST_INVALID = "live_request_invalid"
 CLOSE_REASONS = ("user_hangup", "audio_not_ready", "transport_lost")
 LIVE_PHASES = ("answered_waiting_join", "connecting", "ready", "active")
+HOST_RESTART = "host_restart"
 _SESSIONS_LOCK = threading.Lock()
 _SESSIONS: dict = {}            # call_id → the running session (registered by the socket)
 
@@ -680,6 +681,8 @@ def fallback(principal: str, data: Any) -> dict:
                 replay = {**agent_rings._answered(ring, group_calls.get_call(ring["call_id"]), changed=False),
                           "conversation_mode": MODE_CLASSIC}
             else:
+                if ring.get("_live_retired_reason") == HOST_RESTART:
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)
                 if ring.get("_live_fallback_request_id"):   # claimed by a fallback in progress or one that failed
                     raise CallError(409, FALLBACK_NOT_ALLOWED)
                 if (ring.get("_live_close_receipt") or {}).get("reason") == "user_hangup":
