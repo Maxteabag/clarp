@@ -1137,6 +1137,29 @@ window as it was said at the soak's turn of 22:02, by now `stale` with its limit
 the restart. What this does not show: a real account that is used up, and a warning (neither account
 was near either).
 
+## The desk of the account seats, read with the owner's real tool
+
+18 Nov 2026, 00:26, on elitebook, build `4163b344` installed half a minute before (the installer found the
+owner's tool and named it to the Host: `--seats-tool`; the Host runs beside the Python Host, so it
+tells the tool to renew no login).
+
+| Step | What the installed Host showed |
+|---|---|
+| What it lists | `hotseat_desk` (84); neither `hotseat_desk_actions` nor `accounts_hotseat` |
+| `GET /hotseat/desk`, before any reading | the tool installed, no account, nothing read, stale; nothing was asked of the tool |
+| `GET /hotseat/desk?refresh=1`, once | answered after two seconds: a whole new desk (`refreshed`, all three of the tool's askings `ok`, not partial, no error): every saved account of Claude, of Codex and of Muse, one of each in use, each account of Claude and of Codex with its windows (five hours, the week, thirty days, and a model's own), every window with its number; the states told apart (well, used up, a login that no longer holds, not known); what the list adds on all but one (a plan's code, the clocks of signing in); the next reading held off for a minute |
+| Of agents | the Host's own, counted by tool, each on the account its tool is on: none of the Python Host's. No stopped work is shown: the tool listed none that is no Host's, and what it lists of the Python Host's agents is left to that Host |
+| The work that was done | forty pieces, the most that are shown |
+| `GET /hotseat/status` after it | made of the list the read handed over: the accounts of Claude and of Codex by alias, no address in the body; no switcher, so every provider says `disabled` and stale |
+
+The numbers and the names are the owner's and are not written here. One thing looked wrong and is not:
+the tool marked most accounts of one provider as its own kept readings, so their windows are served as
+stale seconds after the read. It does that whether or not it is told to renew nothing (asked both ways
+within two seconds: the same accounts marked): another reader of the machine had read them half a minute
+before, and the tool does not ask a provider twice that soon. The Python Host's desk would say the same
+of such a read. What this does not show: a reading while nobody else reads the tool, and a read that
+fails on the real tool.
+
 ## What a round does not prove
 
 The soak holds the first rule (an accepted message is never lost and never runs twice); the restart

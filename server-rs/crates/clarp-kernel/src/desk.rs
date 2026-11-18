@@ -71,6 +71,9 @@ const FAMILIES: [(&str, &str); 4] = [
 ];
 /// No more of the work that was done is shown than this.
 const WORK_SHOWN: usize = 40;
+/// How long an agent whose last turn failed for a usage limit is listed as work that
+/// stopped. One that nobody has touched for longer is at rest, and no work to continue.
+pub const STOP_SHOWN_FOR_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 // ---- numbers, as the tool says them --------------------------------------------------------
 
@@ -482,16 +485,72 @@ fn counts(named: &Value) -> Map<String, Value> {
 }
 
 /// One agent of this Host, as far as the desk says something of it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Agent<'a> {
     /// Its name in every request.
     pub session: &'a str,
+    /// What a person calls it.
+    pub name: &'a str,
     /// The tool it runs with, by the tool's name.
     pub tool: &'a str,
+    /// The model it runs on; empty: the tool's own choice.
+    pub model: &'a str,
+    /// Where it works.
+    pub cwd: &'a str,
     /// Whether a turn of it runs now.
     pub working: bool,
     /// Its tool's own session, once it has one.
     pub tool_session: Option<&'a str>,
+    /// Why its work stopped and when, where it did and has not gone on since.
+    pub stopped: Option<(Cause, i64)>,
+    /// How many of its turns wait.
+    pub waiting: usize,
+}
+
+/// Why an agent's work stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cause {
+    /// Its last turn failed for a usage limit, and none has run since.
+    UsageLimit,
+    /// A turn of it waits for an account that serves it.
+    WaitsForAnAccount,
+    /// Its queue is held, with turns waiting in it.
+    QueueHeld,
+}
+
+impl Cause {
+    /// As the owner's tool names it.
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::UsageLimit => "usage_limit",
+            Self::WaitsForAnAccount => "waiting_for_account",
+            Self::QueueHeld => "queue_paused",
+        }
+    }
+}
+
+/// Whether work that stopped for this cause could go on, by what the reading says of the
+/// account its tool is on: the shown alias of that account and its state, where one is in
+/// use. A held queue is let go, not continued.
+fn readiness(cause: Cause, tool: &str, in_use: Option<(&str, &str)>) -> Value {
+    let (ready, hard, warning) = match (cause, in_use) {
+        (Cause::QueueHeld, _) => {
+            let held = "queue is paused; a prompt would only queue".to_string();
+            (false, Some(held), None)
+        }
+        (_, None) => (false, Some(format!("no account of {tool} is in use")), None),
+        (_, Some((alias, "ok"))) => (true, None, Some(format!("{alias} could serve it"))),
+        (_, Some((alias, "unknown"))) => {
+            let unknown = format!("what is left of {alias} is not known");
+            (true, None, Some(unknown))
+        }
+        (_, Some((alias, "exhausted"))) => {
+            (false, Some(format!("{alias} has no quota left")), None)
+        }
+        (_, Some((alias, "auth_error"))) => (false, Some(format!("{alias} is signed out")), None),
+        (_, Some((alias, _))) => (false, Some(format!("{alias} could not be read")), None),
+    };
+    json!({ "ready": ready, "hard": hard, "warning": warning })
 }
 
 fn one_more(counts: &mut Map<String, Value>, of: &str) {
@@ -505,40 +564,85 @@ fn one_more(counts: &mut Map<String, Value>, of: &str) {
 /// The tool has what it says there from the Host it is bridged to: on a machine with
 /// another Host, that Host's agents and that Host's stopped work, which this Host could
 /// neither vouch for nor continue. So the agents are this Host's, counted: each uses the
-/// account its tool is on, which is the one the tool's desk says is in use. Of the work the
-/// tool says stopped, a Host's own is left to that Host; a session of the machine that is no
-/// Host's stays, unless it is the session of one of this Host's agents: that is no session
-/// to take up in a terminal.
-pub fn of_this_host(desk: &Value, list: Option<&Value>, agents: &[Agent<'_>]) -> Value {
+/// account its tool is on, which is the one the tool's desk says is in use. The work that
+/// stopped is this Host's own first: each agent whose work stopped, with why and when, and
+/// whether it could go on by what this reading says of the account its tool is on. Of the
+/// work the tool says stopped, a Host's own is left to that Host; a session of the machine
+/// that is no Host's stays, unless it is the session of one of this Host's agents: that is
+/// no session to take up in a terminal. A stop for a usage limit is listed for a week
+/// ([`STOP_SHOWN_FOR_MS`]); a turn that waits and a queue that is held are listed while
+/// they do and are.
+pub fn of_this_host(
+    desk: &Value,
+    list: Option<&Value>,
+    agents: &[Agent<'_>],
+    now_ms: i64,
+) -> Value {
+    let nothing = Value::Null;
+    let listed_rows = list.unwrap_or(&nothing);
+    // The account each tool is on, as the reading has it: its alias, the alias it is shown
+    // by, and its state.
     let in_use = |tool: &str| {
-        items(&desk["accounts"]).iter().find_map(|account| {
-            let of = python::strip(&said(&[&account["provider"]])).to_lowercase();
-            let alias = python::strip(&said(&[&account["alias"]])).to_string();
-            let it_is = of == tool && python::truthy(&account["active"]) && !alias.is_empty();
-            it_is.then_some(alias)
+        let rows = match tool {
+            "claude" => by_alias(&listed_rows["accounts"]),
+            "codex" => by_alias(&listed_rows["codex"]["accounts"]),
+            _ => Map::new(),
+        };
+        items(&desk["accounts"]).iter().find_map(|raw| {
+            let of = python::strip(&said(&[&raw["provider"]])).to_lowercase();
+            let alias = python::strip(&said(&[&raw["alias"]])).to_string();
+            if of != tool || !python::truthy(&raw["active"]) || alias.is_empty() {
+                return None;
+            }
+            let read = account(raw, rows.get(&alias), &no_agents())?;
+            let shown = said(&[&read["display_alias"]]);
+            Some((alias, shown, said(&[&read["state"]])))
         })
     };
     let (mut by_tool, mut at_work) = (Map::new(), Map::new());
     let mut listed = Vec::new();
+    let mut stopped: Vec<Value> = Vec::new();
     for agent in agents {
         one_more(&mut by_tool, agent.tool);
         let account = in_use(agent.tool);
-        if let (true, Some(account)) = (agent.working, &account) {
-            one_more(&mut at_work, account);
+        let alias = account.as_ref().map(|(alias, _, _)| alias.as_str());
+        if let (true, Some(alias)) = (agent.working, alias) {
+            one_more(&mut at_work, alias);
         }
-        listed.push(json!({ "session": agent.session, "would_use": account }));
+        listed.push(json!({ "session": agent.session, "would_use": alias }));
+        let long_ago = |at_ms: i64| now_ms - at_ms > STOP_SHOWN_FOR_MS;
+        let its_stop = agent
+            .stopped
+            .filter(|(cause, at_ms)| *cause != Cause::UsageLimit || !long_ago(*at_ms));
+        if let Some((cause, at_ms)) = its_stop {
+            let of_account = account
+                .as_ref()
+                .map(|(_, shown, state)| (shown.as_str(), state.as_str()));
+            stopped.push(json!({
+                "kind": "clarp",
+                "cause": cause.word(),
+                "pending": agent.waiting,
+                "id": agent.session,
+                "name": agent.name,
+                "backend": agent.tool,
+                "model": agent.model,
+                "account": alias,
+                "cwd": agent.cwd,
+                "stopped_at": at_ms as f64 / 1000.0,
+                "readiness": readiness(cause, agent.tool, of_account),
+            }));
+        }
     }
-    let nothing = Value::Null;
     let said_stopped = list.map_or(&nothing, |list| &list["extensions"]["clarp"]["stopped"]);
     let of_an_agent = |item: &Value| {
         let id = said(&[&item["id"]]);
         let mut sessions = agents.iter().filter_map(|agent| agent.tool_session);
         sessions.any(|session| session == python::strip(&id))
     };
-    let stopped: Vec<&Value> = items(said_stopped)
+    let of_nobody = items(said_stopped)
         .iter()
-        .filter(|item| item["kind"] == "native" && !of_an_agent(item))
-        .collect();
+        .filter(|item| item["kind"] == "native" && !of_an_agent(item));
+    stopped.extend(of_nobody.cloned());
     let counted =
         |which: &dyn Fn(&Agent<'_>) -> bool| agents.iter().filter(|one| which(one)).count();
     json!({
@@ -798,6 +902,16 @@ impl Desk {
     /// When the last full live read that worked was made.
     pub fn live_read_at(&self) -> Option<i64> {
         moment(&self.read.as_ref()?["live_read_at"])
+    }
+
+    /// The work that stopped, as the kept desk lists it; nothing where no desk was read.
+    pub fn stopped_work(&self) -> Option<&Value> {
+        self.read.as_ref().map(|read| &read["stopped_work"])
+    }
+
+    /// When the kept desk was read.
+    pub fn observed_at(&self) -> Option<i64> {
+        moment(&self.read.as_ref()?["observed_at"])
     }
 
     /// When the next live read may begin (`_next_allowed`). The whole interval counts from
