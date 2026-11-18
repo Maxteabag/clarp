@@ -20,7 +20,7 @@ pub(super) async fn manual(app: &App, tool: String, alias: String) -> resume::An
         if answer.1["switched"] == true {
             let reader = owner.clone();
             tokio::spawn(async move {
-                reader.seats.read(&reader).await;
+                reader.seats.read(&reader,true).await;
             });
         }
         answer
@@ -39,7 +39,7 @@ pub(super) async fn manual(app: &App, tool: String, alias: String) -> resume::An
     }
 }
 
-async fn perform(app: &App, tool: &str, target: &str, expected: Option<&str>) -> resume::Answer {
+pub(super) async fn perform(app: &App, tool: &str, target: &str, expected: Option<(&str,&str,&Value)>) -> resume::Answer {
     let Some(pool) = app.pools.iter().find(|p| p.tool() == tool) else {
         return unavailable(tool, target);
     };
@@ -83,8 +83,13 @@ async fn perform(app: &App, tool: &str, target: &str, expected: Option<&str>) ->
                     .running
                     .insert(tool.into(), record.clone());
             }
-            if expected.is_some_and(|was| from.as_deref() != Some(was)) {
-                return (409, json!({"reason":"superseded"}));
+            if let Some((was,run,last))=expected {
+                let mut state=desk.state.lock().await;
+                let same=state.kept(app).await.is_some_and(|kept|kept.last_switch.get(tool).unwrap_or(&Value::Null)==last);
+                drop(state);
+                if !same || from.as_deref()!=Some(was) || !automatic::current(app,run).await {
+                    return (409,json!({"reason":"superseded"}));
+                }
             }
             if from.as_deref() == Some(target) {
                 let alias = clarp_kernel::seats::display_alias(&json!(target));

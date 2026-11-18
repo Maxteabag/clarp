@@ -115,6 +115,11 @@ pub(crate) fn own_home(place: &Path, given: &OwnHome) -> Result<String, Unanswer
     Ok(home.to_string_lossy().into_owned())
 }
 
+pub(crate) async fn read_on(app:&crate::edge::App,tool:&str,reading:&Reading,within:Duration)->Result<String,Unanswered>{
+    let _login=crate::pool::Service::use_login(app,tool).await.map_err(|_|Unanswered::NotStarted("The login lock is unavailable".into()))?;
+    read(tool,reading,within).await
+}
+
 /// Has a tool read something and answer in a shape it is given, for `within` at most:
 /// what it reads is whatever stood in somebody's work, and it must not act on it. It is
 /// started in a directory of its own, which is taken away afterwards, with nothing to act

@@ -85,7 +85,17 @@ def capture(place):
             status, body = machine._switch(provider,"backup","stand-in",lambda *_:outcome,current,lambda *_:None)
             manual.append(dict(provider=provider,before=before,confirmed=outcome,status=status,body=body,
                                record=hotseat_desk._stored_switch(provider)))
-    return {"reads":reads, "decisions":decisions, "manual":manual}
+    reports=[]
+    by_shape={}
+    for case in decisions:
+        answer=case["result"]
+        by_shape.setdefault((answer["action"],"model" in answer,"blocked_model" in answer),answer)
+    for provider,decision,mode,switched in itertools.product(("claude","codex"),by_shape.values(),
+                                                            ("notify","automatic"),(False,True)):
+        preview=policy.preview(provider,decision,mode=mode,switched=switched)
+        reports.append(dict(provider=provider,decision=decision,mode=mode,switched=switched,
+                            expected=[preview,policy.run_summary(provider,decision,text=preview)]))
+    return {"reads":reads, "decisions":decisions, "manual":manual, "reports":reports}
 
 
 if __name__ == "__main__":

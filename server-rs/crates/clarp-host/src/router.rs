@@ -261,6 +261,7 @@ async fn ask(app: &App, routing: &Routing) -> Result<Map<String, Value>, String>
     };
     let within = Duration::from_millis(u64::try_from(settings.timeout_ms).unwrap_or(0));
     let cwd = &app.config.default_cwd;
+    let _login=crate::pool::Service::use_login(app,&provider).await.map_err(|_|"The login lock is unavailable")?;
     match once::ask(&provider, &question, cwd, within).await {
         Ok(answer) => rules::extract_json(&answer),
         Err(unanswered) => Err(unanswered.words()),

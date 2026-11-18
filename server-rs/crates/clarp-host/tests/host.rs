@@ -17547,10 +17547,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     let (status, said) = host.ask("POST", "/hotseat/renew", Some(&json!({})));
     assert_eq!(
         (status, said["error"].as_str()),
-        (
-            501,
-            Some("Changing the account seats is not built on this Host yet")
-        )
+        (409, Some("switch_failed"))
     );
     // Work that stopped is continued from the desk on a Host that lists some: this one
     // lists none.
@@ -23171,6 +23168,130 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
 }
 
 #[test]
+fn the_desk_and_automatic_switcher_move_only_an_owned_idle_login() {
+    let place=Place::new("switch-accounts");
+    let home=place.root.to_str().unwrap();
+    let seat=place.root.join("seat-tool");
+    let record=place.root.join("seat-calls");
+    let script=r#"#!/usr/bin/env python3
+from pathlib import Path
+import sys,json
+root=Path(__file__).parent
+args=sys.argv[1:]
+with (root/'seat-calls').open('a') as f: print(json.dumps(args),file=f)
+codex=args[0] in ('codex','codex-account')
+tool='codex' if codex else 'claude'
+active=root/(tool+'.active')
+before=active.read_text() if active.exists() else 'current'
+if args in (['list','--json'],['codex','--json'],['codex','--no-quota','--json']):
+    if before=='unreadable': sys.exit(1)
+    def row(alias):
+        amount=1.0 if alias=='current' else 0.05
+        if (root/'exhausted').exists():amount=1.0
+        return dict(alias=alias,is_active=before==alias,usage=dict(used_5h=amount,used_7d=0,worst_used=amount))
+    print(json.dumps({'accounts':[row('current'),row('backup')]}))
+elif args[0] in ('switch','codex-account'):
+    target=args[1] if not codex else args[2]
+    assert args==(['switch',target,'--yes','--json'] if not codex else ['codex-account','switch',target])
+    if (root/'deny').exists():
+        if codex:sys.exit(1)
+        print('{"switched":false}')
+    else:
+        active.write_text(target)
+        if not codex: print('{"switched":true}')
+        else:print('changed')
+elif args==['tui','--snapshot']:
+    print(json.dumps({'accounts':[dict(provider='claude',alias=a,active=a==before,can_switch=True) for a in ['current','backup']]}))
+elif args==['bridge','work']:print('{"items":[]}')
+else:sys.exit(2)
+"#;
+    program(&seat,script);
+    let mut world=vec![("HOME",home),("CLARP_CODEX_PROGRAM","/bin/false"),("CLARP_CLAUDE_PROGRAM","/bin/false")];
+    let (claude,out_of_usage,started)=claude_that_is_out(&place);
+    world[2].1=claude.to_str().unwrap();
+    let tool=seat.to_str().unwrap();
+    let start=|mode:&str|place.start_in("",&["--accounts",mode,"--seats-tool",tool,"--janitors-checked-every-ms","100"],&world);
+    let switch=|h:&Host,provider:&str,alias:&str|h.ask("POST","/hotseat/switch",Some(&json!({"provider":provider,"alias":alias})));
+    for mode in ["none","follow"]{
+        let h=start(mode);
+        assert_eq!(switch(&h,"claude","backup").1["error"],"logins_kept_elsewhere");
+        assert!(h.get("/server-info")["contract"]["features"]["hotseat_desk_actions"].is_null());
+        assert!(!record.exists());
+    }
+    let h=start("select");
+    assert_eq!(h.get("/server-info")["contract"]["features"]["hotseat_desk_actions"],86);
+    assert_eq!(switch(&h,"agy","example").0,400);
+    assert_eq!(switch(&h,"codex","-switch").1["error"],"invalid_alias");
+    assert!(!record.exists());
+    let vectors:Value=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/accounts-switch-vectors.json")).unwrap();
+    for c in vectors["manual"].as_array().unwrap(){
+        let provider=c["provider"].as_str().unwrap();
+        let file=place.root.join(format!("{provider}.active"));
+        std::fs::write(&file,c["before"].as_str().unwrap_or("")).unwrap();
+        let deny=place.root.join("deny");
+        if c["confirmed"]==true {let _=std::fs::remove_file(&deny);}else{std::fs::write(&deny,"").unwrap();}
+        let (code,answer)=switch(&h,provider,"backup");
+        assert_eq!(json!(code),c["status"],"{c}");
+        assert_eq!(answer,c["body"]);
+        let desk=h.get("/hotseat/desk");
+        let result=desk["switches"].as_array().unwrap().iter().find(|r|r["provider"]==provider).unwrap();
+        let mut expected=c["record"].clone();
+        for k in ["requested_at","finished_at"]{assert!(result[k].as_i64().unwrap()>0);expected[k]=result[k].clone();}
+        assert!(result["requested_at"].as_i64()<=result["finished_at"].as_i64());
+        assert_eq!(result,&expected);
+    }
+    let _=std::fs::remove_file(place.root.join("deny"));
+    let agent=h.post("/agents",json!({"name":"Worker","backend":"claude"}))["session"].as_str().unwrap().to_string();
+    std::fs::write(&out_of_usage,"").unwrap();
+    h.send(&agent,"work on this","one");
+    wait_for("the rejected turn to run",||started.exists());
+    let row=|h:&Host|{
+        let snapshot=h.get("/agents/snapshot");
+        snapshot["agents"].as_array().unwrap().iter().find(|r|r["session"]==agent).unwrap().clone()
+    };
+    wait_for("the worker to wait for a seat",||row(&h)["live_activity"]["state"]=="limited");
+    std::fs::remove_file(&out_of_usage).unwrap();
+    assert_eq!(switch(&h,"claude","current").1["switched"],true);
+    wait_for("the waiting turn to answer",||h.state(&agent)=="done");
+    assert!(h.conversation(&agent).contains(&said("assistant","on it")));
+
+    // Hold a shared lock just as a live provider process does. A different provider can
+    // move meanwhile and this provider reports its switch as running until the lock goes.
+    let lock=std::fs::File::open(place.root.join("data/account-claude.lock")).unwrap();
+    lock.lock_shared().unwrap();
+    std::thread::scope(|scope|{
+        let pending=scope.spawn(||switch(&h,"claude","backup"));
+        wait_for("the desk to show a waiting switch",||h.get("/hotseat/desk")["switches"][0]["state"]=="running");
+        assert_eq!(std::fs::read_to_string(place.root.join("claude.active")).unwrap(),"current");
+        assert_eq!(switch(&h,"codex","current").1["switched"],true);
+        lock.unlock().unwrap();
+        assert_eq!(pending.join().unwrap().1["switched"],true);
+    });
+    drop(h);
+    let h=start("select");
+    let desk=h.get("/hotseat/desk");
+    assert_eq!(desk["switches"][0]["alias"],"backup");
+    assert_eq!(desk["switches"][0]["state"],"switched");
+    std::fs::write(place.root.join("claude.active"),"current").unwrap();
+    let owner=h.post("/agents",json!({"name":"Scanner","backend":"codex"}))["session"].as_str().unwrap().to_string();
+    let config=h.post("/janitors",json!({"session":owner,"template_id":"account-hotseat"}));
+    let rev=&config["janitor"]["revision"];
+    let heard=h.listen();
+    let enabled=h.post(&format!("/janitors/{owner}/enabled"),json!({"enabled":true,"expected_revision":rev}));
+    assert_eq!(enabled["janitor"]["enabled"],true);
+    wait_for("automatic switch of both providers",||["claude","codex"].iter().all(|p|std::fs::read_to_string(place.root.join(format!("{p}.active"))).unwrap()=="backup"));
+    wait_for("a recorded switch action for each provider",||{
+        let status=h.get("/hotseat/status");
+        status["actions"].as_array().is_some_and(|v|v.len()==2 && v.iter().all(|a|a["kind"]=="switched"))
+    });
+    wait_for("the Janitor change event",||heard.lock().unwrap().iter().any(|e|e["kind"]=="janitor-changed"));
+    let calls=std::fs::read_to_string(record).unwrap();
+    assert!(calls.contains(r#"["codex", "--no-quota", "--json"]"#));
+    assert!(calls.contains(r#"["codex", "--json"]"#));
+    assert!(!calls.contains("reset"));
+}
+
+#[test]
 fn what_claude_code_says_of_its_accounts_windows_is_shown_and_marks_its_agents_when_used_up() {
     let place = Place::new("claude-windows");
     let own = place.root.join("claude-own");
@@ -24373,16 +24494,12 @@ fn a_host_that_puts_the_logins_in_place_itself_leaves_a_waiting_turn_to_its_sele
         "Worker waits for an account. This Host's selector takes it up when one serves it."
     );
     assert!(waits());
-    // Switching from the desk is this Host's to do where it keeps the logins, and it is not
-    // built: it says that, and still refuses what it cannot read.
+    // Its stand-in has no confirmed switch to report.
     let switch = |asked: Value| host.ask("POST", "/hotseat/switch", Some(&asked));
     let (status, said) = switch(json!({ "provider": "claude", "alias": "spare" }));
     assert_eq!(
         (status, said["error"].as_str()),
-        (
-            501,
-            Some("Changing the account seats is not built on this Host yet")
-        )
+        (409, Some("switch_failed"))
     );
     assert_eq!(
         switch(json!({ "provider": "claude", "alias": "a b" })).1["error"],
