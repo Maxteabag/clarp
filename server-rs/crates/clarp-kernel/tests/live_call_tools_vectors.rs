@@ -187,13 +187,48 @@ fn a_callback_belongs_to_its_phone_and_its_one_due_owner() {
 #[test]
 fn transcript_fragments_and_receipts_are_retained_across_intervening_events() {
     use clarp_kernel::live_call::transcript;
-    let fixture:Value=serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
-    let meta=json!({"call_id":"one","principal":"device-a","agent_session":"guard","agent":"Guard"});
-    let mut runs=0;
-    for case in fixture["transcripts"].as_array().unwrap(){
-        assert_eq!(json!(transcript::name(case["id"].as_str().unwrap())),case["name"]);
-        assert_eq!(transcript::document(&meta,"T0","T20",case["entries"].as_array().unwrap()),case["document"]);
-        runs+=1;
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let meta =
+        json!({"call_id":"one","principal":"device-a","agent_session":"guard","agent":"Guard"});
+    let mut runs = 0;
+    for case in fixture["transcripts"].as_array().unwrap() {
+        assert_eq!(
+            json!(transcript::name(case["id"].as_str().unwrap())),
+            case["name"]
+        );
+        assert_eq!(
+            transcript::document(&meta, "T0", "T20", case["entries"].as_array().unwrap()),
+            case["document"]
+        );
+        runs += 1;
     }
-    assert_eq!(runs,10);
+    assert_eq!(runs, 10);
+}
+
+#[test]
+fn the_live_router_sees_only_new_user_requests_with_the_recent_conversation() {
+    use clarp_kernel::live_call::routing::Routing;
+    let fixture:Value=serde_json::from_str(include_str!("fixtures/live-call-tools-vectors.json")).unwrap();
+    let story=&fixture["routes"][0];
+    let snapshot=json!({"profile":{"display_name":"Guard"},"live_tools":story["config"]});
+    let mut call=Routing::default();
+    let mut count=0;
+    for step in story["steps"].as_array().unwrap(){
+        let event=&step["event"];
+        let at=step["at"].as_f64().unwrap();
+        call.observe(event,at);
+        let mut bodies=Vec::new();
+        let mut spoken=Vec::new();
+        if matches!(event["type"].as_str(),Some("tick"|"session.delegation.created")) &&
+            let Some(route)=call.begin(&snapshot,at,"12:13"){
+            bodies.push(route.body.clone());
+            spoken=call.finish(route,&[],false);
+        }
+        let expected:Vec<_>=step["body_ids"].as_array().unwrap().iter().map(|n| &story["bodies"][n.as_u64().unwrap() as usize]).collect();
+        assert_eq!(json!(bodies),json!(expected),"step {count}");
+        assert_eq!(json!(spoken),step["spoken"],"step {count}");
+        count+=1;
+    }
+    assert_eq!(count,85);
 }
