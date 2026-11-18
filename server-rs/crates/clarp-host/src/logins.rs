@@ -17,6 +17,8 @@ use sha2::{Digest, Sha256};
 
 use crate::fleet::FleetHandle;
 
+pub(crate) mod opencode;
+
 /// What stands for a login file as it is now: nothing of what is in it. `None` when the file
 /// is not there or cannot be read.
 pub(crate) fn digest(path: &Path) -> Option<[u8; 32]> {
@@ -118,10 +120,13 @@ pub(crate) fn installed(program: &str) -> bool {
 
 /// The tools this Host runs that a person signs in to, as an app's screen of accounts names
 /// them: the tool, its name, and how one signs in to it.
-const TOOLS: [(&str, &str, &str); 4] = [
+const TOOLS: [(&str, &str, &str); 7] = [
     ("claude", "Claude", "cli"),
     ("codex", "Codex", "device_code"),
+    ("agy", "Antigravity", "none"),
     ("grok", "Grok", "device_code"),
+    ("opencode", "OpenCode", "none"),
+    ("deepseek", "DeepSeek", "none"),
     ("muse", "Muse Code", "none"),
 ];
 
@@ -135,6 +140,9 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
         .iter()
         .filter(|(tool, _, _)| every || matches!(*tool, "claude" | "codex"))
         .map(|(tool, name, login_kind)| {
+            if matches!(*tool, "opencode" | "deepseek") {
+                return opencode::row(home, tool, name);
+            }
             let mut row = json!({ "id": tool, "name": name, "login_kind": login_kind });
             if every {
                 // Signing in is done with the tool itself, on the machine: not from here.
@@ -143,7 +151,7 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 row["note"] = json!("Sign in with the tool itself on this Computer.");
             }
             let program = clarp_backend::program(tool).unwrap_or_default();
-            if *tool == "muse" {
+            if matches!(*tool, "agy" | "muse") {
                 let present = installed(&program);
                 row["installed"] = json!(present);
                 for key in ["logged_in", "credential_present", "can_logout"] {
@@ -154,12 +162,20 @@ pub fn told(home: &Path, every: bool, now_ms: i64) -> Value {
                 }
                 row["expires_at"] = json!(0);
                 row["state"] = json!(if present {
-                    "host_managed"
+                    if *tool == "agy" {
+                        "unverified"
+                    } else {
+                        "host_managed"
+                    }
                 } else {
                     "signed_out"
                 });
                 row["note"] = json!(if present {
-                    "Sign in to Muse Code on the Host."
+                    if *tool == "agy" {
+                        "Sign in by running agy on the Host."
+                    } else {
+                        "Sign in to Muse Code on the Host."
+                    }
                 } else {
                     ""
                 });

@@ -147,6 +147,7 @@ fn attempt_name(turn: TurnId, attempt: u32) -> String {
 /// Everything a shim needs to take a turn.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimOrder {
+    pub before_stop: Option<(&'static str, u64)>,
     pub turn: TurnId,
     /// Which attempt of the turn the shim runs, from 1.
     pub attempt: u32,
@@ -487,6 +488,7 @@ struct LiveTurn {
     limits: Option<(i64, serde_json::Value)>,
     /// What the tool said its conversation has cost so far, and what it had cost before the
     /// turn, where that is known: nothing for a conversation that begins with the turn.
+    per_turn_cost: Option<u64>,
     cost: Option<u64>,
     cost_before: Option<u64>,
     interpreter: Box<dyn Interpreter>,
@@ -519,6 +521,7 @@ impl LiveTurn {
             base: self.base,
             context: self.context,
             limits: self.limits.clone(),
+            per_turn_cost: self.per_turn_cost,
             cost: self.cost,
             cost_before: self.cost_before,
         }
@@ -799,6 +802,7 @@ struct Facts {
     base: Option<(u64, u64)>,
     context: Option<u64>,
     limits: Option<(i64, serde_json::Value)>,
+    per_turn_cost: Option<u64>,
     cost: Option<u64>,
     cost_before: Option<u64>,
 }
@@ -832,6 +836,7 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     // share is what that grew by. Where what it stood at before is not known (a session that
     // was taken up, or one from before totals were kept), or the total fell, the share is not
     // known either, and the total is kept for the turn after.
+    end.cost_micros = facts.per_turn_cost;
     if let Some(so_far) = facts.cost {
         end.cost_micros = clarp_kernel::usage::rise(facts.cost_before, so_far);
         end.cost_so_far = batch.agent().backend_session().map(|session| CostSoFar {
@@ -1065,6 +1070,7 @@ impl Actor {
                 base: actor.total_before(turn)?,
                 context: None,
                 limits: None,
+                per_turn_cost: None,
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
                 offset: 0,
@@ -2707,6 +2713,7 @@ impl Actor {
             limits,
             // What the conversation has cost so far is said again by the next attempt, with
             // what this one cost in it.
+            per_turn_cost: None,
             cost: None,
             cost_before,
             interpreter,
@@ -2727,6 +2734,7 @@ impl Actor {
             prompt_as_file: launch.prompt_as_file,
             named_session,
             cwd: self.profile.cwd.clone(),
+            before_stop: launch.before_stop,
             program: launch.program,
             args: launch.args,
             env: launch
@@ -2782,6 +2790,7 @@ impl Actor {
         let until = self.recorder.spool_offset(turn);
         let message = self.message_at(message_seq)?;
         let mut last_row = message.id.clone();
+        let mut per_turn_cost = None;
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
         let (mut total, mut limits) = (None, None);
         let mut interpreter = self
@@ -2844,6 +2853,7 @@ impl Actor {
                         } => total = Some((tokens_in, tokens_out)),
                         Signal::Context { tokens: held } => context = Some(held),
                         Signal::Limits(said) => limits = Some((record.t, said)),
+                        Signal::TurnCost { micros } => per_turn_cost = Some(micros),
                         Signal::Cost { micros } => cost = Some(micros),
                         Signal::Glimpse(glimpse) => {
                             let _ = self.shown.show(&glimpse, Some(&name), record.t);
@@ -2881,6 +2891,7 @@ impl Actor {
             base: self.total_before(turn)?,
             context,
             limits,
+            per_turn_cost,
             cost,
             cost_before: self.cost_before(turn)?,
             interpreter,
@@ -3352,6 +3363,10 @@ impl Actor {
                         }
                         Signal::Limits(said) => {
                             live.limits = Some((t, said));
+                            continue;
+                        }
+                        Signal::TurnCost { micros } => {
+                            live.per_turn_cost = Some(micros);
                             continue;
                         }
                         Signal::Cost { micros } => {

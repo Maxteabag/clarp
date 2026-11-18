@@ -290,6 +290,7 @@ mod tests {
     fn shell(line: &str, question: &str) -> Launch {
         Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: "sh".to_string(),
             args: vec!["-c".to_string(), line.to_string()],
             env: vec![("ASKED_AS".to_string(), "a question".to_string())],
@@ -336,6 +337,7 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(5));
         // One that is not there to run is not started.
         let missing = Launch {
+            before_stop: None,
             program: "/nowhere/no-such-tool".to_string(),
             ..shell("", "")
         };

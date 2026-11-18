@@ -125,6 +125,7 @@ impl Backend for Claude {
         stdin.push(b'\n');
         Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: self.program.clone(),
             args,
             env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
@@ -167,6 +168,7 @@ impl Backend for Claude {
         }
         Some(Launch {
             prompt_as_file: false,
+            before_stop: None,
             program: self.program.clone(),
             args,
             env: Vec::new(),

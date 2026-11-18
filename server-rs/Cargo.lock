@@ -249,10 +249,12 @@ dependencies = [
 name = "clarp-shim"
 version = "0.0.1"
 dependencies = [
+ "clarp-kernel",
  "clarp-spool",
  "nix",
  "serde",
  "serde_json",
+ "ureq",
 ]
 
 [[package]]

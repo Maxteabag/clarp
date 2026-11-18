@@ -116,6 +116,7 @@ impl Place {
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
             .args(more)
+            .env("CLARP_OPENCODE_PROGRAM", self.root.join("no-opencode"))
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
@@ -291,7 +292,9 @@ impl Drop for Host {
 }
 
 /// The tools a Host runs, in the order it lists them: the order of the Python Host's registry.
-const TOOLS: [&str; 5] = ["claude", "codex", "agy", "grok", "muse"];
+const TOOLS: [&str; 7] = [
+    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+];
 
 fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -17628,7 +17631,7 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
             .map(|row| row["id"].as_str().unwrap())
             .collect();
         let wanted = if path.ends_with("all") {
-            &["claude", "codex", "grok", "muse"][..]
+            &TOOLS[..]
         } else {
             &["claude", "codex"][..]
         };
@@ -21748,6 +21751,372 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     );
     assert_eq!(starts().len(), begun);
     assert!(!host.turns(&agent).iter().any(|row| row["id"] == "u-4"));
+}
+
+#[test]
+fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
+    for backend in ["opencode", "deepseek"] {
+        let place = Place::new(backend);
+        let root = &place.root;
+        let binary = root.join("opencode-stand-in");
+        program(&binary, include_str!("fixtures/opencode-stand-in.py"));
+        let world = [
+            ("HOME", root.to_str().unwrap()),
+            ("XDG_CACHE_HOME", root.to_str().unwrap()),
+            ("XDG_DATA_HOME", root.to_str().unwrap()),
+            ("CLARP_OPENCODE_PROGRAM", binary.to_str().unwrap()),
+            ("CLARP_OPENCODE_LIVE", "1"),
+            ("FAKE_ROOT", root.to_str().unwrap()),
+        ];
+        let host = place.start_in("", &[], &world);
+        let agent = host.post(
+            "/agents",
+            json!({"name":"Casey","backend":backend,"model":"fake/org/DeepSeek","effort":"high"}),
+        )["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        host.post(
+            "/agent-llm",
+            json!({"session":agent,"model":"fake/org/DeepSeek","effort":"high"}),
+        );
+        let requests = || {
+            std::fs::read_to_string(root.join("requests"))
+                .unwrap_or_default()
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let ended = |client_id: &str| {
+            let (id, _) = clarp_kernel::conversation::Message::filed(client_id);
+            let turns = host.turns(&agent);
+            turns
+                .iter()
+                .position(|r| r["id"] == id)
+                .is_some_and(|at| turns[at..].iter().any(|r| r["turn"].is_object()))
+        };
+        let send = |id: &str| {
+            host.send(&agent, "check the tests", id);
+            wait_for(id, || ended(id));
+        };
+        let path = |v: &Value| {
+            v["path"]
+                .as_str()
+                .unwrap_or("")
+                .split('?')
+                .next()
+                .unwrap_or("")
+                .to_owned()
+        };
+        let sid = format!("ses_{agent}");
+        let session = format!("/session/{sid}");
+        let submit = format!("{session}/prompt_async");
+        let picker = host.get("/agent-model-options");
+        let models = picker["providers"][backend]["models"].as_array().unwrap();
+        assert!(models.iter().any(|m| m["id"] == "fake/org/DeepSeek"));
+        assert_eq!(
+            models.iter().any(|m| m["id"] == "fake/Other"),
+            backend == "opencode"
+        );
+        assert_eq!(picker["providers"][backend]["harness_providers"], true);
+        assert!(
+            models
+                .iter()
+                .any(|m| m["id"] == "fake/org/DeepSeek" && m["model_provider"] == "fake")
+        );
+        assert!(
+            picker["providers"][backend]["model_providers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["id"] == "fake" && p["signed_in"] == false)
+        );
+        let auth = host.get("/backend-auth?harnesses=all");
+        let card = auth["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == backend)
+            .unwrap();
+        assert_eq!(card["installed"], true);
+        assert_eq!(card["model_providers"], true);
+        assert_eq!(card["state"], "signed_out");
+        assert_eq!(card["credential_present"], false);
+        assert!(
+            Command::new(&binary)
+                .arg("seed-history")
+                .env("FAKE_ROOT", root)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let auth = host.get("/backend-auth?harnesses=all");
+        let card = auth["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == backend)
+            .unwrap();
+        assert_eq!(card["state"], "valid");
+        assert_eq!(card["credential_present"], true);
+        assert_eq!(
+            card["account"],
+            if backend == "deepseek" {
+                "Local Fake"
+            } else {
+                "Local Fake, Other"
+            }
+        );
+        let sessions = host.get(&format!("/past-sessions?backend={backend}&scope=all"));
+        assert_eq!(
+            sessions["sessions"],
+            json!([{"id":"ses_stored","mtime":1789544308,"preview":"first real prompt","title":"Native title","cwd":"/work"}])
+        );
+        let missing = host.get(&format!("/past-sessions?backend={backend}&cwd=/another"));
+        assert_eq!(missing["sessions"], json!([]));
+        let adopt = |body: Value| host.ask("POST", "/agents", Some(&body));
+        let (status, existing) =
+            adopt(json!({"name":"Native","backend":backend,"resume_session_id":"ses_stored"}));
+        assert_eq!(status, 200, "{existing}");
+        let imported = host.turns(existing["session"].as_str().unwrap());
+        assert_eq!(
+            imported
+                .iter()
+                .map(|r| r["text"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["first real prompt", "checks passed"]
+        );
+        assert_eq!(imported[1]["tools"][0]["name"], "Bash");
+        assert_eq!(imported[1]["display_cells"][0]["summary"], "make check");
+        let other = if backend == "opencode" {
+            "deepseek"
+        } else {
+            "opencode"
+        };
+        assert_eq!(
+            adopt(json!({"name":"Conflict","backend":other,"resume_session_id":"ses_stored"})).0,
+            409
+        );
+        assert_eq!(
+            adopt(json!({"name":"Missing","backend":backend,"resume_session_id":"missing"})).0,
+            404
+        );
+        assert_eq!(
+            adopt(json!({"name":"Fork","backend":backend,"fork_session_id":"ses_stored"})).0,
+            400
+        );
+        // Withhold the subscription response. No native event has arrived and
+        // prompt_async cannot have been submitted when the session is bound.
+        let barrier = root.join("before-subscription");
+        std::fs::write(&barrier, "").unwrap();
+        host.send(&agent, "check the tests", "first");
+        wait_for("native binding before submission", || {
+            host.get("/agents/snapshot")["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["session"] == agent && r["backend_session_id"] == sid)
+        });
+        assert!(!requests().iter().any(|r| path(r) == submit));
+        std::fs::remove_file(barrier).unwrap();
+        wait_for("first submitted turn", || ended("first"));
+        let calls = requests();
+        let paths = calls.iter().map(path).collect::<Vec<_>>();
+        assert_eq!(
+            paths,
+            [
+                "/session",
+                "/event",
+                &submit,
+                "/question/q1/reject",
+                "/permission/p2/reply",
+                "/permission/per_1/reply"
+            ]
+        );
+        assert_eq!(
+            calls[0]["body"]["permission"],
+            json!([
+                {"permission":"question","pattern":"*","action":"deny"},
+                {"permission":"plan_enter","pattern":"*","action":"deny"},
+                {"permission":"plan_exit","pattern":"*","action":"deny"}
+            ])
+        );
+        assert_eq!(calls[2]["body"]["parts"][0]["type"], "text");
+        assert_eq!(
+            calls[2]["body"]["model"],
+            json!({"providerID":"fake","modelID":"org/DeepSeek"})
+        );
+        assert_eq!(calls[2]["body"]["variant"], "high");
+        assert!(
+            calls[2]["body"]["parts"][0]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("check the tests")
+        );
+        assert_eq!(calls[4]["body"], json!({"reply":"once"}));
+        assert_eq!(calls[5]["body"], json!({"reply":"once"}));
+        assert!(
+            calls
+                .iter()
+                .all(|v| v["path"].as_str().unwrap().contains("?directory="))
+        );
+        let turns = host.turns(&agent);
+        assert!(
+            turns
+                .iter()
+                .any(|r| r["text"] == "All green." && r["turn"]["status"] == "completed")
+        );
+        assert!(
+            turns
+                .iter()
+                .any(|r| r["tools"][0]["name"] == "Bash" && r["tools"][0]["status"] == "ok")
+        );
+        assert!(!turns.iter().any(|r| {
+            [
+                "the prompt",
+                "synthetic",
+                "private annotation",
+                "Check this.",
+            ]
+            .contains(&r["text"].as_str().unwrap_or(""))
+        }));
+        let seen = host.get(&format!("/live?session={agent}"));
+        assert!(
+            seen["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == "oc:prt_r"
+                    && item["text"] == "Check this."
+                    && item["status"] == "completed")
+        );
+
+        let tally = || {
+            host.get("/backend-usage")["backends"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["backend"] == backend)
+                .unwrap()["totals"]["five_hour"]
+                .clone()
+        };
+        wait_for("served usage", || tally()["turns"] == 1);
+        assert_eq!(tally()["tokens_in"], 10);
+        assert_eq!(tally()["tokens_out"], 4);
+        assert_eq!(tally()["cost_usd"], 0.2);
+        send("second");
+        assert_eq!(requests()[calls.len()]["method"], "GET");
+        assert_eq!(path(&requests()[calls.len()]), session);
+        for flag in ["wrong", "gone"] {
+            std::fs::write(root.join(flag), "").unwrap();
+            let before = requests().len();
+            send(flag);
+            assert_eq!(
+                requests()[before..].iter().map(path).collect::<Vec<_>>(),
+                std::slice::from_ref(&session)
+            );
+            assert_eq!(host.state(&agent), "interrupted");
+            std::fs::remove_file(root.join(flag)).unwrap();
+        }
+        std::fs::write(root.join("fail"), "").unwrap();
+        send("refusal");
+        assert_eq!(host.state(&agent), "interrupted");
+        assert!(
+            host.turns(&agent)
+                .iter()
+                .any(|r| r.to_string().contains("synthetic refusal"))
+        );
+        std::fs::remove_file(root.join("fail")).unwrap();
+        std::fs::write(root.join("hang"), "").unwrap();
+        let before = requests().len();
+        host.send(&agent, "wait here", "stoppable");
+        wait_for("hanging submission", || {
+            requests()[before..].iter().any(|r| path(r) == submit)
+        });
+        host.post("/stop", json!({"session":agent}));
+        wait_for("native abort", || {
+            requests()
+                .iter()
+                .any(|r| path(r) == format!("{session}/abort"))
+        });
+        wait_for("stop settled", || ended("stoppable"));
+        std::fs::remove_file(root.join("hang")).unwrap();
+        send("after-stop");
+        assert_eq!(host.state(&agent), "done");
+        std::fs::write(root.join("fallback"), "").unwrap();
+        send("fallback");
+        assert!(requests().iter().any(|r| {
+            r["run"]
+                .as_array()
+                .is_some_and(|args| args.windows(2).any(|p| p[0] == "--session" && p[1] == sid))
+        }));
+        assert!(host.turns(&agent).iter().any(|r| r["text"] == "from run"));
+        // Ask one question without continuing this agent. Keep the test executable
+        // explicit: integration tests in this process run concurrently.
+        use clarp_backend::{Backend, Question, opencode::OpenCode};
+        let adapter = OpenCode(backend, binary.display().to_string());
+        let q = Question {
+            prompt: "route this".into(),
+            model: Some("fake/org/DeepSeek".into()),
+            effort: Some("high".into()),
+        };
+        let launch = adapter.once(&q).unwrap();
+        let done = Command::new(launch.program)
+            .args(launch.args)
+            .envs(launch.env)
+            .env("FAKE_ROOT", root)
+            .output()
+            .unwrap();
+        assert!(done.status.success());
+        assert_eq!(
+            adapter
+                .answered(std::str::from_utf8(&done.stdout).unwrap())
+                .unwrap(),
+            "from run"
+        );
+        assert_eq!(
+            requests().last().unwrap()["run"],
+            json!([
+                "run",
+                "--format",
+                "json",
+                "--auto",
+                "--model",
+                "fake/org/DeepSeek",
+                "--variant",
+                "high",
+                "route this"
+            ])
+        );
+        std::fs::remove_file(root.join("fallback")).unwrap();
+        std::fs::write(root.join("during-restart"), "").unwrap();
+        let before = requests().len();
+        host.send(&agent, "finish while disconnected", "restart");
+        wait_for("submitted before crash", || {
+            requests()[before..].iter().any(|r| path(r) == submit)
+        });
+        host.kill();
+        std::fs::remove_file(root.join("during-restart")).unwrap();
+        let restarted = place.start_in("", &[], &world);
+        wait_for("surviving turn settled", || {
+            restarted.state(&agent) == "done"
+        });
+        assert_eq!(
+            requests()[before..]
+                .iter()
+                .filter(|r| path(r) == submit)
+                .count(),
+            1
+        );
+        assert!(
+            restarted
+                .turns(&agent)
+                .iter()
+                .rev()
+                .take(1)
+                .any(|r| r["text"] == "All green." && r["turn"]["status"] == "completed")
+        );
+    }
 }
 
 #[test]
