@@ -8444,5 +8444,307 @@
    ],
    "story": "a-desk-that-does-not-say-when-it-was-read"
   }
+ ],
+ "switches": [
+  {
+   "alias": "ai13",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "ai13"
+   ]
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": null,
+   "provider": " Claude ",
+   "status": 200,
+   "taken": [
+    "claude",
+    "ai13"
+   ]
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": " Claude ",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": null,
+   "provider": "CODEX",
+   "status": 200,
+   "taken": [
+    "codex",
+    "ai13"
+   ]
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": "CODEX",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": null,
+   "provider": "codex",
+   "status": 200,
+   "taken": [
+    "codex",
+    "ai13"
+   ]
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": "codex",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "muse",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "muse",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "agy",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "agy",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "  ",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "  ",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "claude code",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "claude code",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": "invalid_provider",
+   "provider": "7",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_provider",
+   "provider": "7",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ai13",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "ai13"
+   ]
+  },
+  {
+   "alias": " ai13 ",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "ai13"
+   ]
+  },
+  {
+   "alias": "A.b_c-d@e",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "A.b_c-d@e"
+   ]
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "  ",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "a b",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "-x",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": ".x",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "@x",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "a/b",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "a:b",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "ünï",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   ]
+  },
+  {
+   "alias": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "a\nb",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "",
+   "error": "invalid_alias",
+   "provider": "claude",
+   "status": 400,
+   "taken": null
+  },
+  {
+   "alias": "7",
+   "error": null,
+   "provider": "claude",
+   "status": 200,
+   "taken": [
+    "claude",
+    "7"
+   ]
+  }
  ]
 }

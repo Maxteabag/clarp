@@ -38,6 +38,28 @@ static SAFE_ID: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$").expect("a pattern of this module compiles")
 });
 
+static SAFE_ALIAS: LazyLock<Regex> = LazyLock::new(|| {
+    // Written here, as the pattern above.
+    #[allow(clippy::expect_used)]
+    Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$").expect("a pattern of this module compiles")
+});
+
+/// Reads an asking to make another account the one in use (`POST /hotseat/switch`): the
+/// tool whose account it is and the account's alias, each as it is meant; or the refusal of
+/// what is no tool with seats or no alias (`switch_default`, before it asks anybody).
+pub fn switch_wanted(tool: &str, alias: &str) -> Result<(String, String), Answer> {
+    let tool = python::strip(tool).to_lowercase();
+    let alias = python::strip(alias);
+    let refused = |what: &str| Err((400, json!({ "ok": false, "error": what })));
+    if !["claude", "codex"].contains(&tool.as_str()) {
+        return refused("invalid_provider");
+    }
+    if !SAFE_ALIAS.is_match(alias) {
+        return refused("invalid_alias");
+    }
+    Ok((tool, alias.to_string()))
+}
+
 /// What is asked for, once it is read.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Wanted {

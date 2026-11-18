@@ -1049,6 +1049,13 @@ what is no asking; and a turn that waits for an account, in both ways a Host can
 Of 34 wrong rules planted into the Host's side each is caught. `hotseat_desk_actions` is not listed: switching the account in use is not built, and the
 phone app sends a Host that does not list it none of its three actions.
 
+An asking to make another account the one in use (`POST /hotseat/switch`) is read as the Python Host reads
+it (`resume::switch_wanted`, by 39 askings that Host answered: the tools that have seats, what an alias may
+be) and then answered by what this Host is: beside another Host it says in words, in the shape of that
+Host's refusals, that the account in use is changed where the logins of the machine are kept; a Host that
+keeps the logins itself says that switching from the desk is not built. Ten more planted rules of the
+kernel and five of the Host, each caught.
+
 **What is said of a tool's use, without asking a model** (17 Nov 2026). What the owner's Python Host does
 most, counted over a week of its own log: its tool explainer ran 35,972 times, seventeen times what
 every other janitor ran together (the goal keeper 1,647, the audio bookkeeper 444, one more 4). It puts a plain

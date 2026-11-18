@@ -158,6 +158,34 @@ fn wanted_again(step: &Value) -> Wanted {
 }
 
 #[test]
+fn an_asking_to_switch_is_read_or_refused_as_the_python_host_reads_it() {
+    let vectors = vectors();
+    let askings = vectors["switches"].as_array().unwrap();
+    let mut taken = 0;
+    for one in askings {
+        let (tool, alias) = (
+            one["provider"].as_str().unwrap(),
+            one["alias"].as_str().unwrap(),
+        );
+        match resume::switch_wanted(tool, alias) {
+            Ok((tool, alias)) => {
+                taken += 1;
+                assert_eq!(json!([tool, alias]), one["taken"], "{one}");
+            }
+            Err((status, said)) => {
+                assert_eq!(
+                    (json!(status), &said["error"]),
+                    (one["status"].clone(), &one["error"]),
+                    "{one}"
+                );
+                assert_eq!(said["ok"], false);
+            }
+        }
+    }
+    assert_eq!((askings.len(), taken), (39, 9));
+}
+
+#[test]
 fn the_prompt_of_a_stop_has_one_id_however_it_is_asked_for() {
     assert_eq!(
         resume::message_id("an-agent", 1_800_000_000_000),

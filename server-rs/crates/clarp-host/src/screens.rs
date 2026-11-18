@@ -192,8 +192,27 @@ async fn hotseat_resume(
     (status, Json(said)).into_response()
 }
 
-/// This Host reads the seats and moves none: on a machine with another Host, that Host's
-/// selector does (`docs/differences.md`).
+/// `POST /hotseat/switch`: this Host reads the seats and moves none. Beside another Host
+/// it says so in words; where it keeps the logins itself, switching from the desk is not
+/// built (`crate::seats::switch`, `docs/differences.md`).
+async fn hotseat_switch(
+    State(app): State<App>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse as _;
+    let asked: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    if !asked.is_object() {
+        return bad("bad json").into_response();
+    }
+    match crate::seats::switch(&app, &asked) {
+        Some((status, said)) => {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (status, Json(said)).into_response()
+        }
+        None => no_hotseat().await.into_response(),
+    }
+}
+
 async fn no_hotseat() -> ApiError {
     not_built("Changing the account seats is")
 }
@@ -387,6 +406,7 @@ pub fn routes() -> Router<App> {
         .route("/hotseat/status", get(hotseat_status))
         .route("/hotseat/desk", get(hotseat_desk))
         .route("/hotseat/resume", post(hotseat_resume))
+        .route("/hotseat/switch", post(hotseat_switch))
         .route("/hotseat/{action}", post(no_hotseat))
         .route("/cartesia-voices", get(cartesia_voices))
         .route("/podcast-history", get(podcasts))

@@ -3,7 +3,7 @@
 work that stopped or to let a held queue go (`POST /hotseat/resume`: `HotseatDesk.resume_work` and
 `resume_prompt` of `server/lib/hotseat_desk.py`).
 
-Two things are written. The prompts: what a continued agent is told, for what the desk's row says of
+Three things are written. The prompts: what a continued agent is told, for what the desk's row says of
 why it stopped, what the owner's tool noted of it, and how old the desk's reading is. And stories,
 each from an empty store: agents are made, put away, made janitors, held, said to have ended a turn
 or to work; a desk with work that stopped is stored as a live read stores it; and the Host is asked,
@@ -11,6 +11,10 @@ with a way to send a prompt that works, that fails before or after it saved the 
 confirm, or that says the prompt waits behind a turn. For each asking the vector is the answer, what
 was sent, and what that Host knew of the agent when it was asked (which is what a Host that keeps
 its agents otherwise must find out for itself).
+
+The third: what an asking to make another account the one in use is refused with as it is
+written (`switch_default`: the tool it names, the alias), and which askings are taken. No account is
+switched: an asking that is taken is told that its account is in use already.
 
 It runs in processes of its own, one for each story, whose every home, data, config and cache
 directory is a new empty directory (the replay harness's own isolation, `tests/replay/host.py`),
@@ -79,6 +83,13 @@ PROMPTS = [
     {'row': {'cause': 'usage_limit'}, 'observed_at': T0, 'now': T0},
     {'row': {}, 'observed_at': T0 - 5 * MINUTE, 'now': T0},
 ]
+
+
+# ---- what is asked to be switched ---------------------------------------------------------------
+
+TOOLS_ASKED = ['claude', ' Claude ', 'CODEX', 'codex', 'muse', 'agy', '', '  ', 'claude code', None, 7]
+ALIASES_ASKED = ['ai13', ' ai13 ', 'A.b_c-d@e', '', '  ', 'a b', '-x', '.x', '@x', 'a/b', 'a:b', 'ünï', 'x' * 128,
+                 'x' * 129, 'a\nb', None, 7]
 
 
 # ---- stories ----------------------------------------------------------------------------------
@@ -327,6 +338,18 @@ def ran(name: str) -> dict:
     if name == '--prompts':
         return {'prompts': [{**one, 'text': desk.resume_prompt(one['row'], observed_at=one['observed_at'], now=one['now'])}
                             for one in PROMPTS]}
+    if name == '--switches':
+        # As the handler hands them over: a text for each, empty where the body has none.
+        asked = [(tool, alias) for tool in TOOLS_ASKED for alias in ('ai13', '')] + [('claude', alias) for alias in ALIASES_ASKED]
+        switches = []
+        for tool, alias in asked:
+            said = (str(tool or ''), str(alias or ''))
+            status, body = desk.HotseatDesk().switch_default(
+                said[0], said[1], command='hotseat', read_active=lambda _command, _provider, alias=said[1]: alias.strip(),
+                switch_fn=lambda *_: False, credentials_changed=lambda _provider: None, refresh_after=False)
+            switches.append({'provider': said[0], 'alias': said[1], 'status': status, 'error': body.get('error'),
+                             'taken': [body.get('provider'), body.get('alias')] if status == 200 else None})
+        return {'switches': switches}
     scenario = next(one for one in STORIES if one['story'] == name)
     clock = {'at': T0}
     desk.now_ms = lambda: clock['at']
@@ -470,7 +493,7 @@ def main() -> int:
         sys.stderr.write('two stories of one name\n')
         return 1
     answered = {}
-    for name in [*names, '--prompts']:
+    for name in [*names, '--prompts', '--switches']:
         run = subprocess.run([sys.executable, __file__, '--story', name], capture_output=True, text=True)
         lines = [line for line in run.stdout.splitlines() if line.startswith('VECTORS ')]
         if run.returncode or not lines:
@@ -478,16 +501,19 @@ def main() -> int:
             return 1
         answered[name] = json.loads(lines[-1][len('VECTORS '):])
     prompts = answered.pop('--prompts')['prompts']
+    switches = answered.pop('--switches')['switches']
     stories = [answered[name] for name in names]
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps({'prompts': prompts, 'stories': stories}, indent=1, ensure_ascii=False, sort_keys=True) + '\n')
+    OUT.write_text(json.dumps({'prompts': prompts, 'stories': stories, 'switches': switches}, indent=1, ensure_ascii=False,
+                              sort_keys=True) + '\n')
     asks = [step for one in stories for step in one['steps'] if step['op'] == 'ask']
     by_status: dict[int, int] = {}
     for one in asks:
         by_status[one['status']] = by_status.get(one['status'], 0) + 1
     print(f'{len(prompts)} prompts; {len(stories)} stories, {sum(len(one["steps"]) for one in stories)} steps, '
           f'{len(asks)} askings ({", ".join(f"{count} answered {status}" for status, count in sorted(by_status.items()))}), '
-          f'{sum(len(one["sent"]) for one in asks)} prompts sent -> {OUT.relative_to(REPO)}')
+          f'{sum(len(one["sent"]) for one in asks)} prompts sent; {len(switches)} askings to switch, '
+          f'{sum(1 for one in switches if one["status"] == 200)} of them taken -> {OUT.relative_to(REPO)}')
     return 0
 
 

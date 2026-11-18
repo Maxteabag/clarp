@@ -16674,11 +16674,43 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         )
     );
     assert!(desk["served_at"].as_i64().unwrap() >= asked_at, "{desk}");
-    let (status, said) = host.ask(
-        "POST",
-        "/hotseat/switch",
-        Some(&json!({ "provider": "claude" })),
+    // It moves no seat: an asking it can read is told so in words, and one it cannot is
+    // refused as it is written.
+    let switch = |asked: Value| host.ask("POST", "/hotseat/switch", Some(&asked));
+    let (status, said) = switch(json!({ "provider": " Claude ", "alias": " spare " }));
+    assert_eq!(
+        (
+            status,
+            &said["error"],
+            &said["provider"],
+            &said["alias"],
+            &said["ok"]
+        ),
+        (
+            409,
+            &json!("logins_kept_elsewhere"),
+            &json!("claude"),
+            &json!("spare"),
+            &json!(false)
+        ),
+        "{said}"
     );
+    assert_eq!(
+        said["message"],
+        "This Host reads the account seats and moves none. The account in use is changed where \
+         the logins of this machine are kept."
+    );
+    assert_eq!(
+        switch(json!({ "provider": "claude" })).1["error"],
+        "invalid_alias"
+    );
+    assert_eq!(
+        switch(json!({ "provider": "muse", "alias": "spare" })).1["error"],
+        "invalid_provider"
+    );
+    assert_eq!(switch(json!("not an asking")).1["error"], "bad json");
+    // Nothing else is done to the seats.
+    let (status, said) = host.ask("POST", "/hotseat/renew", Some(&json!({})));
     assert_eq!(
         (status, said["error"].as_str()),
         (
@@ -22209,7 +22241,12 @@ fn the_desk_of_the_seats_is_read_with_the_owners_tool_when_an_app_asks_and_is_ke
     assert_eq!(seats_asked(&place).len(), 3);
     // It reads the seats and moves none.
     let asked = json!({ "provider": "claude", "alias": "spare" });
-    assert_eq!(host.ask("POST", "/hotseat/switch", Some(&asked)).0, 501);
+    let (status, said) = host.ask("POST", "/hotseat/switch", Some(&asked));
+    assert_eq!(
+        (status, &said["error"]),
+        (409, &json!("logins_kept_elsewhere")),
+        "{said}"
+    );
 }
 
 #[test]
@@ -22700,7 +22737,12 @@ say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
         403
     );
     let switch = json!({ "provider": "claude", "alias": "spare" });
-    assert_eq!(host.ask("POST", "/hotseat/switch", Some(&switch)).0, 501);
+    assert_eq!(host.ask("POST", "/hotseat/switch", Some(&switch)).0, 409);
+    assert_eq!(
+        host.ask_as(&limited, "POST", "/hotseat/switch", Some(&switch))
+            .0,
+        403
+    );
 }
 
 /// A stand-in for Claude Code whose account is out for as long as a file says so; it writes
@@ -22890,4 +22932,19 @@ fn a_host_that_puts_the_logins_in_place_itself_leaves_a_waiting_turn_to_its_sele
         "Worker waits for an account. This Host's selector takes it up when one serves it."
     );
     assert!(waits());
+    // Switching from the desk is this Host's to do where it keeps the logins, and it is not
+    // built: it says that, and still refuses what it cannot read.
+    let switch = |asked: Value| host.ask("POST", "/hotseat/switch", Some(&asked));
+    let (status, said) = switch(json!({ "provider": "claude", "alias": "spare" }));
+    assert_eq!(
+        (status, said["error"].as_str()),
+        (
+            501,
+            Some("Changing the account seats is not built on this Host yet")
+        )
+    );
+    assert_eq!(
+        switch(json!({ "provider": "claude", "alias": "a b" })).1["error"],
+        "invalid_alias"
+    );
 }
