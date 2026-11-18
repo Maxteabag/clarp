@@ -6,6 +6,7 @@ something, we want at least a trace line so failures surface in `journalctl
 """
 from __future__ import annotations
 
+import json
 import sys
 import os
 import time
@@ -111,14 +112,14 @@ def log_fault(code: str, exc: BaseException, *, structured: bool = True) -> str:
         _FAULT_LOG_LOCAL.active = False
 
 
-def _eventlog_emit(event: str, level: str, detail: str) -> None:
+def _eventlog_emit(event: str, level: str, detail: str | dict) -> None:
     """Forward to the structured eventlog. Lazy-imported so the module
     works in isolation (tests etc.) without forcing the eventlog file
     layout into existence."""
     try:
         from . import eventlog as _el
-        _el.emit("server", event, level=level,
-                 detail={"msg": detail} if detail else None)
+        fields = detail if isinstance(detail, dict) else {"msg": detail} if detail else None
+        _el.emit("server", event, level=level, detail=fields)
     except Exception as exc:
         log_fault("logEventlogFailed", exc, structured=False)
 
@@ -131,14 +132,16 @@ def flush_deferred() -> None:
     _el.flush_deferred()
 
 
-def log(event: str, detail: str = "") -> None:
+def log(event: str, detail: str | dict = "") -> None:
     """Emit a single-line structured log entry to stderr AND a JSONL row.
 
     Stderr format: `HH:MM:SS event detail`. Goes to systemd journal.
     JSONL row goes through eventlog.emit() for DuckDB queries.
     """
     line = f"{time.strftime('%H:%M:%S')} {event}"
-    if detail:
+    if isinstance(detail, dict):
+        line += " " + json.dumps(detail, separators=(",", ":"))
+    elif detail:
         line += f" {detail}"
     if event == "sqliteWriteWait":
         connection = getattr(_WAIT_CONTEXT, "connection", None)

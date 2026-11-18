@@ -2,6 +2,8 @@
 import copy
 import json
 
+import pytest
+
 from lib import db, goal_keeper
 from tests.unit.test_goal_keeper import _config, _goal, _message, owner, helper  # noqa: F401
 
@@ -345,3 +347,91 @@ def test_moving_message_cursor_drops_then_recovers_final_under_the_same_heads(ow
         assert goal_keeper.due(cfg, baseline, now+20) == expected
         assert goal_keeper.due(cfg, progress, now+20, memo=memo) == expected
         assert progress == baseline
+
+
+@pytest.mark.parametrize("analyzed", [False, True])
+@pytest.mark.parametrize("mixed,archived", [(False, False), (True, False), (True, True)])
+def test_capped_ready_prefix_stays_in_rowid_order_on_every_pass(monkeypatch, analyzed, mixed, archived):
+    from lib import log
+    con, now = db.conn(), db.now_ms()
+    goal = json.dumps({"updater": {"through_ms": now-1}})
+    expected = []
+    for i in range(5):
+        agent = f"owner-{i}"
+        con.execute("INSERT INTO agents(agent_id,persona,voice_id,cwd,session,created_at) "
+                    "VALUES(?,?,?,?,?,?)", (agent, agent, "v", "/tmp", agent, now-500))
+        _message(agent, "assistant", "complete", at=now, phase="final")
+        con.execute("INSERT INTO conversation_heads VALUES(?,?,1,0)", (agent, "s"))
+    for i in range(540):
+        agent = f"owner-{i % 5}"
+        status = "active"
+        if i >= 40 or (mixed and i % 9 == 0):
+            status = "completed"
+        elif mixed and i % 3 == 0:
+            status = "paused"
+        con.execute("INSERT INTO task_plans(plan_id,agent_id,session,title,status,created_at,"
+                    "updated_at,goal_json,recovery_enabled) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (f"p{i}", agent, agent, "Fixture", status, now-400+i, now+i, goal, i % 2))
+        if status in ("active", "paused") and not (archived and i % 5 < 3):
+            expected.append(f"p{i}")
+    if archived:
+        con.execute("UPDATE agents SET archived_at=? WHERE agent_id IN ('owner-0','owner-1','owner-2')", (now,))
+    if analyzed:
+        con.execute("ANALYZE")
+    cfg, memo = _config(coalesce=0, sweep=False), goal_keeper.KeeperMemo()
+    logs = []
+    monkeypatch.setattr(log, "log", lambda event, detail: logs.append(event))
+    plain = goal_keeper.due(cfg, {}, now+20000)
+    observations = {}
+    for n in range(1, 22):
+        ready = goal_keeper.due(cfg, {}, now+20000, memo=memo)
+        if n in (1, 19, 20, 21):
+            observations[n] = ready
+    assert plain == expected
+    assert observations == dict.fromkeys((1, 19, 20, 21), expected)
+    assert all(ready[:5] == plain[:5] for ready in observations.values())
+    assert "goalKeeperMemoMismatch" not in logs
+
+
+def test_helper_messages_only_wake_the_current_parent(owner, helper, tmp_path):
+    from lib import agents, message_store
+    first = _goal()["plan_id"]
+    peer = agents.create_agent(persona="Peer", session="peer", backend="codex", voice_id="v", cwd=str(tmp_path))
+    now = db.now_ms()
+    con = db.conn()
+    con.execute("INSERT INTO task_plans(plan_id,agent_id,session,title,created_at,updated_at,goal_json) "
+                "VALUES('peer-goal',?,'peer','Peer',?,?,?)",
+                (peer, now-100, now, json.dumps({"updater": {"through_ms": now - 100}})))
+    for a in (owner, peer):
+        message_store.record_user_message(agent_id=a, backend_session_id="s", client_msg_id=f"relay-{a}",
+                                          text="Synthetic handoff", sender_agent_id=helper)
+    memo, cfg = goal_keeper.KeeperMemo(), _config(coalesce=0, sweep=False)
+    for parent, wanted in [(owner, first), (peer, "peer-goal")]:
+        agents.set_lineage(helper, parent_agent_id=parent, role="helper")
+        for _ in range(2):
+            assert goal_keeper.due(cfg, {}, now+20000) == [wanted]
+            assert goal_keeper.due(cfg, {}, now+20000, memo=memo) == [wanted]
+
+
+def test_autonomy_keeps_scope_self_checks_independent(owner, monkeypatch):
+    from lib import janitor_autonomy as ja
+    configs = [_config(scope={"agent_ids": [owner]}), _config(scope={"exclude_agent_ids": [owner]})]
+    configs[1]["agent_id"] = "keeper-2"
+    worker = ja.AutonomyJanitors(dispatch=None, notify=None)
+    monkeypatch.setattr(ja.janitor_builtins, "eligible", lambda role: configs)
+    monkeypatch.setattr(ja.janitors, "get_progress", lambda _: {})
+    monkeypatch.setattr(ja.janitors, "save_progress", lambda *args: None)
+    observations = []
+    def inspect(config, progress, now, *, memo):
+        observations.append(memo)
+        return []
+    monkeypatch.setattr(goal_keeper, "due", inspect)
+    worker.goal_keeper_once()
+    first, second = observations
+    assert first is not second
+    configs.pop(0)
+    worker.goal_keeper_once()
+    assert observations[-1] is second and first not in worker._keeper_memos.values()
+    configs[0]["generation"] += 1
+    worker.goal_keeper_once()
+    assert observations[-1] is not second and second not in worker._keeper_memos.values()

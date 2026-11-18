@@ -465,7 +465,7 @@ def open_goals(config: dict, *, con=None) -> list:
         "SELECT p.*, a.is_janitor, a.deleted_at, a.archived_at FROM task_plans p "
         "JOIN agents a ON a.agent_id=p.agent_id WHERE p.status IN ('active','paused') "
         "AND p.goal_json != '{}' AND a.deleted_at IS NULL AND a.archived_at IS NULL "
-        "AND a.is_janitor=0").fetchall()
+        "AND a.is_janitor=0 ORDER BY p.rowid").fetchall()
     return [r for r in rows if janitors._in_scope(config.get("scope") or {}, {
         "agent_id": r["agent_id"], "is_janitor": r["is_janitor"], "deleted_at": r["deleted_at"],
         "archived_at": r["archived_at"]})]

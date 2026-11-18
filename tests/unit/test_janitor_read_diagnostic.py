@@ -59,3 +59,30 @@ def test_keeper_reader_groups_queries_and_marks_sweep_and_self_check(owner):
     goal_keeper.due(_config(), {"next_sweep_at": now}, now, memo=memo)
     assert memo.meter.self_check and memo.meter.sweep
     assert {"plain_plans", "plan_headers", "helpers", "heads", "messages", "events", "jobs"} <= memo.meter.families.keys()
+
+
+def test_twentieth_report_reaches_journal_with_capture_off(capfd):
+    import json
+    from lib import diagnostics_settings, janitor_read_diagnostic as diag, telemetry
+
+    meter = diag.ReadMeter()
+    for enabled in (False, True):
+        diagnostics_settings.update({"enabled": enabled, "categories": list(diagnostics_settings.CATEGORIES)})
+        for _ in range(19):
+            meter.finish_pass()
+        assert "janitorAutonomyReads" not in capfd.readouterr().err
+        meter.lanes["keeper"] = 1_500_000
+        meter.finish_pass()
+        event = " janitorAutonomyReads "
+        lines = [line for line in capfd.readouterr().err.splitlines() if event in line]
+        assert len(lines) == 1
+        detail = json.loads(lines[0].split(event, 1)[1])
+        assert detail == {
+            "passes": 20, "lane_mb": {**dict.fromkeys(diag.LANES, 0), "keeper": 1.5},
+            "keeper_family_mb": dict.fromkeys(diag.FAMILIES, 0), "keeper_other_mb": 1.5,
+            "worked": [], "sweep": False, "self_check": False, "sample_unavailable": False,
+        }
+        rows = telemetry.conn().execute(
+            "SELECT detail FROM diagnostic_events WHERE event=?", ("janitorAutonomyReads",)
+        )
+        assert [json.loads(row[0]) for row in rows] == ([detail] if enabled else [])
