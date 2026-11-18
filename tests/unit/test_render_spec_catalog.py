@@ -173,6 +173,13 @@ FOLLOWED = {
                       lambda f: None, "ok", ("prop", "/spec/elements/topic/props/text")),
     "children": (_components(lambda c: c["stack"].update(children=False)), lambda f: None,
                  "ok", ("element_tree", "/spec/elements/root/children")),
+    "a bound prop's shape is the $bindState shape": (
+        _components(lambda c: c["text_field"]["props"]["properties"]["value"]["properties"]["$bindState"].update(maxLength=30)),
+        lambda f: None, "ok", ("catalog_unavailable", "")),
+    "const": (_components(lambda c: c["heading"]["props"]["properties"]["level"].update(const=2)), lambda f: None,
+              "ok", ("prop", "/spec/elements/topic/props/level")),
+    "reads use the shape they name": (_components(lambda c: c["text"].update(reads={"text": "$bindState"})), _read_state,
+                                      "ok", ("expression", "/spec/elements/instructions/props/text")),
     "keywords the catalog may use": (lambda d: d["schema_keywords"].remove("maxLength"), lambda f: None,
                                      "ok", ("catalog_unavailable", "")),
     "a keyword the code does not know": (lambda d: d["schema_keywords"].append("pattern"), lambda f: None,
