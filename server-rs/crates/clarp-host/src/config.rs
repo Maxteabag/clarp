@@ -110,6 +110,8 @@ pub struct Config {
     /// The same for the engines that speak.
     pub cartesia_endpoint: String,
     pub deepgram_voice_endpoint: String,
+    pub eleven_voice_endpoint: String,
+    pub google_voice_endpoint:String,
     /// A stand-in for the push service on this machine, for a test (`CLARP_APNS_ENDPOINT`).
     /// Empty: the push service itself.
     pub apns_endpoint: String,
@@ -423,14 +425,20 @@ impl Config {
             }
         };
         let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
-        let deepgram_voice_endpoint = stand_in("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
-        if !deepgram_voice_endpoint.is_empty() {
-            let uri=deepgram_voice_endpoint.parse::<axum::http::Uri>().map_err(|_|"invalid Deepgram voice endpoint")?;
-            let authority=uri.authority().ok_or("missing Deepgram stand-in address")?;
-            if authority.as_str().contains('@') || !matches!(authority.host(),"127.0.0.1"|"[::1]"|"localhost") {
-                return Err("Deepgram stand-in must be on loopback".into());
+        let voice_endpoint=|variable:&str| -> Result<String,String> {
+            let endpoint=stand_in(variable)?;
+            if !endpoint.is_empty() {
+                let uri=endpoint.parse::<axum::http::Uri>().map_err(|_|format!("invalid {variable}"))?;
+                let authority=uri.authority().ok_or_else(||format!("missing {variable} host"))?;
+                if authority.as_str().contains('@') || !matches!(authority.host(),"127.0.0.1"|"[::1]"|"localhost") {
+                    return Err(format!("{variable} must be on loopback"));
+                }
             }
-        }
+            Ok(endpoint)
+        };
+        let deepgram_voice_endpoint=voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        let google_voice_endpoint=voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
+        let eleven_voice_endpoint=voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
         let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
         let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
@@ -464,7 +472,7 @@ impl Config {
             })
             .transpose()?;
         let gemini_endpoint = stand_in("CLARP_GEMINI_ENDPOINT")?;
-        let google_token_endpoint = stand_in("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
+        let google_token_endpoint = voice_endpoint("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
         let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
         // A token of the owner's real account is never handed to a stand-in, and a token a
         // stand-in made up is never sent to Google: both are stood in for, or neither.
@@ -548,6 +556,8 @@ impl Config {
             router_endpoint,
             cartesia_endpoint,
             deepgram_voice_endpoint,
+            eleven_voice_endpoint,
+            google_voice_endpoint,
             apns_endpoint,
             fcm_endpoint,
             gemini_endpoint,
