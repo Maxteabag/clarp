@@ -244,6 +244,26 @@ def test_go_away_resumes_on_a_new_connection_with_the_latest_handle(call):
     assert sum(e["type"] == "session.started" for e in call.down) == 1  # the phone sees one call
 
 
+@pytest.mark.parametrize("away", ["soon", 30, ["8s"], True])
+def test_a_go_away_that_is_not_an_object_keeps_the_deadline_held(monkeypatch, away):
+    """R69: such a goAway is passed over; it never raises out of recv()."""
+    socket = FakeGemini()
+    monkeypatch.setattr(oracle_gemini_live, "_connect", lambda _: socket)
+    upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v")
+    upstream.translate({"goAway": {"timeLeft": "20s"}})
+    held = upstream.reconnect_at
+    upstream.translate({"goAway": away})
+    assert upstream.reconnect_at == held
+
+
+def test_a_go_away_that_is_not_an_object_does_not_end_the_call(call):
+    call.sockets[0].inbox.append({"goAway": "soon"})
+    call.sockets[0].inbox.append({"setupComplete": {}})
+    pump(call)
+    assert not call.sockets[0].closed and len(call.opened) == 1
+    assert not call.c.stop.is_set()
+
+
 def test_lost_connection_without_a_handle_ends_the_call(monkeypatch):
     socket = FakeGemini()
     monkeypatch.setattr(oracle_gemini_live, "_connect", lambda _: socket)
