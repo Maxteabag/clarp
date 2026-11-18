@@ -653,9 +653,7 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
               priority: str = "10",
               collapse_id: str | None = None,
               expiration: int | None = None) -> tuple[int, str, str]:
-    """POST one notification. Returns (status_code, reason, APNs request ID).
-    Background pushes MUST use push_type="background" + priority "5" (Apple
-    rejects priority 10 for them)."""
+    """POST one notification. Returns (status_code, reason, APNs request ID)."""
     url = f"{base}/3/device/{token}"
     # Live Activity pushes go to the app's dedicated liveactivity topic.
     topic = (f"{bundle_id}.push-type.liveactivity" if push_type == "liveactivity"
