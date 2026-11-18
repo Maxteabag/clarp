@@ -6666,7 +6666,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     let mut loose = envelope(" spaced-id ");
     loose["type"] = json!(" Render_Spec ");
     loose["session"] = json!(format!(" {theo} "));
-    loose["title"] = json!(" Decide <speak>aloud</speak>");
+    loose["title"] = json!(" Decide <environment_context>aloud</environment_context>");
     loose["status"] = json!(" READY ");
     let (status, made) = ask("POST", "/artifacts", capable, Some(&loose));
     assert_eq!(status, 201, "{made}");
@@ -6773,7 +6773,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // What it is about is one spec's: once among an agent's specs, kept through revisions.
     let mut first_ref = envelope("ref-a");
-    first_ref["reference_id"] = json!("deploy-1 <speak>aloud</speak>");
+    first_ref["reference_id"] = json!("deploy-1 <environment_context>aloud</environment_context>");
     let (status, made) = ask("POST", "/artifacts", capable, Some(&first_ref));
     assert_eq!(
         (status, &made["artifact"]["reference_id"]),

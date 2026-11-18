@@ -371,9 +371,12 @@ def payload_cases():
     case('a heading of 200 signs', put(['spec', 'elements', 'topic', 'props', 'text'], 'h' * 200))
     case('a heading of 201 signs', put(['spec', 'elements', 'topic', 'props', 'text'], 'h' * 201))
     case('a heading that is empty', put(['spec', 'elements', 'topic', 'props', 'text'], ''))
-    case('a heading with a hidden block', put(['spec', 'elements', 'topic', 'props', 'text'], 'a<speak>b</speak>'))
+    case('a heading with a hidden block', put(['spec', 'elements', 'topic', 'props', 'text'],
+                                              'a<environment_context>b</environment_context>'))
     case('a heading with a hidden block left open', put(['spec', 'elements', 'topic', 'props', 'text'],
-                                                        'a <tool_call>b'))
+                                                        'a <oai-mem-citation id="1">b'))
+    case('a heading with markup that is no hidden block', put(['spec', 'elements', 'topic', 'props', 'text'],
+                                                              'a<speak>b</speak>'))
     case('a heading that reads the state', put(['spec', 'elements', 'topic', 'props', 'text'], {'$state': '/answer'}))
     case('a heading beyond ASCII', put(['spec', 'elements', 'topic', 'props', 'text'], 'Bygg ' + chr(0xf8) + chr(0x1f600)))
     case('a text of 4000', put(['spec', 'elements', 'instructions', 'props', 'text'], 't' * 4000))
@@ -546,7 +549,7 @@ def payload_cases():
     case('a label of 41', put(['submit', 'label'], 'l' * 41))
     case('a label of 40 signs beyond ASCII', put(['submit', 'label'], chr(0x6771) * 40))
     case('a label that is a number', put(['submit', 'label'], 4))
-    case('a label with a hidden block is taken', put(['submit', 'label'], '<speak>x</speak>'))
+    case('a label with a hidden block is taken', put(['submit', 'label'], '<environment_context>x</environment_context>'[:40]))
     return out
 
 
