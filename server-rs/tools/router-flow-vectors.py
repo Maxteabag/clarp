@@ -326,7 +326,7 @@ STORIES = [
         message('said to the newest agent, asked again with everyone in view: the agent spoken to, the one that is '
                 'open, and the twenty most recently active of the others are shown with what they were last told and said; of the equally recent, the first',
                 'uh, maybe', [{'kind': 'ignored', 'confidence': 0.5}] * 2, id='b-1', session='extra-01'),
-    ], [(f'Extra {n:02d}', f'extra-{n:02d}', 'codex', f'voice-extra-{n:02d}', False) for n in range(1, 22)]),
+    ], [(f'Extra {n:02d}', f'extra-{n:02d}', 'codex', f'voice-extra-{n:02d}', False) for n in range(1, 23)]),
 ]
 
 
