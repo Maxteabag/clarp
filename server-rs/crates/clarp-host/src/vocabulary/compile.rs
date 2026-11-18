@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 struct Context {
-    workspace:std::sync::Arc<super::workspace::Cache>,
+    workspace: std::sync::Arc<super::workspace::Cache>,
     root: PathBuf,
     session: String,
     agent: String,
@@ -234,7 +234,7 @@ pub async fn compile(
         other => other.split_once(':').unwrap_or((other, "")),
     };
     let ctx = Context {
-        workspace:app.ears.workspace.clone(),
+        workspace: app.ears.workspace.clone(),
         root: app.config.data_dir.clone(),
         agent: record.map_or_else(String::new, |r| r.agent_id.clone()),
         session: session.into(),

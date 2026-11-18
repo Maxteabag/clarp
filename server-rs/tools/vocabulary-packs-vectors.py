@@ -4,6 +4,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,17 @@ def reference(root):
     record(live[2:],Budget('synthetic','fixture','terms',20))
     record(live,Budget('s','b','tokens',300,supports_prose=False))
     record([Pack('t',(Term('One','t'),Term('ONE','t'),Term('Two','t')),priority=-1.0)],Budget('s','b','terms',300))
+    # Each component of the rank can decide an otherwise tied contest.
+    compete=[Pack('low',(Term('Rare','low',1,0), Term('Recent','low',0.5,1)),priority=1),
+             Pack('high',(Term('Learned','high',0.5,0,True),),priority=2)]
+    for n in (1,2,3):
+        record(compete,Budget('s','test','terms',n))
+    for cap in (None,0,1,3,4,5,49):
+        record([Pack('exact',(Term('AA BC','exact',1.0),Term('AA BD','exact',0.9),Term('abc','exact',1.0)),
+                     floor=1)],Budget('s','names','tokens',25,max_term_chars=cap))
+    for boundary in (0.25,0.45,0.65):
+        pack=Pack('edge',tuple(Term('word'+str(i),'edge',boundary+delta) for i,delta in enumerate((-0.001,0,0.001))))
+        for n in (119,120,299,300,799,800):record([pack],Budget('s','test','terms',n))
     from lib import judgment_sites, judgments
     from unittest.mock import patch
     verdicts=[]
