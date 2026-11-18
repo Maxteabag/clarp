@@ -55,7 +55,71 @@ def reference(root):
                 discard=judgment_sites.is_junk(transcript)
             verdicts.append(dict(transcript=transcript,probability=probability,discard=discard))
     question=judgment_sites._JUNK_QUESTION
-    return dict(question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
+    from lib import vocab_store, vocab_compile, workspace_vocab, heard_audio
+    from lib.routes.vocab import VocabRoutes
+    from unittest.mock import patch
+    from contextlib import ExitStack
+    import sqlite3
+    db=sqlite3.connect(':memory:')
+    db.executescript('PRAGMA foreign_keys=ON; CREATE TABLE agents(agent_id TEXT PRIMARY KEY);')
+    schema=(ROOT/'server/lib/db_schema.py').read_text().split('CREATE TABLE vocab_packs (',1)[1].split('"""',1)[0]
+    db.executescript('CREATE TABLE vocab_packs ('+schema)
+    snapshots=[]
+    class Handler(VocabRoutes):
+        def _read_json(self): return self.body
+        def _query_first(self): return self.body
+        def _json_ok(self,value): self.response=[200,value]
+        def _json_error(self,status,why): self.response=[status,{'error':why}]
+    client=Handler()
+    def step(route,method,operation,data):
+        client.body=data
+        getattr(client,'_handle_vocab_'+operation)()
+        snapshots.append(dict(route=route,method=method,data=data,response=client.response))
+    flags={}
+    with ExitStack() as stack:
+        for name,impl in dict(conn=lambda:db,now_ms=lambda:1000,_new_id=lambda pre:pre+'-example',
+                              profile_harvests_workspace=lambda pf:flags.get(pf,False),
+                              set_profile_harvests_workspace=lambda pf,flag:flags.update({pf:flag})).items():
+            stack.enter_context(patch.object(vocab_store,name,impl))
+        def get(route,op,**data):step(route,'GET',op,data)
+        def post(route,op,**data):step(route,'POST',op,data)
+        get('packs','packs_get')
+        post('packs','packs_post',name='')
+        post('packs','packs_post',name='bad',kind='unknown')
+        post('packs','packs_post',name='Gloss',terms=['RareName',dict(text='Alpha',rarity=0.8, often_heard_as='alter')])
+        post('packs','packs_post',name='Gloss')
+        pk='pk-example';pf='pf-example'
+        get('packs','packs_get');get('terms','terms_get',pack_id=pk)
+        post('terms','terms_post',pack_id=pk,text='rarename')
+        post('terms','terms_post',pack_id=pk,text='NewName',say_as=' nu ')
+        post('terms/update','terms_update',term_id=999,text='unknown')
+        post('terms/update','terms_update',term_id=4,rarity=2,often_heard_as='new')
+        get('terms','terms_get',pack_id=pk)
+        post('terms/delete','terms_delete',term_id=4)
+        post('packs/update','packs_update',pack_id=pk,enabled=False,name='Renamed',priority=2,floor=1)
+        get('packs','packs_get')
+        post('profiles','profiles_post',name='Default',pack_ids=[pk])
+        get('profiles','profiles_get');get('profile','profile_get',profile_id=pf)
+        post('profiles/workspace','profile_workspace',profile_id=pf,enabled=True)
+        post('profiles/packs/remove','profile_packs_remove',profile_id=pf,pack_id=pk)
+        post('profiles/packs','profile_packs_post',profile_id=pf,pack_id=pk,position=3)
+        post('assign','assign_post',profile_id=pf,team_id='example-team')
+        get('assignments','assignments_get');get('profile','profile_get',profile_id=pf)
+        post('unassign','unassign_post',team_id='example-team')
+        post('packs/delete','packs_delete',pack_id=pk);get('profile','profile_get',profile_id=pf)
+        post('profiles/delete','profiles_delete',profile_id=pf);get('profile','profile_get',profile_id=pf)
+    db.close()
+    sources=[]
+    for names,recent,corrections in [([],[],[]),(['a',' A ','beta',''],['Open AlphaBeta or echo_thing','AlphaBeta delta'],[('wrong','target'),('alias','Target')]),
+            (['Z9'],[' '.join('Term'+str(n) for n in range(28))],[])]:
+        source=vocab_compile.Sources(agent_names=tuple(names),recent_transcripts=tuple(recent),corrections=tuple(corrections),
+            project_name=' Alpha ',identifiers=('Xray','Alpha'),branches=('worktree-123/active-branch','123','one_two_three_four_five_six_seven'),
+            commit_subjects=('fix CamelCase in service2',))
+        sources.append(dict(input=asdict(source),packs=[asdict(p) for p in vocab_compile.dynamic_packs(source)]))
+    paths=['src/ClipStreamBroker.py','src/ClipStream.rs','lib/WidgetThing.py','build/JunkName.so','libmp3lame.a','MyName.cc','x2.txt','test_only.hh','utils.ts']
+    workspaces=[dict(paths=paths,ids=workspace_vocab.identifiers_from_paths(paths))]
+    traces=[dict(trace=t,valid=heard_audio.valid_trace(t)) for t in ('','a'*7,'a'*8,'a'*64,'a'*65,'ABCDEF12','abcdef01','gg123456','not/a/name')]
+    return dict(admin=snapshots,sources=sources,workspaces=workspaces,traces=traces,question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
 
 
 if __name__ == '__main__':
