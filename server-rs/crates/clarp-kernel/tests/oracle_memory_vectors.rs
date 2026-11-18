@@ -506,3 +506,73 @@ fn a_result_an_age_and_a_time_are_written_as_the_python_host_writes_them() {
         threads::operation_id("a-phone", "a-call", true)
     );
 }
+
+#[test]
+fn a_talk_too_long_to_keep_is_not_kept_and_ends_no_call() {
+    let mut memory = Memory::default();
+    let opening = Opening {
+        owner: "a-phone",
+        contact: "theo",
+        thread_id: None,
+        connection: "conn-1",
+        fresh: false,
+        new_id: "thread-1",
+    };
+    let thread_id = memory.open(&opening, 1_000).unwrap();
+    let opened = Opened {
+        thread_id: &thread_id,
+        owner: "a-phone",
+        connection: "conn-1",
+    };
+    // Kept within its bound, and up to it exactly: measured in bytes, as it is written.
+    let first = json!({ "revision": 1, "fragments": [] });
+    let bytes = python::canonical(&first).len();
+    assert_eq!(memory.save_within(opened, &first, 2_000, bytes), Ok(()));
+    // A byte over the bound is not kept: what was kept stays as it was.
+    let longer = json!({ "revision": 2, "fragments": ["\u{e9}"] });
+    let over = python::canonical(&longer).len() - 1;
+    assert_eq!(
+        memory.save_within(opened, &longer, 3_000, over),
+        Err(threads::TOO_MUCH)
+    );
+    assert_eq!(memory.load(opened).unwrap(), first);
+    // By another connection than the one that has the thread, nothing is kept either.
+    let other = Opened {
+        connection: "conn-2",
+        ..opened
+    };
+    assert_eq!(
+        memory.save_within(other, &first, 4_000, usize::MAX),
+        Err(threads::STALE)
+    );
+    // The call goes on where its talk was too much or the store failed, and that is said
+    // once a call; it ends where its thread is another call's now.
+    let mut said = false;
+    let told = |why: &str| format!("a call of the Oracle could not keep its talk: {why}");
+    assert_eq!(
+        threads::not_kept(threads::TOO_MUCH, &mut said),
+        threads::NotKept::GoesOn {
+            say: Some(told(threads::TOO_MUCH))
+        }
+    );
+    assert_eq!(
+        threads::not_kept(threads::TOO_MUCH, &mut said),
+        threads::NotKept::GoesOn { say: None }
+    );
+    assert_eq!(
+        threads::not_kept(threads::STORE_FAILED, &mut said),
+        threads::NotKept::GoesOn { say: None }
+    );
+    let mut fresh = false;
+    assert_eq!(
+        threads::not_kept(threads::STORE_FAILED, &mut fresh),
+        threads::NotKept::GoesOn {
+            say: Some(told(threads::STORE_FAILED))
+        }
+    );
+    assert_eq!(
+        threads::not_kept(threads::STALE, &mut said),
+        threads::NotKept::Ends
+    );
+    assert_eq!(threads::STATE_BYTES, 2 * 1024 * 1024);
+}
