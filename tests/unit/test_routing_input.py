@@ -317,3 +317,99 @@ def test_a_left_behind_prompt_directory_is_swept_once_no_call_can_still_use_it(t
     os.utime(other, (1_000, 1_000))
     assert routing_input.sweep_stale(now=1_000 + 3601) == 1
     assert not old.exists() and young.exists() and other.exists()
+
+
+# ---- R82: no command line in any log line, stored reason, event or route answer ----------------
+
+MARKER = "PROMPT-MARKER-6f1c"
+
+
+def _hanging_router(stub, monkeypatch, provider):
+    """A real router on ``provider`` whose CLI hangs past a 0.4 s timeout. The marker is in the spoken-to
+    agent's recent words: in the prompt (on argv for agy and opencode), never in the utterance."""
+    from types import SimpleNamespace
+    from lib import agents, events, eventlog, orchestrator
+    from tests.unit.test_orchestrator_janitor import ROLE, builtins
+    monkeypatch.setenv("STUB_BEHAVIOUR", "hang")
+    for session in ("mike", "antoni"):
+        agents.create_agent(persona=session.title(), voice_id="", cwd="/tmp", session=session)
+    orchestrator.record_routing_message(session="mike", role="assistant", text=f"{MARKER} the plan")
+    builtins().ensure_builtins(initial={ROLE: {
+        "enabled": True, "backend": provider, "provider": provider, "model": "", "effort": "",
+        "options": {"fallback_only": False, "timeout_ms": 400}}})
+    seen = []
+    real_emit = eventlog.emit
+    monkeypatch.setattr(eventlog, "emit", lambda *a, **k: (seen.append(repr((a, k))), real_emit(*a, **k))[1])
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: seen.append(repr(event)))
+    service = orchestrator.OrchestratorService(SimpleNamespace(
+        default_session="mike", stream=None, speak_announcement=lambda *a, **k: None))
+    return service, seen
+
+
+@pytest.mark.parametrize("provider", ["agy", "opencode"])
+def test_a_timed_out_routing_call_leaves_its_command_line_nowhere(stub, monkeypatch, capfd, provider):
+    from lib import db, orchestrator
+    service, seen = _hanging_router(stub, monkeypatch, provider)
+    outcome = service.handle_send(text="send the report", requested_session="mike", trace_id="t-82",
+                                  hands_free=True, synthesize_audio=False,
+                                  dispatch=lambda **kwargs: pytest.fail("nothing is dispatched"))
+    assert any(MARKER in " ".join(call["argv"]) for call in stub())       # it was on argv
+    stored = [dict(row) for row in db.conn().execute("SELECT * FROM orchestrator_decisions")]
+    assert stored and stored[0]["error"] == f"{provider} timed out after 0.4 s"
+    sinks = {
+        "log lines": capfd.readouterr().err,
+        "eventlog and events": "\n".join(seen),
+        "stored decisions": repr(stored),
+        "route answer (send)": repr(outcome),
+        "route answer (decisions)": repr(orchestrator.recent_decisions()),
+    }
+    assert [name for name, text in sinks.items() if MARKER in text] == []
+
+
+def test_every_model_call_raises_a_timeout_without_its_command_line(monkeypatch, capfd):
+    """execute() is where all four routing callers' failures pass (the router, the fallback
+    model, both keepers): its failure has no command line in its words or its chain, the log
+    line of it neither, and the attempt rows keep the type name."""
+    import subprocess
+    from lib.log import log_exception
+    monkeypatch.setattr(model_fallbacks, "get", lambda agent_id: {"models": [], "revision": 1})
+
+    def invoke(model):
+        raise subprocess.TimeoutExpired(["agy", f"--print={MARKER}"], 30)
+    with pytest.raises(model_fallbacks.ProviderFailure) as raised:
+        model_fallbacks.execute("agent", "request", {"backend": "agy", "model": ""}, invoke)
+    failure = raised.value
+    assert str(failure) == "agy timed out after 30 s" and failure.origin_type == "TimeoutExpired"
+    assert failure.__cause__ is None and failure.__suppress_context__
+    log_exception("goalKeeperUpdateFail", failure, detail="plan")
+    assert MARKER not in capfd.readouterr().err
+
+
+def test_a_stored_error_from_before_is_answered_without_its_command_line(monkeypatch):
+    from lib import db, orchestrator
+    old = f"Command '['agy', '--dangerously-skip-permissions', '--print={MARKER} ...']' timed out after 30.0 seconds"
+    db.conn().execute(
+        "INSERT INTO orchestrator_decisions (trace_id, utterance, requested_session, hands_free, enabled, "
+        "provider, model, effort, latency_ms, decision_kind, target_session, final_action, error, created_at) "
+        "VALUES ('t', 'u', 'mike', 1, 1, 'agy', '', '', 0, 'error', 'mike', 'ignored', ?, 1)", (old,))
+    for answered in (orchestrator.recent_decisions(), orchestrator.recent_ignored_decisions()):
+        assert [row["error"] for row in answered] == ["agy timed out after 30 s"]
+    assert db.conn().execute("SELECT error FROM orchestrator_decisions").fetchone()[0] == old   # not rewritten
+    assert orchestrator.public_error("an ordinary error") == "an ordinary error"
+
+
+def test_the_attempt_rows_keep_the_failures_type_name(monkeypatch):
+    import subprocess
+    primary, other = {"backend": "agy", "model": ""}, {"backend": "opencode", "model": ""}
+    monkeypatch.setattr(model_fallbacks, "get", lambda agent_id: {"models": [primary, other], "revision": 1})
+    reasons = []
+    monkeypatch.setattr(model_fallbacks, "claim", lambda agent_id, request_id, index, model, reason:
+                        reasons.append(reason) or True)
+    monkeypatch.setattr(model_fallbacks, "finish", lambda *a, **k: None)
+
+    def invoke(model):
+        if model is primary:
+            raise subprocess.TimeoutExpired(["agy", f"--print={MARKER}"], 30)
+        return {"kind": "ok"}
+    assert model_fallbacks.execute("agent", "request", primary, invoke) == {"kind": "ok"}
+    assert reasons == ["TimeoutExpired"]
