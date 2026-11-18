@@ -1,0 +1,837 @@
+{
+ "commands": [
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--resume",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "grok",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "--always-approve",
+    "--no-alt-screen",
+    "--output-format",
+    "streaming-json",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "-p",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": false,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  },
+  {
+   "tool": "muse",
+   "session": "synthetic-session",
+   "fresh": true,
+   "model": "synthetic-model",
+   "effort": "high",
+   "argv": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--session-id",
+    "synthetic-session"
+   ],
+   "once": [
+    "exec",
+    "--json",
+    "--yolo",
+    "--model",
+    "synthetic-model",
+    "--reasoning-effort",
+    "high",
+    "--no-session-log",
+    "--",
+    "--question"
+   ]
+  }
+ ],
+ "answers": [
+  {
+   "tool": "grok",
+   "printed": "bad-json\n[]\n{\"type\": \"thought\", \"data\": \"private\"}\n{\"type\": \"text\", \"data\": \"A\"}\n{\"event\": \"assistant\", \"role\": \"user\", \"content\": \"skip\"}\n{\"method\": \"session/update\", \"params\": {\"update\": {\"sessionUpdate\": \"agent_message_chunk\", \"content\": [{\"text\": \"B\"}, {\"text\": \"C\"}]}}}",
+   "answer": "AB\nC"
+  },
+  {
+   "tool": "muse",
+   "printed": "bad-json\n[]\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"A\"}}\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"B\"}}",
+   "answer": "AB"
+  },
+  {
+   "tool": "muse",
+   "printed": "bad-json\n[]\n{\"payload_type\": \"run.output.delta\", \"payload\": {\"text\": \"A\"}}\n{\"payload_type\": \"run.terminal.completed\", \"payload\": {\"text\": \"terminal\"}}",
+   "answer": "terminal"
+  }
+ ]
+}
