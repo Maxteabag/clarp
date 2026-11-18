@@ -32,9 +32,8 @@ service_account = "~/.config/clarp/fcm-service-account.json"
   …)` when the file reads as a service account, or `FAIL  Android push:`
   with the reason.
 
-`[apns] background_sync = true` turns background sync on for Android as well
-as iPhones. `[apns] mode` only affects iPhones; a Host with `mode = "off"` and
-a service account pushes to Android phones only.
+`[apns] mode` only affects iPhones; a Host with `mode = "off"` and a service
+account pushes to Android phones only.
 
 ## Capability
 
@@ -185,9 +184,9 @@ the notification itself:
 ```
 
 - `android.priority` is `HIGH` for every alert (finished turn, decision,
-  ring) and `NORMAL` for background sync.
-- `android.collapse_key` is set only for background sync
-  (`sync-<session>`), so a phone that was offline gets the newest hint.
+  ring).
+- `android.collapse_key` is set only for the agents-working summary, so a
+  phone that was offline gets the newest state.
 - No TTL is set (FCM keeps a message up to four weeks); a ring carries
   `expires_at` for the app to check.
 
@@ -276,10 +275,6 @@ stop. When the Host does not know whether a ring rang (it rang before a Host
 restart), its end goes to every phone, so in doubt the end is sent. A ring that runs out is announced (`missed`) after the
 Host's ring lock is released, so a slow Google never holds another phone's
 `GET /calls/ring`.
-
-Background sync (`kind = sync`, only with `[apns] background_sync = true`):
-`session` and `agent_id`; no alert. Budgeted like iPhones' (three an hour,
-ten minutes apart per session).
 
 ## Agents working (feature `live_activity_fcm`, Host contract 95)
 
