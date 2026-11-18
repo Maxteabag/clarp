@@ -293,6 +293,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::heartbeat::run(&app);
     // And a janitor's scheduled task is run when its schedule says.
     clarp_host::janitors::run(&app);
+    clarp_host::seats::start_switcher(&app);
     // And what waits to be explained of the use of tools is asked of its janitor's model.
     clarp_host::explain::run(&app);
     // And the open goals are kept current beside their owners, where a keeper is on.

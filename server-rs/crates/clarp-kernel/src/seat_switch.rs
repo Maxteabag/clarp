@@ -137,6 +137,10 @@ pub fn parse(tool: &str, body: &Value) -> Vec<Seat> {
 }
 
 impl Seat {
+    pub fn serves(&self,model:&str)->bool{
+        spec(model).map_or(self.remaining,|(family,_)|self.room(&family)).unwrap_or(0)>0
+    }
+
     pub fn room(&self, family: &str) -> Option<i64> {
         let general = self.remaining?;
         if general <= 0 || self.blocked_models.iter().any(|name| name == family) {
@@ -328,4 +332,34 @@ pub fn decide(accounts: &[Seat], ask: Demand<'_>) -> Value {
         }
     }
     json!({"action":"noop","active":active.alias,"remaining":have,"rung":noop_rung})
+}
+
+/// What a switcher's run shows in the Janitor's history and in an exhaustion notice.
+pub fn report(tool:&str,d:&Value,mode:&str,switched:bool)->(String,String){
+    let (name,window)=if tool=="claude"{("Claude","5-hour")}else{("Codex","weekly")};
+    let active=d["active"].as_str().unwrap_or("?");
+    let have=d["remaining"].as_i64().map(|n|n.to_string()).unwrap_or_else(||"?".into());
+    let target=d["target"].as_str().unwrap_or("");
+    let to=d["target_remaining"].as_i64().unwrap_or(0);
+    let model=d["model"].as_str();
+    let text=match d["action"].as_str(){
+        Some("switch")=>{
+            let (target,detail)=if let Some(model)=model{
+                let general=d["target_general_remaining"].as_i64().unwrap_or(to);
+                (format!("{target} for {model}"),format!("{target} has {to}% {model} quota ({general}% of the {window} window) left; {active} had {have}% {model}"))
+            }else{(target.into(),format!("{target} has {to}% of the {window} window left; {active} had {have}%"))};
+            let verb=if mode!="automatic" {"would switch to"}else if switched{"switched to"}else{"could not switch to"};
+            format!("{name}: {verb} {target}. {detail}")
+        }
+        Some("exhausted")=>if let Some(model)=model {
+            let tail=d["general_remaining"].as_i64().filter(|n|*n!=0).map(|n|format!(" ({active} keeps {n}% of the {window} window for other models)")).unwrap_or_default();
+            format!("{name}: {active} has {have}% {model} quota left and no saved account can serve {model}{tail}")
+        }else{format!("{name}: {active} has {have}% of the {window} window left and no saved account has more")},
+        _=>String::new(),
+    };
+    let summary=if !text.is_empty(){text.clone()}else if let Some(model)=d["blocked_model"].as_str(){
+        let left=d["model_remaining"].as_i64().unwrap_or(0);
+        format!("{tool}: {active} has {left}% {model} quota left and no saved account can serve {model}; keeping {active} ({have}% of the {window} window) for running models")
+    }else{format!("{tool}: {active} keeps {have}% of the {window} window")};
+    (text,summary)
 }

@@ -87,6 +87,15 @@ impl Service {
         order.args.extend(args);
     }
 
+    /// Provider one-shots hold the same shared lock as a turn for their full call.
+    pub async fn use_login(app:&crate::edge::App,tool:&str)->Result<Option<std::fs::File>,()> {
+        let Some(path)=app.pools.iter().find(|p|p.tool()==tool).and_then(|p|p.login_lock.clone()) else {return Ok(None)};
+        tokio::task::spawn_blocking(move||{
+            let file=std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path).map_err(|_|())?;
+            file.lock_shared().map_err(|_|())?;Ok(Some(file))
+        }).await.map_err(|_|())?
+    }
+
     pub async fn switch_lock(&self) -> Option<std::fs::File> {
         let path = self.login_lock.clone()?;
         tokio::task::spawn_blocking(move || {

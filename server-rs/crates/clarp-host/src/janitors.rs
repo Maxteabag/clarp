@@ -544,7 +544,7 @@ fn revision(said: Option<&Value>) -> Result<Value, &'static str> {
 }
 
 /// Tells the apps to read the janitors again.
-fn changed(app: &App) {
+pub(crate) fn changed(app: &App) {
     let told = json!({ "type": "agent-roster", "kind": "janitor-changed" });
     app.hub.publish(told, app.clock.now_ms());
 }
@@ -852,7 +852,8 @@ async fn change(
                 clarp_kernel::goals::keeper::ROLE,
                 clarp_kernel::janitors::audio::ROLE,
             ];
-            if on && !runs_here.iter().any(|job| agent["template_id"] == *job) {
+            let seats=app.config.accounts==clarp_kernel::recovery::Accounts::Select && app.seats.told() && agent["template_id"]=="account-hotseat";
+            if on && !seats && !runs_here.iter().any(|job| agent["template_id"] == *job) {
                 let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
                 return refusal(&told);
             }
