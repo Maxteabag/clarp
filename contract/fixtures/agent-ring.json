@@ -172,7 +172,6 @@
     "ring_state": "ringing",
     "session": "theo-97e5",
     "persona": "Theo",
-    "reason": "Possible water leak at pump 01",
     "expires_at": 1791160045000,
     "server_instance_id": "host_fixture"
   },
