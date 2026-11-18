@@ -1192,6 +1192,45 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
                           carry_rows, oracle_rows, prelude.session_rows)
 
 
+# R62: turns whose own id a row of another agent holds, and when that was last
+# logged. One line a minute at most, with a count; never the id or the text.
+_FOREIGN_TURN_IDS: dict[str, Any] = {"count": 0, "logged_at": None}
+_FOREIGN_TURN_ID_LOG_SECONDS = 60.0
+
+
+def _turn_id_is_ours(database, msg_id: str, agent_id: str, backend_session_id: str,
+                     source_file: str, seq: int) -> bool:
+    """Whether a turn may keep its own id (R62): a row of this agent holds it
+    (carry_conversation moves an agent's rows to another session with their
+    ids), or no row holds it and the turn's slot is not already held by its
+    positional row. A turn once stored under its position stays there:
+    honouring the id later would put a second row into its own slot. A row of
+    another agent would be rewritten under this agent's head, so that turn is
+    stored as if it had no id."""
+    held = database.execute(
+        "SELECT agent_id FROM messages WHERE message_id = ?", (msg_id,)).fetchone()
+    if held is not None and held["agent_id"] == agent_id:
+        return True
+    if held is None:
+        # The slot is (agent, session, seq), the unique index; the positional
+        # id is derived from exactly those three, so one primary-key lookup.
+        positional = database.execute(
+            "SELECT 1 FROM messages WHERE message_id = ? AND agent_id = ? AND backend_session_id = ? AND seq = ?",
+            (_message_id(agent_id, backend_session_id, source_file, seq), agent_id, backend_session_id, seq),
+        ).fetchone()
+        return positional is None
+    if not database.locked:
+        return False  # the import's read-only pass; its locked pass counts the turn
+    _FOREIGN_TURN_IDS["count"] += 1
+    now = time.monotonic()
+    last = _FOREIGN_TURN_IDS["logged_at"]
+    if last is None or now - last >= _FOREIGN_TURN_ID_LOG_SECONDS:
+        from .log import log
+        log("messageTurnIdOfAnotherAgent", f"count={_FOREIGN_TURN_IDS['count']}")
+        _FOREIGN_TURN_IDS.update(count=0, logged_at=now)
+    return False
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -1374,6 +1413,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         text = str(turn.get("text") or "")
         origin = "user"
         sender_agent_id = ""
+        if turn.get("id") and not _turn_id_is_ours(database, str(turn["id"]), agent_id,
+                                                    backend_session_id, source_file, seq):
+            turn = {key: value for key, value in turn.items() if key != "id"}
         msg_id = str(turn.get("id") or _message_id(
             agent_id, backend_session_id, source_file, seq))
         if role == "user" and text.lstrip().startswith(CALL_OPENING_OPEN):
