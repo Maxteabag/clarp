@@ -322,7 +322,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 99);
+    assert_eq!(info["contract"]["host"], 100);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -9261,12 +9261,13 @@ fn what_the_hosts_own_turns_used_is_counted_for_an_apps_usage_screen() {
     let place = Place::new("usage");
     // A stand-in for Claude Code that says what its turn took in and gave out, and, as the
     // tool does, what its whole session has cost so far: an eighth of a dollar after its first
-    // turn, three eighths after its second, seven eighths after its third.
+    // turn, three eighths after its second, seven eighths after its third; then less, a half,
+    // and after its fifth three quarters.
     let claude = place.root.join("claude");
     let turns_file = place.root.join("claude-turns");
     let script = format!(
         "#!/bin/sh\nread message\necho x >> {turns}\n\
-case $(wc -l < {turns}) in 1) cost=0.125 ;; 2) cost=0.375 ;; *) cost=0.875 ;; esac\n\
+case $(wc -l < {turns}) in 1) cost=0.125 ;; 2) cost=0.375 ;; 3) cost=0.875 ;; 4) cost=0.5 ;; *) cost=0.75 ;; esac\n\
 printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}}'\n\
 printf '%s\\n' '{{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{{\"type\":\"text\",\"text\":\"on it\"}}]}}}}'\n\
 printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"on it\",\"num_turns\":1,\"usage\":{{\"input_tokens\":12,\"output_tokens\":3}},\"total_cost_usd\":'$cost'}}'\n",
@@ -9319,6 +9320,11 @@ printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false
                          "window_minutes": 300 });
     assert_eq!(one["totals"]["five_hour"], window, "{one}");
     assert_eq!(one["totals"]["seven_day"]["window_minutes"], 10_080);
+    // Claude Code tells what its session has cost so far: its row says from when this Host
+    // has counted what each turn cost, which no other tool's row does.
+    let since = one["cost_activation_ms"].as_i64().unwrap();
+    assert!(since > 1_700_000_000_000, "{one}");
+    assert!(of(&host, "codex").get("cost_activation_ms").is_none());
     assert_eq!(
         (&one["freshness"], &one["error"], &one["windows"]),
         (&json!("fresh"), &json!(""), &json!({})),
@@ -9374,10 +9380,32 @@ printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false
         three["totals"]["seven_day"]["cost_usd"], 0.875,
         "what the three turns cost: {three}"
     );
+    // And it has counted since the same moment as before it was started again.
+    assert_eq!(three["cost_activation_ms"], since, "{three}");
+    // A total that fell tells nothing of what the turn cost: the turn is counted and no cost
+    // is added for it. The turn after cost what the total grew by since.
+    host.send(&agent, "four", "u-4");
+    wait_for("the fourth turn to be counted", || {
+        of(&host, "claude")["totals"]["five_hour"]["turns"] == 4
+    });
+    assert_eq!(
+        of(&host, "claude")["totals"]["seven_day"]["cost_usd"],
+        0.875,
+        "a total that fell"
+    );
+    host.send(&agent, "five", "u-5");
+    wait_for("the fifth turn to be counted", || {
+        of(&host, "claude")["totals"]["five_hour"]["turns"] == 5
+    });
+    assert_eq!(
+        of(&host, "claude")["totals"]["seven_day"]["cost_usd"],
+        1.125,
+        "and rose again"
+    );
     // What was used belongs to the Host: an agent that is removed takes none of it along.
     let (status, _) = host.ask("DELETE", &format!("/agents/{agent}"), None);
     assert_eq!(status, 200);
-    assert_eq!(of(&host, "claude")["totals"]["seven_day"]["turns"], 3);
+    assert_eq!(of(&host, "claude")["totals"]["seven_day"]["turns"], 5);
 }
 
 #[test]

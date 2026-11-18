@@ -308,12 +308,19 @@ pub fn state(
                 "duration_ms": last.ended_at_ms - last.started_at_ms.unwrap_or(last.ended_at_ms),
                 "origin": last.origin.name(),
             });
-            if let Some(end) = ended.filter(|end| end.turn == last.id.0) {
+            let end = ended.filter(|end| end.turn == last.id.0);
+            if let Some(end) = end {
                 detail["trace_id"] = json!(end.trace_id.clone().unwrap_or_default());
                 if let (Some(tokens_in), Some(tokens_out)) = (end.tokens_in, end.tokens_out) {
                     detail["tokens_in"] = json!(tokens_in);
                     detail["tokens_out"] = json!(tokens_out);
                 }
+            }
+            // A tool that tells what its session has cost so far: what the turn cost is said
+            // with its end, and said to be unknown where it is (contract 100).
+            if clarp_kernel::usage::tells_a_total(backend) {
+                let micros = end.and_then(|end| end.cost_micros);
+                detail["cost_usd"] = json!(micros.map(|micros| micros as f64 / 1_000_000.0));
             }
             detail
         }
@@ -2314,9 +2321,26 @@ mod tests {
         assert!(doing["call_id"].is_null() && doing.get("stop_actor").is_none());
 
         let done = status(None, Some(Outcome::Completed));
+        // Claude Code tells what its session has cost so far: what the turn cost is said with
+        // its end, also where that is not known.
         assert_eq!(
             state(&record(), &done, "claude", Some(&ended()))["detail"],
-            json!({"dispatch": "clarp", "duration_ms": 2_900, "origin": "user", "trace_id": "trace-1", "tokens_in": 5, "tokens_out": 7})
+            json!({"dispatch": "clarp", "duration_ms": 2_900, "origin": "user", "trace_id": "trace-1", "tokens_in": 5, "tokens_out": 7, "cost_usd": null})
+        );
+        let mut costly = ended();
+        costly.cost_micros = Some(250_000);
+        assert_eq!(
+            state(&record(), &done, "claude", Some(&costly))["detail"]["cost_usd"],
+            0.25
+        );
+        assert_eq!(
+            state(&record(), &done, "claude", None)["detail"]["cost_usd"],
+            Value::Null
+        );
+        assert!(
+            state(&record(), &done, "codex", Some(&costly))["detail"]
+                .get("cost_usd")
+                .is_none()
         );
         assert_eq!(
             state(&record(), &done, "scripted", None)["detail"]["dispatch"],
