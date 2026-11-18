@@ -39,6 +39,10 @@ def test_notification_avatar_signature_is_scoped_and_short_lived():
     assert not notification_avatar_authorized(
         secret="secret", agent_id="agent-a", content_version="content-v1",
         expires_at=1_500, signature=signature, now=1_501)
+    # A signature outside ASCII is a wrong signature (compare_digest raises on it).
+    assert not notification_avatar_authorized(
+        secret="secret", agent_id="agent-a", content_version="content-v1",
+        expires_at=1_500, signature="ø" * len(signature), now=1_000)
 
 
 def test_avatar_content_version_is_hashed_once_per_file_revision(tmp_path, monkeypatch):

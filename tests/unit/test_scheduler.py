@@ -295,3 +295,16 @@ def test_many_repeating_failures_are_not_traced_again_when_the_memory_is_full(mo
     assert traced == ["plan-0", "plan-1"]
     assert len(lines) == 1 and "not tracked" in lines[0]
     assert len(task_goal_recovery._FAILURE_LOGGED) <= 3
+
+
+@pytest.mark.parametrize("expression", ["０ 9 * * *", "0 ٩ * * *", "*/５ * * * *", "0 9 1-３ * *",
+                                        "+5 * * * *", "1_0 * * * *", "0 9 * * ¹"])
+def test_a_cron_number_is_ascii_digits_only(expression):
+    """R66: int() reads other scripts' digits, a sign and underscores; a cron field means none of them."""
+    with pytest.raises(ValueError):
+        scheduler.parse_cron(expression)
+
+
+def test_ascii_cron_numbers_parse_as_before():
+    assert scheduler.parse_cron("*/15 9-17 1,15 1-12/3 1-5") == (
+        set(range(0, 60, 15)), set(range(9, 18)), {1, 15}, {1, 4, 7, 10}, {1, 2, 3, 4, 5})
