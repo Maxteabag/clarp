@@ -305,17 +305,17 @@ fn decoded(bytes: &[u8]) -> Option<Vec<u32>> {
 }
 
 fn utf32(bytes: &[u8], big: bool) -> Option<Vec<u32>> {
-    if bytes.len() % 4 != 0 {
+    let (fours, rest) = bytes.as_chunks::<4>();
+    if !rest.is_empty() {
         return None;
     }
-    bytes
-        .chunks_exact(4)
+    fours
+        .iter()
         .map(|four| {
-            let four = [four[0], four[1], four[2], four[3]];
             let point = if big {
-                u32::from_be_bytes(four)
+                u32::from_be_bytes(*four)
             } else {
-                u32::from_le_bytes(four)
+                u32::from_le_bytes(*four)
             };
             (point <= 0x10_ffff).then_some(point)
         })
@@ -323,17 +323,17 @@ fn utf32(bytes: &[u8], big: bool) -> Option<Vec<u32>> {
 }
 
 fn utf16(bytes: &[u8], big: bool) -> Option<Vec<u32>> {
-    if bytes.len() % 2 != 0 {
+    let (twos, rest) = bytes.as_chunks::<2>();
+    if !rest.is_empty() {
         return None;
     }
-    let units: Vec<u32> = bytes
-        .chunks_exact(2)
+    let units: Vec<u32> = twos
+        .iter()
         .map(|two| {
-            let two = [two[0], two[1]];
             u32::from(if big {
-                u16::from_be_bytes(two)
+                u16::from_be_bytes(*two)
             } else {
-                u16::from_le_bytes(two)
+                u16::from_le_bytes(*two)
             })
         })
         .collect();
