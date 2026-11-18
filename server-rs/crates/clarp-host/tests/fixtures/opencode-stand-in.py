@@ -185,7 +185,8 @@ class H(BaseHTTPRequestHandler):
                     peer.connect(os.environ["CLARP_SHIM_SOCKET"])
                     shim_pid, _, _ = struct.unpack("3i", peer.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,12))
                     argv = pathlib.Path(f"/proc/{shim_pid}/cmdline").read_bytes().split(b"\0")
-                    (root / "signalled-spool").write_bytes(argv[argv.index(b"--spool") + 1])
+                    # Keep this test's view of the inode across normal settled-turn cleanup.
+                    os.link(argv[argv.index(b"--spool") + 1], root / "signalled-spool")
                     os.kill(shim_pid, signal.SIGTERM)
             if (root/"hang").exists():
                 EVENTS[:] = [e for e in EVENTS if e["type"]=="session.status" and e["properties"]["sessionID"]==session][:1]+["HANG"]

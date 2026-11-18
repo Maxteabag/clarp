@@ -22048,8 +22048,7 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         assert_eq!(host.state(&agent), "interrupted");
         let turns = host.turns(&agent);
         assert_eq!(turns.last().unwrap()["turn"]["status"], "interrupted");
-        let spool = std::fs::read_to_string(root.join("signalled-spool")).unwrap();
-        let written = std::fs::read_to_string(spool).unwrap();
+        let written = std::fs::read_to_string(root.join("signalled-spool")).unwrap();
         let last: Value = serde_json::from_str(written.lines().last().unwrap()).unwrap();
         assert_eq!(last["d"], json!({"event":"exited","signal":15,"code":null}));
         std::fs::remove_file(root.join("signal-shim")).unwrap();
