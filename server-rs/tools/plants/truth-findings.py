@@ -46,7 +46,8 @@ for file,run,label,old,new in [
     (J,'words','every job said','.filter(|template| !runs_here(template["id"].as_str().unwrap_or_default(), seats))','.filter(|_| true)'),
     (J,'words','where the switcher runs not said','    if !seats {\n        said.push_str(','    if false {\n        said.push_str('),
     (J,'words','where the switcher runs said always','    if !seats {\n        said.push_str(','    if true {\n        said.push_str('),
-    (H,'seats','a seats tool is not asked for','&& app.seats.told();\n','&& true;\n'),
+    # Not here: a seats tool not asked for is accounts-switch's 'allow enabling a Hotseat Janitor
+    # without a seats tool', the same rule in the same place, and that list came first.
     (H,'auditor','the words of a Host with the seats','let why = rules::cannot_run(seats);','let why = rules::cannot_run(true);'),
     (H,'seats','the switcher let on everywhere','if on && !rules::runs_here(job, seats) {','if on && !rules::runs_here(job, true) {'),
     (H,'auditor','every janitor turned on','if on && !rules::runs_here(job, seats) {','if false {'),

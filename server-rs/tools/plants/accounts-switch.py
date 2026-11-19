@@ -128,7 +128,8 @@ select = f"app.config.accounts == {qual}Select"
 # without a seats tool is the mode alone with the owner's switch.
 for file, effect, test, toolless in [
         ("clarp-host/src/edge.rs","advertise seat actions", select+" && seats", select+" && !crate::seats::turned_off(app)"),
-        ("clarp-host/src/janitors.rs","allow enabling a Hotseat Janitor",select+"\n                && app.seats.told()",select)]:
+        # One line since truth-findings commit 3, where the seats a Host keeps are read once.
+        ("clarp-host/src/janitors.rs","allow enabling a Hotseat Janitor",select+" && app.seats.told()",select)]:
     for extra, other in [("follow","None"),("none","Follow")]:
         PLANTS.append((file,"desk",f"{effect} under {extra}",test,test.replace(select,f"app.config.accounts != {qual}{other}")))
     PLANTS.append((file,"desk",f"{effect} without a seats tool",test,toolless))
