@@ -96,8 +96,8 @@ for why,old,new in [
     ('lose normalized empty path','".".into()','"".into()'),
     ('erase parent traversals','*part != "."','*part != "." && *part != ".."'),
     ('leave query case untouched','python::casefold(query)','query.to_owned()'),
-    ('lose non-ASCII decimal digits','char::from_digit(d,10)','char::from_digit(d,2)'),
-    ('ignore the Python integer input limit','count()>4300','count()>9999'),
+    ('lose non-ASCII decimal digits','char::from_digit(d, 10)','char::from_digit(d,2)'),
+    ('ignore the Python integer input limit','count() > 4300','count()>9999'),
 ]:
     plant(K,'vectors',why,old,new)
 if __name__=='__main__':
