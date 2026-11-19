@@ -432,13 +432,6 @@ pub fn egress(stored: &Value, internal: bool) -> Option<Value> {
     Some(Value::Object(hint))
 }
 
-/// Whether a Stop is the user's: only the user's moves the generation a send is shown stopped
-/// by. Every Stop here is the user's until a Stop carries its actor and whether it is
-/// verified; then a verified agent's Stop is not.
-pub fn is_users_stop(_by: &str) -> bool {
-    true
-}
-
 /// The revision of a transition: the position of the event in the agent's own log, and the
 /// send's place among those one event moves (a Stop that fences several).
 pub fn revision(position: u64, place: u64) -> u64 {
@@ -633,12 +626,21 @@ mod tests {
         }
     }
 
-    fn paused(agent: &mut Agent, at: u64) {
+    fn stopped_by(agent: &mut Agent, at: u64, by: &str, verified: bool) {
         agent.at(at);
-        let by = "user".to_string();
-        agent
-            .apply(&AgentEvent::Paused { by, at_ms: 2_000 })
-            .unwrap();
+        let by = by.to_string();
+        let reason = String::new();
+        let stop = AgentEvent::Paused {
+            by,
+            verified,
+            reason,
+            at_ms: 2_000,
+        };
+        agent.apply(&stop).unwrap();
+    }
+
+    fn paused(agent: &mut Agent, at: u64) {
+        stopped_by(agent, at, "user", false);
     }
 
     fn told(agent: &mut Agent) -> Vec<(u64, bool, bool, u64, u64)> {
@@ -698,6 +700,11 @@ mod tests {
             told(&mut agent),
             [(2, false, false, 1, revision(5, 0))]
         );
+        // An agent's own Stop, which the Host knows to be that agent's, withdraws nothing of the
+        // user's and moves no generation.
+        stopped_by(&mut agent, 10, "agent:helper", true);
+        assert!(told(&mut agent).is_empty());
+        assert_eq!(agent.user_stop_generation(), 0);
         // The user's Stop fences the pending one; the generation moves.
         paused(&mut agent, 10);
         assert_eq!(told(&mut agent), [(2, true, false, 2, revision(10, 0))]);

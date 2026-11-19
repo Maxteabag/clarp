@@ -2584,7 +2584,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
         .accept_message(message(10_002), world.tick())
         .unwrap();
     let stop = Command::Stop {
-        by: "user".to_string(),
+        by: clarp_kernel::control::Control::by("user"),
     };
     recorder.handle(stop, world.tick()).unwrap();
     let stopped = RunOutcome::Stopped {
