@@ -7,6 +7,7 @@ members = [
     "crates/clarp-ports",
     "crates/clarp-protocol",
     "crates/clarp-shim",
+    "crates/clarp-tool-args",
     "crates/clarp-spool",
     "crates/clarp-codec",
     "crates/clarp-kernel",
@@ -29,6 +30,7 @@ clarp-kernel = { path = "crates/clarp-kernel" }
 clarp-backend = { path = "crates/clarp-backend" }
 clarp-actor = { path = "crates/clarp-actor" }
 clarp-protocol = { path = "crates/clarp-protocol" }
+clarp-tool-args = { path = "crates/clarp-tool-args" }
 clarp-shim = { path = "crates/clarp-shim" }
 clarp-store-sqlite = { path = "crates/clarp-store-sqlite" }
 clarp-store-files = { path = "crates/clarp-store-files" }

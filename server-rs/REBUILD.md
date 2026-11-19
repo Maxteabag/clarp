@@ -1440,6 +1440,18 @@ outstanding kill is sent. A late escalation cannot append to the finished spool.
 The actor counts each step's usage and the turn's own charge. Native history reads the messages and
 parts from the shared SQLite store.
 
+**One stop for every tool.** The shim reserves its child's process-group ID until the turn's end and
+any stop deadline. A stop first asks the direct child only when its backend has a private abort signal.
+It sends TERM to the group and KILL after the caller's grace. A leader that has already exited can
+still have a child holding stdout or stderr: until both streams close and the shim commits Exited,
+a stop can still reach that child. Repeated stops share the first deadline. The terminal record uses
+the observed leader status; cleanup can finish after publication without another record. An unstopped
+background child can continue to write to its turn.
+
+The served driver terminates itself with nix SIGTERM after abort. Its HTTP client has no TLS,
+compression, proxy or redirect handling enabled. Native command arguments, model pairs and confined
+session names are shared with the kernel without linking the Host's speech engines into the shim.
+
 **A conversation made shorter** (17 Nov 2026). `POST /compact`, for Claude Code. The Python Host starts
 the tool's own screen in a terminal and types into it; this Host has no terminal. Measured first, with
 Claude Code 2.1.321 on Sonnet (three calls, the recording kept as a fixture): given `/compact` as its
