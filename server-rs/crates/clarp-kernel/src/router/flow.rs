@@ -56,18 +56,41 @@ const RETRYABLE: &str = "dispatch_retryable";
 const CHANGED: &str = "Message delegator configuration changed";
 const FAILED: &str = "Message routing failed";
 const NOT_SEEN: &str = "I do not see that agent running.";
-/// What a command or a question about an agent is answered where it is not carried out. A
-/// refused command keeps the phrase key its model gave, which is none: the Python Host gives
-/// those sentences no key of their own (its `_command_check`, until its R76).
-const NO_SUCH_AGENT: &str = "I do not have an agent by that name.";
-const WHICH_AGENT: &str = "Which agent did you mean?";
-const CANNOT_CHECK: &str = "I cannot check on that agent from here.";
-const CANNOT_COMMAND: &str = "I cannot do that for that agent from here.";
-const UNSURE_COMMAND: &str = "I am not sure what you wanted me to do.";
-const NO_VOICE_COMMANDS: &str = "That agent does not accept voice commands.";
-const FORK_IN_APP: &str = "Please fork agents from the app.";
+/// One of the router's own sentences, with the key its clip is kept under (the Python Host's
+/// `orchestrator_phrases`): a decision refused in one of them keeps its key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fixed {
+    key: &'static str,
+    text: &'static str,
+}
+
+const fn fixed(key: &'static str, text: &'static str) -> Fixed {
+    Fixed { key, text }
+}
+
+/// What a command or a question about an agent is answered where it is not carried out.
+const NO_SUCH_AGENT: Fixed = fixed("no_such_agent", "I do not have an agent by that name.");
+const WHICH_AGENT: Fixed = fixed("which_agent", "Which agent did you mean?");
+const CANNOT_CHECK: Fixed = fixed("cannot_check", "I cannot check on that agent from here.");
+const CANNOT_COMMAND: Fixed = fixed(
+    "cannot_command",
+    "I cannot do that for that agent from here.",
+);
+const UNSURE_COMMAND: Fixed = fixed("unsure_command", "I am not sure what you wanted me to do.");
+const NO_VOICE_COMMANDS: Fixed = fixed(
+    "no_voice_commands",
+    "That agent does not accept voice commands.",
+);
+const FORK_IN_APP: Fixed = fixed("fork_in_app", "Please fork agents from the app.");
+/// A new agent never takes a name an agent has already, as it is spoken.
+const NAME_TAKEN: Fixed = fixed("name_taken", "I already have an agent by that name.");
+/// The Host refused to start an agent: said, never a silent error.
+const COMMAND_REFUSED: Fixed = fixed("command_refused", "I could not do that.");
 /// A confirmation of a message that is no longer held here: nothing is given in its place.
-const HELD_MESSAGE_GONE: &str = "That message is no longer waiting. Please say it again.";
+const HELD_MESSAGE_GONE: Fixed = fixed(
+    "held_message_gone",
+    "That message is no longer waiting. Please say it again.",
+);
 
 /// A decision as it is kept.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -254,6 +277,8 @@ pub enum Done {
     NotGiven { status: u16, error: String },
     /// An agent was started or made: its session.
     Started { session: String },
+    /// The Host refused to start or make the agent: its word for why. Nothing was done.
+    Refused { code: String },
     /// Something else failed.
     Broke(String),
 }
@@ -276,6 +301,9 @@ pub struct Outcome {
     pub status: u16,
     /// The event the apps are told.
     pub told: Option<Value>,
+    /// What the Host is still to say, after it did what the decision asked: that it refused
+    /// to start an agent.
+    pub say: Option<Say>,
 }
 
 /// One routing under way: what the Host holds from [`Book::begin`] to [`Book::finish`].
@@ -443,7 +471,7 @@ fn command_check(
     shown: &[&str],
     requested: &str,
     agents: &[Member],
-) -> Result<Option<String>, &'static str> {
+) -> Result<Option<String>, Fixed> {
     if !sure {
         return Err(UNSURE_COMMAND);
     }
@@ -453,6 +481,14 @@ fn command_check(
         return Err(FORK_IN_APP);
     }
     if of_agents && asked == "create" {
+        // A name the voice already gives an agent (one that was put away too) is taken: the
+        // Host compares names as they are written only. (A blank name names nobody.)
+        let payload = decision.control_payload.as_ref();
+        let given = payload.and_then(|payload| payload.get("name"));
+        let given = given.and_then(Value::as_str).unwrap_or_default();
+        if !agents_named(agents, given).is_empty() {
+            return Err(NAME_TAKEN);
+        }
         return Ok(None);
     }
     let mut names = vec![python::strip(&decision.target_session)];
@@ -857,7 +893,9 @@ impl Book {
             }
             Done::NotGiven { status, error } => refused(status, error),
             Done::Broke(error) => refused(500, error),
-            Done::Fine | Done::Started { .. } => refused(500, FAILED.to_string()),
+            Done::Fine | Done::Started { .. } | Done::Refused { .. } => {
+                refused(500, FAILED.to_string())
+            }
         }
     }
 
@@ -1250,9 +1288,10 @@ impl Book {
                 // words to an agent as a message.
                 Err(refusal) => {
                     decision.kind = CLARIFY.to_string();
+                    decision.phrase_key = refusal.key.to_string();
                     action = Some(CLARIFY);
                     if !routing.fallback_request {
-                        let said = self.as_agent(requested, refusal, "", around);
+                        let said = self.as_agent(requested, refusal.text, refusal.key, around);
                         effects.extend(said.map(Effect::Say));
                     }
                 }
@@ -1293,7 +1332,9 @@ impl Book {
                         // the confirmation is not given in its place.
                         action = Some(CLARIFY);
                         decision.kind = CLARIFY.to_string();
-                        let said = self.as_agent(requested, HELD_MESSAGE_GONE, "", around);
+                        decision.phrase_key = HELD_MESSAGE_GONE.key.to_string();
+                        let gone = HELD_MESSAGE_GONE;
+                        let said = self.as_agent(requested, gone.text, gone.key, around);
                         effects.extend(said.map(Effect::Say));
                     } else {
                         let own = python::strip(&decision.text_to_send);
@@ -1362,7 +1403,7 @@ impl Book {
                     1 => CANNOT_CHECK,
                     _ => WHICH_AGENT,
                 };
-                refusal.to_string()
+                refusal.text.to_string()
             };
             effects.push(router_says(text));
         }
@@ -1468,7 +1509,7 @@ impl Book {
             mut error,
         } = plan;
         let now = around.now_ms;
-        let (mut given, mut refused_with) = (None, 0);
+        let (mut given, mut refused_with, mut say) = (None, 0, None);
         match done {
             Done::Fine => {}
             Done::Given { session, backend } => {
@@ -1485,6 +1526,18 @@ impl Book {
                 (error, action, refused_with) = (why, ERROR.to_string(), status);
             }
             Done::Started { session } => target = session,
+            // Refused by the Host (a name or a session in use, ...): said, and kept as a
+            // question, never as a silent error.
+            Done::Refused { code } => {
+                (error, action) = (code, CLARIFY.to_string());
+                let refused = COMMAND_REFUSED;
+                say = self.as_agent(
+                    &routing.requested_session,
+                    refused.text,
+                    refused.key,
+                    around,
+                );
+            }
             Done::Broke(why) => (error, action) = (why, ERROR.to_string()),
         }
         let message = routing.message();
@@ -1523,6 +1576,7 @@ impl Book {
             error,
             status,
             told: Some(told),
+            say,
         };
         if let Some((session, backend)) = given {
             outcome = Outcome {

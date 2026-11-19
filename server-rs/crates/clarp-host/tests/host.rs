@@ -11192,6 +11192,173 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
 }
 
 #[test]
+fn the_router_shows_twenty_agents_in_detail_and_says_a_start_the_host_refuses() {
+    let place = Place::new("router-many");
+    let (claude, asked) = (place.root.join("claude-routes"), place.root.join("asked"));
+    // A stand-in for the router's model: it writes down, of each asking, how far it saw and which agents
+    // it was shown in detail (with what they are doing) and what they were last told; it is not sure of
+    // "uh", which it is asked again with everyone in view, and makes an agent of "make", without a name.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, sys
+packet = json.loads(sys.stdin.read().split("INPUT:\n", 1)[1])
+shown = {{"scope": packet["context_scope"], "listed": [agent["session"] for agent in packet["agents"]],
+         "detailed": [agent["session"] for agent in packet["agents"] if agent["state"]],
+         "told": {{agent["session"]: [said["text"] for said in agent["recent_user_messages"]]
+                  for agent in packet["agents"] if agent["recent_user_messages"]}}}}
+with open({asked}, "a") as out:
+    out.write(json.dumps(shown) + "\n")
+if "make" in packet["utterance"]:
+    print(json.dumps({{"kind": "agent_control", "control_action": "create", "confidence": 0.9}}))
+else:
+    print(json.dumps({{"kind": "ignored", "confidence": 0.5}}))
+"#,
+        asked = serde_json::to_string(asked.to_str().unwrap()).unwrap(),
+    );
+    program(&claude, &script);
+    // What the router says aloud is made by a stand-in engine of speech on this machine.
+    let voice = cartesia_stand_in(vec![7; 2_000]);
+    let keys = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &keys,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n[cartesia.voices]\n\
+         Mike = \"voice-of-mike\"\n",
+    )
+    .unwrap();
+    let args = ["--speech-keys", keys.to_str().unwrap()];
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let heard = host.listen();
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    // Twenty-four agents, the oldest first: Mike, Rachel, and twenty-two more. The first of the
+    // twenty-two is told something, which makes it the one most recently active; then Rachel is opened
+    // (a message sent to an agent opens that agent).
+    let (mike, rachel) = (host.new_agent("Mike"), host.new_agent("Rachel"));
+    let others: Vec<String> = (1..=22)
+        .map(|n| host.new_agent(&format!("Agent {n:02}")))
+        .collect();
+    assert_eq!(others[0], "agent-01");
+    host.send(&others[0], "the first of them is told", "t-0");
+    wait_for("its answer", || {
+        host.conversation(&others[0])
+            .iter()
+            .any(|(role, _)| role == "assistant")
+    });
+    let (status, _) = host.ask("POST", "/select", Some(&json!({ "session": rachel })));
+    assert_eq!(status, 200);
+    let roster = || {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let before = roster();
+    let set = json!({ "enabled": true, "fallback_only": false, "provider": "claude" });
+    let (status, on) = host.ask("POST", "/orchestrator/settings", Some(&set));
+    assert_eq!(status, 200, "{on}");
+    let dictate = |text: &str, id: &str| {
+        let message = json!({
+            "session": mike, "text": text, "hands_free": true, "client_msg_id": id,
+        });
+        host.ask("POST", "/send", Some(&message))
+    };
+
+    // Not sure: asked again with everyone in view. The first asking shows the agent spoken to and the
+    // one that is open in detail; the second, with everyone listed, those two and the twenty most
+    // recently active of the others: Agent 01, told last, and Agents 04 to 22; Agents 02 and 03, the
+    // least recent, by name only. Only the last words of those shown in detail are read.
+    let (status, sent) = dictate("uh, maybe", "r-1");
+    assert_eq!(status, 200, "{sent}");
+    let asked_now = questions();
+    assert_eq!(asked_now.len(), 2, "{asked_now:?}");
+    let (first, second) = (&asked_now[0], &asked_now[1]);
+    assert_eq!(first["scope"], "focused");
+    assert_eq!(first["detailed"], json!([mike, rachel]));
+    assert_eq!(second["scope"], "all");
+    let everyone: Vec<String> = [mike.clone(), rachel.clone()]
+        .into_iter()
+        .chain(others.clone())
+        .collect();
+    assert_eq!(second["listed"], json!(everyone));
+    let mut in_detail = vec![mike.clone(), rachel.clone(), others[0].clone()];
+    in_detail.extend(others[3..].iter().cloned());
+    assert_eq!(second["detailed"], json!(in_detail));
+    assert_eq!(in_detail.len(), 22);
+    assert_eq!(
+        second["told"],
+        json!({ "agent-01": ["the first of them is told"] })
+    );
+
+    // Told to make an agent, of no name: the Host itself refuses to make it. Said in the router's fixed
+    // sentence, in the voice of the agent spoken to; kept as a question with the Host's word for why;
+    // and no agent is made.
+    let (status, made) = dictate("make a new agent", "r-2");
+    let decided = &made["orchestrator"];
+    assert_eq!(
+        (status, &made["ok"], &made["session"], &decided["action"]),
+        (200, &json!(true), &json!(mike), &json!("clarify")),
+        "{made}"
+    );
+    assert_eq!(made["error"], "name required", "{made}");
+    assert_eq!(roster(), before);
+    let newest = host.get("/orchestrator/decisions?limit=1")["decisions"][0].clone();
+    assert_eq!(
+        (
+            &newest["final_action"],
+            &newest["decision_kind"],
+            &newest["error"]
+        ),
+        (
+            &json!("clarify"),
+            &json!("agent_control"),
+            &json!("name required")
+        ),
+        "{newest}"
+    );
+    wait_for("the refusal to be said", || {
+        voice
+            .asked()
+            .iter()
+            .any(|request| request["transcript"] == "I could not do that.")
+    });
+    let said = voice.asked();
+    let refusal = said
+        .iter()
+        .find(|request| request["transcript"] == "I could not do that.")
+        .unwrap();
+    assert_eq!(refusal["voice"]["id"], "voice-of-mike", "{refusal}");
+    // Said before the apps are told what was decided.
+    wait_for("what was decided to be told", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "orchestrator-decision" && event["action"] == "clarify")
+    });
+    let told = heard.lock().unwrap().clone();
+    let clip = told
+        .iter()
+        .position(|event| event["type"] == "audio" && event["session"] == json!(mike));
+    let decision = told
+        .iter()
+        .position(|event| event["type"] == "orchestrator-decision" && event["action"] == "clarify");
+    assert!(clip.unwrap() < decision.unwrap(), "{told:?}");
+}
+
+#[test]
 fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
     let place = Place::new("started-again");
     let host = place.start();

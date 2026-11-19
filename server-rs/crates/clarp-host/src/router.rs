@@ -43,7 +43,7 @@ use clarp_kernel::python;
 use clarp_kernel::router::flow::{
     self, Begun, Book, Done, Effect, Give, Next, Outcome, Routing, Say, Start,
 };
-use clarp_kernel::router::packet::{Came, Member, Said, State as Doing};
+use clarp_kernel::router::packet::{Came, InView, Member, Said, State as Doing, in_view};
 use clarp_kernel::router::{self as rules, JOB, POLICY};
 use clarp_protocol::requests::SendRequest;
 use clarp_protocol::responses::SendResponse;
@@ -59,8 +59,6 @@ const KIND: &str = "router";
 const ALL: &str = "all";
 /// How much of an agent's conversation is read for what it was last told and said.
 const READ_BACK: usize = 60;
-/// Of how many agents the last words are shown when every agent is in view.
-const WHOLE_MOST: usize = 20;
 /// The setting an app keeps of how a message that names nobody finds its agent, and what
 /// it can be: the apps apply it; the Host keeps it.
 const ADDRESSING: &str = "orchestrator.addressing_mode";
@@ -179,13 +177,17 @@ async fn said_of(member: &Fellow) -> Vec<Said> {
 }
 
 /// Every agent of the Host as the router sees it: the roster in its order, then the
-/// janitors, which are looked at and not spoken to. `whole`: with the last words of the
-/// agents that were last active; otherwise with those of the agent the message was said
-/// to and of the one that is open, which is all a first asking shows.
+/// janitors, which are looked at and not spoken to. Of those a packet shows in detail, and of
+/// no other, the last words are read (`packet::in_view`): the agent the message was said to
+/// and the one that is open, and with everyone in view (`whole`) the most recently active.
+/// `only`: the agents of a call; `asked_for`: an app asks, that could place the message by
+/// no name.
 async fn members(
     app: &App,
     given: &BTreeMap<String, Vec<Said>>,
     requested: &str,
+    only: Option<&[String]>,
+    asked_for: bool,
     whole: bool,
 ) -> Vec<Member> {
     let directory = app.fleet.directory();
@@ -217,24 +219,25 @@ async fn members(
         };
         all.push((member, fellow.as_ref()));
     }
-    // Whose last words are read: the two a first asking shows, and with everyone in view
-    // the agents that were last active.
-    let mut recent: Vec<(i64, &str)> = all
-        .iter()
-        .filter(|(member, _)| member.voice_target && !member.archived)
-        .map(|(member, _)| (member.last_activity, member.agent_id.as_str()))
-        .collect();
-    recent.sort_by_key(|(active, _)| std::cmp::Reverse(*active));
-    let most = if whole { WHOLE_MOST } else { 0 };
-    let recent: Vec<String> = recent
+    // Whose last words are read: those the packet will show in detail, as it chooses them.
+    let bare: Vec<Member> = all.iter().map(|(member, _)| member.clone()).collect();
+    let view = InView {
+        agents: &bare,
+        requested_session: requested,
+        focus: open,
+        only_sessions: only,
+        fallback_request: asked_for,
+        scope_all: whole,
+        now_ms: app.clock.now_ms(),
+    };
+    let chosen: Vec<String> = in_view(&view)
         .into_iter()
-        .take(most)
-        .map(|(_, id)| id.to_string())
+        .filter(|(_, detail)| *detail)
+        .map(|(member, _)| member.agent_id.clone())
         .collect();
     let mut seen = Vec::with_capacity(all.len());
     for (mut member, fellow) in all {
-        let near = member.session == requested || open == Some(member.agent_id.as_str());
-        if member.voice_target && (near || recent.contains(&member.agent_id)) {
+        if chosen.contains(&member.agent_id) {
             member.said = said_of(fellow).await;
             let own = given.get(&member.agent_id);
             member.said.extend(own.into_iter().flatten().cloned());
@@ -382,9 +385,13 @@ async fn start(app: &App, start: &Start) -> Done {
         Ok(made) => Done::Started {
             session: made["session"].as_str().unwrap_or_default().to_string(),
         },
+        // Refused, in the Python Host's word for why (its lifecycle's `code`): the router says so
+        // and keeps it as a question.
         Err((_, told)) => {
-            let why = told["message"].as_str().or(told["error"].as_str());
-            Done::Broke(why.unwrap_or("the agent could not be made").to_string())
+            let why = told["error"].as_str().or(told["message"].as_str());
+            Done::Refused {
+                code: why.unwrap_or("the agent could not be made").to_string(),
+            }
         }
     }
 }
@@ -503,7 +510,7 @@ pub(crate) async fn route(
     }
     let text = python::strip(&request.text);
     let given = desk.read(app, |book| book.given.clone()).await?;
-    let mut agents = members(app, &given, requested, false).await;
+    let mut agents = members(app, &given, requested, only, asked_for, false).await;
     let message = flow::Message {
         text,
         requested_session: requested,
@@ -533,7 +540,7 @@ pub(crate) async fn route(
             let mut next = answered.await?;
             if next == Next::AskAgain {
                 // Everyone is put in view: now the others' last words are read too.
-                agents = members(app, &given, requested, true).await;
+                agents = members(app, &given, requested, only, asked_for, true).await;
                 let widened = desk.step(app, &agents, |book, around| {
                     book.widen(&mut routing, around)
                 });
@@ -561,7 +568,13 @@ pub(crate) async fn route(
                     let finished = desk.step(app, &agents, |book, around| {
                         book.finish(&routing, plan, done, latency, around)
                     });
-                    finished.await?
+                    let outcome = finished.await?;
+                    // What is still to be said (a start the Host refused), before the apps
+                    // are told what was decided, as the Python Host says it.
+                    if let Some(words) = &outcome.say {
+                        say(app, words).await;
+                    }
+                    outcome
                 }
             }
         }
