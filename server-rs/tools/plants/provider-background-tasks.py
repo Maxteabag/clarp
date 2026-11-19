@@ -77,7 +77,7 @@ PLANTS=[
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'mirror an ordinary worker', 'job["heartbeat_source"] == "provider_event"', 'true'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'replace provider state durably on wire', 'json!("superseded")', 'json!("stopped")'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'omit display-only indicator', 'shown["projection_only"] = json!(true)', 'shown["projection_only"]=json!(false)'),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'use wrong replacement id', 'other["job_id"].clone()', 'job["job_id"].clone()'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'use wrong replacement id', 'shown["replaced_by_job_id"] = json!(id)', 'shown["replaced_by_job_id"] = job["job_id"].clone()'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'allow mirror clock regression', 'at.max(job["updated_at"].as_i64().unwrap_or(0))', 'at'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'change cancellation response', '"provider_task_cancel_unsupported"', '"cancelled"'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'claim cancellation changed the job', '"changed":false', '"changed":true'),
