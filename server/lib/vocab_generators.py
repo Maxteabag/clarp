@@ -92,10 +92,18 @@ def _dedupe(terms: Iterable[Term]) -> list[Term]:
     return result
 
 
+AGENT_NAME_RARITY = 0.9
+
+
 def agents_pack(names: Iterable[str], *, pack: str = "agents") -> list[Term]:
-    """Personas the user can address by name."""
+    """Personas the user can address by name, in the order given (R109: the likeliest first).
+
+    Every name has the same rarity, so every name the same score: the budget's sorts are
+    stable and keep this order, and the cut takes the first names that fit. A score from the
+    name's shape (a CamelCase or snake_case name rated rarer) would put such names ahead of the
+    ones the user is likelier to say."""
     return _dedupe(
-        Term(text=name.strip(), pack=pack, rarity=max(estimate_rarity(name), 0.9))
+        Term(text=name.strip(), pack=pack, rarity=AGENT_NAME_RARITY)
         for name in names
         if str(name or "").strip()
     )

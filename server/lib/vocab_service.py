@@ -27,6 +27,15 @@ class VocabService:
         self._stt = stt
 
     def active_agent_names(self) -> list[str]:
+        """The names a user may say to address an agent, the likeliest first (R109).
+
+        Only agents that are neither deleted nor archived, and that can be addressed by voice
+        (not janitors). The user's own agents before helpers; within each, the most recently
+        used first (the latest turn's start, read through the turns(agent_id, started_at)
+        index, one seek per agent); ties by creation, so the order holds from one call to the
+        next while nothing is used. A helper is an agent whose role is 'helper' or that has a
+        parent (parent_agent_id). The prompt's budget then takes the names in this order and
+        skips one that does not fit (vocab.build_initial_prompt)."""
         names: list[str] = []
         seen: set[str] = set()
 
@@ -39,9 +48,16 @@ class VocabService:
 
         try:
             from . import agents as agents_db  # local: avoid startup cycles
-            for info in agents_db.list_agents():
-                if agents_db.interaction_capabilities(info)["can_voice_target"]:
-                    add(info.get("persona"))
+            live = [info for info in agents_db.list_agents()
+                    if not info.get("archived_at")
+                    and agents_db.interaction_capabilities(info)["can_voice_target"]]
+            used = _last_used(info["agent_id"] for info in live)
+            live.sort(key=lambda info: (
+                info.get("role") == "helper" or bool(info.get("parent_agent_id")),
+                -(used.get(info["agent_id"]) or 0),
+                int(info.get("created_at") or 0), str(info["agent_id"])))
+            for info in live:
+                add(info.get("persona"))
         except Exception as e:  # noqa: BLE001 - prompt bias must never break STT
             log_exception("vocabAgentsFail", e)
         return names
@@ -259,3 +275,19 @@ class VocabService:
                 corrections=corrections,
             ),
         )
+
+
+def _last_used(agent_ids) -> dict[str, int]:
+    """When each agent's latest turn began (ms): one index seek per agent, no message read."""
+    from .db import conn
+    ids = list(agent_ids)
+    used: dict[str, int] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        marks = ",".join("?" for _ in chunk)
+        for row in conn().execute(
+                f"SELECT a.agent_id, (SELECT MAX(t.started_at) FROM turns t WHERE t.agent_id = a.agent_id) "
+                f"AS used FROM agents a WHERE a.agent_id IN ({marks})", chunk):
+            if row[1] is not None:
+                used[str(row[0])] = int(row[1])
+    return used
