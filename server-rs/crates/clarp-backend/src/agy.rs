@@ -514,7 +514,8 @@ pub struct AgyInterpreter {
     /// The steps whose usage is counted, by their index as the Python Host writes it.
     counted: BTreeSet<String>,
     /// The lines that are not taken twice: a DONE, a tool's step, the first line and the result,
-    /// each as written, keys in order.
+    /// each by the digest of it as written, keys in order (a tool's step can carry all the tool
+    /// printed: the line itself is not kept a second time).
     seen: BTreeSet<String>,
     /// Antigravity said how the turn ended: well, or with what went wrong.
     result: Option<Result<(), String>>,
@@ -574,7 +575,7 @@ impl AgyInterpreter {
         let once = matches!(text_of(&event["event"]), "init" | "result")
             || update["state"] == "DONE"
             || update["step_type"] == "tool";
-        if once && !self.seen.insert(clarp_kernel::python::canonical(&event)) {
+        if once && !self.seen.insert(clarp_kernel::live_call::digest(&event)) {
             return;
         }
         match text_of(&event["event"]) {
