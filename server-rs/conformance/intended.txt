@@ -232,6 +232,17 @@ f85f0a1fc780  past-sessions: its file, with a message after
 # it from then on (docs/differences.md, registered one by one).
 d90e2215ebd4  oracle-delegations: the answer to the delegation, before the agent's first turn
 
+# A reply that the Python Host stores twice (reference defect R89: a reply left as a live row
+# beside its imported final row). It shows or does not, from run to run, on the same tree: run
+# 44424594522 had it in both recordings of the reference, runs 44425653605 and 44426289871 on the
+# same tree did not. Where it shows, the conversation has one row more there and what names the
+# last message follows it. This Host stores the reply once. Registered as a defect of the
+# reference, by the release owner's word of 19 Nov 2026, not as something meant.
+edc09f29e363  the-apps-own-ids: one row more in the conversation (shows or does not, from run to run)
+ccbe384d767a  the-apps-own-ids: the row that follows, which has its turn here (shows or does not)
+4b93f4c845e3  the-apps-own-ids: the agent's last message id at rest (shows or does not)
+9a8446c9a7f4  the-apps-own-ids: the notification's source message id (shows or does not)
+
 # AWAITING A PORT. The reference moved, and this Host follows it on a branch that is in work. Each line
 # says which change of the reference it is, is dated, and goes with the landing of its port; a line
 # that stands here for more than a few days is a defect of the rebuild's own.
