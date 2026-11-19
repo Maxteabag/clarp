@@ -335,6 +335,11 @@ impl Agent {
         self.backend_session.as_deref()
     }
 
+    // Old events remain readable. A refused binding leaves the next launch fresh.
+    fn bind_session(&mut self, name: Option<&str>) {
+        self.backend_session = name.filter(|id| crate::native_session_name(id)).map(str::to_owned);
+    }
+
     /// Whether the agent came from another Host, where it had worked. One that has run no
     /// turn here is then at rest, and not new.
     pub fn arrived(&self) -> bool {
@@ -700,12 +705,12 @@ impl Agent {
             AgentEvent::Adopted {
                 backend_session, ..
             } => {
-                self.backend_session.clone_from(backend_session);
+                self.bind_session(backend_session.as_deref());
                 self.arrived = true;
             }
             AgentEvent::TookUp {
                 backend_session, ..
-            } => self.backend_session = Some(backend_session.clone()),
+            } => self.bind_session(Some(backend_session)),
             AgentEvent::StartedAgain { .. } => self.backend_session = None,
             AgentEvent::Labelled { text, at_ms } => {
                 self.resting = Some(if text.is_empty() {
@@ -767,7 +772,7 @@ impl Agent {
                 return Ok(());
             };
             if let TurnEvent::Bound { backend_session } = change {
-                self.backend_session = Some(backend_session.clone());
+                self.bind_session(Some(backend_session));
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
