@@ -485,19 +485,17 @@ impl Send {
     }
 }
 
-/// The agent's sends whose state can still change: admitted, not handed over, their turn not
-/// over. What changes leaves through [`Ledger::take`]; a send that can no longer change leaves
-/// the ledger. Folding the log when the Host starts, nothing leaves: what changed before is not
-/// told again.
+/// The agent's user sends whose turn is not over, handed over or not: what a row of one shows,
+/// and whose launch is told. What changes leaves through [`Ledger::take`], and a send leaves the
+/// ledger when its turn is over. Folding the log when the Host starts, nothing is told: what
+/// changed before is not told again, and what is held is as it was.
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
-    waiting: std::collections::BTreeMap<u64, Send>,
+    sends: std::collections::BTreeMap<u64, Send>,
     changed: Vec<Send>,
-    /// The turns of shown sends whose tool was just launched, in order: each launch is told
-    /// (`delivery-updated`), also a launch anew after a wait for an account.
+    /// The turns whose tool was just launched, in order: each launch is told (`delivery-updated`),
+    /// also a launch anew after a wait for an account.
     launched: Vec<u64>,
-    /// The shown sends whose turn is not over: what a launch of a turn is told for.
-    open: std::collections::BTreeSet<u64>,
     folding: bool,
 }
 
@@ -505,16 +503,21 @@ pub struct Ledger {
 /// the log is being folded, is the moment's.
 impl PartialEq for Ledger {
     fn eq(&self, other: &Self) -> bool {
-        self.waiting == other.waiting
+        self.sends == other.sends
     }
 }
 
 impl Eq for Ledger {}
 
 impl Ledger {
-    /// The sends that can still change, in turn order.
-    pub fn waiting(&self) -> impl Iterator<Item = &Send> {
-        self.waiting.values()
+    /// The sends whose turn is not over, in turn order.
+    pub fn sends(&self) -> impl Iterator<Item = &Send> {
+        self.sends.values()
+    }
+
+    /// Whether a turn's send is held: its turn is not over.
+    pub fn holds(&self, turn: u64) -> bool {
+        self.sends.contains_key(&turn)
     }
 
     /// While the log is folded, what changes is not kept to be told.
@@ -534,7 +537,7 @@ impl Ledger {
 
     /// A turn's tool is launched: told where its send is shown.
     pub(crate) fn launch(&mut self, turn: u64) {
-        if self.open.contains(&turn) && !self.folding {
+        if self.sends.contains_key(&turn) && !self.folding {
             self.launched.push(turn);
         }
     }
@@ -564,14 +567,17 @@ impl Ledger {
             at_ms,
         };
         self.tell(send.clone());
-        self.waiting.insert(turn, send);
-        self.open.insert(turn);
+        self.sends.insert(turn, send);
     }
 
-    /// The user's Stop: every send that is pending is fenced, each with its own revision.
+    /// The user's Stop: every send that is pending (neither fenced nor handed over) is fenced,
+    /// each with its own revision.
     pub(crate) fn fence(&mut self, position: u64, at_ms: i64) {
         let mut told = Vec::new();
-        let pending = self.waiting.values_mut().filter(|send| !send.fenced);
+        let pending = self
+            .sends
+            .values_mut()
+            .filter(|send| !send.fenced && !send.handed);
         for (place, send) in (0u64..).zip(pending) {
             send.fenced = true;
             send.moved(revision(position, place), at_ms);
@@ -582,24 +588,20 @@ impl Ledger {
         }
     }
 
-    /// Its tool is handed the message: it can change no more.
+    /// Its tool, or the queue that keeps it, has the message: handed over, once.
     pub(crate) fn hand(&mut self, turn: u64, seq: u64, at_ms: i64) {
-        if let Some(mut send) = self.waiting.remove(&turn) {
-            send.handed = true;
-            send.moved(seq, at_ms);
-            self.tell(send);
-        }
+        let Some(send) = self.sends.get_mut(&turn).filter(|send| !send.handed) else {
+            return;
+        };
+        send.handed = true;
+        send.moved(seq, at_ms);
+        let told = send.clone();
+        self.tell(told);
     }
 
-    /// Its turn is over without its tool having had it: it stays as it is, and can change no more.
+    /// Its turn is over: it leaves the ledger as it is.
     pub(crate) fn over(&mut self, turn: u64) {
-        self.open.remove(&turn);
-        if let Some(send) = self.waiting.remove(&turn) {
-            self.tell(Send {
-                rev: send.rev,
-                ..send
-            });
-        }
+        self.sends.remove(&turn);
     }
 }
 
@@ -751,7 +753,7 @@ mod tests {
         turn(&mut folded, 3, 1, TurnEvent::Started { at_ms: 1_100 });
         assert!(folded.deliveries_mut().take().is_empty());
         assert!(folded.deliveries_mut().take_launched().is_empty());
-        assert_eq!(folded.deliveries().waiting().count(), 0);
+        assert_eq!(folded.deliveries().sends().count(), 1);
     }
 
     #[test]
