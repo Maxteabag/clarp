@@ -20,9 +20,9 @@
 //! newer than the one remembered says nothing and changes nothing; one that says more than
 //! all or less than nothing was used is no reading.
 //!
-//! One thing is not as there: a window whose time of seeing is no text (nothing, a number) is
-//! passed over here, where the Python Host's look breaks on it and every look after it does
-//! too, its run left running (`docs/reference-defects.md`).
+//! A window whose time of seeing is no text (nothing, a number) is passed over, and the rest
+//! are read (R100, fixed by the Python Host's PR 456). A notice nobody got because the
+//! transport failed waits and is tried again (R105, its PR 457): [`delivering`], [`after_push`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -313,6 +313,9 @@ pub fn looked(usage: &Value, owner: &Owner<'_>, memory: &mut dyn Memory) -> Vec<
                 "reason": REASON,
                 "recovery_mode": owner.recovery_mode,
                 "owner_generation": owner.generation,
+                // What a retry needs (R105): the window it speaks of, and when that resets.
+                "window_key": key,
+                "resets_at": window.get("resets_at").cloned().unwrap_or(Value::Null),
             });
             notices.push(Notice {
                 provider: provider_id.clone(),
@@ -345,6 +348,134 @@ pub fn recovery(provider: &str, mode: &str, spent: bool, accounts: Accounts) -> 
             json!({ "status": "unconfigured", "reason": why })
         }
     })
+}
+
+/// What a look that stopped part-way says of its run (the Python Host's `_close_unfinished`,
+/// R100): it failed, and what it read before is kept. `why`: the kind of what stopped it.
+pub fn stopped(why: &str) -> String {
+    format!("The check stopped ({why}); what it read before is kept")
+}
+
+/// What became of a notice's push: whether nobody got it because the transport failed (R105:
+/// pushes on, not held back, no phone took it, and at least one send failed). One a phone took,
+/// beside failures, is delivered; one that was never meant to reach anyone is not this.
+pub fn transport_failed(delivery: &Value) -> bool {
+    if !delivery["enabled"].as_bool().unwrap_or(false) || python::truthy(&delivery["suppressed"]) {
+        return false;
+    }
+    let count = |key: &str| delivery[key].as_i64().unwrap_or(0);
+    count("sent") == 0 && count("failed") >= 1
+}
+
+/// Whether the window a notice speaks of has begun anew by `now_ms` (`resets_at`, read as the
+/// Python Host's `_iso_to_ms` reads it: a moment without its offset is in UTC).
+pub fn window_has_reset(payload: &Value, now_ms: i64) -> bool {
+    let reset = payload["resets_at"].as_str().map(str::trim).filter(|at| !at.is_empty());
+    let reset = reset.and_then(instant).map(|(at, _)| (seconds(at) * 1000.0).trunc() as i64);
+    reset.is_some_and(|reset| now_ms >= reset)
+}
+
+/// What a look does with a notice that waits to be delivered (`deliver_notifications`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Deliver {
+    /// Left as it is: another keeper's, or one tried too lately to be tried again yet.
+    Wait,
+    /// Settled without a push, with this for what became of it.
+    Settle(Value),
+    /// Pushed now.
+    Push,
+}
+
+/// A notice that waits, as `deliver_notifications` reads it: its id, when it was written, and
+/// its payload.
+pub type Waiting<'a> = (&'a str, i64, &'a Value);
+
+/// What a look does with each notice that waits, in the order they were written (`R105`): one
+/// of another keeper is left; one of another generation is cancelled; of the notices of one
+/// window the newest is the one that is sent, and an older one is settled as superseded by it;
+/// one that was tried already is let go once its window has reset, and otherwise waits until
+/// the keeper's interval has passed since its last attempt.
+pub fn delivering(
+    waiting: &[Waiting<'_>],
+    (agent_id, generation): (&str, u64),
+    interval_seconds: i64,
+    now_ms: i64,
+) -> Vec<(String, Deliver)> {
+    let mut ordered: Vec<&Waiting<'_>> = waiting.iter().collect();
+    ordered.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));
+    let threshold = |payload: &Value| payload["reason"] == REASON;
+    let mut newest: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for (id, _, payload) in &ordered {
+        if let Some(key) = payload["window_key"].as_str().filter(|key| threshold(payload) && !key.is_empty()) {
+            newest.insert(key, id);
+        }
+    }
+    let mut done = Vec::new();
+    for (id, _, payload) in ordered {
+        if payload["agent_id"] != agent_id {
+            continue;
+        }
+        if payload["owner_generation"] != generation {
+            done.push((id.to_string(), Deliver::Settle(json!({ "cancelled": SET_ANEW }))));
+            continue;
+        }
+        let retry = &payload["delivery_retry"];
+        let attempts = retry["attempts"].as_i64().unwrap_or(0);
+        let key = payload["window_key"].as_str().filter(|key| !key.is_empty());
+        if let Some(newer) = key
+            .filter(|_| threshold(payload))
+            .and_then(|key| newest.get(key))
+            .filter(|newer| **newer != *id)
+        {
+            let settled = json!({ "superseded": newer, "attempts": attempts });
+            done.push((id.to_string(), Deliver::Settle(settled)));
+            continue;
+        }
+        if attempts > 0 && window_has_reset(payload, now_ms) {
+            let settled = json!({ "expired": "The window has reset", "attempts": attempts });
+            done.push((id.to_string(), Deliver::Settle(settled)));
+            continue;
+        }
+        let last = retry["at"].as_i64().unwrap_or(0);
+        if attempts > 0 && now_ms < last + interval_seconds * 1000 {
+            done.push((id.to_string(), Deliver::Wait));
+            continue;
+        }
+        done.push((id.to_string(), Deliver::Push));
+    }
+    done
+}
+
+/// What is pushed of a notice: all of its payload but its tries.
+pub fn pushed_of(payload: &Value) -> Value {
+    let mut pushed = payload.clone();
+    if let Some(fields) = pushed.as_object_mut() {
+        fields.remove("delivery_retry");
+    }
+    pushed
+}
+
+/// What became of a notice's push, written on it: `None` where nobody got it because the
+/// transport failed (it waits, its attempt written on its payload, R105); else what it is
+/// settled with, the attempts with it where it was tried before.
+pub fn after_push(payload: &mut Value, delivery: Value, now_ms: i64) -> Option<Value> {
+    let attempts = payload["delivery_retry"]["attempts"].as_i64().unwrap_or(0);
+    if payload["reason"] == REASON && transport_failed(&delivery) {
+        let count = |key: &str| delivery[key].as_i64().unwrap_or(0);
+        payload["delivery_retry"] = json!({
+            "attempts": attempts + 1, "at": now_ms,
+            "last": { "sent": count("sent"), "failed": count("failed"), "disabled": count("disabled") },
+        });
+        return None;
+    }
+    if !delivery.is_object() {
+        return Some(json!({}));
+    }
+    let mut delivery = delivery;
+    if attempts > 0 {
+        delivery["attempts"] = json!(attempts + 1);
+    }
+    Some(delivery)
 }
 
 /// What a run of the keeper says of itself: how it went, its line, and its result.
