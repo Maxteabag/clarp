@@ -517,7 +517,9 @@ are the Python Host's (`server/lib/html_forms.py`), held by 71 recorded calls of
 end (`tests/host.rs`, an agent asks its user with a form), and by the scenario `forms`. The vectors found a
 fault that had nothing to do with forms: a fraction of seventeen digits could be read one step off
 (`9.999999900000001e-05` as `9.9999999e-05`), so a number an agent published could come back as another;
-fractions are read exactly now (`float_roundtrip`). Whether the agent speaks the reply is kept with the answers.
+fractions are read exactly now (`float_roundtrip`). The submission’s audio preference follows the queued message onto its own turn.
+The ordinary output pipeline voices the agent’s marked reply and announces its clip with the
+turn’s trace. Resending the submission only returns the receipt.
 
 **What an app asks of any Host** (16 Nov 2026). The load was counted on the live Host's own log: in three
 days its clients made 147,704 requests over 469 routes, and 69.3 per cent of them went to routes this Host

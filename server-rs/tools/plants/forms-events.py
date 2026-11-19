@@ -79,5 +79,14 @@ for why,old,new in [
     ('overwrite flag ignored','options.flags.contains("--overwrite")','false'),
     ('no-overwrite refuses a new export','!overwrite && target.exists()','!overwrite || target.exists()'),
 ]: change(T,why,old,new)
+RUNS['reply']=['test','--test','host','a_forms_spoken_answer_belongs_to_the_submission_that_requested_it']
+for why,old,new in [
+ ('all form replies are spoken','speak: spoken,','speak: true,'),
+ ('no form replies are spoken','speak: spoken,','speak: false,'),
+ ('form answers are attached to the wrong message','format!("u-html-form-{submission_id}")','format!("u-{submission_id}")'),
+]:
+    PLANTS.append(('clarp-host/src/library.rs','reply',why,old,new))
+
+PLANTS.append(('clarp-host/src/edge.rs','reply','queued form conceals its audio choice','"synthesize_audio": message.speak','"synthesize_audio": false'))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

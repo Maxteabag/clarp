@@ -15790,6 +15790,154 @@ fn a_forms_events_are_private_append_only_and_exported_at_one_snapshot() {
 }
 
 #[test]
+fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
+    let place = Place::new("form-reply-audio");
+    let voice = cartesia_stand_in(vec![8; 2000]);
+    let settings = place.root.join("voice.toml");
+    std::fs::write(&settings,"[tts]\nprovider='cartesia'\n[cartesia]\napi_key='fixture'\n[cartesia.voices]\nSpeaker='fixture-voice'\n").unwrap();
+    let host = place.start_in(
+        "",
+        &["--speech-keys", settings.to_str().unwrap()],
+        &[
+            ("CLARP_CARTESIA_ENDPOINT", &voice.address),
+            ("GEMINI_API_KEY", ""),
+            ("GOOGLE_VERTEX_API_KEY", ""),
+        ],
+    );
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["html_form_reply_audio"],
+        50
+    );
+    let agent = host.new_agent("Speaker");
+    let events = host.listen();
+    let created = json!({"session":agent,"type":"html_form","artifact_id":"audio-form","title":"Plan <speak>Read the reply</speak>","payload":{"content":"<p>Plan</p>","version":"v1","answer_schema":{"type":"object","properties":{"note":{"type":"string"}}}}});
+    assert_eq!(host.ask("POST", "/artifacts", Some(&created)).0, 201);
+    let submit = |id: &str, words: &str, audio: Option<bool>| {
+        let mut data = json!({"version":"v1","submission_id":id,"answers":{"note":words}});
+        if let Some(audio) = audio {
+            data["synthesize_audio"] = json!(audio);
+        }
+        host.ask("POST", "/artifacts/audio-form/submit", Some(&data))
+    };
+    let done = |id: &str| {
+        wait_for("the reply to the form", || {
+            let turns = host.turns(&agent);
+            turns
+                .iter()
+                .position(|r| r["id"] == format!("u-html-form-{id}"))
+                .is_some_and(|i| turns[i + 1..].iter().any(|r| r["role"] == "assistant"))
+                && host.state(&agent) == "done"
+        })
+    };
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/form-reply-dispatch.json"
+    ))
+    .unwrap();
+    let successful: Vec<&Value> = vectors
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["delivered"] == true)
+        .collect();
+    let quiet = successful
+        .iter()
+        .find(|r| r["input"]["synthesize_audio"] == false)
+        .unwrap();
+    assert_eq!(quiet["synthesize_audio"], false);
+    let silent = "submission-silent-01";
+    assert_eq!(
+        submit(
+            silent,
+            "Keep quiet",
+            quiet["input"]["synthesize_audio"].as_bool()
+        )
+        .0,
+        200
+    );
+    done(silent);
+    assert!(voice.asked().is_empty());
+    let mut clips = Vec::new();
+    for (index, (id, words, audio)) in [
+        ("submission-default-01", "Read the default", None),
+        ("submission-spoken-01", "Read by request", Some(true)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index == 1 {
+            host.post("/send",json!({"session":agent,"text":"sleep 3","client_msg_id":"hold-for-queued-form","synthesize_audio":false}));
+            wait_for("the preceding turn", || host.state(&agent) != "done");
+        }
+        let (status, receipt) = submit(id, words, audio);
+        if index == 1 {
+            let queued = successful
+                .iter()
+                .find(|row| row["input"]["synthesize_audio"] == true)
+                .unwrap();
+            let queue = host.get(&format!("/turn-queue?session={agent}"));
+            let item = queue["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == format!("html-form-{id}"))
+                .unwrap();
+            assert_eq!(item["synthesize_audio"], queued["synthesize_audio"]);
+        }
+        assert_eq!(status, 200, "{receipt}");
+        done(id);
+        wait_for("the scripted voice receives the requested reply", || {
+            voice.asked().len() == index + 1
+        });
+        assert!(
+            voice.asked()[index]["transcript"]
+                .as_str()
+                .unwrap()
+                .contains("Read the reply")
+        );
+        wait_for("the phone hears about the clip", || {
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "audio" && e["session"] == agent)
+                .count()
+                == index + 1
+        });
+        let announced = events
+            .lock()
+            .unwrap()
+            .iter()
+            .rfind(|e| e["type"] == "audio" && e["session"] == agent)
+            .unwrap()
+            .clone();
+        assert!(
+            announced["trace_id"]
+                .as_str()
+                .is_some_and(|trace| !trace.is_empty())
+        );
+        let trace = host
+            .turns(&agent)
+            .into_iter()
+            .find(|r| r["id"] == format!("u-html-form-{id}"))
+            .unwrap()["trace_id"]
+            .clone();
+        assert_eq!(announced["trace_id"], trace);
+        clips.push(announced["clip_id"].as_u64().unwrap());
+        assert_eq!(submit(id, words, None).1["delivery_status"], "delivered");
+        assert_eq!(submit(id, words, Some(false)).0, 409);
+    }
+    assert_ne!(clips[0], clips[1]);
+    assert_eq!(voice.asked().len(), 2);
+    assert_eq!(
+        host.turns(&agent)
+            .iter()
+            .filter(|r| r["role"] == "assistant")
+            .count(),
+        4
+    );
+}
+
+#[test]
 fn an_agent_asks_its_user_with_a_form_and_is_told_the_answers() {
     let place = Place::new("form");
     let token = "form-token";

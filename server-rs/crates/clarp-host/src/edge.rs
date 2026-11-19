@@ -100,6 +100,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_report_revisions", 49),
     ("html_form_network", 59),
     ("html_form_events", 51),
+    ("html_form_reply_audio", 50),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     // Pairing codes and devices with tokens of their own.
@@ -2657,7 +2658,7 @@ async fn queue(
                 "id": message.client_id,
                 "text": message.text,
                 "enqueued_at": message.accepted_at_ms,
-                "synthesize_audio": false,
+                "synthesize_audio": message.speak,
             })
         })
         .collect();
