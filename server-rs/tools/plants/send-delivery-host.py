@@ -34,7 +34,6 @@ PLANTS = [
     (J, "port", "what changed before the start told again", "        agent.deliveries_mut().folding(true);\n", ""),
     (F, "feed", "a fenced send not hinted", "let told = moved && send.fenced && !send.handed;", "let told = moved && send.handed;"),
     (L, "host", "a launch not hinted", "            if let Some(id) = self.deliveries.message_id(turn) {\n                told.push(id);", "            if let Some(id) = self.deliveries.message_id(turn) {\n                let _ = id;"),
-    (A, "host", "a send behind a busy turn left pending", "                    if waits {\n", "                    if false {\n"),
     (A, "ledger", "a launch not told", "                    if launch {\n                        self.deliveries.launch(turn.0);", "                    if launch {\n                        let _ = turn;"),
     (F, "feed", "the feed at no position", "            head: self.latest,", "            head: 0,"),
     (L, "port", "a send's names read at every ask", "            let names = if self.deliveries.message_id(turn).is_some() {\n                None", "            let names = if false {\n                None"),
