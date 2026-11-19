@@ -625,7 +625,7 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     });
     let desk_token = std::fs::read_to_string(&token_at).unwrap();
     let session = host.new_agent("Deliverer");
-    let heard = host.listen();
+    let heard = host.listen_at("/events?token=secret");
     host.send(&session, "sleep 60", "m1");
     wait_for("the turn to run", || host.state(&session) == "thinking");
     host.send(&session, "later", "m2");

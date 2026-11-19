@@ -8,7 +8,10 @@
 a6a1fa158ccb  send-while-busy: the same event (queue_revision)
 f588400bad1e  send-while-busy: the same event (queue_started)
 d64ffe6fffea  send-while-busy: the event the Python Host does send, now second
-f20abf0c9b7b  delivery-of-a-held-send: queue-updated for the plain send that joined behind the busy turn
+b2edb783c3b0  delivery-of-a-held-send: queue-updated for the plain send that joined behind the busy turn (queue_depth)
+6eef7602ee03  delivery-of-a-held-send: the same event (queue_revision)
+c7c993cc4961  delivery-of-a-held-send: the same event (queue_started)
+9bc6307fe0b6  delivery-of-a-held-send: the event the Python Host does send, now second
 
 # The reply that closes a completed turn is `final` (the Python Host says null when the turn
 # before had settled: reference defect R6).
