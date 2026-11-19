@@ -269,7 +269,9 @@ impl Asked {
         };
         if let_go {
             // A contact that names no agent any more is let go, as when it is asked for.
-            let _ = keep(app, CONTACT_KEY, String::new()).await;
+            if let Err(why) = keep(app, CONTACT_KEY, String::new()).await {
+                app.fleet.unkept("setting", why.message());
+            }
         }
         // What the owner prepared for this contact is read before anything else is asked
         // of the call: a file that is not as it must be is told first.

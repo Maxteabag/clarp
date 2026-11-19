@@ -446,6 +446,8 @@ pub struct Works {
     /// The pools of the tools' accounts, where this Host runs the owner's selectors itself:
     /// one for each tool that has a selector.
     pub pools: Vec<Arc<crate::pool::Service>>,
+    /// Where what the Host could not keep is said.
+    pub log: crate::unkept::Log,
 }
 
 enum Ask {
@@ -610,6 +612,7 @@ enum Ask {
 pub struct FleetHandle {
     tx: mpsc::Sender<Ask>,
     directory: watch::Receiver<Arc<Directory>>,
+    log: crate::unkept::Log,
 }
 
 impl FleetHandle {
@@ -922,6 +925,19 @@ impl FleetHandle {
         .await?
     }
 
+    /// A write nothing waits on failed: said once in the Host's own log, by the kind of
+    /// record and the store's words, never by what was to be written.
+    pub fn unkept(&self, kind: &str, why: &str) {
+        self.log.unkept(kind, why);
+    }
+
+    /// Keeps as [`Self::keep`] does, for a caller that waits on nothing: a failure is said.
+    pub async fn keep_said(&self, kind: &'static str, key: String, value: Option<Vec<u8>>) {
+        if let Err(why) = self.keep(kind, key, value).await {
+            self.unkept(kind, &why.0);
+        }
+    }
+
     pub async fn keep_together(
         &self,
         rows: Vec<(&'static str, String, Vec<u8>)>,
@@ -1168,6 +1184,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
         personas: book.clone(),
     }));
     let (tx, rx) = mpsc::channel();
+    let log = works.log.clone();
     let fleet = Fleet {
         works,
         store,
@@ -1188,6 +1205,7 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
     Ok(FleetHandle {
         tx,
         directory: read,
+        log,
     })
 }
 
@@ -1223,6 +1241,8 @@ impl Fleet {
                 }
             }
             let Some(ask) = ask else { continue };
+            // Each answer goes to whoever asked. One who has gone by then is told nothing:
+            // nobody is left to tell, and what was done is done (and said, where it failed).
             match ask {
                 Ask::Create {
                     request,
@@ -2388,7 +2408,10 @@ impl Fleet {
         self.abandon_helpers_of(&record.agent_id)?;
         if self.focus.as_deref() == Some(record.agent_id.as_str()) {
             self.focus = None;
-            let _ = self.store.delete(SETTINGS, FOCUS);
+            // A focus that names no agent is left out when the Host starts again.
+            if let Err(why) = self.store.delete(SETTINGS, FOCUS) {
+                self.works.log.unkept("focus", &why.to_string());
+            }
         }
         self.publish();
         self.tell_roster("deleted", session);
@@ -2440,7 +2463,10 @@ impl Fleet {
             let expired = serde_json::from_slice::<PendingCode>(&stored)
                 .map_or(true, |code| code.expires_at < now);
             if expired {
-                let _ = self.store.delete(CODES, &digest);
+                // One that stays is swept again when the next code is made.
+                if let Err(why) = self.store.delete(CODES, &digest) {
+                    self.works.log.unkept("pairing code", &why.to_string());
+                }
             }
         }
         let stored = serde_json::to_vec(&pending).map_err(|error| error.to_string())?;

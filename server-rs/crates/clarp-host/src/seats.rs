@@ -251,7 +251,9 @@ impl Desk {
                 }
             }
             if let Ok(written) = serde_json::to_vec(kept) {
-                let _ = app.fleet.keep(KIND, KEPT.to_string(), Some(written)).await;
+                app.fleet
+                    .keep_said(KIND, KEPT.to_string(), Some(written))
+                    .await;
             }
         }
         state.under_way = None;

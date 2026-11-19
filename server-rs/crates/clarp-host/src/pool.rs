@@ -138,7 +138,8 @@ impl Service {
 
     /// Gives the pool the way to the agents.
     pub fn attach(&self, fleet: FleetHandle) {
-        let _ = self.fleet.set(fleet);
+        // Attached once, at the start; a second attach (none is made) keeps the first.
+        self.fleet.get_or_init(|| fleet);
     }
 
     /// The pool as one agent's turn sees it.

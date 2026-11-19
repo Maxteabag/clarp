@@ -90,6 +90,15 @@ impl Worker {
             .is_ok()
     }
 
+    /// Saves a row nothing waits on: a failure is said.
+    async fn save_said(&self, key: &str, row: &Value) {
+        let written = Some(row.to_string().into_bytes());
+        self.app
+            .fleet
+            .keep_said("live_tools", key.into(), written)
+            .await;
+    }
+
     /// Prune abandoned attempts as well as callback slots. Re-read each old
     /// row under its own slot lock so a new booking cannot be removed by a
     /// sweep that observed the old booking.
@@ -117,7 +126,7 @@ impl Worker {
                 .as_ref()
                 == Some(&bytes)
             {
-                let _ = self.app.fleet.keep("live_tools", key, None).await;
+                self.app.fleet.keep_said("live_tools", key, None).await;
             }
         }
     }
@@ -334,7 +343,7 @@ impl Worker {
                     row["status"] = json!("not_done");
                     row["status_text"] = json!("not_sent");
                     row["error"] = json!("call ended before the request");
-                    let _ = self.save(&id, &row).await;
+                    self.save_said(&id, &row).await;
                     return team::ended(tool);
                 }
                 let receipt = if cfg["delegate"]["kind"] == "prompt" {
@@ -387,7 +396,7 @@ impl Worker {
                     _ => "done",
                 });
                 row["receipt"] = receipt.clone();
-                let _ = self.save(&id, &row).await;
+                self.save_said(&id, &row).await;
                 if let Some(intent) = receipt["intent"].as_str().filter(|s| !s.is_empty())
                     && !receipt["sesjon"].is_null()
                 {

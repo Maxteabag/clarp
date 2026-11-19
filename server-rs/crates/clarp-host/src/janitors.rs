@@ -224,12 +224,14 @@ impl Desk {
                     // Its tool first, then the model and the effort that go with it.
                     if let Some(backend) = backend {
                         let tool = Amend::Tool(backend);
-                        let _ = app.fleet.amend_any(agent_id.clone(), tool).await?;
+                        let amended = app.fleet.amend_any(agent_id.clone(), tool).await?;
+                        not_amended(app, amended);
                     }
                     (agent_id, Amend::Tune { model, effort })
                 }
             };
-            let _ = app.fleet.amend_any(agent_id, amend).await?;
+            let amended = app.fleet.amend_any(agent_id, amend).await?;
+            not_amended(app, amended);
         }
         // A run the change cut off may not go on: its turn is taken back.
         let was_out = before.runs.values().filter(|run| run.out());
@@ -389,6 +391,17 @@ async fn deliver(app: &App, hand: &Handed) -> Delivery {
 /// Takes back the turn of a run that was cut off: a message that waits is withdrawn, a
 /// turn that runs is stopped. The janitor's mailbox is not left held: its next run is not
 /// this one's.
+/// A change the janitors' book made that the fleet refused (the agent gone, its name
+/// another's): the book has it and the agent has not. Nothing waits on it: it is said.
+fn not_amended<T>(app: &App, amended: Result<T, crate::fleet::NotAmended>) {
+    let why = match amended {
+        Ok(_) => return,
+        Err(crate::fleet::NotAmended::Unknown) => "no such agent",
+        Err(crate::fleet::NotAmended::Occupied { .. }) => "its name is another agent's",
+    };
+    app.fleet.unkept("agent", why);
+}
+
 async fn take_back(app: &App, agent: &str, run_id: &str) {
     let directory = app.fleet.directory();
     let Some(member) = directory.janitor(agent).or_else(|| directory.anyone(agent)) else {

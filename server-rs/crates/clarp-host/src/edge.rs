@@ -1447,9 +1447,10 @@ pub(crate) async fn make_agent(
                 if !matches!(taken, Ok(Ok(_))) {
                     // An agent without the session it was to begin with is not what was
                     // asked for: it does not stay.
-                    let _ = app.fleet.remove(record.session.clone()).await;
                     let why = "The session could not be taken up: no agent was made.";
-                    return Err(refused(StatusCode::CONFLICT, "resume_failed", why));
+                    let failed = refused(StatusCode::CONFLICT, "resume_failed", why);
+                    let session = record.session.clone();
+                    return Err(not_to_stay(&app.fleet, session, failed, unavailable).await);
                 }
             }
             record
@@ -1561,6 +1562,21 @@ struct MovedPlan {
     documents: Vec<Value>,
 }
 
+/// An agent made for what then failed does not stay. Where it cannot be let go, that is
+/// what the caller is told, in the store's words: an agent is there that should not be, and
+/// the failure that came first is no longer the whole of it.
+pub(crate) async fn not_to_stay<E>(
+    fleet: &FleetHandle,
+    session: String,
+    failed: E,
+    told: impl FnOnce(Unavailable) -> E,
+) -> E {
+    match fleet.remove(session).await {
+        Ok(_) => failed,
+        Err(unavailable) => told(unavailable),
+    }
+}
+
 /// Takes an agent over from another Host: who it is, the conversation it had, and the tool's
 /// session, which its next turn here continues.
 async fn import_agent(
@@ -1668,12 +1684,13 @@ async fn import_agent(
         failed => {
             // Nothing of the conversation was written. An agent without its past is not what
             // was asked for: it does not stay.
-            let _ = app.fleet.remove(member.record.session.clone()).await;
-            return Err(match failed {
+            let failed = match failed {
                 Ok(Err(why)) => ApiError::new(StatusCode::CONFLICT, why),
                 Err(unavailable) => unavailable.into(),
                 Ok(Ok(_)) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the move failed"),
-            });
+            };
+            let session = member.record.session.clone();
+            return Err(not_to_stay(&app.fleet, session, failed, ApiError::from).await);
         }
     };
     // Then what it made and asked, and what it is committed to. An agent that arrives
@@ -1717,12 +1734,13 @@ async fn import_agent(
     let (artifacts, plans) = match taken {
         Ok(Ok(taken)) => taken,
         failed => {
-            let _ = app.fleet.remove(member.record.session.clone()).await;
-            return Err(match failed {
+            let failed = match failed {
                 Ok(Err(why)) => ApiError::new(StatusCode::CONFLICT, why),
                 Err(unavailable) => unavailable.into(),
                 Ok(Ok(_)) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "the move failed"),
-            });
+            };
+            let session = member.record.session.clone();
+            return Err(not_to_stay(&app.fleet, session, failed, ApiError::from).await);
         }
     };
     // It is here, and until its owner says it lives here it is on the other Host too. So it
@@ -1954,10 +1972,13 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         if result["route"] == "greeting"
             && let Some(id) = result["opening"]["ring_id"].as_str()
         {
-            let _ = app
+            let admitted = app
                 .calls
                 .greeting_admitted(app, id, &message, sent.is_ok())
                 .await;
+            if let Err(why) = admitted {
+                app.fleet.unkept("opening", &why.0);
+            }
         }
         return match sent {
             Ok(answer) => {
@@ -2290,7 +2311,9 @@ async fn send_as(
         // Writing to an agent makes it the open one, without a word about it: an agent a
         // message names, by its session or at its beginning. A message that only stayed
         // with the agent that was open opens nothing.
-        let _ = app.fleet.open(member.record.session.clone()).await;
+        if let Err(why) = app.fleet.open(member.record.session.clone()).await {
+            app.fleet.unkept("focus", &why.0);
+        }
     }
     Ok(SendResponse {
         ok: true,

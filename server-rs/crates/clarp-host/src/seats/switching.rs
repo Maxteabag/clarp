@@ -162,7 +162,7 @@ pub(super) async fn perform(
             kept.switches.insert(tool.into(), record);
         }
         if let Ok(bytes) = serde_json::to_vec(kept) {
-            let _ = app.fleet.keep(KIND, KEPT.into(), Some(bytes)).await;
+            app.fleet.keep_said(KIND, KEPT.into(), Some(bytes)).await;
         }
     }
     drop(held);

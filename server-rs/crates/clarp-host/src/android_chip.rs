@@ -240,9 +240,8 @@ impl Desk {
                     == Some(&bytes)
                 {
                     row["shown"] = json!(!end);
-                    let _ = app
-                        .fleet
-                        .keep(REGISTER, owner, Some(row.to_string().into_bytes()))
+                    app.fleet
+                        .keep_said(REGISTER, owner, Some(row.to_string().into_bytes()))
                         .await;
                 }
             } else if retry {

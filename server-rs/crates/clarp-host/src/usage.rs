@@ -116,7 +116,9 @@ async fn since(fleet: &FleetHandle, now_ms: i64) -> i64 {
         return at;
     }
     let written = now_ms.to_string().into_bytes();
-    let _ = fleet.keep(SINCE, "at".to_string(), Some(written)).await;
+    fleet
+        .keep_said(SINCE, "at".to_string(), Some(written))
+        .await;
     now_ms
 }
 
@@ -153,7 +155,7 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
         let Ok(written) = serde_json::to_vec(&used) else {
             continue;
         };
-        let _ = fleet.keep(KIND, name, Some(written)).await;
+        fleet.keep_said(KIND, name, Some(written)).await;
         since_looked += 1;
         if since_looked < LOOKED_OVER_EVERY {
             continue;
@@ -165,7 +167,7 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
             if name >= too_old {
                 break;
             }
-            let _ = fleet.keep(KIND, name, None).await;
+            fleet.keep_said(KIND, name, None).await;
         }
     }
 }
