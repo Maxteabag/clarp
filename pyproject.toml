@@ -41,4 +41,5 @@ pythonpath = ["."]
 # runs across all cores. The timeout turns a deadlock into a failure with a
 # stack trace instead of a run that never ends.
 addopts = "-q -n auto --timeout=60"
-markers = ["timeout: pytest-timeout per-test override"]
+markers = ["timeout: pytest-timeout per-test override",
+           "structural: a check of the code's structure; every such file runs in make test-guards"]

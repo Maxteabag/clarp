@@ -16,6 +16,8 @@ from tests.integration.test_route_goldens import DISPATCH_GOLDEN, server_module 
 from tests.integration.test_server_di import (  # noqa: F401 - fixtures
     _model_catalog_never_probes_installed_clis, fake_ctx)
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 
 def _selected_routes(server_module, monkeypatch, tmp_path, routes):
     """Which (method, route name) actually served a golden key: dispatch runs

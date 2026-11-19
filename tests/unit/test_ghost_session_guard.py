@@ -12,6 +12,8 @@ import pytest
 
 from lib import agents, turn_dispatch as td
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 
 @pytest.fixture
 def dispatch_case(tmp_path, monkeypatch):

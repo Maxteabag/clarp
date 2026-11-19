@@ -16,7 +16,7 @@ from lib import provider_capabilities as capabilities  # noqa: E402
 
 # These tests exercise provider CLI resolution itself (with stubbed runners),
 # so the session's model-catalog warm-up stub stays off for them.
-pytestmark = pytest.mark.probes_provider_clis
+pytestmark = [pytest.mark.probes_provider_clis, pytest.mark.structural]
 
 
 OBSERVED_AT = "2026-08-26T10:00:00Z"

@@ -24,6 +24,8 @@ from lib import db_schema, schema_guard
 from tests.unit.test_clarp_admin import admin
 from tests.unit.test_only_services_migrate import _database_at, _own_port, _paths, _snapshot
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CODE = db_schema._SCHEMA_VERSION
 OLD, NEW = 80, 122           # the two schema versions of that day
