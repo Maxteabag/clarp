@@ -4,29 +4,90 @@
 //!
 //! The fleet says it ([`crate::fleet::FleetHandle::unkept`]), through the log it was started
 //! with: the standard error, or what a test reads.
+//!
+//! Said once also where the store stays down: the same kind in the same words is said again
+//! only a minute after it was last said, with how often it happened since. A full disk does
+//! not fill the journal on it with a line for every write.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use clarp_ports::clock::Clock;
+
+/// How long the same failure is held back once it has been said.
+pub const AGAIN_AFTER_MS: i64 = 60_000;
+/// A failure not seen again for this long is forgotten: the next is new.
+const FORGOTTEN_AFTER_MS: i64 = 10 * AGAIN_AFTER_MS;
+
+/// A failure said, and how often it happened since.
+struct Held {
+    said_at: i64,
+    since: u64,
+}
 
 /// Where the Host says what it could not keep.
 #[derive(Clone)]
-pub struct Log(Arc<dyn Fn(&str) + Send + Sync>);
+pub struct Log {
+    say: Arc<dyn Fn(&str) + Send + Sync>,
+    clock: Arc<dyn Clock + Send + Sync>,
+    /// By kind and words.
+    held: Arc<Mutex<HashMap<(String, String), Held>>>,
+}
 
 impl Log {
     /// The Host's own log: its standard error, beside its other lines.
-    pub fn stderr() -> Self {
-        Self(Arc::new(|line| eprintln!("{line}")))
+    pub fn stderr(clock: Arc<dyn Clock + Send + Sync>) -> Self {
+        Self::to(|line| eprintln!("{line}"), clock)
     }
 
-    /// A log that hands each line to `said`.
-    pub fn to(said: impl Fn(&str) + Send + Sync + 'static) -> Self {
-        Self(Arc::new(said))
+    /// A log that hands each line to `said`, by the time `clock` tells.
+    pub fn to(
+        said: impl Fn(&str) + Send + Sync + 'static,
+        clock: Arc<dyn Clock + Send + Sync>,
+    ) -> Self {
+        Self {
+            say: Arc::new(said),
+            clock,
+            held: Arc::default(),
+        }
     }
 
-    /// The one way a failed write is said: the kind and the store's words.
+    /// The one way a failed write is said: the kind and the store's words. The first is said
+    /// at once; the same again only a minute after, with how often it happened since.
     pub fn unkept(&self, kind: &str, why: &str) {
-        (self.0)(&format!(
-            "clarp-host: a record of the kind {kind} was not kept: {why}"
-        ));
+        let now = self.clock.now_ms();
+        let line = format!("clarp-host: a record of the kind {kind} was not kept: {why}");
+        let said = {
+            let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+            held.retain(|_, failure| now - failure.said_at < FORGOTTEN_AFTER_MS);
+            match held.get_mut(&(kind.to_string(), why.to_string())) {
+                None => {
+                    let first = Held {
+                        said_at: now,
+                        since: 0,
+                    };
+                    held.insert((kind.to_string(), why.to_string()), first);
+                    Some(line)
+                }
+                Some(failure) if now - failure.said_at < AGAIN_AFTER_MS => {
+                    failure.since += 1;
+                    None
+                }
+                Some(failure) => {
+                    let times = failure.since + 1;
+                    failure.said_at = now;
+                    failure.since = 0;
+                    Some(if times > 1 {
+                        format!("{line} ({times} times since it was last said)")
+                    } else {
+                        line
+                    })
+                }
+            }
+        };
+        if let Some(line) = said {
+            (self.say)(&line);
+        }
     }
 }
 
@@ -40,6 +101,9 @@ impl std::fmt::Debug for Log {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    use clarp_ports::clock::ManualClock;
 
     /// The calls that write what the Host keeps. A `let _ =` that throws one's result away
     /// says nothing when the write fails.
@@ -142,14 +206,66 @@ mod tests {
                 (12, "app.fleet.amend_any".to_string()),
             ]
         );
-        let line = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let line = Arc::new(Mutex::new(Vec::new()));
         let said = line.clone();
-        let log = super::Log::to(move |text| said.lock().unwrap().push(text.to_string()));
+        let clock = Arc::new(clarp_ports::clock::SystemClock);
+        let log = super::Log::to(
+            move |text| said.lock().unwrap().push(text.to_string()),
+            clock,
+        );
         log.unkept("used", "disk full");
         assert_eq!(
             *line.lock().unwrap(),
             ["clarp-host: a record of the kind used was not kept: disk full"]
         );
+    }
+
+    #[test]
+    fn a_failure_that_goes_on_is_said_again_a_minute_after_with_how_often() {
+        let clock = Arc::new(ManualClock::starting_at(1_795_000_000_000));
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let said = lines.clone();
+        let log = super::Log::to(
+            move |text| said.lock().unwrap().push(text.to_string()),
+            clock.clone(),
+        );
+        let line = |kind: &str, why: &str| {
+            format!("clarp-host: a record of the kind {kind} was not kept: {why}")
+        };
+        // The first at once; forty more within the minute are held back.
+        log.unkept("used", "disk full");
+        for _ in 0..40 {
+            clock.advance_ms(1_000);
+            log.unkept("used", "disk full");
+        }
+        // Another kind, and other words, are other failures: said at once.
+        log.unkept("chip", "disk full");
+        log.unkept("used", "database is locked");
+        // A minute after it was said: again, with how often since, this one counted.
+        clock.advance_ms(20_000);
+        log.unkept("used", "disk full");
+        // A minute later, once: nothing was held back.
+        clock.advance_ms(60_000);
+        log.unkept("used", "disk full");
+        // Held back again, within its minute.
+        clock.advance_ms(59_999);
+        log.unkept("used", "disk full");
+        let full = line("used", "disk full");
+        assert_eq!(
+            *lines.lock().unwrap(),
+            [
+                full.clone(),
+                line("chip", "disk full"),
+                line("used", "database is locked"),
+                format!("{full} (41 times since it was last said)"),
+                full.clone(),
+            ]
+        );
+        // Not seen for ten minutes, it is new again: said at once, alone.
+        clock.advance_ms(10 * super::AGAIN_AFTER_MS);
+        log.unkept("used", "disk full");
+        assert_eq!(lines.lock().unwrap().len(), 6);
+        assert_eq!(lines.lock().unwrap()[5], full);
     }
 }
 
@@ -251,7 +367,10 @@ mod at_the_port {
             telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
             tally: crate::usage::tally().0,
             pools: Vec::new(),
-            log: Log::to(move |line| heard.lock().unwrap().push(line.to_string())),
+            log: Log::to(
+                move |line| heard.lock().unwrap().push(line.to_string()),
+                Arc::new(SystemClock),
+            ),
         };
         let refused: Refused = Arc::default();
         let store = Refusing {
