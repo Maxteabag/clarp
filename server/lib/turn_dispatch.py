@@ -377,7 +377,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         # A steer hands the prompt to the provider too. Raised past the
         # fall-through below: a failed receipt write must not turn into a
         # preempt of the live turn.
-        _record_launch_attempt(spec)
+        recorded = _record_launch_attempt(spec)
         try:
             peer_text=spec.text
             if spec.origin=='agent' and spec.sender_agent_id:
@@ -411,6 +411,14 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             # A peer message falls through to wait behind the turn (it is
             # always queueable), so an Oracle assignment is never preempted.
             return False
+        if (not accepted and recorded == "attempted"
+                and getattr(self.backends, "_RUNTIME_CLIENT", None) is None):
+            # A steer answered False here sent nothing (Backend.steer's
+            # contract): the receipt says PENDING again, as it did before this
+            # attempt, so the send waiting behind the turn runs after a Stop or
+            # a restart. An exception above stays 'possibly sent'; an answer
+            # over the runtime socket proves nothing either way (R120).
+            launch_receipts.withdraw_attempt(spec.trace_id)
         if accepted:
             if launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
                                         call_opening=_is_call_opening(spec)):

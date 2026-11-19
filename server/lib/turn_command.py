@@ -264,16 +264,17 @@ class _LaunchReceiptRefused(DispatchError):
 DELIVERY_HINT_BUSY_MS = 50   # N4 B: a hint never waits longer for the writer lock
 
 
-def _record_launch_attempt(spec: "_TurnSpec") -> None:
-    """Fail closed immediately before a backend receives a user prompt."""
+def _record_launch_attempt(spec: "_TurnSpec") -> str:
+    """Fail closed immediately before a backend receives a user prompt.
+    Returns launch_receipts.mark_attempted's outcome ('' when not eligible)."""
     if not launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
                                     call_opening=_is_call_opening(spec)):
-        return
+        return ""
     # A spec launched from a durable queue or park row, or held behind Stop as
     # newer work, is governed by that decision, not by a racing fence.
     decided = bool(spec.queue_id or spec.park_id or spec.after_stop)
     try:
-        launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
+        return launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
     except launch_receipts.HandoffRefused as e:
         log("launchReceiptRefused",
             f"agent={spec.agent_id} trace={spec.trace_id or '∅'} state={e.state}")
