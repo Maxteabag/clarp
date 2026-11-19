@@ -11,12 +11,16 @@ import runner
 RUNS = {
     'kernel': ['test', '-p', 'clarp-kernel', '--test', 'quota_keeper_vectors'],
     'host': ['test', '--test', 'host', '--', 'the_quota_keeper_tells_the_owner_once_where_a_window_runs_low'],
+    'retry': ['test', '--test', 'host', '--',
+              'a_quota_notice_that_reached_no_phone_waits_and_is_pushed_again_after_the_keepers_interval'],
     'due': ['test', '-p', 'clarp-kernel', '--lib', 'janitors::quota::tests'],
 }
 Q = 'clarp-kernel/src/janitors/quota.rs'
 K = 'clarp-host/src/quota_keeper.rs'
 B = 'clarp-host/src/janitors.rs'
 # NOT PLANTED, each with its reason:
+#   quota_keeper.rs, the order of receipts written in one look (`order`): a Host test of it needs two notices
+#     waiting at once from one look; the kernel's stories hold the order delivering() keeps (planted above).
 #   janitors.rs (kernel), that the Quota keeper runs here: planted with every other job of RUN_HERE in
 #     `truth-findings.py`, with the words of a janitor that cannot run.
 #   quota.rs `ran`: that a run that only asked for a recovery worked. No story of the Python Host asks for one without
@@ -81,6 +85,8 @@ PLANTS = [
     (Q, 'kernel', "a notice's tries are pushed with it", '        fields.remove("delivery_retry");', ''),
     (Q, 'kernel', 'a notice does not say when its window resets', '                "resets_at": window.get("resets_at").cloned().unwrap_or(Value::Null),', '                "resets_at": Value::Null,'),
     (Q, 'kernel', 'a look that stopped says nothing of what it kept', '    format!("The check stopped ({why}); what it read before is kept")', '    format!("The check stopped ({why})")'),
+    (Q, 'kernel', 'what waits is delivered by when it was written and its id, not as it was written', '    for (id, _, payload) in waiting {', '    for (id, _, payload) in by_age.clone() {'),
+    (K, 'retry', 'a push that reached nobody is settled', '                quota::after_push(&mut receipt.payload, told, now)', '                Some(told)'),
 ]
 
 

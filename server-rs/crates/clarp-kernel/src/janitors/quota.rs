@@ -395,7 +395,9 @@ pub enum Deliver {
 /// its payload.
 pub type Waiting<'a> = (&'a str, i64, &'a Value);
 
-/// What a look does with each notice that waits, in the order they were written (`R105`): one
+/// What a look does with each notice that waits, in the order given, which is the order they
+/// were written in (the Python Host's `undelivered_quota_receipts`, read in its table's order;
+/// R105): one
 /// of another keeper is left; one of another generation is cancelled; of the notices of one
 /// window the newest is the one that is sent, and an older one is settled as superseded by it;
 /// one that was tried already is let go once its window has reset, and otherwise waits until
@@ -406,11 +408,12 @@ pub fn delivering(
     interval_seconds: i64,
     now_ms: i64,
 ) -> Vec<(String, Deliver)> {
-    let mut ordered: Vec<&Waiting<'_>> = waiting.iter().collect();
-    ordered.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));
+    // Which of a window's notices is the newest: by when it was written, then by its id.
+    let mut by_age: Vec<&Waiting<'_>> = waiting.iter().collect();
+    by_age.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));
     let threshold = |payload: &Value| payload["reason"] == REASON;
     let mut newest: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
-    for (id, _, payload) in &ordered {
+    for (id, _, payload) in &by_age {
         if let Some(key) = payload["window_key"]
             .as_str()
             .filter(|key| threshold(payload) && !key.is_empty())
@@ -419,7 +422,7 @@ pub fn delivering(
         }
     }
     let mut done = Vec::new();
-    for (id, _, payload) in ordered {
+    for (id, _, payload) in waiting {
         if payload["agent_id"] != agent_id {
             continue;
         }
