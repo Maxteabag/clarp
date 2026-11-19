@@ -172,6 +172,18 @@ STORIES = [
                {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(5))])}}, {'do': 'tick'},
                {'do': 'push', 'answer': {'enabled': True, 'sent': 1, 'failed': 0, 'disabled': 0}},
                {'do': 'wait', 'seconds': 300}, {'do': 'tick'}]},
+    {'name': 'two notices of one window written at the same moment: the newest is the larger id, though it was '
+             'written first', 'tie': True,
+     # Claude rounds a window's reset to the minute (its quota_identity), so two windows of one kind whose resets
+     # differ by jitter are one window to the keeper: both cross in one look (80 used, then nothing left, read
+     # later), and both notices are written at the same moment. The ids are chosen so that the larger is written
+     # first (the story checks it): the reference takes the newest by (created_at, receipt_id), not by the order
+     # written.
+     'steps': [{'do': 'usage', 'providers': {'claude': provider([
+                   window('cl-a', used=80, observed=at(0), kind='five_hour', resets_at='2027-01-15T12:00:29.6Z'),
+                   window('cl-b', used=100, observed=at(0, 30), kind='five_hour', resets_at='2027-01-15T12:00:29.9Z')],
+                   instance='host-1:claude')}},
+               {'do': 'tick'}]},
     {'name': 'a notice that waits is let go once its window has reset',
      'steps': [{'do': 'push', 'answer': {'enabled': True, 'sent': 0, 'failed': 1, 'disabled': 0}},
                {'do': 'usage', 'providers': {CODEX: provider([window(used=80, observed=at(0), kind='five_hour',
@@ -386,6 +398,13 @@ def story(index) -> dict:
             more['runs'] = [{key: run[key] for key in ('status', 'outcome', 'activity', 'activity_summary', 'created_at',
                                                          'finished_at', 'generation')}
                             | {'result': run.get('demand_result')} for run in new_runs]
+        if one.get('tie') and kind == 'tick':
+            # What the story is for: two notices of one window, the same moment, the larger id written first.
+            written = db.conn().execute('SELECT receipt_id, created_at, payload_json FROM janitor_quota_receipts '
+                                        'ORDER BY rowid').fetchall()
+            keys = {json.loads(r['payload_json'])['window_key'] for r in written}
+            assert len(written) == 2 and len(keys) == 1 and written[0]['created_at'] == written[1]['created_at'] \
+                and written[0]['receipt_id'] > written[1]['receipt_id'], ('the tie this story is for did not happen', [dict(r) for r in written])
         current = janitors.get(session)
         receipts = [{'receipt_id': r['receipt_id'], 'payload': json.loads(r['payload_json']),
                      'delivery': json.loads(r['delivery_json']) if r['delivery_json'] is not None else None,
