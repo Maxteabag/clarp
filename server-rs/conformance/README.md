@@ -101,7 +101,7 @@ not marked, one that never read the answer is not marked, a sound third answer i
 nothing asked after it, a mark every time adds nothing, a try that did not run to its end is no
 answer, and a scenario with one sound recording is not recorded again).
 
-A second defect the two recordings can share, the late stamp. An answer that a snapshot named
+A second defect the two recordings can share, R115, the late stamp. An answer that a snapshot named
 complete (its agent's last message, with its words, at the cursor that snapshot handed out) is
 shown by a later read of the conversation as newer than that cursor, with the same words: the
 reference stamped it again, beside a later answer, though nothing of it a client sees changed, and
@@ -111,7 +111,7 @@ and the Rust Host, which did it in none of 126, differed from both. A recording 
 that it has it (`stamped_again`): no other Host is looked at. It is a mark like R19's: a scenario
 whose every recording carries a mark is recorded again, and the first answer without any mark is
 kept. Where the mark is still there every time (and in `judge`, which records nothing), a
-difference in such a row's revision is told by its shape (`late-stamp`), and only where the Rust
+difference in such a row's revision is told by its shape (as `R115`), and only where the Rust
 Host's row is the same answer and is not newer than the cursor its own snapshot handed out.
 
 What these rules could hide. A mark only asks for another recording; it excuses nothing. If this
@@ -159,7 +159,7 @@ What this rule could hide. If this Host regresses into one of the reference's ra
 regression passes whenever the reference happens to give that answer in one of its
 recordings. Before the rule a run had two recordings; now it can have up to five. The table of
 73 runs since 18 Nov puts the rare answers' rates at about 9% in `oracle-delegations` (most of
-that already marked as R19), 7% in `retried-turns`, 5% in `turn-timer-after-stop`, 3–4% for the
+that already marked as R19), 7% in `retried-turns`, 5% in `turn-timer-after-stop`, 3–4% for R115, the
 late stamp (9 of 268 recordings), and 2% or less in the rest. A regression into a rate-*p* answer
 passes one run with chance 1 − (1 − *p*)^5 where it used to be 1 − (1 − *p*)^2:
 
