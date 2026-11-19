@@ -179,13 +179,20 @@ async fn told(
     State(app): State<App>,
     axum::extract::Query(query): axum::extract::Query<Vec<(String, String)>>,
 ) -> Json<Value> {
+    let force = query.iter().any(|(k, v)| {
+        k == "refresh" && matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true")
+    });
+    Json(view(&app, force).await)
+}
+
+/// What `GET /backend-usage` answers: the providers are asked first only on a Host that was
+/// told to ask them (`--ask-usage`), and asked again before their time only where `force`.
+/// What the Quota keeper reads, as the Python Host's reads `get_backend_usage()`.
+pub(crate) async fn view(app: &App, force: bool) -> Value {
     let home = crate::config::home();
     let mut events = Vec::new();
     if app.config.ask_usage {
-        let force = query.iter().any(|(k, v)| {
-            k == "refresh" && matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true")
-        });
-        events = app.limits.refresh(&app, &home, force).await;
+        events = app.limits.refresh(app, &home, force).await;
     }
     let now = app.clock.now_ms();
     let with = quota::With {
@@ -246,7 +253,7 @@ async fn told(
             ((*tool).to_string(), provider)
         })
         .collect();
-    Json(json!({
+    json!({
         "backends": backends,
         "capability_catalog_schema_version": 2,
         "computer_id": app.server_id,
@@ -254,7 +261,7 @@ async fn told(
         "observed_at": crate::wire::iso(now),
         "providers": providers,
         "schema_version": 1,
-    }))
+    })
 }
 
 pub fn routes() -> Router<App> {

@@ -160,9 +160,6 @@ fn left_of(used: &Value) -> Option<Value> {
     if let Some(whole) = used.as_i64() {
         return Some(json!(100 - i128::from(whole)));
     }
-    if let Some(whole) = used.as_u64() {
-        return Some(json!(100 - i128::from(whole)));
-    }
     used.as_f64().map(|used| json!(100.0 - used))
 }
 

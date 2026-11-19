@@ -37,7 +37,7 @@ H='clarp-host/src/janitors.rs'
 RUNS['words']=['test','-p','clarp-kernel','--lib','a_janitor_that_cannot_run_is_told']
 RUNS['auditor']=['test','--test','host','a_janitors_scheduled_task_runs_when_its_schedule_says']
 RUNS['seats']=['test','--test','host','the_desk_and_automatic_switcher_move_only_an_owned_idle_login']
-for job in ['runs::SCHEDULED_TASK,','crate::router::JOB,','"tool-explainer",','crate::goals::keeper::ROLE,','audio::ROLE,\n]']:
+for job in ['runs::SCHEDULED_TASK,','crate::router::JOB,','"tool-explainer",','crate::goals::keeper::ROLE,','audio::ROLE,','quota::ROLE,\n]']:
     PLANTS.append((J,'words',f'{job.split(",")[0]} does not run','    '+job.replace('\\n','\n'),'    "never",'+('\n]' if job.endswith(']') else '')))
 for file,run,label,old,new in [
     (J,'words','the switcher of seats runs everywhere','(seats && job == SEATS_JOB)','job == SEATS_JOB'),
