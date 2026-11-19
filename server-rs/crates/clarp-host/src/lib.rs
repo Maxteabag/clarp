@@ -28,6 +28,7 @@ pub mod config;
 pub mod connector;
 pub mod controls;
 pub mod direct;
+pub mod diagnostics;
 pub mod edge;
 pub mod explain;
 pub mod faces;

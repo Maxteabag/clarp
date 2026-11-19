@@ -82,3 +82,4 @@ pub mod vocabulary;
 pub mod voices;
 
 pub use clarp_tool_args::native_session_name;
+pub mod diagnostics;
