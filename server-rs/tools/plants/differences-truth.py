@@ -28,8 +28,8 @@ for run,label,old,new in [
     ('scope','a PATCH never looked at','method == "PATCH" && !path.starts_with("/schedules/")','method == "PATCH"'),
     ('scope','a closed prefix without its slash is open','path == prefix.trim_end_matches(\'/\') || ',''),
     ('scope','only the closed path itself','|| path.starts_with(*prefix)','|| path == *prefix'),
-    ('scope','the disk read open','matches!(path, "/dirs" | "/past-sessions")','matches!(path, "/past-sessions")'),
-    ('scope','past sessions open','matches!(path, "/dirs" | "/past-sessions")','matches!(path, "/dirs")'),
+    ('scope','the disk read open','"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"','"/past-sessions" | "/launch-directories" | "/favorite-paths"'),
+    ('scope','past sessions open','"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"','"/dirs" | "/launch-directories" | "/favorite-paths"'),
     ('scope','a terminal read open','(path.starts_with("/terminal/") && method == "GET")','(path.starts_with("/terminal/") && method == "POST")'),
     ('scope','the list of terminals closed','(path.starts_with("/terminal/") && method == "GET")','(path.starts_with("/terminal") && method == "GET")'),
     ('scope','reads refused','if method == "GET" {\n        return false;','if method == "OPTIONS" {\n        return false;'),
@@ -68,5 +68,8 @@ for file,run,label,old,new in [
     ('clarp-host/src/seats.rs','desk','another table read','.and_then(|file| file.get("hotseat"))','.and_then(|file| file.get("seats"))'),
 ]:
     PLANTS.append((file,run,label,old,new))
+# Contract 104 closes these exact routes to a limited device (R123).
+PLANTS.append((D, 'scope', 'a limited device reads /launch-directories', '"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"', '"/dirs" | "/past-sessions" | "/favorite-paths"'))
+PLANTS.append((D, 'scope', 'a limited device reads /favorite-paths', '"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"', '"/dirs" | "/past-sessions" | "/launch-directories"'))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
