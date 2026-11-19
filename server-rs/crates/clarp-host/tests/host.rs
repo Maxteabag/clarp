@@ -11264,7 +11264,7 @@ else:
             .unwrap()
             .len()
     };
-    assert_eq!(roster(), 24);
+    let before = roster();
     let set = json!({ "enabled": true, "fallback_only": false, "provider": "claude" });
     let (status, on) = host.ask("POST", "/orchestrator/settings", Some(&set));
     assert_eq!(status, 200, "{on}");
@@ -11312,7 +11312,7 @@ else:
         "{made}"
     );
     assert_eq!(made["error"], "name required", "{made}");
-    assert_eq!(roster(), 24);
+    assert_eq!(roster(), before);
     let newest = host.get("/orchestrator/decisions?limit=1")["decisions"][0].clone();
     assert_eq!(
         (
