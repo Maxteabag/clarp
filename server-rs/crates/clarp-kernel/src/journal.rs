@@ -362,6 +362,11 @@ impl Recorder {
         self.agent.deliveries_mut().take()
     }
 
+    /// The turns of shown sends whose tool was launched since this was last asked.
+    pub fn take_launched(&mut self) -> Vec<u64> {
+        self.agent.deliveries_mut().take_launched()
+    }
+
     /// The log, for reading. Only a [`Batch`] writes to it.
     pub fn log(&self) -> &dyn AgentLog {
         self.log.as_ref()
