@@ -200,6 +200,8 @@ class RetryMixin:
                 log_exception("providerLimitRecordFail", exc, detail=spec.trace_id)
         provider = error_classify.provider_message(message)
         state_detail = {
+            # Its trace: the runner's end names its trace, so it settles its own turn's row (R92).
+            "trace_id": spec.trace_id,
             "dispatch": spec.backend, "reason": category, "message": human,
             "error": (message or "")[:200], "provider_message": provider[:500],
             "attempts": attempts, "summary": human + ". Your message is saved.",
@@ -210,7 +212,6 @@ class RetryMixin:
         if call_opening:
             # The Host's own initiative, not a user's message: nothing was saved to resend.
             state_detail["summary"] = OPENING_NOT_CONFIRMED
-            state_detail["trace_id"] = spec.trace_id
             written = self._end_opening_state(spec, state_detail)
         else:
             turn_lifecycle.try_transition(

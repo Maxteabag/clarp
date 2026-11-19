@@ -180,11 +180,19 @@ _ORIGIN_CARRY_WINDOW_MS = 120_000
 
 def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any] | None,
                 ts: int, *, unlaunched_turn_id: int | None = None) -> str | None:
-    """Record how the agent's current turn ended; the first terminal change
-    wins. Returns the settled trace id (then its rows are re-stamped)."""
+    """Record how the agent's current turn ended, once: a row is settled only where settled_at
+    IS NULL, and a second end of a settled row writes nothing (one line names the row and both
+    ends). Returns the settled trace id (then its rows are re-stamped).
+
+    The Stop hook of a process the dispatcher started writes no outcome: that turn is settled by
+    the Host's own side alone (the runner's end, a Stop, a janitor cancel, boot recovery), which
+    reports after the CLI has exited (R92). A terminal turn has no runner; its hook settles it.
+    A traced end whose trace's rows are all settled settles nothing else."""
     from .message_turns import outcome_for
     outcome = outcome_for(event, kind)
     if outcome is None:
+        return None
+    if event == TurnEvent.HOOK_STOP and (detail or {}).get("dispatched") is True:
         return None
     database = conn()
     trace = str((detail or {}).get("trace_id") or "")
@@ -203,17 +211,42 @@ def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any]
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND trace_id = ?
                   AND settled_at IS NULL ORDER BY started_at DESC LIMIT 1""",
             (agent_id, trace)).fetchone()
+        if row is None:
+            settled = database.execute(
+                """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                    ORDER BY turn_id DESC LIMIT 1""", (agent_id, trace)).fetchone()
+            if settled is not None:
+                _settled_already(database, agent_id, int(settled["turn_id"]), event)
+                return None
     if row is None:
         row = database.execute(
             """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND started_at <= ?
                 ORDER BY started_at DESC, turn_id DESC LIMIT 1""", (agent_id, ts)).fetchone()
-        if row is None or database.execute(
-                "SELECT settled_at FROM turns WHERE turn_id = ?",
-                (row["turn_id"],)).fetchone()["settled_at"] is not None:
+        if row is None:
             return None
-    database.execute("UPDATE turns SET settled_at = ?, outcome = ? WHERE turn_id = ? AND settled_at IS NULL",
-                     (ts, outcome, row["turn_id"]))
+    settled = database.execute(
+        "UPDATE turns SET settled_at = ?, outcome = ? WHERE turn_id = ? AND settled_at IS NULL",
+        (ts, outcome, row["turn_id"]))
+    if not settled.rowcount:
+        _settled_already(database, agent_id, int(row["turn_id"]), event)
+        return None
     return str(row["trace_id"] or "")
+
+
+_SETTLED_BY_SQL = (
+    "SELECT s.kind, COALESCE(json_extract(s.detail, '$.source'),"
+    " json_extract(s.detail, '$.dispatch'), '') AS by_"
+    " FROM turns t JOIN state_log s ON s.agent_id = t.agent_id AND s.ts = t.settled_at"
+    " WHERE t.turn_id = ? AND s.kind IN (" + ", ".join(f"'{kind}'" for kind in sorted(TERMINAL)) + ")"
+    " ORDER BY s.state_id LIMIT 1")
+
+
+def _settled_already(database, agent_id: str, turn_id: int, event: str) -> None:
+    """One line for an end that found its row settled: the row, the end that settled it (its
+    terminal state row's source or dispatch) and this one. No content."""
+    first = database.execute(_SETTLED_BY_SQL, (turn_id,)).fetchone()
+    by = f"{first['kind']}:{first['by_']}" if first is not None else "?"
+    log("turnSettledAlready", f"agent={agent_id} turn={turn_id} settled_by={by} then={event}")
 
 
 def _unlaunched_write_detail(database, agent_id: str, event: str, detail):
@@ -869,6 +902,36 @@ class TurnStateMachine:
         return int(cursor.lastrowid or 0)
 
     @staticmethod
+    def open_turn_once(*, agent_id: str, source: str, trace_id: str,
+                       synthesize_audio: bool = True) -> int | None:
+        """Open ``trace_id``'s turn row unless the trace already has one: ONE turn row per trace
+        (R92). A dispatched turn has its row from admission or the queue hand-off, committed before
+        its process is spawned, so the prompt hook of that process finds it. The check and the
+        insert are one statement, so two hooks at once open one row. Returns the new row's id, or
+        None when the trace had one."""
+        if source not in TurnSource.valid():
+            raise ValueError(f"invalid turn source: {source}")
+        from . import agents as agents_db
+        runtime_id = agents_db.current_runtime_id(agent_id)
+        with _critical_write():
+            cursor = conn().execute(
+                """INSERT INTO turns
+                       (agent_id, runtime_id, source, trace_id, synthesize_audio, started_at)
+                   SELECT ?, ?, ?, ?, ?, ?
+                    WHERE NOT EXISTS (SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ?)""",
+                (agent_id, runtime_id, source, trace_id, 1 if synthesize_audio else 0, now_ms(),
+                 agent_id, trace_id))
+        return int(cursor.lastrowid) if cursor.rowcount else None
+
+    @staticmethod
+    def trace_settled(agent_id: str, trace_id: str) -> bool:
+        """Whether ``trace_id``'s newest turn row has settled."""
+        row = conn().execute(
+            """SELECT settled_at FROM turns WHERE agent_id = ? AND trace_id = ?
+                ORDER BY turn_id DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
+        return row is not None and row["settled_at"] is not None
+
+    @staticmethod
     def close_turn(turn_id: int) -> None:
         with _critical_write():
             conn().execute("UPDATE turns SET ended_at = ? WHERE turn_id = ?",
@@ -1036,6 +1099,16 @@ def open_turn(*, agent_id: str, source: str, trace_id: str,
     return MACHINE.open_turn(agent_id=agent_id, source=source,
                              trace_id=trace_id,
                              synthesize_audio=synthesize_audio)
+
+
+def open_turn_once(*, agent_id: str, source: str, trace_id: str,
+                   synthesize_audio: bool = True) -> int | None:
+    return MACHINE.open_turn_once(agent_id=agent_id, source=source, trace_id=trace_id,
+                                  synthesize_audio=synthesize_audio)
+
+
+def trace_settled(agent_id: str, trace_id: str) -> bool:
+    return MACHINE.trace_settled(agent_id, trace_id)
 
 
 def close_turn(turn_id: int) -> None:

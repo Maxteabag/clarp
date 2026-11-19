@@ -134,15 +134,22 @@ def backend_session(agent: AgentRef | dict[str, Any] | str) -> str:
 
 
 def open_trace_id(agent: AgentRef | dict[str, Any] | str) -> str:
-    """The trace id of the agent's newest open turn, or '' between turns."""
+    """The trace id of the agent's turn running now, or '' between turns.
+
+    A turn ends by settling (settled_at); ended_at only marks one cut off. So the running turn is
+    the agent's newest row while it has neither (R92). Asking for the newest row with no ended_at
+    named the last turn long after it settled, and a never-settled twin row of an older trace
+    before R92 could name that trace."""
     ref = resolve(agent)
     if ref is None:
         return ""
     from .db import conn
     row = conn().execute(
-        "SELECT trace_id FROM turns WHERE agent_id = ? AND ended_at IS NULL "
+        "SELECT trace_id, settled_at, ended_at FROM turns WHERE agent_id = ? "
         "ORDER BY turn_id DESC LIMIT 1", (ref.agent_id,)).fetchone()
-    return str(row["trace_id"] or "") if row else ""
+    if row is None or row["settled_at"] is not None or row["ended_at"] is not None:
+        return ""
+    return str(row["trace_id"] or "")
 
 
 def turn_ref(agent: AgentRef | dict[str, Any] | str, trace_id: object,

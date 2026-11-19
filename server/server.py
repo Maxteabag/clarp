@@ -2459,11 +2459,14 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
             stop_unrecorded: Exception | None = None
             try:
                 try:
+                    stop_detail = {"source": "user_stop", "message": "Turn stopped",
+                                   "stop_actor": actor, "stop_actor_verified": actor_verified,
+                                   "stop_reason": reason}
+                    if stop_snapshot.get("trace_id"):
+                        # The turn it stopped settles, not the agent's newest row (R92).
+                        stop_detail["trace_id"] = stop_snapshot["trace_id"]
                     stopped = turn_lifecycle.try_transition(
-                        agent_id, TurnEvent.STOP_REQUESTED,
-                        {"source": "user_stop", "message": "Turn stopped",
-                         "stop_actor": actor, "stop_actor_verified": actor_verified,
-                         "stop_reason": reason})
+                        agent_id, TurnEvent.STOP_REQUESTED, stop_detail)
                 except Exception as exc:  # the write failed after its bounded retries
                     # The barrier is still released below; the caller hears the
                     # Stop was not recorded and can send it again (TP-N1b).

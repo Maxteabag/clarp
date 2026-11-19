@@ -3223,7 +3223,7 @@ def test_a_turn_with_a_voice_message_queued_behind_it_records_its_own_outcome(tm
         ended = (AgentState.DONE, "tA")
     else:
         call["on_error"]("Turn interrupted")
-        ended = (AgentState.INTERRUPTED, None)
+        ended = (AgentState.INTERRUPTED, "tA")      # the runner's failure names its trace (R92)
 
     # Its own end, then the queued message's start.
     assert _states(agent_id)[-2:] == [ended, (AgentState.THINKING, "voice-1")]
