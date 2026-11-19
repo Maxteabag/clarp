@@ -253,6 +253,7 @@ async fn serve(config: Config) -> Result<(), String> {
         capture,
         turns,
         form_event_writer: Arc::default(),
+        controller_actions: Arc::default(),
         android_chip: Arc::default(),
         android,
         config: config.clone(),
