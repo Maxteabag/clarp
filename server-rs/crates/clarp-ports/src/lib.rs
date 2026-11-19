@@ -11,9 +11,9 @@
 pub mod blobs;
 pub mod clock;
 pub mod codec;
+pub mod diagnostics;
 pub mod fcm;
 pub mod kv;
 pub mod log;
 pub mod testkit;
 pub mod usage;
-pub mod diagnostics;
