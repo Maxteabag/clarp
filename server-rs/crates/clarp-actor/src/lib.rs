@@ -3302,6 +3302,7 @@ impl Actor {
                 .or_else(|| self.profile.model.clone())
                 .unwrap_or_default();
             let accounts = self.profile.accounts;
+            let already_refused = self.recorder.agent().refused_live_binding();
             let mut batch = self.recorder.batch();
             let mut signals = Vec::new();
             let mut shown: Vec<String> = Vec::new();
@@ -3369,16 +3370,13 @@ impl Actor {
                             // Another conversation than the agent had, of a tool that has
                             // that one no more: the Host carried the conversation over.
                             let had = batch.agent().backend_session().map(str::to_string);
-                            let lost =
-                                |had: &String| *had != backend_session && !self.backend.keeps(had);
-                            if let Some(had) = had.filter(lost) {
-                                out.carried.push((had, backend_session.clone()));
+                            let command = Command::TurnBound { turn, backend_session };
+                            if batch.command(command, t).is_ok()
+                                && let Some(bound) = batch.agent().backend_session()
+                                && let Some(had) = had.filter(|had| had != bound && !self.backend.keeps(had))
+                            {
+                                out.carried.push((had, bound.to_owned()));
                             }
-                            let command = Command::TurnBound {
-                                turn,
-                                backend_session,
-                            };
-                            let _ = batch.command(command, t);
                             continue;
                         }
                         Signal::Moved(activity) => {
@@ -3649,6 +3647,9 @@ impl Actor {
                 batch.cursor(turn, read_until, now_ms);
             }
             let committed = batch.commit()?;
+            if !already_refused && self.recorder.agent().refused_live_binding() {
+                clarp_backend::past::report_refused_session(self.backend.id());
+            }
             live.offset = read_until;
             for line in &aloud {
                 self.speech.apply(line);
