@@ -557,8 +557,13 @@ class OrchestratorService:
             janitor_builtins.complete_run(run_id, outcome=outcome, result=receipt, error=error)
         except Exception as exc:  # noqa: BLE001 - the receipt never costs the answer
             log_exception("orchestratorReceiptFail", exc, detail=f"run={run_id}")
-            least = {key: receipt[key] for key in ("status", "target_agent_id", "http_status")
+            # Its least receipt keeps what the first answer said (status and dispatch always fit;
+            # the session when it does), so a replay after a failed completion answers the same.
+            least = {key: receipt[key] for key in ("status", "target_agent_id", "http_status",
+                                                   "answer_status", "answer_dispatch", "answer_session")
                      if key in receipt}
+            if not janitor_builtins.fits_metadata(least):
+                least.pop("answer_session", None)
             if not janitor_builtins.fits_metadata(least):
                 least = {"status": result.action}
             try:        # never leave the run claimed: close it with its least receipt (replays as main)
@@ -683,12 +688,13 @@ class OrchestratorService:
                   else 200)
         # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
         # A receipt written before it kept that answers as main did, by its recipient.
-        # A stored answer is read defensively. Its status must be an integer, else the receipt is
+        # A stored answer is read defensively. Its status must be an HTTP status, an integer from
+        # 100 to 599 (0 would be answered as 'HTTP/1.1 0'), else the receipt is
         # an older one, replayed as main does. A status with no session stored means the first
         # answer named the requested session (too long for the bound), which is this same client
         # id's own request; a session stored but not a non-empty text is an older receipt too.
         said_session, said_status = receipt.get("answer_session"), receipt.get("answer_status")
-        if not pending and type(said_status) is int and (
+        if not pending and type(said_status) is int and 100 <= said_status <= 599 and (
                 "answer_session" not in receipt or (isinstance(said_session, str) and said_session)):
             session = said_session if "answer_session" in receipt else requested_session
             dispatched = receipt.get("answer_dispatch") if isinstance(receipt.get("answer_dispatch"), str) else ""
