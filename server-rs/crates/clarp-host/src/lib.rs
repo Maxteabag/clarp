@@ -26,6 +26,7 @@ pub mod chip;
 pub mod compact;
 pub mod config;
 pub mod connector;
+pub mod contacts;
 pub mod controls;
 pub mod direct;
 pub mod edge;

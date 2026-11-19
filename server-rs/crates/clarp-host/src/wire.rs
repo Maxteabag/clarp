@@ -1021,6 +1021,12 @@ pub fn roster_renamed(session: &str, name: &str) -> Value {
     json!({ "type": "agent-roster", "kind": "agent-renamed", "session": session, "name": name })
 }
 
+/// An agent was given a contact (`POST /agent-assign`): its name as a person reads it, its
+/// voice and its way of speaking are the contact's now.
+pub fn roster_contact_assigned(session: &str, name: &str) -> Value {
+    json!({ "type": "agent-roster", "kind": "contact-assigned", "session": session, "name": name })
+}
+
 /// The personas changed (`persona-created`, `persona-updated`, `persona-deleted`): the apps
 /// read the list again.
 pub fn roster_personas(kind: &str) -> Value {
