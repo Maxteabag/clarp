@@ -123,6 +123,7 @@ pub struct Android {
 /// What of the Host a live ring is admitted and held by.
 #[derive(Clone, Copy)]
 pub struct World<'a> {
+    pub opening: Option<&'a dyn super::opening::Proof>,
     pub profiles: &'a dyn Profiles,
     pub android: &'a [Android],
     /// Whether this Host can push to Android phones at all.
@@ -563,6 +564,7 @@ impl Rings {
         };
         match admitted() {
             Ok(Ok((caller, live))) => Ok(Admission::Place(Admitted {
+                generation: Value::Null,
                 caller,
                 reason,
                 opening,
@@ -808,6 +810,9 @@ impl Rings {
             ..Live::default()
         };
         self.rings.push(Ring {
+            opening_mode: String::new(),
+            generation: Value::Null,
+            opening: Value::Null,
             ring_id: format!("rng_{new_id}"),
             session: caller.session,
             persona: caller.persona,

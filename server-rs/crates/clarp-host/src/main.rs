@@ -63,6 +63,13 @@ async fn serve(config: Config) -> Result<(), String> {
         .and_then(|()| std::fs::create_dir_all(&config.run_dir))
         .map_err(|error| format!("the Host's directories cannot be made: {error}"))?;
 
+    if let Err(reason) = clarp_host::calls::generation::bootstrap(&config.data_dir) {
+        eprintln!(
+            "clarp-host: listen-first generation unavailable ({})",
+            reason.kind()
+        );
+    }
+
     let mut store = tables
         .open(&config.data_dir.join("fleet.db"))
         .map_err(|error| error.to_string())?;
@@ -128,7 +135,9 @@ async fn serve(config: Config) -> Result<(), String> {
         } else {
             Vec::new()
         };
+    let (opening_gate, opening_requests) = clarp_host::calls::opening_launch::channel();
     let works = Works {
+        opening_gate,
         config: config.clone(),
         engine,
         codecs,
@@ -283,6 +292,10 @@ async fn serve(config: Config) -> Result<(), String> {
     // and its agent are told without anybody having to ask first.
     clarp_host::calls::resume(&app);
     // And the chips of the phones are kept current from now on.
+    tokio::spawn(clarp_host::calls::opening_launch::run(
+        app.clone(),
+        opening_requests,
+    ));
     clarp_host::chip::run(&app, is_limited);
     tokio::spawn(clarp_host::android_chip::run(app.clone()));
     // And what is due of the schedules is sent.

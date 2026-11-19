@@ -42,6 +42,7 @@ pub enum Launched {
     SaidWhy,
     /// No shim has the turn.
     Failed(String),
+    NoShim(String),
 }
 
 /// What a turn's thread tells the agent.
@@ -149,7 +150,7 @@ impl Launcher {
         let mut child = match self.command(order).spawn() {
             Ok(child) => child,
             Err(error) => {
-                return Launched::Failed(format!("the shim could not be started: {error}"));
+                return Launched::NoShim(format!("the shim could not be started: {error}"));
             }
         };
         let mut said = String::new();
@@ -180,7 +181,7 @@ impl Launcher {
             }
             Launched::TurnTaken => follow(&order.socket, tell),
             Launched::SaidWhy => tell(Told::SpoolChanged),
-            Launched::Failed(reason) => tell(Told::Failed(reason)),
+            Launched::Failed(reason) | Launched::NoShim(reason) => tell(Told::Failed(reason)),
         }
     }
 }
@@ -231,6 +232,7 @@ mod tests {
 
     fn order() -> ShimOrder {
         ShimOrder {
+            opening: None,
             named_session: None,
             prompt_as_file: false,
             before_stop: None,
@@ -344,6 +346,6 @@ mod tests {
             Launcher::by_name("direct", PathBuf::from("/nonexistent/clarp-shim")).unwrap();
         let mut order = order();
         order.socket = std::env::temp_dir().join("clarp-host-launcher-test/none.sock");
-        assert!(matches!(missing.launch(&order), Launched::Failed(_)));
+        assert!(matches!(missing.launch(&order), Launched::NoShim(_)));
     }
 }

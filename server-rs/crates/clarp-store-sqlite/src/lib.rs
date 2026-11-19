@@ -301,6 +301,17 @@ impl KeyValue for SqliteTables {
         Ok(())
     }
 
+    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError> {
+        let tx = self.conn.transaction().map_err(failed)?;
+        {
+            let mut put=tx.prepare_cached("INSERT INTO kv(tbl,key,value) VALUES (?1,?2,?3) ON CONFLICT(tbl,key) DO UPDATE SET value=excluded.value").map_err(failed)?;
+            for (table, key, value) in writes {
+                put.execute(params![table, key, value]).map_err(failed)?;
+            }
+        }
+        tx.commit().map_err(failed)
+    }
+
     fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError> {
         let removed = self
             .conn

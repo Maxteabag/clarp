@@ -144,5 +144,101 @@ for what,old,new in [
 ]:
     PLANTS.append((H,'host',what,old,new))
 
+RUNS['openings']=['test','--test','listen_first_vectors']
+O='clarp-kernel/src/rings/opening.rs'
+for what,old,new in [
+    ('fallback exposes the owner nonce','if secret && python::truthy(&op["token"])','if python::truthy(&op["token"])'),
+    ('renew omits the old epoch check','op["epoch"] != body["expected_epoch"]','false'),
+    ('renew ignores owner nonce','op["owner_nonce"] != body["owner_nonce"]','false'),
+    ('another device may claim','if op["principal"] != owner','if false'),
+    ('a stale claim is admitted','else if op["epoch"] != body["epoch"]','else if false'),
+    ('accept an empty claim id','python::strip(id).is_empty()','false'),
+    ('a 128-character id is refused','id.chars().count() > 128','id.chars().count() >= 128'),
+    ('a 129-character id is accepted','id.chars().count() > 128','id.chars().count() > 129'),
+    ('different retry accepted','prior["fingerprint"] != fp','false'),
+    ('replay count grows again','"opening":shown,"changed":false','"opening":shown,"changed":true'),
+    ('drop a stored claim too early','requests.len() > 64','requests.len() >= 64'),
+    ('drop a stored claim too late','requests.len() > 64','requests.len() > 65'),
+    ('newest request evicted first','.min_by_key(|(_, v)| v["at"].as_i64())','.max_by_key(|(_, v)| v["at"].as_i64())'),
+    ('renew reuses nonce','op["owner_nonce"] = json!(w.nonce)','op["owner_nonce"] = json!("old")'),
+    ('intent overwrites previous generation','op["intent"]["gen"].as_i64().unwrap_or(0) + 1','1'),
+    ('silence at deadline is refused','< op["silence_ms"].as_i64().unwrap_or(1250)','<= op["silence_ms"].as_i64().unwrap_or(1250)'),
+    ('late watermark unnecessary','["at_ms", "watermark_ms"].iter().any','["at_ms"].iter().any'),
+    ('clock unnecessary','["at_ms", "watermark_ms"].iter().any','["watermark_ms"].iter().any'),
+    ('abandon rejects empty capture','Some("empty_capture" | "capture_aborted")','Some("capture_aborted")'),
+    ('abandon rejects capture abort','Some("empty_capture" | "capture_aborted")','Some("empty_capture")'),
+    ('second onset changes the latch','changed = false;','changed = true;'),
+    ('late greeting is not ordinary','shown["greeting"] = json!("ordinary")','shown["greeting"] = json!("greeting")'),
+    ('intent with no row went out','_ if row.is_null() => "cancelled"','_ if row.is_null() => "started"'),
+    ('mismatched trace cancels a different row','_ if row["trace_id"] != intent["trace_id"] => "unknown"','_ if row["trace_id"] != intent["trace_id"] => "cancelled"'),
+    ('an intended launch already ran','Some("intended") => "cancelled"','Some("intended") => "started"'),
+    ('a started intent is withdrawn','Some("started") => return "started"','Some("started") => return "cancelled"'),
+    ('a cancelled intent is considered unknown','Some("cancelled") => return "cancelled"','Some("cancelled") => return "unknown"'),
+    ('queued row is left behind','effects.withdraw = true;', 'effects.withdraw = false;'),
+    ('an earlier claim may be replaced','Some("queued" | "parked") if row["claimed_at"].is_null()', 'Some("queued" | "parked")'),
+    ('a greeting from the wrong phone is accepted','if op["principal"] != g.principal','if false'),
+    ('a greeting may go to any call','|| op["call_id"] != g.call',''),
+    ('a greeting may go to another session','op["session"] != g.session ||',''),
+    ('greeting may use old epoch','if op["epoch"] != *g.epoch','if false'),
+    ('the wrong message confirms a greeting','op["greeting"]["client_msg_id"] == id','false'),
+    ('a greeting is marked confirmed on ambiguous send','if ok { "confirmed" } else { "unknown" }','if ok { "confirmed" } else { "confirmed" }'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
+
+for what,old,new in [
+    ('a foreign waiting turn is intercepted','if w.queue["foreign"] == true {','if false {'),
+    ('a gate accepts a different admission','intent["admission_id"] == id && intent["trace_id"] == trace','intent["trace_id"] == trace'),
+    ('a gate accepts a different trace','intent["admission_id"] == id && intent["trace_id"] == trace','intent["admission_id"] == id'),
+    ('a duplicate claimed launch is replayed','mark_unknown(op, &mut fx.opening);','return json!(true);'),
+    ('claim accepts a parked row','if status != "queued"','if status != "queued" && status != "parked"'),
+    ('claim does not take the queue row','fx.claim = true;','fx.claim = false;'),
+    ('unsent release leaves the slot claimed','fx.release = true;','fx.release = false;'),
+    ('an unprovable launch does not mark the row unknown','fx.launched_unknown = true;','fx.launched_unknown = false;'),
+    ('parked launch ignores a newer Stop','if action == Gate::Parked {\n                if let Some(reason) = w.fence','if action == Gate::Parked {\n                if let Some(reason) = None::<&str>'),
+    ('claim refuses to record an uncertain row','fx.unknown = true;','fx.unknown = false;'),
+    ('release works without a claimed queue row','|| status != "claimed"','|| status == "gone"'),
+    ('an end tag calls a greeting an initiative','"greeting_reply"','"initiative"'),
+    ('a retired opening can still be synthesized','let skip = !op["retired"].is_null()','let skip = false'),
+    ('a later greeting does not stop initiative audio','|| python::truthy(&op["late_greeting"])','|| false'),
+    ('an audio tag identifies the other epoch','"epoch":op["epoch"],"kind":kind','"epoch":0,"kind":kind'),
+    ('an invalid uuid length is accepted','text.len() == 36','text.len() >= 35'),
+    ('uppercase UUID digits identify the Host',"(b'a'..=b'f').contains(&c)","c.is_ascii_hexdigit()"),
+    ('metadata loses its call identity','"call_id":op["call_id"],"opening"','"call_id":"another","opening"'),
+    ('initiative header has another cause','Some("no_mic")=>','Some("another")=>'),
+    ('silence duration is measured in ms','as f64/1000.0','as f64/1.0'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
+for mod,what,old,new in [
+    ('calls/opening','the greeting is never confirmed','rules::greeting_admitted(&mut ring.opening, message, ok, &world, fx)','rules::greeting_admitted(&mut ring.opening, message, !ok, &world, fx)'),
+    ('calls/opening','retire does not look at the revoked phone','r.opening["principal"] == owner','r.opening["principal"] != owner'),
+    ('calls/generation','a full device loses its auth proof','d.device_id == principal','d.device_id != principal'),
+    ('calls/opening_launch','a final check returns no launch','result == "launch"','result == "never-launch"'),
+    ('voice','drop the greeting trace tag','event[k] = v.clone()','event[k] = Value::Null'),
+]:
+    PLANTS.append(('clarp-host/src/'+mod+'.rs','host',what,old,new))
+for file,what,old,new in [
+    ('clarp-actor/src/lib.rs','pre-spawn refusal ends an opening','live.opening && !stopping','!live.opening && !stopping'),
+    ('clarp-actor/src/lib.rs','the previous attempt cannot prove it was unsent','let previous_unsent = attempt > 1','let previous_unsent = attempt > u32::MAX - 1'),
+    ('clarp-host/src/calls/opening_launch.rs','the restarted gate discards the previous attempt proof','op["launch_attempt"] == attempt - 1','op["launch_attempt"] == attempt'),
+    ('clarp-host/src/calls/opening_launch.rs','the gate forgets which attempt claimed the initiative','op["launch_attempt"] = json!(attempt);','op["launch_attempt"] = json!(0);'),
+]:
+    PLANTS.append((file,'host',what,old,new))
+for what,old,new in [
+    ('a client admission may become the initiative','admission["channel"] != "call"','admission["channel"] == "never"'),
+    ('adoption disregards the admission trace','&admission["trace_id"] != trace','&admission["trace_id"] == &serde_json::Value::Null'),
+    ('an unrelated queued trace may be adopted','&w.queue["trace_id"] != trace','&w.queue["trace_id"] == &serde_json::Value::Null'),
+    ('a committed admission is created again','if admission.is_null() {','if !admission.is_null() {'),
+    ('a matching admission ignores the retained fence','retire(op, reason, w, fx);\n        return "fenced";','return "fenced";'),
+]:
+    PLANTS.append((O,'openings',what,old,new))
+for file,what,old,new in [
+    ('clarp-host/src/calls.rs','the token index records the wrong ring','token.into(),\n                        dropped.ring_id.as_bytes().to_vec()','token.into(),\n                        dropped.agent_id.as_bytes().to_vec()'),
+    ('clarp-host/src/calls.rs','eviction files an opening under its agent','"opening_history",\n                        dropped.ring_id.clone()','"opening_history",\n                        dropped.agent_id.clone()'),
+    ('clarp-host/src/calls.rs','a change to an archived opening is forgotten','if archived.get(&ring.ring_id) != Some(&ring.opening)','if archived.get(&ring.ring_id) == Some(&ring.opening)'),
+    ('clarp-host/src/calls.rs','archived clips retain old playback rights','for ring in rings.opening_records() {','for ring in rings.rings() {'),
+    ('clarp-host/src/calls/opening.rs','revocation scans the wrong archive','.kept_all("opening_history")','.kept_all("absent_openings")'),
+    ('clarp-kernel/src/rings/opening.rs','opening changes cannot reach an evicted ring','.chain(self.archived.iter_mut())','.chain(self.archived.iter_mut().take(0))'),
+]:
+    PLANTS.append((file,'host',what,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
