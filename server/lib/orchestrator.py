@@ -542,13 +542,15 @@ class OrchestratorService:
         if result.retry_dispatch:
             # The decision stands; a same-id retry sends it again (RTO-07).
             receipt.update(reason=DISPATCH_RETRYABLE, decision_id=result.decision_id)
-        # What the first answer said, so a replay answers exactly this; all three or none, never
-        # cut: a value the demand history's bound refuses is left out and the receipt replays as
-        # main does (a cut session name is a wrong name).
-        said = {"answer_session": result.session, "answer_dispatch": result.dispatch,
-                "answer_status": result.status}
+        # What the first answer said, so a replay answers exactly this. Its status and dispatch
+        # always fit; its session is stored only when it fits the demand history's bound, never
+        # cut (a cut session name is a wrong name). Only an undelivered outcome can carry an
+        # over-long session, the requested one: a status without a session means just that.
+        said = {"answer_dispatch": result.dispatch, "answer_status": result.status}
         if janitor_builtins.fits_metadata({**receipt, **said}):
             receipt.update(said)
+            if janitor_builtins.fits_metadata({**receipt, "answer_session": result.session}):
+                receipt["answer_session"] = result.session
         outcome = "failed" if failed else "completed"
         error = "Message routing failed" if failed else ""
         try:
@@ -681,12 +683,14 @@ class OrchestratorService:
                   else 200)
         # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
         # A receipt written before it kept that answers as main did, by its recipient.
-        # A stored answer is read defensively: a session that is not a non-empty text or a status
-        # that is not an integer is an older receipt, replayed as main does.
+        # A stored answer is read defensively. Its status must be an integer, else the receipt is
+        # an older one, replayed as main does. A status with no session stored means the first
+        # answer named the requested session (too long for the bound), which is this same client
+        # id's own request; a session stored but not a non-empty text is an older receipt too.
         said_session, said_status = receipt.get("answer_session"), receipt.get("answer_status")
-        if (not pending and isinstance(said_session, str) and said_session
-                and type(said_status) is int):
-            session = said_session
+        if not pending and type(said_status) is int and (
+                "answer_session" not in receipt or (isinstance(said_session, str) and said_session)):
+            session = said_session if "answer_session" in receipt else requested_session
             dispatched = receipt.get("answer_dispatch") if isinstance(receipt.get("answer_dispatch"), str) else ""
             status = said_status
         elif pending:
