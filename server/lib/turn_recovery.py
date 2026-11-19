@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 
 from . import agents as agents_db
@@ -13,7 +14,7 @@ from . import events
 from .turn_lifecycle import TurnEvent
 from .log import log, log_exception
 from .turn_dispatch_state import _TURN_LOCK, _SLOTS, account_failover, _INFLIGHT, _RECOVERY_LOCK, _RECOVERY_BACKOFF, _NO_LOCK, LEAKED_SLOT_GRACE_MS, ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launch_running
-from .turn_command import _can_steer, _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable
+from .turn_command import _can_steer, _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable, _launch_refused
 
 
 class RecoveryMixin:
@@ -225,6 +226,12 @@ class RecoveryMixin:
             agent_id, str(row["queue_id"]), exc, self.now())
         if backoff.failures == 1:
             log_exception("queuedRecoveryFail", exc, detail=row["session"])
+        if backoff.parked and _launch_refused(exc):
+            # Refused before anything was sent, the same way PARK_AFTER times:
+            # the row ends failed and its sender is told; parked, it would
+            # stay queued for good unless someone sent again (R121).
+            if self._end_refused_launch(row, backoff):
+                return dataclasses.replace(backoff, parked=False, retry_at=self.now())
         if backoff.parked:
             log("queuedRecoveryParked",
                 f"session={row['session']} queue={row['queue_id']} "
@@ -250,6 +257,26 @@ class RecoveryMixin:
                 f"failures={backoff.failures} "
                 f"retry_in={backoff.retry_at - self.now():.0f}s")
         return backoff
+
+    def _end_refused_launch(self, row, backoff: recovery_backoff.Backoff) -> bool:
+        agent_id = str(row["agent_id"])
+        try:
+            ended = turn_queue.fail_refused_launch(row, failures=backoff.failures, error=backoff.error)
+        except Exception as exc:  # noqa: BLE001 - it parks instead, as before R121
+            log_exception("queuedRecoveryEndFail", exc, detail=row["session"])
+            return False
+        _RECOVERY_BACKOFF.clear(agent_id)
+        if not ended:
+            return True     # no longer queued: nothing to end, and nothing holds the agent
+        log("queuedRecoveryEnded", f"session={row['session']} queue={row['queue_id']} "
+                                   f"failures={backoff.failures} error={backoff.error!r}")
+        if getattr(self.ctx, "stream", None) is not None:
+            state = turn_queue.state(agent_id)
+            events.broadcast(self.ctx.stream, events.queue_updated(
+                session=row["session"], agent_id=agent_id, client_msg_id=row["client_msg_id"],
+                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_revision=state["revision"]))
+        return True
 
     def clear_recovery_backoff(self, agent_id: str, *, reason: str) -> None:
         """A new send, explicit send or repair asks for the agent again: its

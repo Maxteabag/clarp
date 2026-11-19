@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import agent_goals, agents as agents_db, backend_usage, eventlog, settings_store, tts_queue
+from .backend.base import CliMissing, LaunchRefused
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
 from .hook_runtime import without_inherited_identity
@@ -56,7 +57,7 @@ def _codex_argv() -> list[str]:
     if found is None and os.path.isfile(binary) and os.access(binary, os.X_OK):
         found = binary
     if found is None:
-        raise FileNotFoundError(f"`{binary}` not on PATH")
+        raise CliMissing(f"`{binary}` not on PATH")
     return [found, "app-server", "--stdio", *unload]
 
 
@@ -112,7 +113,7 @@ class _StoppedBeforeLaunch(Exception):
     """A Stop arrived before turn/start was sent: nothing is launched."""
 
 
-class CodexSessionStuck(RuntimeError):
+class CodexSessionStuck(LaunchRefused, RuntimeError):
     """The agent's thread is held by a stuck app-server process that is
     recycled once no other live turn runs on it."""
 
