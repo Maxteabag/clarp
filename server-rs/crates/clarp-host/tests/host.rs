@@ -41813,13 +41813,19 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
     // asked to recover: what runs is stopped, the selector is asked once, the turn is taken up.
     let (place, own, asked, owners) = host_of("quota-recovers");
     let host = start(&place, &own, &owners);
-    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
-    let cody = made["session"].as_str().unwrap().to_string();
-    host.send(&cody, "slow work", "u-1");
+    // The windows are read off a turn that ended: another agent's quick one. Then Cody's turn
+    // runs, and runs on.
+    let made = host.post("/agents", json!({ "name": "Quinn", "backend": "codex" }));
+    let quinn = made["session"].as_str().unwrap().to_string();
+    host.send(&quinn, "quick work", "u-0");
     wait_for("the windows to be shown", || {
         let shown = host.get("/backend-usage")["providers"]["codex"]["windows"].clone();
         shown.as_array().is_some_and(|windows| !windows.is_empty())
     });
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    host.send(&cody, "slow work", "u-1");
+    wait_for("Cody's turn to run", || host.state(&cody) == "thinking");
     set(&host, "automatic");
     wait_for("the selector to be asked", || !lines(&asked).is_empty());
     wait_for("the turn to be taken up and done", || {
