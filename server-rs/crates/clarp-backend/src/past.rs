@@ -222,7 +222,8 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
         }
     };
     for dir in &dirs {
-        let index = confined(&root, &dir.join("sessions-index.json")).and_then(|path| std::fs::read(path).ok());
+        let index = confined(&root, &dir.join("sessions-index.json"))
+            .and_then(|path| std::fs::read(path).ok());
         let index = index.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
         let entries = index.as_ref().and_then(|index| index["entries"].as_array());
         for entry in entries
@@ -270,8 +271,10 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             let id = path
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned());
-            if transcript && id.is_some_and(|id| one_name(&id) && !named.contains(&id))
-                && confined(&root, &path).is_some() {
+            if transcript
+                && id.is_some_and(|id| one_name(&id) && !named.contains(&id))
+                && confined(&root, &path).is_some()
+            {
                 unnamed.push((written(&path).0, path));
             }
         }
@@ -534,20 +537,42 @@ pub fn claude_transcript(
     session: &str,
     other_projects: bool,
 ) -> Option<PathBuf> {
+    claude_source(projects, cwd, session, other_projects)
+        .ok()
+        .flatten()
+}
+
+/// A fork distinguishes a missing source from one the store boundary refuses.
+#[derive(Debug)]
+pub struct OutsideStore;
+
+pub fn claude_source(
+    projects: &Path,
+    cwd: &str,
+    session: &str,
+    other_projects: bool,
+) -> Result<Option<PathBuf>, OutsideStore> {
     if !one_name(session) {
-        return None;
+        return Err(OutsideStore);
     }
-    let root = projects.canonicalize().ok()?;
+    let Ok(root) = projects.canonicalize() else {
+        return Ok(None);
+    };
     let name = format!("{session}.jsonl");
     let own = root.join(claude_project(cwd)).join(&name);
-    confined(&root, &own).or_else(|| {
-        if !other_projects {
-            return None;
-        }
+    let candidate = if own.is_file() {
+        Some(own)
+    } else if other_projects {
         files_of(&root)
             .into_iter()
-            .find_map(|dir| confined(&root, &dir.join(&name)))
-    })
+            .map(|dir| dir.join(&name))
+            .find(|file| file.is_file())
+    } else {
+        None
+    };
+    candidate
+        .map(|path| confined(&root, &path).ok_or(OutsideStore))
+        .transpose()
 }
 
 /// The newest rollout whose complete timestamped name identifies this session.
@@ -556,12 +581,15 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
         return None;
     }
     let root = sessions.canonicalize().ok()?;
+    #[allow(clippy::expect_used)]
     static ROLLOUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl\z")
             .expect("the Codex rollout name pattern")
     });
     let named = files_under(sessions, &|name| {
-        ROLLOUT.captures(name).is_some_and(|matched| &matched[1] == session)
+        ROLLOUT
+            .captures(name)
+            .is_some_and(|matched| &matched[1] == session)
     });
     let mut newest: Option<(SystemTime, PathBuf)> = None;
     for path in named.into_iter().filter_map(|p| confined(&root, &p)) {
@@ -611,7 +639,8 @@ pub fn agy_transcript(base: &Path, conversation: &str) -> Option<PathBuf> {
         return None;
     }
     let brain = base.join("brain").canonicalize().ok()?;
-    let path = brain.join(conversation)
+    let path = brain
+        .join(conversation)
         .join(".system_generated/logs/transcript.jsonl");
     confined(&brain, &path)
 }
@@ -978,6 +1007,130 @@ pub fn native_sessions(
 mod confinement {
     use super::*;
     use clarp_kernel::grok_muse::Tool;
+
+    #[test]
+    fn native_session_lookups_follow_the_reference_for_names_and_files() {
+        use std::os::unix::fs::symlink;
+        use std::path::Component;
+
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/session-ids-434-vectors.json"
+        ))
+        .unwrap();
+        let root = std::env::temp_dir().join(format!("clarp-r70-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = rusqlite::Connection::open(root.join("native.db")).unwrap();
+        db.execute_batch("CREATE TABLE session(id TEXT); CREATE TABLE message(id TEXT, session_id TEXT, time_created INTEGER, data TEXT);").unwrap();
+        let mut names = 0;
+        for row in vectors["names"].as_array().unwrap() {
+            let expected = row[1].as_bool().unwrap();
+            let id = row[0].as_str();
+            assert_eq!(id.is_some_and(one_name), expected, "{row}");
+            names += 1;
+            // Only construct fixture names that the OS can represent as a single entry.
+            let Some(id) = id.filter(|id| {
+                !id.contains(['/', '\0'])
+                    && matches!(
+                        Path::new(id).components().next(),
+                        Some(Component::Normal(_))
+                    )
+            }) else {
+                continue;
+            };
+            for (tool, file) in [
+                (
+                    "claude",
+                    root.join("claude/-work").join(format!("{id}.jsonl")),
+                ),
+                (
+                    "codex",
+                    root.join("codex")
+                        .join(format!("rollout-2026-11-19T12-00-00-{id}.jsonl")),
+                ),
+                (
+                    "agy",
+                    root.join("agy/brain")
+                        .join(id)
+                        .join(".system_generated/logs/transcript.jsonl"),
+                ),
+                (
+                    "grok",
+                    root.join("grok").join(id).join("chat_history.jsonl"),
+                ),
+                (
+                    "muse",
+                    root.join("muse/2026/11/19").join(id).join("session.jsonl"),
+                ),
+            ] {
+                std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+                std::fs::write(&file, "{}").unwrap();
+                let store = root.join(tool);
+                let found = match tool {
+                    "claude" => claude_transcript(&store, "/work", id, false).is_some(),
+                    "codex" => codex_rollout(&store, id).is_some(),
+                    "agy" => agy_transcript(&store, id).is_some(),
+                    "grok" => native_transcript_in(Tool::Grok, &store, id).is_some(),
+                    "muse" => native_transcript_in(Tool::Muse, &store, id).is_some(),
+                    _ => unreachable!(),
+                };
+                let accepted = if tool == "muse" {
+                    row[2].as_bool().unwrap()
+                } else {
+                    expected
+                };
+                assert_eq!(found, accepted, "{tool}: {row}");
+                std::fs::remove_file(file).unwrap();
+            }
+            // OpenCode and DeepSeek both open this store by the session's key.
+            db.execute("INSERT INTO session VALUES (?)", [id]).unwrap();
+            assert_eq!(
+                crate::history::opencode::read(&root.join("native.db"), id).is_some(),
+                expected,
+                "{row}"
+            );
+        }
+        let store = root.join("store");
+        let alias = root.join("alias");
+        let sibling = root.join("store-sibling");
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        symlink(&store, &alias).unwrap();
+        std::fs::write(store.join("file"), "").unwrap();
+        std::fs::write(sibling.join("file"), "").unwrap();
+        for (link, target) in [
+            ("in-link", "file"),
+            ("out-link", "../store-sibling/file"),
+            ("twice", "in-link"),
+            ("loop", "loop"),
+            ("missing-link", "absent"),
+        ] {
+            symlink(target, store.join(link)).unwrap();
+        }
+        let mut locations = 0;
+        for row in vectors["locations"].as_array().unwrap() {
+            let file = alias.join(row[0].as_str().unwrap());
+            assert_eq!(
+                confined(&alias.canonicalize().unwrap(), &file).is_some(),
+                row[1].as_bool().unwrap(),
+                "{row}"
+            );
+            locations += 1;
+        }
+        let mut rollouts = 0;
+        for row in vectors["rollouts"].as_array().unwrap() {
+            let file = store.join(row[0].as_str().unwrap());
+            std::fs::write(&file, "").unwrap();
+            assert_eq!(
+                codex_rollout(&alias, "a1").is_some(),
+                row[1].as_bool().unwrap(),
+                "{row}"
+            );
+            std::fs::remove_file(file).unwrap();
+            rollouts += 1;
+        }
+        assert_eq!((names, locations, rollouts), (235, 7, 18));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn all_native_session_lookups_require_one_name_and_a_file_in_the_store() {

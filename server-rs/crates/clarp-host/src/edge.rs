@@ -1436,7 +1436,9 @@ pub(crate) async fn make_agent(
     for key in ["resume_session_id", "fork_session_id"] {
         match asked.get(key) {
             None | Some(Value::Null) => {}
-            Some(Value::String(id)) if id.is_empty() || clarp_kernel::native_session_name(clarp_kernel::python::strip(id)) => {}
+            Some(Value::String(id))
+                if id.is_empty()
+                    || clarp_kernel::native_session_name(clarp_kernel::python::strip(id)) => {}
             _ => return Err(bad("invalid session id")),
         }
     }
