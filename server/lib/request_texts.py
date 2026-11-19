@@ -44,15 +44,15 @@ def _render_spec(path: str, data: dict) -> bool:
     return False
 
 
-def refused(handler, method: str, path: str) -> bool:
+def refused(responder, method: str, path: str) -> bool:
     """Answer 400 with the fixed sentence when an artifact or decision mutation carries a text
     that cannot be stored; True when it did. The body is read once and kept for the handler."""
     if method == "GET" or not (path in _FAMILIES or path.startswith(tuple(f + "/" for f in _FAMILIES))):
         return False
-    data = handler._read_json()
+    data = responder.read_json()
     if not isinstance(data, dict) or not lone_surrogate(data) or _render_spec(path, data):
         return False
     from .log import log
     log("requestTextRefused", path.split("/", 2)[1])     # the family only: no id, no text
-    handler._json_error(400, SENTENCE)
+    responder.send_error(400, SENTENCE)
     return True
