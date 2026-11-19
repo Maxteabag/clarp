@@ -62,6 +62,9 @@ const MOST_PRINTED: u64 = 8 * 1024 * 1024;
 const WAITED_FOR: Duration = Duration::from_secs(desk::DESK_ASKED.1 + 5);
 /// What the tool is told so that it renews no login as it reads.
 const RENEW_NOTHING: (&str, &str) = ("HOTSEAT_NO_REFRESH", "1");
+/// How often a tool whose file is still open for writing is tried again, and how far apart.
+const BUSY_TRIES: u32 = 10;
+const BUSY_APART: Duration = Duration::from_millis(50);
 /// What is kept with the fleet: the seats as the strict answer tells them, and the desk.
 #[derive(Default, Serialize, Deserialize)]
 struct Kept {
@@ -165,8 +168,22 @@ impl Desk {
         if !self.renews {
             tool.env(RENEW_NOTHING.0, RENEW_NOTHING.1);
         }
-        let Ok(mut running) = tool.spawn() else {
-            return Err(Failed::DidNotRun);
+        // A tool whose file is still open for writing cannot be started (`ETXTBSY`): it is
+        // being replaced, or a process that was being started beside it when it was written
+        // still holds it for a moment. It is tried again a little later, a few times.
+        let mut tries = 0;
+        let mut running = loop {
+            match tool.spawn() {
+                Ok(running) => break running,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                        && tries < BUSY_TRIES =>
+                {
+                    tries += 1;
+                    tokio::time::sleep(BUSY_APART).await;
+                }
+                Err(_) => return Err(Failed::DidNotRun),
+            }
         };
         let group = running.id();
         let printed = running.stdout.take();
@@ -582,6 +599,27 @@ mod tests {
         std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         Desk::new(path.to_str().unwrap(), renews)
+    }
+
+    #[tokio::test]
+    async fn a_tool_whose_file_is_still_open_for_writing_is_started_once_it_is_free() {
+        let dir = std::env::temp_dir().join(format!("clarp-seats-busy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let busy = tool(&dir, "busy", "printf '{}'", false);
+        // Held open for writing, as by a process forked while the file was written: it cannot
+        // be started until that lets go of it.
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .open(dir.join("busy"))
+            .unwrap();
+        let lets_go = std::thread::spawn(move || {
+            std::thread::sleep(BUSY_APART * 3);
+            drop(held);
+        });
+        assert_eq!(busy.asking((&["tui"], 20)).await, Ok(json!({})));
+        lets_go.join().unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test]
