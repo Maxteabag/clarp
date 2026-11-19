@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Compile and test server-rs on the build machine, one job at a time.
+# fleet-load-build compiles the release Host for the manual fleet benchmark.
+# fleet-load <private-remote-dir> <move|empty|full> runs one time-bounded slice.
 # Set CLARP_BUILD_FIRST=1 for a single priority step. For a whole landing, use
 # tools/build lease ./landing-driver; its build and repo-gates commands inherit the reservation.
 # If the driver's machine disappears, its lease can last until SSH detects the disconnect (about two hours).
@@ -70,6 +72,11 @@ case "$cmd" in
     fmt)    cargo_cmd="cargo fmt --all" ;;
     conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
+    fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host" ;;
+    fleet-load)
+        [[ $# = 2 && $1 == /var/tmp/* && $1 != *$'\n'* && $2 =~ ^(move|empty|full)$ ]] || exit 2
+        printf -v cargo_cmd '%q ' timeout -k 3 170 unshare --user --map-root-user --net --pid --fork --kill-child --mount-proc sh -ec 'ip link set lo up; exec python3 tools/fleet-load "$@"' fleet-load "$1" "$2"
+        ;;
     release) cargo_cmd="cargo build --release -j $JOBS -p clarp-host -p clarp-shim" ;;
     *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status" >&2; exit 2 ;;
 esac
