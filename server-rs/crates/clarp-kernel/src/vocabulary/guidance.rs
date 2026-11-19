@@ -32,6 +32,10 @@ pub fn clean(raw: &str) -> String {
 
 pub struct Agent<'a> {
     pub persona: &'a str,
+    pub id: &'a str,
+    pub role: &'a str,
+    pub parent: &'a str,
+    pub latest_start: i64,
     pub created: i64,
     pub archived: bool,
     pub deleted: bool,
@@ -42,7 +46,14 @@ pub fn active_names<'a>(agents: impl Iterator<Item = Agent<'a>>) -> Vec<String> 
     let mut agents: Vec<_> = agents
         .filter(|a| !a.archived && !a.deleted && !a.janitor)
         .collect();
-    agents.sort_by_key(|a| a.created);
+    agents.sort_by_key(|a| {
+        (
+            a.role == "helper" || !a.parent.is_empty(),
+            std::cmp::Reverse(a.latest_start),
+            a.created,
+            a.id,
+        )
+    });
     let mut seen = HashSet::new();
     agents
         .into_iter()
@@ -69,26 +80,32 @@ pub fn update(enabled: bool, stored: &str, data: &Value) -> Result<(bool, String
 }
 
 fn delegation(names: &[String]) -> String {
-    let mut kept = String::new();
-    for name in names.iter().rev() {
-        if name.chars().take(CHAR_LIMIT + 1).count() > CHAR_LIMIT {
-            break;
+    let mut prompt = String::from("Agent names: ");
+    let mut chars = prompt.len();
+    let mut any = false;
+    for name in names {
+        let separator = if any { ", " } else { "" };
+        let size = chars + separator.len() + name.chars().take(CHAR_LIMIT + 1).count();
+        if size + 1 > CHAR_LIMIT {
+            continue;
         }
-        let joined = if kept.is_empty() {
-            name.clone()
-        } else {
-            format!("{name}, {kept}")
-        };
-        let prompt = format!("Agent names: {joined}.");
-        if prompt.chars().count() > CHAR_LIMIT || estimate_tokens(&prompt) > TOKEN_LIMIT {
-            break;
+        let before = prompt.len();
+        prompt.push_str(separator);
+        prompt.push_str(name);
+        prompt.push('.');
+        if estimate_tokens(&prompt) > TOKEN_LIMIT {
+            prompt.truncate(before);
+            continue;
         }
-        kept = joined;
+        prompt.pop();
+        chars = size;
+        any = true;
     }
-    if kept.is_empty() {
-        kept
+    if any {
+        prompt.push('.');
+        prompt
     } else {
-        format!("Agent names: {kept}.")
+        String::new()
     }
 }
 

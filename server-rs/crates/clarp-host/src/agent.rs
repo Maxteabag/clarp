@@ -362,6 +362,7 @@ pub enum Ask {
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
+    pub latest_turn_start: i64,
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
@@ -858,6 +859,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     let (tx, rx) = mpsc::channel();
     let idle = never_ran();
     let (view_tx, view) = watch::channel(Arc::new(View {
+        latest_turn_start: 0,
         status: idle,
         newest: None,
         ended: None,
@@ -2463,6 +2465,7 @@ impl Worker {
         };
         let shown_since = self.now_ms() - JOB_SHOWN_FOR_MS;
         self.view.send_replace(Arc::new(View {
+            latest_turn_start: actor.latest_turn_start(),
             status: actor.status(),
             newest: self.newest.clone(),
             ended: self.ended.clone(),

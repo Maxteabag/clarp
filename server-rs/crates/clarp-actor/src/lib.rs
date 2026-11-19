@@ -1309,6 +1309,10 @@ impl Actor {
         self.recorder.floor() * REVISION_STEP
     }
 
+    pub fn latest_turn_start(&self) -> i64 {
+        self.recorder.agent().latest_turn_start()
+    }
+
     pub fn status(&self) -> Status {
         let agent = self.recorder.agent();
         let stopping = agent.stopping().is_some();

@@ -14,6 +14,50 @@ ROOT = TOOLS.parents[1]
 OUT = TOOLS.parent / 'crates/clarp-kernel/tests/fixtures/vocabulary-packs-vectors.json'
 
 
+def ranked_speech_names():
+    """Record the full route and pack order, then each provider's actual selection."""
+    from lib import db, vocab, vocab_compile
+    from lib.vocab_service import VocabService
+    from lib.vocab_budget import score
+
+    conn = db.conn()
+    agents = []
+    for i in range(120):
+        agent_id = f"rank-{i:03}"
+        # Identifier-shaped personas span both sides of the provider cutoffs.
+        if i % 4 == 0:
+            name = f"RosterAgent{i:03}"
+        elif i % 4 == 1:
+            name = f"roster_agent{i:03}"
+        else:
+            name = f"Persona{i:03}"
+        starts = [1000 + (i * 37) % 120, 10] if i % 7 else []
+        role = "helper" if i % 4 == 0 else "agent"
+        conn.execute(
+            "INSERT INTO agents(agent_id,persona,session,created_at,voice_id,cwd,role) VALUES(?,?,?,?,?,?,?)",
+            (agent_id, name, agent_id, i, "", "/fixture", role))
+        for start in starts:
+            conn.execute("INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,?,?,?)",
+                         (agent_id, "user", "fixture", start))
+        agents.append(dict(id=agent_id, name=name, created=i, role=role, starts=starts))
+    active = VocabService(lambda: None).active_agent_names()
+    route = vocab.settings_payload(active)["active_agent_names"]
+    sources = vocab_compile.Sources(agent_names=tuple(active))
+    pack = next(p for p in vocab_compile.dynamic_packs(sources) if p.name == "agents")
+    assert all(term.rarity == 0.9 for term in pack.terms)
+    scores = [score(term, pack) for term in pack.terms]
+    assert set(scores) == {2.7}
+    sequence = [term.text for term in pack.terms]
+    assert sequence == route and len(route) == len(agents)
+    providers = []
+    for provider, model in [("deepgram", "nova-3"), ("elevenlabs", "scribe_v2")]:
+        audit = vocab_compile.compile_for(provider=provider, model=model, sources=sources).audit()
+        kept = [term["text"] for term in audit["included"]]
+        assert 0 < len(kept) < len(route) and kept == route[:len(kept)]
+        providers.append(dict(provider=provider, model=model, audit=audit))
+    return dict(agents=agents, route=route, pack=sequence, scores=scores, providers=providers)
+
+
 def reference(root):
     replay = runpy.run_path(str(ROOT / 'tests/replay/host.py'))
     replay['isolate'](root)
@@ -163,7 +207,7 @@ def reference(root):
         heard_audio.sweep(clips,now=now)
         audio_sweeps.append(dict(ages=times,survived=sorted(p.stem for p in clips.glob('*.json'))))
         shutil.rmtree(clips)
-    return dict(audio_sweeps=audio_sweeps,admin=snapshots,sources=sources,workspaces=workspaces,traces=traces,question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
+    return dict(ranked_names=ranked_speech_names(),audio_sweeps=audio_sweeps,admin=snapshots,sources=sources,workspaces=workspaces,traces=traces,question=question,verdicts=verdicts,measured=measured,budgets=budgets,declared=describe_budgets(),stories=stories)
 
 
 if __name__ == '__main__':

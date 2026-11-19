@@ -2127,9 +2127,14 @@ files (`decision-on-behalf-vectors.json`); the wrong rules are `tools/plants/dec
 
 **Transcription guidance** (19 Nov 2026). The guidance settings route reads and updates the names
 switch and the technical glossary. Its previews count Unicode characters and estimate tokens within
-the reference limits. Display and delegated speech now share a creation-ordered roster of active
-personas, retaining the first casefolded spelling. Under R109 both omit archived names. A settings
-preview reads the roster and saved values without creating a vocabulary audit.
+the reference limits. The route and delegated speech share the active roster. Own agents come
+first, then helpers, including completed helpers that are still active. Within each group the
+latest turn start comes first, with ties resolved by creation time and agent ID. Deduplication
+keeps the first casefolded spelling. The settings preview skips a name that exceeds either budget
+and continues. Speech compilation receives every name with rarity 0.9 and applies the provider's
+budget. The existing agent event fold maintains the maximum turn start during operation and log
+replay. For a hundred members a request reads a hundred published views in memory and sorts the
+eligible names. It sends no actor requests and does no store reads for the roster.
 
 **Quiet agents** (19 Nov 2026; Host feature `quiet_agents`, 56). An agent whose activity never claims its owner's
 attention by itself is quiet: today exactly the janitors, by the kernel's one definition (`roster::quiet`, held to
