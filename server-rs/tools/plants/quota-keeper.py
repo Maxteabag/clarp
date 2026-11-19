@@ -21,6 +21,7 @@ B = 'clarp-host/src/janitors.rs'
 # NOT PLANTED, each with its reason:
 #   quota_keeper.rs, the order of receipts written in one look (`order`): a Host test of it needs two notices
 #     waiting at once from one look; the kernel's stories hold the order delivering() keeps (planted above).
+#   the words of a recovery: planted in quota-recovery.py, with the recovery under a selector they belong to.
 #   janitors.rs (kernel), that the Quota keeper runs here: planted with every other job of RUN_HERE in
 #     `truth-findings.py`, with the words of a janitor that cannot run.
 #   quota.rs `ran`: that a run that only asked for a recovery worked. No story of the Python Host asks for one without
@@ -61,7 +62,6 @@ PLANTS = [
     (Q, 'kernel', "a receipt is the same in every generation of its keeper", '                stamp,\n                owner.generation\n', '                stamp,\n'),
     (Q, 'kernel', 'an automatic switcher tells of Codex too, and the keeper does', 'pub const SWITCHED: [&str; 2] = ["claude", "codex"];', 'pub const SWITCHED: [&str; 2] = ["claude", "claude"];'),
     # ---- the run and the recovery
-    (Q, 'kernel', 'a selector with no runtime is no selector', '        Accounts::Select => json!({ "status": "runtime_unavailable" }),', '        Accounts::Select => json!({ "status": "unconfigured" }),'),
     (Q, 'kernel', "the recoveries' words are run together", '    let reason = python::first(&recoveries.join("; "), REASON_MOST).to_string();', '    let reason = python::first(&recoveries.join(""), REASON_MOST).to_string();'),
     # ---- the lane
     (Q, 'kernel', 'a keeper set anew forgets when the last look was', '            last_check: kept.last_check,', '            last_check: None,'),
