@@ -228,6 +228,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // not run here (docs/differences.md).
     ("tts", 1),
     ("controller_narration", 8),
+    ("controller_actions", 63),
     ("tts_provider_google", 69),
     ("tts_google_id_guard", 70),
     // The clips of a reply, to play it again (`GET /clips/message`).
@@ -298,6 +299,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
+    pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
@@ -3097,9 +3099,12 @@ fn shown_event(json: &str) -> SseEvent {
 }
 
 fn numbered(published: &Published) -> SseEvent {
-    SseEvent::default()
-        .id(published.id.to_string())
-        .data(published.json.clone())
+    let event = SseEvent::default().data(published.json.clone());
+    if published.id == 0 {
+        event
+    } else {
+        event.id(published.id.to_string())
+    }
 }
 
 fn unnumbered(event: &Value) -> SseEvent {

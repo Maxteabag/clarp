@@ -1815,6 +1815,9 @@ fn calendar(app: &App, args: &[String]) -> ToolAnswer {
 /// Answers `clarp-admin`.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
+        Some((command, rest)) if command == "controller-action" => {
+            crate::controller_action_tool::run(app, call, rest).await
+        }
         Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),
