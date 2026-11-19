@@ -37781,8 +37781,11 @@ fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
     let last = lane["last_check"].as_i64().unwrap();
     assert_eq!(lane["next_run_at"], last + 300_000);
     assert_eq!(lane["last_activity"], "worked");
+    // What is left of the book once its tables are apart (its model policy) is written only
+    // where it changed: on a new Host, not at all.
     let book = kept_records(&place, "janitors");
-    assert_eq!(book.keys().collect::<Vec<_>>(), ["all"]);
+    let rest = book.get("all").cloned().unwrap_or_else(|| json!({}));
+    assert!(book.keys().all(|key| key == "all"), "{book:?}");
     for table in [
         "configs",
         "triggers",
@@ -37791,7 +37794,7 @@ fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
         "progress",
         "creations",
     ] {
-        assert!(book["all"].get(table).is_none(), "{table}");
+        assert!(rest.get(table).is_none(), "{table}");
     }
     let kept_runs = kept_records(&place, "janitor-run");
     assert!(kept_runs.contains_key(run["run_id"].as_str().unwrap()));
@@ -37807,7 +37810,7 @@ fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
         .unwrap();
     config["generation"] = json!(config["generation"].as_u64().unwrap() + 1);
     keep_record(&place, "janitor-config", id, config);
-    let mut whole = book["all"].clone();
+    let mut whole = rest;
     whole["configs"] = json!(configs);
     whole["runs"] = json!(kept_records(&place, "janitor-run"));
     keep_record(&place, "janitors", "all", &whole);
@@ -37865,5 +37868,6 @@ fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
     assert_eq!(receipts.len(), 3);
     let book = kept_records(&place, "janitors");
     assert!(book["all"].get("runs").is_none() && book["all"].get("configs").is_none());
+    assert!(book["all"].get("model_policy").is_some());
     assert_eq!(kept_records(&place, "janitor-run").len(), 2);
 }
