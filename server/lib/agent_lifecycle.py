@@ -19,7 +19,7 @@ from .agent_store import AGENT_ROSTER, load_agents, save_agent
 from .fork import ForkRefused
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
-from .policies.agent_spec import AgentSpec, RosterView, SpecError
+from .policies.agent_spec import AgentSpec, NeedsContact, RosterView, SpecError
 from . import personas as persona_store
 
 
@@ -82,9 +82,17 @@ class AgentLifecycleService:
     ) -> tuple[AgentLifecycleResult, AgentSpec | None, bool]:
         """Parse the request, check the IO-backed collisions, and persist."""
         agents = load_agents(self.ctx.agents_path)
+        view = self._roster_view(agents)
         parsed = AgentSpec.parse(
-            data, backends=backends, roster=self._roster_view(agents),
-            personas=persona_store, janitor=janitor)
+            data, backends=backends, roster=view, personas=persona_store, janitor=janitor)
+        if isinstance(parsed, NeedsContact):
+            # The policy only asks; minting a Contact is IO and happens here (rule 6).
+            from . import contact_minting
+            minted = contact_minting.mint_contact(
+                parsed.backend, occupied_names=view.occupied_personas, generate_avatar=False)
+            parsed = AgentSpec.parse(
+                data, backends=backends, personas=persona_store, janitor=janitor,
+                roster=replace(view, minted_contact=str((minted or {}).get("name") or "")))
         if isinstance(parsed, SpecError):
             raise AgentLifecycleError(parsed.status, parsed.message,
                                       message=parsed.detail or None,
@@ -123,7 +131,7 @@ class AgentLifecycleService:
     @staticmethod
     def _roster_view(agents: dict) -> RosterView:
         from . import config as app_config
-        from . import contact_minting
+        from . import transcript_paths
         from .contact_assignment import available_contacts
         from .workspace_paths import recover_user_path
         from .session_models import launch_default, recorded_model
@@ -141,8 +149,7 @@ class AgentLifecycleService:
             existing_agent=lambda session: agents_db.get_by_session(session) or {},
             session_exists=agents_db.session_exists,
             contact_pool=lambda backend: [c["name"] for c in available_contacts(backend)],
-            mint_contact=lambda backend: contact_minting.mint_contact(
-                backend, occupied_names=occupied, generate_avatar=False)["name"],
+            session_id_rule=transcript_paths.SESSION_ID.pattern,
             resume_owner=agents_db.get_by_backend_session,
             resume_listed=lambda backend, cwd, sid: any(
                 item.get("id") == sid
