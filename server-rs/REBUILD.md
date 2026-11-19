@@ -848,6 +848,15 @@ since the end of the turn before in the same thread: nothing before a thread's f
 so not counted, where the thread was taken up or is older than this. Found on 17 Nov when the account the
 tests ran on was used up: the usage screen said 61 million tokens for sixteen turns.
 
+The Python Host counted both tools' turns from their running totals (defect R48) and mended it on 18 Nov
+(its PR 413): a turn of Codex is the sum of its model calls, measured from where its first call says the turn
+began; a turn of Antigravity is the sum of its steps, each step counted once by the first of its updates that
+says what it took (an explicit nothing included), the result's own figure only where no step said anything.
+Ported from that Host's own functions (`tools/turn-usage-vectors.py`): Antigravity's reader takes a step once
+as there, drops a line told again word for word, reads the figures as `int()` reads them, and counts what was
+read from the cache as what went in (29 streams); Codex's share is `usage::share`, held to 23 turns of 12
+threads of that Host's client where its rule and this transport's mean the same.
+
 **What is left of an account, as its tool says it** (17 Nov 2026). The other half of the usage screen is how
 much of an account is left. The Python Host has it from Codex's app server as that runs, and from the
 provider's usage endpoint, asked with the account's login. This Host runs Codex one process to a turn, and
