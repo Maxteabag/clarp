@@ -43214,7 +43214,7 @@ home=pathlib.Path(os.environ["HOME"])
 with (home/"requests").open("a") as log:
     print(json.dumps({"args":sys.argv[1:],"secret":"CLARP_HOST_TOKEN" in os.environ,
                       "identity":"CLARP_SESSION" in os.environ}),file=log)
-if "slow" in sys.argv:
+if "zzzzzz" in sys.argv:
     (home/"child-pid").write_text(str(os.getpid()))
     time.sleep(2)
     (home/"late").touch()
@@ -43305,7 +43305,10 @@ print(home/"Project one")
         json!([{"path":home,"label":"~"},{"path":two,"label":"~/Project two"},{"path":one,"label":"~/Project one"}])
     );
     let before = Instant::now();
-    assert_eq!(host.get("/launch-directories?q=slow")["matches"], json!([]));
+    assert_eq!(
+        host.get("/launch-directories?q=zzzzzz")["matches"],
+        json!([])
+    );
     assert!(before.elapsed() < Duration::from_secs(2));
     let pid = std::fs::read_to_string(home.join("child-pid")).unwrap();
     wait_for("timed-out zoxide to exit", || {
@@ -43329,7 +43332,7 @@ print(home/"Project one")
             json!(["query", "--list", "--", "ptw"]),
             json!(["query", "--list"]),
             json!(["query", "--list", "--"]),
-            json!(["query", "--list", "--", "slow"])
+            json!(["query", "--list", "--", "zzzzzz"])
         ]
     );
     assert_eq!(host.get(fav), favorite);
