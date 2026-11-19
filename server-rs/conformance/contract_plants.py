@@ -91,6 +91,17 @@ CHANGES = [
         'replace': '    item["spec"] = stored["spec"]\n    return PublicRow(item, meta)\n',
         'expect': {'channel': 'http', 'locator': r'\.spec$', 'kinds': {'field-added'}},
     },
+    {
+        'id': 'router-holds-a-command',
+        'what': 'a command the router refuses is held, and a yes that follows gives its words to the agent',
+        'file': 'server/lib/orchestrator.py',
+        'find': ('                    final_action = FINAL_CLARIFY\n'
+                 '                    if not fallback_request:\n'
+                 '                        self._speak_as_session(refusal, requested_session)\n'),
+        'replace': ('                    if not fallback_request:\n'
+                    '                        self._speak_as_session(refusal, requested_session)\n'),
+        'expect': {'channel': 'http', 'locator': r'\.body\.turns\[\d+\]\.text$', 'kinds': {'changed'}},
+    },
     # ---- changes planted by the reviewer go below this line ----
 ]
 
