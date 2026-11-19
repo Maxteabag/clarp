@@ -28,7 +28,9 @@ def _new_agent_id() -> str:
 # ---- read paths --------------------------------------------------------
 
 def list_agents() -> list[dict[str, Any]]:
-    """All live agents. Each row carries agent_id + session."""
+    """Every agent not deleted, ARCHIVED ONES INCLUDED (archived_at in the row), oldest first.
+    Each row carries agent_id + session. A caller that wants only the agents in use leaves out
+    the rows with archived_at (R109)."""
     c = conn()
     rows = c.execute("""
         SELECT agent_id, persona, voice_id, cwd, session, backend, created_at,
