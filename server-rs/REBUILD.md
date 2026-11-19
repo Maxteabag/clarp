@@ -1339,6 +1339,16 @@ server of Codex to ask, and says so in the Python Host's own words for a tool th
 turn of a stand-in Codex through the Host: the session offered, taken up, shown, continued, and refused a
 second time.
 
+**Bookkeeping delegation lifecycle**. The fleet reserves the two active roles and the relationship in one
+KeyValue write. The principal records START in its own log before creation answers. Its mailbox orders each
+authorized operation with STOP. An archive or deletion records STOP for either role before the roster change
+and release of both keys commit together. A Host opening its stores releases an unstarted reservation and
+completes the release for a logged stop. An agent reopening its log stops an active binding whose reservation
+is missing. A damaged reservation is left in the fleet store and counted in the startup journal.
+The principal serves ordinary work while the fleet repairs a mismatch. The fleet waits up to
+three seconds for each actor reply. History for either participant is read from the delegation rows. Listener launch and delegate
+observe/record are later parts of this feature.
+
 **A goal’s ledger** (19 Nov 2026). The owning agent appends a goal change, its attributable
 events, their per-plan ordinals and their ID locators together. The next number belongs to the
 agent. A new agent arriving from another Host keeps its supplied IDs, and its next number is above

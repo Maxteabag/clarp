@@ -1113,6 +1113,30 @@ pub fn run(app: &App) {
 /// Host has of its own, this goal's last failed update and when it is tried again, and the
 /// newest receipt of the goal.
 pub(crate) async fn tell<'a>(app: &App, plans: impl Iterator<Item = &'a mut Value>) {
+    let mut plans: Vec<_> = plans.collect();
+    if app.fleet.delegation_view.any() {
+        let mut cache = HashMap::new();
+        for plan in &mut plans {
+            let Some(owner) = plan["agent_id"].as_str() else {
+                continue;
+            };
+            if !plan["ledger"].is_object() || !app.fleet.delegation_view.has_principal(owner) {
+                continue;
+            }
+            if !cache.contains_key(owner) {
+                let Ok(row) = app
+                    .fleet
+                    .goal_delegation(crate::fleet::delegations::Request::Current(owner.into()))
+                    .await
+                else {
+                    continue;
+                };
+                cache.insert(owner.to_owned(), row);
+            }
+            let row = cache[owner].clone();
+            plan["ledger"]["delegation"] = row;
+        }
+    }
     let own = app.janitors.read(app, |book, _, _| {
         let agent_id = clarp_kernel::janitors::own_id(ROLE)?;
         let config = book.configs.get(agent_id)?;

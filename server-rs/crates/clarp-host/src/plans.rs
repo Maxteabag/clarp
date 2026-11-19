@@ -222,8 +222,51 @@ async fn ledger(State(app): State<App>, Query(query): Params) -> Result<Json<Val
     ))
 }
 
+async fn delegation_enable(
+    State(app): State<App>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let field = |k| clarp_kernel::control::field(body.get(k));
+    app.fleet
+        .goal_delegation(crate::fleet::delegations::Request::Enable {
+            principal: field("principal"),
+            delegate: field("delegate"),
+            reason: field("reason"),
+        })
+        .await
+        .map(Json)
+}
+async fn delegation_stop(
+    State(app): State<App>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let field = |k| clarp_kernel::control::field(body.get(k));
+    app.fleet
+        .goal_delegation(crate::fleet::delegations::Request::Stop {
+            id: field("delegation_id"),
+            reason: field("reason"),
+        })
+        .await
+        .map(Json)
+}
+async fn delegation_list(
+    State(app): State<App>,
+    Query(query): Params,
+) -> Result<Json<Value>, ApiError> {
+    app.fleet
+        .goal_delegation(crate::fleet::delegations::Request::List(
+            query.get("session").map_or("", |s| s.trim()).into(),
+        ))
+        .await
+        .map(Json)
+}
 pub fn routes() -> Router<App> {
     Router::new()
+        .route(
+            "/goal-ledger/delegations",
+            get(delegation_list).post(delegation_enable),
+        )
+        .route("/goal-ledger/delegations/stop", post(delegation_stop))
         .route("/goal-ledger", get(ledger))
         .route("/task-plan", get(active))
         .route("/task-plans", get(plans))

@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 
 use crate::jobs::parse_handle;
 
+pub mod delegation;
 pub mod keeper;
 pub mod ledger;
 pub mod subgoals;
