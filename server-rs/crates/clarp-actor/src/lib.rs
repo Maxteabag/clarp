@@ -1092,16 +1092,16 @@ impl Actor {
         };
         actor.open_goal_ledger(now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
-        // The sends that can still change are what the agent's state holds; each one's names
-        // are read from its message, once.
-        let waiting: Vec<_> = actor
+        // The sends whose turn is not over are what the agent's state holds, as they were;
+        // each one's names are read from its message, once (a queue's length of reads).
+        let held: Vec<_> = actor
             .recorder
             .agent()
             .deliveries()
-            .waiting()
+            .sends()
             .cloned()
             .collect();
-        for send in waiting {
+        for send in held {
             let names = actor.send_names(send.message_seq)?;
             actor.deliveries.changed(send, names);
         }
@@ -1753,15 +1753,9 @@ impl Actor {
                 told.push(id);
             }
         }
-        let waiting: Vec<u64> = self
-            .recorder
-            .agent()
-            .deliveries()
-            .waiting()
-            .map(|send| send.turn)
-            .collect();
+        let ledger = self.recorder.agent().deliveries();
         self.deliveries
-            .forget_before(now_ms - deliveries::KEPT_FOR_MS, &waiting);
+            .forget_before(now_ms - deliveries::KEPT_FOR_MS, |turn| ledger.holds(turn));
         Ok(told)
     }
 

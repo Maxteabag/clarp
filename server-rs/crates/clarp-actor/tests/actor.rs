@@ -2572,9 +2572,13 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
         ended(&mut recorder, turn, world.tick());
     }
     // One more runs, the next waits behind it, and the user stops the agent: the one that
-    // waits is held, and fenced.
+    // waits is held.
     let running = recorder
         .accept_message(message(10_001), world.tick())
+        .unwrap();
+    let turn = running.turn.unwrap();
+    recorder
+        .handle(Command::TurnStarted { turn }, world.tick())
         .unwrap();
     recorder
         .accept_message(message(10_002), world.tick())
@@ -2586,7 +2590,6 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     let stopped = RunOutcome::Stopped {
         by: "user".to_string(),
     };
-    let turn = running.turn.unwrap();
     recorder
         .handle(
             Command::TurnEnded {
@@ -2596,6 +2599,15 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
             world.tick(),
         )
         .unwrap();
+    // How the held send stands before the Host goes: handed to the queue that keeps it.
+    let before = recorder
+        .agent()
+        .deliveries()
+        .sends()
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(before.len(), 1, "{before:?}");
+    let held = before[0].clone();
     drop(recorder);
 
     let read = Arc::new(AtomicU64::new(0));
@@ -2623,51 +2635,18 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     let row =
         |n: u64| json!({"role": "user", "id": format!("u-m{n}"), "trace_id": format!("t{n}")});
     read.store(0, Ordering::SeqCst);
-    // What changed before the Host started is not told again, and nothing of it is held: the
-    // send that waited was handed to the queue that keeps it, and can change no more.
+    // What changed before the Host started is not told again, and the send whose turn is not
+    // over is held as it was.
     assert!(actor.take_deliveries(world.tick()).unwrap().is_empty());
-    assert_eq!(actor.held_deliveries(), 0);
-    // A send now: handed over at its launch, which the apps are told of; its names are read
-    // once, from its message.
-    let said = Message {
-        id: "u-m10003".into(),
-        text: "message 10003".into(),
-        origin: Origin::User,
-        trace_id: Some("t10003".into()),
-        ..Message::default()
-    };
-    actor.send(&said, Admission::Queue, world.tick()).unwrap();
-    read.store(0, Ordering::SeqCst);
-    let told = actor.take_deliveries(world.tick()).unwrap();
-    assert_eq!(told, ["u-m10003"]);
-    // One message read: one call, one item.
-    let one_read = read.load(Ordering::SeqCst);
-    assert_eq!(one_read, 2, "a send's names are read once");
-    // One more behind it: admitted and handed to the queue in one breath, its names read once.
-    let behind = Message {
-        id: "u-m10004".into(),
-        trace_id: Some("t10004".into()),
-        ..said.clone()
-    };
-    actor.send(&behind, Admission::Queue, world.tick()).unwrap();
-    read.store(0, Ordering::SeqCst);
-    assert!(actor.take_deliveries(world.tick()).unwrap().is_empty());
-    assert_eq!(
-        read.load(Ordering::SeqCst),
-        one_read,
-        "a send's names are read once"
-    );
-    read.store(0, Ordering::SeqCst);
-    // A page's rows: an old send shows nothing; the new one is handed over.
-    let mut rows = vec![row(5), row(10_002), row(10_003)];
+    assert_eq!(actor.held_deliveries(), 1);
+    // A page's rows: an old send shows nothing; the held one is shown as it was before.
+    let mut rows = vec![row(5), row(10_002)];
     let top = actor.delivery(&mut rows, &Query::default(), &scope);
-    assert!(
-        rows[0].get("delivery").is_none() && rows[1].get("delivery").is_none(),
-        "{rows:?}"
-    );
+    assert!(rows[0].get("delivery").is_none(), "{rows:?}");
+    let shown = &rows[1]["delivery"];
     assert_eq!(
-        (&rows[2]["delivery"]["state"], &rows[2]["delivery"]["rev"]),
-        (&json!("handed_over"), &json!(2)),
+        (&shown["state"], &shown["rev"], &shown["seq"]),
+        (&json!("handed_over"), &json!(held.rev), &json!(held.seq)),
         "{rows:?}"
     );
     assert_eq!(top["delivery_stop_generation"], 1);
@@ -2678,8 +2657,8 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     };
     let first = actor.delivery(&mut Vec::new(), &bootstrap, &scope);
     let updates = first["delivery_updates"].as_array().unwrap();
-    assert_eq!(updates.len(), 2, "{first:?}");
-    assert_eq!(updates[0]["message_id"], "u-m10003");
+    assert_eq!(updates.len(), 1, "{first:?}");
+    assert_eq!(updates[0]["message_id"], "u-m10002");
     let page = Query {
         since: Some(0),
         generation: Some(1),
@@ -2689,5 +2668,25 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     let paged = actor.delivery(&mut Vec::new(), &page, &scope);
     assert_eq!(paged["delivery_cursor_expired"], false, "{paged:?}");
     assert_eq!(read.load(Ordering::SeqCst), 0, "nothing of the log is read");
+    // The resume runs the held one: its launch is told, as before the restart.
+    actor.resume("user", world.tick()).unwrap();
+    assert_eq!(actor.take_deliveries(world.tick()).unwrap(), ["u-m10002"]);
+    // One more behind it: admitted and handed to the queue in one breath, its names read once
+    // (one call, one item), and no launch to tell yet.
+    let behind = Message {
+        id: "u-m10003".into(),
+        text: "message 10003".into(),
+        origin: Origin::User,
+        trace_id: Some("t10003".into()),
+        ..Message::default()
+    };
+    actor.send(&behind, Admission::Queue, world.tick()).unwrap();
+    read.store(0, Ordering::SeqCst);
+    assert!(actor.take_deliveries(world.tick()).unwrap().is_empty());
+    assert_eq!(
+        read.load(Ordering::SeqCst),
+        2,
+        "a send's names are read once"
+    );
     assert_eq!(actor.held_deliveries(), 2);
 }

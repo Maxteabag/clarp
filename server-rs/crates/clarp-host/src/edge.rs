@@ -2000,7 +2000,10 @@ async fn log(
         release: clarp_kernel::delivery::IN_PROCESS_RELEASE.to_string(),
         instance: app.hub.epoch().to_string(),
     };
-    let turns = answer["turns"].as_array().cloned().unwrap_or_default();
+    let turns = match answer["turns"].take() {
+        Value::Array(turns) => turns,
+        _ => Vec::new(),
+    };
     let (turns, fields) = member.agent.delivery(turns, delivery, scope).await?;
     answer["turns"] = Value::Array(turns);
     if let Some(answer) = answer.as_object_mut() {
