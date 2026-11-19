@@ -7,7 +7,7 @@
 //! first, and its last part is opened without following a link.
 
 use std::io::{Read, Seek, SeekFrom};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -55,6 +55,38 @@ pub fn forbidden() -> Value {
     withheld("", "forbidden")
 }
 
+// Pin each directory before opening the next component. A replaced
+// ancestor cannot redirect an already-resolved log path.
+fn open_resolved(path:&Path)->std::io::Result<File>{
+    let mut at=crate::files::open(Path::new("/"),true)?;
+    let mut names=path.strip_prefix("/").map_err(std::io::Error::other)?.iter().peekable();
+    while let Some(name)=names.next(){
+        use std::os::fd::AsRawFd;
+        let child=PathBuf::from(format!("/proc/self/fd/{}",at.as_raw_fd())).join(name);
+        at=crate::files::open(&child,names.peek().is_some())?;
+    }
+    Ok(at)
+}
+
+pub fn provider_output(metadata:&Value)->Value{
+    let base=Path::new("/tmp").join(format!("claude-{}",nix::unistd::getuid().as_raw()));
+    provider_output_in(&base,metadata)
+}
+
+fn provider_output_in(base:&Path,metadata:&Value)->Value{
+    use clarp_kernel::provider_tasks::{safe_text,valid_id};
+    let component=|field:&str| metadata[field].as_str().filter(|name|valid_id(name));
+    let (Some(project),Some(native),Some(task))=(component("provider_project"),component("native_session_id"),component("provider_task_id")) else{
+        return tail("",&[],TAIL_BYTES);
+    };
+    let dir=base.join(project).join(native).join("tasks");
+    if resolved(&dir)!=dir{return withheld("","outside_allowed_roots");}
+    let path=dir.join(format!("{task}.output"));
+    let mut result=tail(&path.to_string_lossy(),&[dir],TAIL_BYTES);
+    if let Some(text)=result["text"].as_str(){result["text"]=json!(safe_text(text));}
+    result
+}
+
 /// The last `limit` bytes of a job's log, from a line's beginning, or why it is withheld.
 pub fn tail(path: &str, roots: &[PathBuf], limit: u64) -> Value {
     if path.is_empty() {
@@ -67,10 +99,7 @@ pub fn tail(path: &str, roots: &[PathBuf], limit: u64) -> Value {
     if !roots.iter().any(|root| real.starts_with(root)) {
         return withheld(path, "outside_allowed_roots");
     }
-    let opened = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-        .open(&real);
+    let opened = open_resolved(&real);
     let mut file = match opened {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -139,6 +168,38 @@ mod tests {
             "the cut-off line is left out"
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_provider_log_comes_only_from_the_receipted_task_and_secrets_are_redacted(){
+        let place=scratch("provider-output");
+        let base=place.join("claude-fixture");
+        let dir=base.join("project/native/tasks");
+        std::fs::create_dir_all(&dir).unwrap();
+        let meta=json!({"provider_project":"project","native_session_id":"native","provider_task_id":"task-1","log_path":"/somewhere/else"});
+        let path=dir.join("task-1.output");
+        assert_eq!(provider_output_in(&base,&meta)["reason"],"missing");
+        for field in ["provider_project","native_session_id","provider_task_id"]{
+            for value in [json!(""),json!("../foreign"),json!("x".repeat(161)),json!(1)] {
+                let mut invalid=meta.clone();invalid[field]=value;
+                assert_eq!(provider_output_in(&base,&invalid),withheld("","no_log"));
+            }
+        }
+        let bytes=format!("{}\npassword=fixture\ndone\n","x".repeat(TAIL_BYTES as usize));
+        std::fs::write(&path,&bytes).unwrap();
+        let shown=provider_output_in(&base,&meta);
+        assert_eq!(shown["text"],"password=[redacted]\ndone\n");
+        assert_eq!(shown["truncated"],true);
+        assert_eq!(shown["size"],bytes.len());
+        let outside=place.join("outside");
+        std::fs::write(&outside,"foreign fixture").unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&outside,&path).unwrap();
+        assert_eq!(provider_output_in(&base,&meta)["reason"],"outside_allowed_roots");
+        std::fs::rename(&dir,base.join("other")).unwrap();
+        std::os::unix::fs::symlink(base.join("other"),&dir).unwrap();
+        assert_eq!(provider_output_in(&base,&meta),withheld("","outside_allowed_roots"));
+        std::fs::remove_dir_all(place).unwrap();
     }
 
     #[test]
