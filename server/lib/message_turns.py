@@ -78,6 +78,44 @@ class TurnIndex:
         self._starts = [int(r["started_at"]) for r in rows]
         self._rows = rows
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
+        self._spans = None
+
+    def ended_before(self, trace: str, timestamp: Any) -> bool:
+        """Whether every turn of ``trace`` had ended before ``timestamp``: it
+        settled, or the agent's next turn of another trace began (an agent
+        runs one turn at a time, so a turn that never settled ended when the
+        next began). False for a trace with no turn (a message steered into
+        another turn), a turn still running, or a time not known."""
+        if self._spans is None:
+            self._spans = self._turn_spans()
+        span = self._spans.get(trace)
+        ms = iso_ms(timestamp)
+        return span is not None and ms is not None and span[1] is not None and ms > span[1]
+
+    def _turn_spans(self) -> dict[str, tuple[int, int | None]]:
+        first: dict[str, int] = {}
+        last: dict[str, int] = {}
+        settled: dict[str, int | None] = {}
+        for row in self._rows:
+            trace = str(row["trace_id"] or "")
+            if not trace:
+                continue
+            start = int(row["started_at"])
+            first[trace] = min(first.get(trace, start), start)
+            last[trace] = max(last.get(trace, start), start)
+            done = None if row["settled_at"] is None else int(row["settled_at"])
+            settled[trace] = None if trace in settled and settled[trace] is None or done is None \
+                else max(settled.get(trace) or done, done)
+        spans = {}
+        for trace, began in first.items():
+            later = bisect.bisect_right(self._starts, last[trace])
+            cut = next((int(row["started_at"]) for row in self._rows[later:]
+                        if str(row["trace_id"] or "") != trace), None)
+            end = settled[trace]
+            if cut is not None:
+                end = cut if end is None else min(end, cut)
+            spans[trace] = (began, end)
+        return spans
 
     def trace_at(self, timestamp: Any) -> str:
         return self.running_at(timestamp)[0]
