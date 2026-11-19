@@ -20898,7 +20898,10 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(
         (&echo_before.0, &fox_before.0),
         (
-            &vec![pair("m8", "before it with Echo"), pair("m9", "left with Echo")],
+            &vec![
+                pair("m8", "before it with Echo"),
+                pair("m9", "left with Echo")
+            ],
             &vec![pair("m9", "left with Fox")]
         )
     );
