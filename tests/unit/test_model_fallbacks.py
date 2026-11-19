@@ -126,30 +126,21 @@ def test_exhausted_fallbacks_are_bounded_and_visible(agent, monkeypatch):
 # --- Trigger policy: only an AI/provider failure switches models -------------
 
 
-@pytest.mark.parametrize(
-    "category",
-    ["usage_limit", "connection", "transient", "runner_exit", "timeout"],
-)
-def test_provider_failures_are_the_only_retry_trigger(category):
-    assert fallback.is_provider_failure(category)
-
+# The live decision is _as_provider_failure, on the error raised around a model call
+# (is_provider_failure, which took a dispatcher category, had no caller and is gone, R85).
 
 @pytest.mark.parametrize(
-    "category, message",
+    "message",
     [
         # The user pressed stop; the agent is not broken.
-        ("interrupted", "turn_aborted"),
-        # A turn the dispatcher could not name is not evidence of an outage.
-        ("unknown", "something odd happened"),
-        # The turn finished; its tools merely reported errors.
-        ("clean", "2 tests failed"),
+        "turn_aborted",
         # A refusal is an answer, not an outage.
-        ("runner_exit", "codex exited rc=1: permission denied"),
-        ("runner_exit", "codex exited rc=1: approval required"),
+        "codex exited rc=1: permission denied",
+        "codex exited rc=1: approval required",
     ],
 )
-def test_agent_work_failures_never_switch_models(category, message):
-    assert not fallback.is_provider_failure(category, message)
+def test_agent_work_failures_never_switch_models(message):
+    assert fallback._as_provider_failure(RuntimeError(message)) is None
 
 
 @pytest.mark.parametrize(
@@ -166,13 +157,13 @@ def test_real_provider_outage_messages_classify_as_failures(message, expected):
     promoted = fallback.provider_error(message)
     assert isinstance(promoted, fallback.ProviderFailure)
     assert promoted.category == expected
-    assert fallback.is_provider_failure(promoted)
+    assert fallback._as_provider_failure(RuntimeError(message)).category == expected
 
 
 def test_user_interrupt_from_a_runner_is_never_a_provider_failure():
     promoted = fallback.provider_error("turn_aborted by user")
     assert isinstance(promoted, fallback.Cancelled)
-    assert not fallback.is_provider_failure(promoted)
+    assert fallback._as_provider_failure(RuntimeError("turn_aborted by user")) is None
 
 
 ANSWER_SCHEMA = {
