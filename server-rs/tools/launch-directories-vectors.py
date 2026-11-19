@@ -150,7 +150,4 @@ if __name__=="__main__":
         replay.loopback_only()
         sys.path.insert(0,str(ROOT/"server"))
         data=capture(place)
-        from unicodedata import decimal
-        zeroes=[n for n in range(sys.maxunicode+1) if decimal(chr(n),None)==0]
-        (ROOT/"server-rs/crates/clarp-kernel/src/launch-decimal-zeroes.json").write_text(json.dumps(zeroes)+"\n")
         DEST.write_text(json.dumps(data,ensure_ascii=True,separators=(",",":"))+"\n",encoding="ascii")
