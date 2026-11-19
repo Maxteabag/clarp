@@ -94,6 +94,9 @@ struct Receipt {
     /// The order receipts were written in, the first one: what waits is delivered in that
     /// order, as the Python Host reads its table. 0: one written before this was kept.
     order: u64,
+    /// The tool the crossing was of: what a card for it asks about, where its card is asked
+    /// again (`quota::unasked`). Empty: one written before this was kept.
+    provider: String,
 }
 
 /// The Quota keeper of this Host.
@@ -156,6 +159,18 @@ struct Keeper {
 }
 
 impl Keeper {
+    /// The keeper as the kernel's rules read it.
+    fn owner(&self) -> Owner<'_> {
+        Owner {
+            agent_id: &self.agent_id,
+            session: &self.session,
+            name: &self.name,
+            generation: self.generation,
+            threshold: self.number("remaining_threshold", 25) as f64,
+            recovery_mode: self.mode(),
+        }
+    }
+
     fn number(&self, key: &str, otherwise: i64) -> i64 {
         self.options
             .get(key)
@@ -284,6 +299,8 @@ async fn pass(app: &App) {
         return;
     };
     deliver(app, &keeper, receipts).await;
+    // A card that was not made is asked at every look, whether one is due or not.
+    ask_cards(app, &keeper, receipts).await;
     let lane = match app.fleet.kept(LANE, THE_LANE.to_string()).await {
         Ok(lane) => lane,
         Err(why) => return desk.failed("its lane", &why),
@@ -333,25 +350,20 @@ async fn pass(app: &App) {
         Vec::new()
     };
     cards.sort_by_key(|card| card["created_at"].as_i64().unwrap_or(0));
-    let mut acted = std::collections::BTreeSet::new();
-    for card in &cards {
-        let Some(id) = card["artifact_id"].as_str() else {
-            continue;
-        };
-        if card["decision"]["resolved_choice"] != "accepted" {
-            continue;
-        }
-        match app.fleet.kept(APPROVALS, id.to_string()).await {
-            Ok(Some(_)) => {
-                acted.insert(id.to_string());
-            }
-            Ok(None) => {}
+    // Read at once, where a card was accepted: one read of the kind, not one a card.
+    let accepted = cards
+        .iter()
+        .any(|card| card["decision"]["resolved_choice"] == "accepted");
+    let acted: std::collections::BTreeSet<String> = if accepted {
+        match app.fleet.kept_all(APPROVALS).await {
+            Ok(kept) => kept.into_iter().map(|(id, _)| id).collect(),
             Err(why) => return desk.failed("the cards a recovery ran by", &why),
         }
-    }
+    } else {
+        std::collections::BTreeSet::new()
+    };
     let pool_of = |tool: &str| app.pools.iter().find(|pool| pool.tool() == tool).cloned();
     let selector = |tool: &str| pool_of(tool).is_some_and(|pool| pool.has_selector());
-    let mut asking = Vec::new();
     let looked = app.janitors.with_kept(app, |book, world, at| {
         let mut rows = Vec::new();
         let mut gone = Vec::new();
@@ -383,14 +395,7 @@ async fn pass(app: &App) {
             rows.push(row(LANE, THE_LANE, &lane));
             return (Some(lane.next_run(base)), rows, gone);
         };
-        let owner = Owner {
-            agent_id: &keeper.agent_id,
-            session: &keeper.session,
-            name: &keeper.name,
-            generation: keeper.generation,
-            threshold: keeper.number("remaining_threshold", 25) as f64,
-            recovery_mode: keeper.mode(),
-        };
+        let owner = keeper.owner();
         // How the keeper stands, for a recovery that would run now.
         let config = book.configs.get(&keeper.agent_id);
         let standing = config.map(|config| quota::Standing {
@@ -438,14 +443,9 @@ async fn pass(app: &App) {
             let recovery = match asked {
                 None => None,
                 Some(quota::Asked::Recover) => Some(json!({ "status": recover(provider, None) })),
-                // The card is asked once the look is kept; its id is written on the receipt then.
-                Some(quota::Asked::Card) => {
-                    asking.push((
-                        notice.receipt_id.clone(),
-                        quota::card(provider, &owner, &notice.receipt_id),
-                    ));
-                    Some(json!({ "status": "awaiting_approval" }))
-                }
+                // The card is asked once the look is kept; its id is written on the receipt then
+                // (`ask_cards`).
+                Some(quota::Asked::Card) => Some(json!({ "status": "awaiting_approval" })),
                 Some(refused) => quota::refused(refused),
             };
             if let Some(recovery) = recovery {
@@ -466,6 +466,7 @@ async fn pass(app: &App) {
                 settled_at: delivery.as_ref().map(|_| now),
                 delivery,
                 created_at: now,
+                provider: notice.provider.clone(),
             };
             rows.push(row(RECEIPTS, &receipt.receipt_id, &receipt));
             receipts.insert(notice.receipt_id, receipt);
@@ -525,19 +526,30 @@ async fn pass(app: &App) {
     };
     // Armed after its own write: only what changes the book from now on moves the count.
     desk.arm(next, app.janitors.changes());
-    ask_cards(app, &keeper, receipts, asking).await;
+    ask_cards(app, &keeper, receipts).await;
     deliver(app, &keeper, receipts).await;
     crate::janitors::changed(app);
 }
 
-/// The cards a look asks its owner by (`request_recovery` where the keeper asks): each made
-/// in the keeper's session, and its id written on the receipt it is for, in one write.
-async fn ask_cards(
-    app: &App,
-    keeper: &Keeper,
-    receipts: &mut BTreeMap<String, Receipt>,
-    asking: Vec<(String, Value)>,
-) {
+/// The cards the keeper asks its owner by (`request_recovery` where the keeper asks): one for
+/// each of its receipts that waits for its card (`quota::unasked`: those of the look just kept,
+/// and any whose card was not made before), each made in the keeper's session, and its id
+/// written on the receipt it is for, in one write.
+async fn ask_cards(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Receipt>) {
+    let owner = keeper.owner();
+    let mine = (keeper.agent_id.as_str(), keeper.generation);
+    let mut waiting: Vec<&Receipt> = receipts
+        .values()
+        .filter(|receipt| !receipt.provider.is_empty() && quota::unasked(&receipt.payload, mine))
+        .collect();
+    waiting.sort_by_key(|receipt| (receipt.order, receipt.receipt_id.clone()));
+    let asking: Vec<(String, Value)> = waiting
+        .iter()
+        .map(|receipt| {
+            let card = quota::card(&receipt.provider, &owner, &receipt.receipt_id);
+            (receipt.receipt_id.clone(), card)
+        })
+        .collect();
     if asking.is_empty() {
         return;
     }
@@ -553,7 +565,8 @@ async fn ask_cards(
             Ok(made) => made,
             Err(_) => {
                 eprintln!(
-                    "clarp-host: the Quota keeper's card for receipt {receipt_id} was not made"
+                    "clarp-host: the Quota keeper's card for receipt {receipt_id} was not made; \
+                     it is asked again at the next look"
                 );
                 continue;
             }
@@ -563,6 +576,9 @@ async fn ask_cards(
         };
         receipt.payload["recovery"]["artifact_id"] = made["artifact_id"].clone();
         rows.push(row(RECEIPTS, &receipt_id, &*receipt));
+    }
+    if rows.is_empty() {
+        return;
     }
     if let Err(why) = app.fleet.change_together(rows, Vec::new()).await {
         app.fleet.unkept(RECEIPTS, &why.0);
