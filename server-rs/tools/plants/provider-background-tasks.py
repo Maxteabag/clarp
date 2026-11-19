@@ -175,8 +175,11 @@ PLANTS=[
     ('clarp-shim/src/main.rs', 'host', 'accept an oversized hook input', 'bytes.len() as u64>MAX_INPUT', 'false'),
     ('clarp-shim/src/main.rs', 'host', 'advisory hook rejects malformed calls', 'background_hook(argv.next());\n        return ExitCode::SUCCESS;', 'background_hook(argv.next());return ExitCode::FAILURE;'),
     ('clarp-host/src/agent.rs', 'host', 'lose mirrored event revision', 'json!(event.revision)', 'json!(0)'),
-    ('clarp-host/src/edge.rs', 'host', 'expose superseded jobs in snapshot', '!member.agent.view().provider_mirrors.contains_key(&job.id)', 'true'),
+    ('clarp-host/src/edge.rs', 'host', 'expose superseded jobs in snapshot', '.filter(|(_,_,hidden)| !hidden)', '.filter(|_|true)'),
     ('clarp-actor/src/lib.rs', 'host', 'leave the old link visible', 'std::iter::once(&record.job.metadata).chain(previous)', 'std::iter::once(&record.job.metadata)'),
+    ('clarp-kernel/src/jobs.rs', 'actor', 'prefer the newest linked job', 'first().map(|(_,id)|id.as_str())', 'last().map(|(_,id)|id.as_str())'),
+    ('clarp-kernel/src/jobs.rs', 'actor', 'assign insertion order at each registration', 'let first=*self.first_seen.entry(job.id.clone()).or_insert(job.revision);', 'let first=job.revision;'),
+    ('clarp-kernel/src/jobs.rs', 'actor', 'leave an old exact identity in the lookup', 'candidates.remove(&(first,job.id.clone()));', 'let _=&first;'),
 ]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

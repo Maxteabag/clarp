@@ -290,6 +290,7 @@ pub enum Ask {
         answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
+    JobRecord { id:String,answer:Answer<Option<Job>> },
     JobTimeline {
         id: String,
         limit: usize,
@@ -412,7 +413,7 @@ pub struct View {
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
-    pub provider_mirrors:BTreeMap<String,String>,
+    pub provider_mirrors:BTreeMap<String,Option<String>>,
     /// Idle native bindings and the last known runtime end, for the shared runner.
     pub provider_bindings: Vec<(String, Option<i64>, Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
@@ -421,6 +422,12 @@ pub struct View {
     pub speech: Arc<SpeechBook>,
     /// Why the agent cannot answer right now, when it cannot.
     pub broken: Option<String>,
+}
+
+impl View {
+    pub fn mirrored_provider(&self,id:&str)->bool{
+        self.provider_mirrors.get(id).is_some_and(Option::is_some)
+    }
 }
 
 /// Everything an agent's thread is given.
@@ -694,6 +701,9 @@ impl AgentHandle {
         self.ask(|answer| Ask::Job { command, origin, answer }).await
     }
 
+    pub async fn job_record(&self,id:String)->Result<Option<Job>,Unavailable>{
+        self.ask(|answer| Ask::JobRecord{id,answer}).await
+    }
     pub async fn job_timeline(
         &self,
         id: String,
@@ -2405,6 +2415,7 @@ impl Worker {
                 };
                 answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
             }
+            Ask::JobRecord{id,answer} => return read(Ok(actor.jobs().get(&id).cloned()),answer),
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
@@ -3016,7 +3027,7 @@ impl Worker {
                     )
                 })
                 .collect(),
-            provider_mirrors:actor.jobs().jobs().filter_map(|j|Some((j.id.clone(),actor.jobs().provider_replacement(j)?.to_owned()))).collect(),
+            provider_mirrors:actor.jobs().jobs().filter(|j|j.provider_owned()).map(|j|(j.id.clone(),actor.jobs().provider_replacement(j).map(str::to_owned))).collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -3486,6 +3497,7 @@ fn refuse_for(
             Ok(Ask::TakeLibrary { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),

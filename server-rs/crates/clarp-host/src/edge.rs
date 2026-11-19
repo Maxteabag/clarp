@@ -1226,7 +1226,7 @@ pub(crate) fn agent_row(
         .jobs
         .iter()
         .filter(|job| job.status.is_active())
-        .filter(|job| !view.provider_mirrors.contains_key(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none())
+        .filter(|job| !view.mirrored_provider(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none())
         .map(|job| helpers::Process {
             title: job.title.clone(),
             progress: job.progress_text.clone(),
@@ -2560,16 +2560,16 @@ async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<To
 }
 
 /// Every job the Host knows that is worth showing, with the agent it belongs to.
-async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job)>, ApiError> {
+async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job, bool)>, ApiError> {
     let directory = app.fleet.directory();
-    let mut jobs: Vec<(Option<Arc<Member>>, Job)> = directory
+    let mut jobs: Vec<(Option<Arc<Member>>, Job, bool)> = directory
         .members
         .iter()
         .flat_map(|member| {
             let view = member.agent.view();
             view.jobs
                 .iter()
-                .map(|job| (Some(member.clone()), job.clone()))
+                .map(|job| (Some(member.clone()), job.clone(), view.mirrored_provider(&job.id)))
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -2581,10 +2581,10 @@ async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job
             .filter(|job| {
                 job.status.is_active() || job.updated_at_ms >= now - crate::agent::JOB_SHOWN_FOR_MS
             })
-            .map(|job| (None, job)),
+            .map(|job| (None, job, false)),
     );
     // What runs first, then what ended; within each, the last changed first.
-    jobs.sort_by_key(|(_, job)| {
+    jobs.sort_by_key(|(_, job,_)| {
         (
             job.status.is_terminal(),
             std::cmp::Reverse(job.updated_at_ms),
@@ -2598,12 +2598,12 @@ async fn background_jobs(State(app): State<App>) -> Result<Json<Value>, ApiError
     let now = app.clock.now_ms();
     let jobs = shown_jobs(&app, now).await?;
     let (active, ended): (Vec<_>, Vec<_>) =
-        jobs.iter().partition(|(_, job)| job.status.is_active());
+        jobs.iter().partition(|(_, job,_)| job.status.is_active());
     let listed: Vec<Value> = active
         .iter()
         .chain(ended.iter().take(100))
-        .filter(|(member, job)| !member.as_ref().is_some_and(|m| m.agent.view().provider_mirrors.contains_key(&job.id)))
-        .map(|(member, job)| project_job(member.as_deref(), &app.server_id, job, now))
+        .filter(|(_, _, hidden)| !hidden)
+        .map(|(member, job, _)| project_job(member.as_deref(), &app.server_id, job, now))
         .collect();
     Ok(Json(json!({
         "jobs": listed,
@@ -2632,12 +2632,8 @@ async fn job_and_owner(app: &App, job_id: &str) -> Result<Option<(Arc<Member>, J
     else {
         return Ok(None);
     };
-    let view = member.agent.view();
-    Ok(view
-        .jobs
-        .iter()
-        .find(|job| job.id == job_id)
-        .map(|job| (member.clone(), job.clone())))
+    let job=member.agent.job_record(job_id.to_owned()).await?;
+    Ok(job.map(|job|(member.clone(),job)))
 }
 
 /// `GET /background-jobs/<id>`: one job with its timeline, its progress and the end of its log.
