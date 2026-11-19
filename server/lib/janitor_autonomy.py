@@ -420,12 +420,42 @@ class AutonomyJanitors:
         run=janitor_builtins.begin_run('quota-monitor',digest([owner['agent_id'],now]),context={'input_hash':digest(usage)})
         if not run or not janitor_builtins.claim_run(run['run_id']):
             lane_record('quota-keeper',owner,base,'failed','The check could not start',now);return
+        # Whatever raises inside the look, the run opened above is closed with its reason and what
+        # was read before is delivered; the raise then goes on to the loop, which logs it, as before,
+        # and the next look starts clean (R100).
+        try:self._quota_look(owner,run,usage,base,now)
+        except Exception as exc:
+            error=f'The check stopped ({type(exc).__name__}); what it read before is kept'
+            self._close_unfinished(run,error,owner=owner,lane='quota-keeper',base=base,now=now,deliver=True)
+            raise
+
+    def _close_unfinished(self,run,error,*,owner=None,lane=None,base=None,now=None,deliver=False):
+        """A run opened by begin_run/claim_run is never left running (R100): completed as failed with
+        its reason (complete_run cancels it instead once its authority is gone; a run already closed
+        is left as it is), its lane told, and the receipts already written delivered."""
+        from .log import log_exception
+        try:
+            row=janitors.get_run(run['run_id'])
+            if row and row['status'] in ('queued','running'):
+                janitor_builtins.complete_run(run['run_id'],'failed',error=error[:500],activity='failed',summary=error[:300])
+            if lane:lane_record(lane,owner,base,'failed',error,now)
+        except Exception as exc:log_exception('janitorRunCloseFail',exc,detail=run['run_id'])
+        if deliver:
+            try:self.deliver_notifications(owner)
+            except Exception as exc:log_exception('janitorDeliverFail',exc,detail=run['run_id'])
+
+    def _quota_look(self,owner,run,usage,base,now):
+        from .log import log
         notifications=0;recovery_states=[]
         self.recover_approved(owner)
         for provider_id,provider in usage.get('providers',{}).items():
             for window in provider.get('windows',[]):
                 used=window.get('used_percentage')
                 if window.get('freshness')!='fresh' or not isinstance(used,(int,float)) or isinstance(used,bool):continue
+                if not isinstance(window.get('observed_at'),str):
+                    # A window dated with no text is passed over, logged once in this look, and the rest are read (R100).
+                    log('quotaWindowPassedOver',f"provider={provider_id} window={str(window.get('window_id'))[:64]} reason=observed_at is not text")
+                    continue
                 import datetime
                 try:stamp=int(datetime.datetime.fromisoformat(window['observed_at'].replace('Z','+00:00')).timestamp()*1000)
                 except (KeyError,ValueError):continue
@@ -433,7 +463,8 @@ class AutonomyJanitors:
                 # Notification threshold belongs to the Janitor, not a separate feature flag.
                 receipt=quota_crossing(provider_id,account,window,used,owner,stamp)
                 if receipt is None:continue
-                if not janitor_builtins.is_current(run['run_id']):return
+                if not janitor_builtins.is_current(run['run_id']):
+                    janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Configuration changed'});return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
                 payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
                 ownership=_automatic_hotseat_quota_snapshot(provider_id)
