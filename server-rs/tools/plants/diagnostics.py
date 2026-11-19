@@ -1,7 +1,7 @@
 """Incorrect diagnostics admission, retention and wire rules."""
 import runner
 
-RUNS = {'request': ['test', '--lib', 'diagnostic_request_records'], 'resource': ['test', '--lib', 'diagnostic_resource_sample'], 'policy': ['test', '--test', 'diagnostics_vectors'], 'store': ['test', '--lib', 'diagnostic_files_expire'], 'queue': ['test', '--lib', 'diagnostic_queue_drops'], 'host': ['test', '--test', 'host', 'diagnostics_capture_is_opt_in']}
+RUNS = {'blocked': ['test', '--lib', 'diagnostic_writer_blockage'], 'producers': ['test', '--lib', 'diagnostic_producers_record'], 'request': ['test', '--lib', 'diagnostic_request_records'], 'resource': ['test', '--lib', 'diagnostic_resource_sample'], 'policy': ['test', '--test', 'diagnostics_vectors'], 'store': ['test', '--lib', 'diagnostic_files_expire'], 'queue': ['test', '--lib', 'diagnostic_queue_drops'], 'host': ['test', '--test', 'host', 'diagnostics_capture_is_opt_in']}
 PLANTS = [
     ('clarp-kernel/src/diagnostics.rs', 'policy', 'drop category requests', 'pub const CATEGORIES: [&str; 10] = [\n    "requests",\n    "database",\n    "network",\n    "interactions",\n    "transcript",\n    "resources",\n    "feedback",\n    "voice",\n    "agents",\n    "client",\n];', 'pub const CATEGORIES: [&str; 10] = [\n    "absent",\n    "database",\n    "network",\n    "interactions",\n    "transcript",\n    "resources",\n    "feedback",\n    "voice",\n    "agents",\n    "client",\n];'),
     ('clarp-kernel/src/diagnostics.rs', 'policy', 'drop category database', 'pub const CATEGORIES: [&str; 10] = [\n    "requests",\n    "database",\n    "network",\n    "interactions",\n    "transcript",\n    "resources",\n    "feedback",\n    "voice",\n    "agents",\n    "client",\n];', 'pub const CATEGORIES: [&str; 10] = [\n    "requests",\n    "absent",\n    "network",\n    "interactions",\n    "transcript",\n    "resources",\n    "feedback",\n    "voice",\n    "agents",\n    "client",\n];'),
@@ -66,13 +66,24 @@ PLANTS = [
     ('clarp-host/src/diagnostics.rs', 'request', 'lose the real HTTP status', 'reply.status().as_u16()', '200'),
     ('clarp-host/src/diagnostics.rs', 'request', 'record the wrong HTTP method', '"method":method', '"method":"PUT"'),
     ('clarp-host/src/diagnostics.rs', 'request', 'transcription size lost', '"size":size', '"size":0'),
-    ('clarp-host/src/diagnostics.rs', 'request', 'transcription failure marked successful', '"ok":ok', '"ok":true'),
+    ('clarp-host/src/diagnostics.rs', 'request', 'transcription failure marked successful', '"size":size,"duration_ms":t.elapsed().as_millis(),"ok":ok', '"size":size,"duration_ms":t.elapsed().as_millis(),"ok":true'),
     ('clarp-host/src/diagnostics.rs', 'request', 'a later success erases prior failures', 'entry.success = Some(at);', 'entry.success=Some(at);entry.error=None;'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'capture private process name', '("VmHWM:", "process_rss_kb")', '("Name:", "process_rss_kb")'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'sample a different store', 'dir.join("fleet.db")', 'dir.join("other.db")'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'sample a different load window', 's.split_whitespace().next()?.parse::<f64>()', 's.split_whitespace().nth(1)?.parse::<f64>()'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'drop memory pressure', '["cpu", "memory", "io"]', '["cpu","cpu","io"]'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'forget the 60-second sample', '"avg10" | "avg60"', '"avg10"|"avg600"'),
+    ('clarp-host/src/diagnostics.rs', 'blocked', 'queue admits one extra waiting event', 'mpsc::channel::<Row>(256)', 'mpsc::channel::<Row>(257)'),
+    ('clarp-host/src/diagnostics.rs', 'blocked', 'queue rejects last free slot', 'mpsc::channel::<Row>(256)', 'mpsc::channel::<Row>(255)'),
+    ('clarp-host/src/diagnostics.rs', 'blocked', 'batch takes beyond 64 rows', 'rx.recv_many(&mut batch, 64)', 'rx.recv_many(&mut batch,65)'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'agent records omit the turn number', '"turn":turn', '"turn":0'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'relay records lose the session', '"session":session', '"session":0'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'failed relay treats prior session as disconnected', '"connected":connected', '"connected":false'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'swap lost HTTP stream count', '"http_count":streams.0', '"http_count":streams.1'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'lose voice byte count', '"bytes":bytes', '"bytes":0'),
+    ('clarp-host/src/diagnostics.rs', 'producers', 'voice failure recorded as success', '"bytes":bytes,"duration_ms":t.elapsed().as_millis(),"ok":ok', '"bytes":bytes,"duration_ms":t.elapsed().as_millis(),"ok":true'),
+    ('clarp-kernel/src/diagnostics.rs', 'policy', 'retain arbitrary client field names', 'format!("field_{:x}", Sha256::digest(key.as_bytes()))', 'key.clone()'),
+    ('clarp-kernel/src/diagnostics.rs', 'policy', 'copy unknown string detail without masking', 'Value::String(_) => masked(v)', 'Value::String(_)=>v.clone()'),
 ]
 
 if __name__=="__main__":

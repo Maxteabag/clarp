@@ -404,12 +404,7 @@ pub fn run(app: &App, router: Router) {
                     session += 1;
                     let up_since = Instant::now();
                     connector.is("connected");
-                    capture.mark(crate::diagnostics::Subsystem::Relay, true, clock.now_ms());
-                    capture.emit(
-                        "network",
-                        clock.now_ms(),
-                        || json!({"kind":"relay_connected","session":session}),
-                    );
+                    capture.relay_connected(clock.now_ms(),session);
                     connector.opened(session, (up_since - without_since).as_millis());
                     let (lost, torn) = serve(&router, socket, &local).await;
                     let age = up_since.elapsed().as_secs_f64();
@@ -418,8 +413,7 @@ pub fn run(app: &App, router: Router) {
                 Ok(Err(error)) => (Lost::dial(&error), None, (0, 0)),
                 Err(_) => (Lost::of_kind("TimeoutError"), None, (0, 0)),
             };
-            capture.mark(crate::diagnostics::Subsystem::Relay, false, clock.now_ms());
-            capture.emit("network",clock.now_ms(),||json!({"kind":"relay_lost","connected":up.is_some(),"http_count":torn.0,"socket_count":torn.1}));
+            capture.relay_lost(clock.now_ms(),up.is_some(),torn);
             without_since = Instant::now();
             connector.lost(&lost, up, torn);
             let wait = rules::redial_after(waited, up.is_some(), lost.received());

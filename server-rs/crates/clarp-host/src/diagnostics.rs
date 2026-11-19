@@ -120,7 +120,7 @@ impl Capture {
     pub(crate) fn settings(&self) -> Settings {
         Settings(self.bits.load(Ordering::Acquire))
     }
-    pub fn emit(&self, category: &'static str, now: i64, make: impl FnOnce() -> Value) -> bool {
+    fn emit(&self, category: &'static str, now: i64, make: impl FnOnce() -> Value) -> bool {
         let s = self.settings();
         if !(if category == "requests" {
             s.requests()
@@ -141,6 +141,23 @@ impl Capture {
         }
         slot.send((now, bytes));
         true
+    }
+    pub(crate) fn turn(&self, at:i64,kind:&'static str,agent_id:&str,turn:u64){
+        self.emit("agents",at,||json!({"kind":kind,"agent_id":agent_id,"turn":turn}));
+    }
+    pub(crate) fn relay_connected(&self,at:i64,session:u64){
+        self.mark(Subsystem::Relay,true,at);
+        self.emit("network",at,||json!({"kind":"relay_connected","session":session}));
+    }
+    pub(crate) fn relay_lost(&self,at:i64,connected:bool,streams:(usize,usize)){
+        self.mark(Subsystem::Relay,false,at);
+        self.emit("network",at,||json!({"kind":"relay_lost","connected":connected,"http_count":streams.0,"socket_count":streams.1}));
+    }
+    pub(crate) fn synthesis(&self,at:i64,ok:bool,bytes:u64,started:Option<Instant>){
+        self.mark(Subsystem::Tts,ok,at);
+        if let Some(t)=started{
+            self.emit("voice",at,||json!({"kind":"synthesis","bytes":bytes,"duration_ms":t.elapsed().as_millis(),"ok":ok}));
+        }
     }
     pub fn transcription(&self, at: i64, ok: bool, size: usize, elapsed: Option<Instant>) {
         self.mark(Subsystem::Stt, ok, at);
@@ -354,6 +371,46 @@ pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, Ap
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn diagnostic_writer_blockage_preserves_the_queue_bound_and_producer_progress() {
+        use clarp_ports::clock::ManualClock;
+        struct Blocked {
+            entered:Option<tokio::sync::oneshot::Sender<()>>,
+            release:std::sync::mpsc::Receiver<()>,
+            receipts:mpsc::UnboundedSender<Vec<Value>>,
+        }
+        impl DiagnosticStore for Blocked {
+            fn append(&mut self,_:i64,records:&[Row])->std::io::Result<usize>{
+                if let Some(entered)=self.entered.take(){
+                    entered.send(()).unwrap();
+                    self.release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                let batch=records.iter().map(|(_,v)|serde_json::from_slice(v).unwrap()).collect();
+                self.receipts.send(batch).unwrap();
+                Ok(0)
+            }
+        }
+        let (entered,blocked)=tokio::sync::oneshot::channel();
+        let (release,unblock)=std::sync::mpsc::channel();
+        let (receipts,mut results)=mpsc::unbounded_channel();
+        let store=Blocked{entered:Some(entered),release:unblock,receipts};
+        let setting=Settings::update(&json!({"enabled":true,"categories":["client"]})).unwrap();
+        let capture=Capture::start(Box::new(store),Arc::new(ManualClock::starting_at(1)),setting,PathBuf::new());
+        assert!(capture.emit("client",1,||json!({"seq":0})));
+        tokio::time::timeout(Duration::from_secs(3),blocked).await.unwrap().unwrap();
+        for seq in 1..=256 {assert!(capture.emit("client",1,||json!({"seq":seq})));}
+        assert!(!capture.emit("client",1,||panic!("the rejected event may not allocate")));
+        assert_eq!(capture.dropped.load(Ordering::Relaxed),1);
+        release.send(()).unwrap();
+        let mut numbers=Vec::new();
+        while numbers.len()<257 {
+            let batch=tokio::time::timeout(Duration::from_secs(3),results.recv()).await.unwrap().unwrap();
+            assert!(!batch.is_empty() && batch.len()<=64);
+            numbers.extend(batch.iter().map(|v|v["event"]["seq"].as_u64().unwrap()));
+        }
+        assert_eq!(numbers,(0..257).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
     async fn diagnostic_request_records_only_the_route_pattern() {
         use axum::{Router, body::Body, middleware, routing::get};
         use clarp_ports::clock::ManualClock;
@@ -416,6 +473,30 @@ mod tests {
             capture.subsystems()["stt"],
             json!({"last_success_at":4.0,"last_error_at":3.0,"last_error":"failed"})
         );
+    }
+    #[test]
+    fn diagnostic_producers_record_metadata_under_their_own_categories(){
+        let (queue,mut read)=mpsc::channel(8);
+        let desk=Capture{bits:AtomicU16::new(0),queue,dropped:Default::default(),settings_lock:Default::default(),resources:watch::channel(false).0,health:Default::default()};
+        for selected in ["agents","network","voice","database"]{
+            desk.bits.store(Settings::update(&json!({"enabled":true,"categories":[selected]})).unwrap().0,Ordering::Release);
+            for kind in ["accepted","started","settled"]{desk.turn(1,kind,"fixture-id",7);}
+            desk.relay_connected(2,8);
+            desk.relay_lost(3,true,(11,12));
+            desk.synthesis(4,false,17,Some(Instant::now()));
+            let mut events=Vec::new();
+            while let Ok((_,bytes))=read.try_recv(){
+                let record:Value=serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(record["category"],selected);
+                events.push(record["event"].clone());
+            }
+            match selected{
+                "agents"=>assert_eq!(events,["accepted","started","settled"].map(|kind|json!({"kind":kind,"agent_id":"fixture-id","turn":7}))),
+                "network"=>assert_eq!(events,[json!({"kind":"relay_connected","session":8}),json!({"kind":"relay_lost","connected":true,"http_count":11,"socket_count":12})]),
+                "voice"=>{assert_eq!(events.len(),1);assert!(events[0]["duration_ms"].is_number());assert_eq!(events[0]["bytes"],17);assert_eq!(events[0]["ok"],false);},
+                _=>assert!(events.is_empty()),
+            }
+        }
     }
     #[test]
     fn diagnostic_resource_sample_uses_only_the_named_measurements() {

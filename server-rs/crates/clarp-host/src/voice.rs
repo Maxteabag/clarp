@@ -1172,14 +1172,7 @@ impl Mouth {
             Err(_) => (Err("the engine's thread ended".to_string()), 0),
         };
         if let Some(c) = &self.hub.capture {
-            c.mark(
-                crate::diagnostics::Subsystem::Tts,
-                spoke.is_ok(),
-                self.now_ms(),
-            );
-            if let Some(t) = started {
-                c.emit("voice",self.now_ms(),||json!({"kind":"synthesis","bytes":written,"duration_ms":t.elapsed().as_millis(),"ok":spoke.is_ok()}));
-            }
+            c.synthesis(self.now_ms(),spoke.is_ok(),written,started);
         }
         // Whoever plays the clip as it grows hears at once that it grows no more.
         growing.progress.send_replace(Progress {

@@ -54,3 +54,15 @@ fn diagnostic_policy_matches_the_reference() {
     }
     assert_eq!(counts, [40, 6, 24, 60, 8]);
 }
+
+#[test]
+fn diagnostic_client_detail_cannot_copy_free_text_or_untrusted_field_names(){
+    let secret="SYNTHETIC user sentence, tool output or machine path";
+    let mut input=json!({"detail":[{"status":"SYNTHETIC secret-token","bytes":42}]});
+    input[secret]=json!(secret);
+    let kept=rules::safe_detail(&input);
+    assert!(!kept.to_string().contains("SYNTHETIC"));
+    assert!(kept["detail"][0]["status"].as_str().unwrap().starts_with("<redacted length="));
+    assert_eq!(kept["detail"][0]["bytes"],42);
+    assert!(kept.as_object().unwrap().keys().any(|key|key.starts_with("field_")));
+}
