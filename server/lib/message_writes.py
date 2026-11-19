@@ -618,6 +618,18 @@ def carry_conversation(*, agent_id: str, from_session_id: str,
                    ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
                        revision = MAX(conversation_heads.revision, excluded.revision)""",
                 (agent_id, to_session_id, revision))
+            # The old conversation's rows left it: its head rises too, and a
+            # client holding it must reload (replace_revision), since a delta
+            # cannot say that a row is gone (R119).
+            database.execute(
+                """INSERT INTO conversation_heads (
+                       agent_id, backend_session_id, revision, replace_revision
+                   ) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                       revision = MAX(conversation_heads.revision, excluded.revision),
+                       replace_revision = MAX(conversation_heads.replace_revision,
+                                              excluded.replace_revision)""",
+                (agent_id, from_session_id, revision, revision))
         database.execute("COMMIT")
     except BaseException:
         database.execute("ROLLBACK")
