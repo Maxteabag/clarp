@@ -39,6 +39,20 @@ from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispat
     refresh_hold_headlines, _ADMISSION, live_work, reset_for_tests, _terminal_live, _alive,
 )
 _RUNTIME_CLIENT: Any | None = None
+
+
+def _can_steer(registry, backend: str) -> bool:
+    """The backend catalogue's ``supports_steer``. A registry that cannot say
+    (no ``by_id``, an unknown backend) keeps the steer path as it was."""
+    by_id = getattr(registry, "by_id", None)
+    if by_id is None:
+        return True
+    try:
+        return bool(getattr(by_id(backend), "supports_steer", True))
+    except Exception:  # noqa: BLE001 - unknown: the steer path as before
+        return True
+
+
 def configure_runtime_client(client: Any | None) -> None:
     global _RUNTIME_CLIENT
     _RUNTIME_CLIENT = client
@@ -349,7 +363,11 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
         if not busy or _terminal_live(spec.agent_id):
             return False
         steer = getattr(self.backends, "steer_turn", None)
-        if steer is None:
+        if steer is None or not _can_steer(self.backends, spec.backend):
+            # A backend that cannot be steered refuses before anything leaves:
+            # no launch attempt is recorded for it, so the send that then waits
+            # behind the turn keeps a PENDING receipt and runs from the queue
+            # after a Stop or a restart (R120).
             return False
         # A claimed slot with no live process is a phantom (a launch that
         # died before the backend started). Steering into it loses the
