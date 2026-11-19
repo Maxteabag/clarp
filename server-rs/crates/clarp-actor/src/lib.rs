@@ -3370,10 +3370,14 @@ impl Actor {
                             // Another conversation than the agent had, of a tool that has
                             // that one no more: the Host carried the conversation over.
                             let had = batch.agent().backend_session().map(str::to_string);
-                            let command = Command::TurnBound { turn, backend_session };
+                            let command = Command::TurnBound {
+                                turn,
+                                backend_session,
+                            };
                             if batch.command(command, t).is_ok()
                                 && let Some(bound) = batch.agent().backend_session()
-                                && let Some(had) = had.filter(|had| had != bound && !self.backend.keeps(had))
+                                && let Some(had) =
+                                    had.filter(|had| had != bound && !self.backend.keeps(had))
                             {
                                 out.carried.push((had, bound.to_owned()));
                             }
