@@ -38,6 +38,9 @@ pub struct Message {
     /// this item are the same thing.
     pub id: String,
     pub text: String,
+    /// Primary selected when a managed Janitor request was admitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_model: Option<String>,
     pub origin: Origin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,

@@ -312,7 +312,7 @@ pub type Left = Vec<(String, Vec<u8>)>;
 
 /// The table of a kind of thing that is left with the Host (`FleetHandle::keep`): one of its
 /// own, apart from every table the fleet keeps for itself.
-fn shelf(kind: &str) -> String {
+pub fn shelf(kind: &str) -> String {
     format!("kept.{kind}")
 }
 

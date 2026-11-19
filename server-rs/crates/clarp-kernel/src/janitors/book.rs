@@ -56,6 +56,10 @@ pub trait World {
     fn backend(&self, name: &str) -> bool;
     /// Whether a tool has a model of this name. No name is the tool's own choice.
     fn model(&self, backend: &str, model: &str) -> bool;
+    /// The policy setter validates model names against an existing observation.
+    fn policy_model_error(&self, backend: &str, model: &str) -> Option<String> {
+        (!self.model(backend, model)).then(|| "Invalid provider model identifier".into())
+    }
     /// The efforts a tool takes.
     fn efforts(&self, backend: &str) -> Vec<String>;
     /// The time between the next two runs of a schedule, in seconds.
@@ -129,6 +133,7 @@ pub struct Trigger {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Book {
+    pub model_policy: super::fallbacks::Policy,
     /// Each janitor's job, by the agent's id.
     pub configs: BTreeMap<String, Config>,
     /// Every trigger there ever was, by its id.
