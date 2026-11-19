@@ -46,6 +46,37 @@ def _managed_root(model_id: str) -> Path:
     return MANAGED_MODELS / model_id.replace(":", "--")
 
 
+def _own_folder(model_id: str, stored: object) -> Path:
+    """The folder a removal of ``model_id`` may delete: one its id gives (R112, _own_folders).
+
+    The path a registry record stores is not trusted. It must be, exactly, that folder: an
+    absolute path that resolves to itself and to the id's folder, which is no link. The managed
+    root itself, a sibling's folder, a deeper or an outer path, a relative or empty one, or one
+    that reaches the folder or leaves it through a symbolic link is refused, before any file or
+    the registry changes, with an error that names the model and not the paths. The stored path
+    is only compared: what is returned, and deleted, is the computed folder it equals."""
+    text = str(stored) if isinstance(stored, (str, os.PathLike)) else ""
+    path = Path(text)
+    owned = [folder for folder in _own_folders(model_id)
+             if not folder.is_symlink() and path == folder.resolve()]
+    if not text or not path.is_absolute() or path.resolve() != path or not owned:
+        from .log import log
+        log("transcriptionModelFolderRefused", f"model={model_id}")
+        raise ValueError(f"refusing to remove {model_id}: its stored folder is not the model's own")
+    return owned[0]
+
+
+def _own_folders(model_id: str) -> list[Path]:
+    """The folders a model's id gives: its managed folder, and for a faster-whisper model the
+    Hugging Face cache folder of its own repo under the managed root (models--<org>--<name>),
+    where a model whose root was the Hugging Face hub is kept. Never a path read from a record."""
+    folders = [_managed_root(model_id)]
+    provider, _, model = model_id.partition(":")
+    if provider == "faster-whisper" and model:
+        folders.append(MANAGED_MODELS / ("models--" + _faster_whisper_repo(model).replace("/", "--")))
+    return folders
+
+
 def _activation_key(model_id: str, job: dict | None) -> tuple[str, str, int]:
     from . import db
     return (
@@ -237,15 +268,11 @@ def rollback_terminal_install(
                 records = _read_registry()
                 record = next(
                     (item for item in records if item.get("id") == model_id), None)
-                managed_root = (
-                    record.get("_managed_root") if record else _managed_root(model_id))
                 tombstone = None
-                if managed_root:
-                    target = Path(str(managed_root)).resolve()
-                    root = MANAGED_MODELS.resolve()
-                    if not (root == target or root in target.parents):
-                        raise ValueError(
-                            f"refusing to clean model outside managed caches: {target}")
+                if record is None or "_managed_root" in record:
+                    # Only the folder the id gives, and only when the record names exactly it (R112).
+                    target = (_own_folder(model_id, record["_managed_root"]) if record
+                              else _managed_root(model_id).resolve())
                     if target.exists():
                         tombstone = target.with_name(
                             f".{target.name}.cancelled-{uuid.uuid4().hex}")
@@ -608,17 +635,15 @@ def remove(model_id: str, *, allow_active: bool = False) -> None:
                            if item.get("id") == model_id and _valid_record(item)), None)
             if record is None:
                 return
-            managed_root = record.get("_managed_root")
-            if not managed_root:
+            if "_managed_root" not in record:
+                # A model registered from the user's own folder: only its registry line goes.
                 _write_registry([
                     item for item in _read_registry() if item.get("id") != model_id])
                 with _lock:
                     _tasks.pop(model_id, None)
                 return
-            target = Path(managed_root).resolve()
-            roots = [MANAGED_MODELS.resolve()]
-            if not any(root == target or root in target.parents for root in roots):
-                raise ValueError(f"refusing to remove model outside managed caches: {target}")
+            # Only the folder the id gives, and only when the record names exactly it (R112).
+            target = _own_folder(model_id, record["_managed_root"])
             if target.is_dir(): shutil.rmtree(target)
             elif target.is_file(): target.unlink()
             _write_registry([
