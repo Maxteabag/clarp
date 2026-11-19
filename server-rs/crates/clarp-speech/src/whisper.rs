@@ -107,6 +107,27 @@ impl Running {
         writeln!(self.stdin, "{line}")?;
         self.stdin.flush()
     }
+    fn reply(&mut self, id: &str, within: Duration) -> Result<Value, Unheard> {
+        let until = Instant::now() + within;
+        loop {
+            let left = until.saturating_duration_since(Instant::now());
+            let line = match self.lines.recv_timeout(left) {
+                Ok(line) => line,
+                Err(RecvTimeoutError::Timeout) => return Err(Unheard::Gone(SILENT)),
+                Err(RecvTimeoutError::Disconnected) => return Err(Unheard::Gone(ENDED)),
+            };
+            let Ok(said) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if said["id"].as_str() != Some(id) {
+                continue; // the answer to a clip nobody waits for any more
+            }
+            if let Some(why) = said["error"].as_str() {
+                return Err(Unheard::Said(why.to_string()));
+            }
+            return Ok(said);
+        }
+    }
 }
 
 /// A worker nobody holds any more is ended: none is left behind, whoever let go of it.
@@ -314,6 +335,41 @@ impl Whisper {
         Ok(path)
     }
 
+    /// Only an already-loaded, idle worker may probe; probing never starts a model.
+    pub fn probe(&self, clip: Clip<'_>) -> Option<f64> {
+        let mut running = {
+            let mut state = locked(&self.state);
+            if !matches!(*state, State::Up(_)) {
+                return None;
+            }
+            match std::mem::replace(&mut *state, State::Hearing) {
+                State::Up(r) => r,
+                _ => unreachable!(),
+            }
+        };
+        let Ok(path) = self.written(clip) else {
+            *locked(&self.state) = State::Up(running);
+            return None;
+        };
+        let id = format!("p{}", self.clips.load(Ordering::Relaxed));
+        let request = json!({"op":"probe","id":id,"path":path});
+        let answer = running
+            .say(&request)
+            .map_err(|_| Unheard::Gone(ENDED))
+            .and_then(|()| running.reply(&id, Duration::from_secs(6)));
+        let _ = std::fs::remove_file(path);
+        if matches!(answer, Err(Unheard::Gone(_))) {
+            drop(running);
+            *locked(&self.state) = State::Down;
+            return None;
+        }
+        *locked(&self.state) = State::Up(running);
+        answer
+            .ok()
+            .and_then(|v| v["seconds"].as_f64())
+            .filter(|s| s.is_finite() && *s > 0.)
+    }
+
     /// Asks the worker for one clip.
     fn ask(
         &self,
@@ -343,32 +399,15 @@ impl Whisper {
                 .unwrap_or("auto")
                 .to_string(),
         );
-        let until = Instant::now() + self.worker.hear_within;
-        loop {
-            let left = until.saturating_duration_since(Instant::now());
-            let line = match running.lines.recv_timeout(left) {
-                Ok(line) => line,
-                Err(RecvTimeoutError::Timeout) => return Err(Unheard::Gone(SILENT)),
-                Err(RecvTimeoutError::Disconnected) => return Err(Unheard::Gone(ENDED)),
-            };
-            let Ok(said) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            if said["id"].as_str() != Some(id.as_str()) {
-                continue; // the answer to a clip nobody waits for any more
-            }
-            if let Some(why) = said["error"].as_str() {
-                return Err(Unheard::Said(why.to_string()));
-            }
-            let pieces = said["segments"].as_array().cloned().unwrap_or_default();
-            return Ok(pieces
-                .iter()
-                .map(|piece| Segment {
-                    text: piece["text"].as_str().unwrap_or("").to_string(),
-                    no_speech_prob: piece["no_speech_prob"].as_f64().unwrap_or(0.0),
-                })
-                .collect());
-        }
+        let said = running.reply(&id, self.worker.hear_within)?;
+        let pieces = said["segments"].as_array().cloned().unwrap_or_default();
+        Ok(pieces
+            .iter()
+            .map(|piece| Segment {
+                text: piece["text"].as_str().unwrap_or("").to_string(),
+                no_speech_prob: piece["no_speech_prob"].as_f64().unwrap_or(0.0),
+            })
+            .collect())
     }
 }
 

@@ -60,7 +60,7 @@ pub struct Ears {
     pub(crate) judge: crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
-    own: Option<(Arc<dyn Listener>, String)>,
+    own: Option<(Arc<Whisper>, String)>,
     settings_lock: tokio::sync::Mutex<()>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
@@ -93,6 +93,7 @@ const CHIRP: &str = "google:chirp_3";
 /// speech is found to end (the Python Host's keys).
 const ENGINE_KEY: &str = "transcription.engine";
 const TURN_TAKING_KEY: &str = "transcription.turn_taking";
+const LONG_FORM_MODEL_KEY: &str = "transcription.long_form_model";
 const LONG_FORM_THRESHOLD_KEY: &str = "transcription.long_form_threshold_sec";
 
 /// An engine that was chosen for a clip.
@@ -129,7 +130,7 @@ impl Ears {
             };
             let whisper = Whisper::new(worker);
             whisper.warm();
-            let engine: Arc<dyn Listener> = Arc::new(whisper);
+            let engine = Arc::new(whisper);
             (engine, config.whisper_model.clone())
         });
         let keys = OwnerFile::new(config.speech_keys.clone());
@@ -217,17 +218,54 @@ impl Ears {
         set.unwrap_or(&self.engine).to_string()
     }
 
+    async fn long_model<'a>(
+        &self,
+        directory: &'a Directory,
+        audio: &axum::body::Bytes,
+        kind: &str,
+    ) -> &'a str {
+        let model = directory.setting(LONG_FORM_MODEL_KEY).unwrap_or("").trim();
+        if model.is_empty() {
+            return "";
+        }
+        let seconds = match heard::duration::wav_seconds(audio) {
+            Some(s) => Some(s),
+            None => match &self.own {
+                Some((worker, _)) => {
+                    let (worker, audio, kind) = (worker.clone(), audio.clone(), kind.to_string());
+                    tokio::task::spawn_blocking(move || {
+                        worker.probe(Clip {
+                            audio: &audio,
+                            content_type: &kind,
+                        })
+                    })
+                    .await
+                    .ok()
+                    .flatten()
+                }
+                None => None,
+            },
+        };
+        heard::duration::long_model(model, long_form_threshold(directory), seconds)
+    }
+
     /// The engines a clip is tried on, in order: the first hears it, and each next one only
     /// when the one before failed. `requested` is what the app asked for by name (nothing:
     /// whatever this Host hears with), `own` are the engines of the agent the clip is for,
     /// which come before what an app asks for.
-    fn order(&self, requested: &str, own: &[String], default_engine: &str) -> Vec<String> {
+    fn order(
+        &self,
+        requested: &str,
+        own: &[String],
+        default_engine: &str,
+        long_model: &str,
+    ) -> Vec<String> {
         // The cloud engine chosen for this Host stands in for its own; what an app asks
         // for by name still comes first.
         let stands_in =
             heard::wants_cloud_engine(requested, own, false) && heard::is_cloud(default_engine);
         let cloud = if stands_in { default_engine } else { "" };
-        let plan = heard::plan(requested, own, cloud, "", false);
+        let plan = heard::plan(requested, own, cloud, long_model, false);
         let mut order = vec![plan.model];
         order.extend(plan.fallbacks);
         order
@@ -566,7 +604,12 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         (said, Some(report), id)
     } else {
         let (own, language) = spoken_to(&directory, recorded_for, &ears.language);
-        let order = ears.order(&requested, &own, &ears.default_engine(&directory));
+        let long = if own.is_empty() {
+            ears.long_model(&directory, &audio, &content_type).await
+        } else {
+            ""
+        };
+        let order = ears.order(&requested, &own, &ears.default_engine(&directory), long);
         let selected = order.first().map_or(requested.as_str(), String::as_str);
         let (audit, id) =
             crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
@@ -828,7 +871,9 @@ async fn providers(State(app): State<App>) -> Json<Value> {
 /// seconds unless the owner set another.
 fn long_form_threshold(directory: &Directory) -> i64 {
     let kept = directory.setting(LONG_FORM_THRESHOLD_KEY);
-    kept.and_then(|kept| kept.parse().ok()).unwrap_or(30)
+    kept.and_then(|s| clarp_kernel::python::int(s.trim()))
+        .unwrap_or(30)
+        .clamp(1, 3600) as i64
 }
 
 async fn vocabulary_budgets(State(app): State<App>) -> Json<Value> {
@@ -868,7 +913,7 @@ fn status(app: &App) -> Value {
         "call_policy_error": call.error,
         "turn_taking": turn_taking(&directory),
         "retain_audio": crate::vocabulary::audio::enabled(&directory),
-        "long_form_model": "",
+        "long_form_model":directory.setting(LONG_FORM_MODEL_KEY).unwrap_or("").trim(),
         "long_form_threshold_sec": long_form_threshold(&directory),
         "long_form_threshold_range": { "min": 1, "max": 3600 },
         "stream_path": "/stt/stream",
@@ -949,15 +994,12 @@ async fn set_providers(
     }
     match named("long_form_model") {
         None => {}
-        Some(Value::String(model)) if model.trim().is_empty() => {}
-        Some(Value::String(model)) if unknown(model.trim()) => {
+        Some(Value::String(model)) => {
             let model = model.trim();
-            return Err(bad(&format!("unknown transcription engine: {model}")));
-        }
-        Some(Value::String(_)) => {
-            return Err(bad(
-                "long recordings go to no other engine on this Host yet (long_form_model)",
-            ));
+            if !model.is_empty() && unknown(model) {
+                return Err(bad(&format!("unknown transcription engine: {model}")));
+            }
+            settings.push((LONG_FORM_MODEL_KEY.to_string(), model.to_string()));
         }
         Some(_) => return Err(bad("long_form_model must be a string")),
     }

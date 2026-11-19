@@ -17470,9 +17470,9 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
         );
     }
     assert_eq!(set(json!([1])), (400, json!({ "error": "bad json" })));
-    let (status, why) = set(json!({ "long_form_model": "elevenlabs:scribe_v2" }));
-    assert_eq!(status, 400);
-    assert!(why["error"].as_str().unwrap().contains("on this Host yet"));
+    let (status, saved) = set(json!({ "long_form_model": "elevenlabs:scribe_v2" }));
+    assert_eq!(status, 200);
+    assert_eq!(saved["long_form_model"], "elevenlabs:scribe_v2");
     // A save that names what is as it is, and one that takes an agent's entries away.
     let (status, _) =
         set(json!({ "turn_taking": "native", "retain_audio": false, "long_form_model": "" }));
@@ -37152,6 +37152,254 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
             "Gemini connection information in Host output"
         );
     }
+}
+
+#[test]
+fn long_recordings_are_routed_by_duration_on_upload() {
+    const SHORT: &str = "elevenlabs:scribe_v2";
+    const LONG: &str = "deepgram:nova-3";
+    let place = Place::new("measured-clips");
+    let (scribe, shorts) = scribe_stand_in(r#"{"text":"short route."}"#);
+    let (nova, longs) = scribe_stand_in(
+        r#"{"results":{"channels":[{"alternatives":[{"transcript":"long route."}]}]}}"#,
+    );
+    // Exercise the actual worker protocol with fake inference and an in-memory demuxer.
+    std::fs::write(place.root.join("av.py"),r#"
+import json, os, time
+from types import SimpleNamespace as NS
+time_base = 1000000
+class Container:
+    def __init__(self, v):
+        self.v=v
+        self.duration=v.get('container')
+        self.streams=[NS(type=t,duration=v.get('duration'),time_base=v.get('base'),rate=v.get('rate')) for t in v.get('streams',['audio'])]
+    def __enter__(self): return self
+    def __exit__(self,*args): pass
+    def decode(self,stream):
+        assert stream.type == 'audio'
+        return [NS(samples=n) for n in self.v['frames']]
+def open(file,mode,options):
+    assert options == {'protocol_whitelist':'pipe'}
+    with __import__('builtins').open(os.environ['PROBE_LOG'],'a') as log: log.write('probe\n')
+    value=json.load(file)
+    if value.get('slow'): time.sleep(25)
+    return Container(value)
+"#).unwrap();
+    let trace = place.root.join("probes");
+    let env = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("XDG_CACHE_HOME", place.root.to_str().unwrap()),
+        ("XDG_CONFIG_HOME", place.root.to_str().unwrap()),
+        ("HF_HOME", place.root.to_str().unwrap()),
+        ("HF_HUB_OFFLINE", "1"),
+        ("CLARP_SCRIBE_ENDPOINT", scribe.as_str()),
+        ("CLARP_NOVA_ENDPOINT", nova.as_str()),
+        ("ELEVEN_API_KEY", "test-scribe"),
+        ("DEEPGRAM_API_KEY", "test-nova"),
+        ("CLARP_WHISPER_FAKE", "1"),
+        ("PYTHONPATH", place.root.to_str().unwrap()),
+        ("PROBE_LOG", trace.to_str().unwrap()),
+    ];
+    let worker = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tools/whisper-worker.py");
+    let host = place.start_in(
+        "admin",
+        &["--whisper-python", "python3", "--whisper-worker", worker],
+        &env,
+    );
+    let agent = host.new_agent("Theo");
+    let (phone, _) = pair(&host, "Phone", "full");
+    let changes = |body: Value| host.ask("POST", "/transcription-providers", Some(&body));
+    let upload = |host: &Host, headers: &[(&str, &str)], bytes: &[u8]| {
+        let response = fetch(host, &phone, "POST", "/transcribe", headers, bytes);
+        (
+            response.status,
+            serde_json::from_slice::<Value>(&response.body).unwrap(),
+        )
+    };
+    let probes = || {
+        std::fs::read_to_string(&trace)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    wait_for("fake worker ready", || upload(&host, &[], b"warm").0 == 200);
+    let initial = host.get("/transcription-providers");
+    assert_eq!(initial["long_form_model"], "");
+    assert_eq!(initial["long_form_threshold_sec"], 30);
+    assert_eq!(
+        initial["long_form_threshold_range"],
+        json!({"min":1,"max":3600})
+    );
+    for (body, why) in [
+        (
+            json!({"long_form_model":7}),
+            "long_form_model must be a string",
+        ),
+        (
+            json!({"long_form_model":"deepgram:missing"}),
+            "unknown transcription engine: deepgram:missing",
+        ),
+        (
+            json!({"long_form_model":"bare"}),
+            "unknown transcription engine: bare",
+        ),
+        (
+            json!({"long_form_threshold_sec":true}),
+            "long_form_threshold_sec must be an integer",
+        ),
+        (
+            json!({"long_form_threshold_sec":3601}),
+            "long_form_threshold_sec must be between 1 and 3600",
+        ),
+    ] {
+        assert_eq!(changes(body), (400, json!({"error":why})));
+    }
+    assert_eq!(
+        changes(json!({"long_form_threshold_sec":3600})).1["long_form_threshold_sec"],
+        3600
+    );
+    assert_eq!(
+        changes(json!({"long_form_threshold_sec":0})),
+        (
+            400,
+            json!({"error":"long_form_threshold_sec must be between 1 and 3600"})
+        )
+    );
+    let (status, saved) = changes(
+        json!({"engine":SHORT,"long_form_model":format!(" {LONG} "),"long_form_threshold_sec":1}),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(saved["long_form_model"], LONG);
+    assert_eq!(
+        host.get("/transcription-providers")["long_form_threshold_sec"],
+        1
+    );
+    let wav = |frames: u32| {
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend((36 + 2 * frames).to_le_bytes());
+        bytes.extend(b"WAVEfmt ");
+        bytes.extend(16u32.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(1u16.to_le_bytes());
+        bytes.extend(8000u32.to_le_bytes());
+        bytes.extend(16000u32.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend(16u16.to_le_bytes());
+        bytes.extend(b"data");
+        bytes.extend((2 * frames).to_le_bytes());
+        bytes.resize(bytes.len() + frames as usize * 2, 0);
+        bytes
+    };
+    let ordinary = [("X-Transcription-Model", SHORT)];
+    assert_eq!(
+        upload(&host, &ordinary, &wav(7999)).1["text"],
+        "short route."
+    );
+    assert_eq!(
+        upload(&host, &ordinary, &wav(8000)).1["text"],
+        "long route."
+    );
+    assert_eq!(probes(), 0);
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/long-recordings-vectors.json"
+    ))
+    .unwrap();
+    let containers = fixture["containers"].as_array().unwrap();
+    for case in containers {
+        let clip = serde_json::to_vec(&case["fields"]).unwrap();
+        let expected = if case["seconds"].as_f64().unwrap() >= 1. {
+            "long route."
+        } else {
+            "short route."
+        };
+        assert_eq!(
+            upload(&host, &ordinary, &clip).1["text"],
+            expected,
+            "{case}"
+        );
+    }
+    for clip in [b"broken container".as_slice(), br#"{"slow":true}"#] {
+        let before = Instant::now();
+        assert_eq!(upload(&host, &ordinary, clip).1["text"], "short route.");
+        assert!(before.elapsed() < Duration::from_secs(15));
+    }
+    let probed = containers.len() + 2;
+    assert_eq!(probes(), probed);
+    assert_eq!(longs.lock().unwrap().len(), 4);
+    assert_eq!(shorts.lock().unwrap().len(), 9);
+    let started = host
+        .ask_as(&phone, "POST", "/calls", Some(&json!({"agents":[agent]})))
+        .1;
+    let id = started["call"]["call_id"].as_str().unwrap();
+    let call = [
+        ("X-Clarp-Call-Id", id),
+        ("X-Transcription-Session", agent.as_str()),
+        ("X-Transcription-Model", SHORT),
+    ];
+    let (_, reply) = upload(&host, &call, &wav(8000));
+    assert_eq!(
+        reply["stt"]["engines"],
+        json!({"value":[SHORT],"source":"device"})
+    );
+    assert_eq!(reply["stt"]["effective_engine"], LONG);
+    assert_eq!(reply["stt"]["attempts"][0]["engine"], LONG);
+    assert_eq!(
+        upload(&host, &call[..2], &wav(8000)).1["stt"]["effective_engine"],
+        LONG
+    );
+    assert_eq!(changes(json!({"call_engines":SHORT})).0, 200);
+    let pinned = upload(&host, &call, br#"{"container":9000000}"#).1;
+    assert_eq!(pinned["stt"]["effective_engine"], SHORT);
+    assert_eq!(pinned["stt"]["engines"]["source"], "call_policy");
+    assert_eq!(changes(json!({"agent_engines":{"theo":SHORT}})).0, 200);
+    let pinned = upload(&host, &call, br#"{"container":9000000}"#).1;
+    assert_eq!(pinned["stt"]["engines"]["source"], "agent");
+    assert_eq!(pinned["stt"]["effective_engine"], SHORT);
+    assert_eq!(
+        upload(
+            &host,
+            &[("X-Transcription-Session", agent.as_str())],
+            br#"{"container":9000000}"#
+        )
+        .1["text"],
+        "short route."
+    );
+    assert_eq!(probes(), probed);
+    assert_eq!(changes(json!({"call_engines":"","agent_engines":{"theo":null},"call_languages":"no","long_form_model":"faster-whisper:missing.en"})).0,200);
+    let (status, none) = upload(&host, &call, &wav(8000));
+    assert_eq!(status, 409);
+    assert_eq!(none["engines"], json!(["faster-whisper:missing.en"]));
+    assert_eq!(none["attempts"][0]["reason"], "language_incompatible");
+    assert_eq!(
+        changes(json!({"long_form_model":"faster-whisper:missing"})).0,
+        200
+    );
+    assert_eq!(upload(&host, &ordinary, &wav(8000)).0, 400);
+    assert_eq!(changes(json!({"long_form_model":LONG})).0, 200);
+    host.kill();
+    let host = place.start_in("admin", &[], &env);
+    assert_eq!(
+        host.get("/transcription-providers")["long_form_model"],
+        LONG
+    );
+    assert_eq!(
+        upload(&host, &ordinary, br#"{"container":9000000}"#).1["text"],
+        "short route."
+    );
+    assert_eq!(
+        upload(&host, &ordinary, &wav(8000)).1["text"],
+        "long route."
+    );
+    let (status, _) = host.ask(
+        "POST",
+        "/transcription-providers",
+        Some(&json!({"long_form_model":"  "})),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        upload(&host, &ordinary, &wav(8000)).1["text"],
+        "short route."
+    );
 }
 
 #[test]

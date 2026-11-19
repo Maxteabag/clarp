@@ -2006,6 +2006,15 @@ session and the same `stt` report returned to the client. A cached retry reuses 
 transaction before publishing its directory. Call-job fingerprints bind the validated principal,
 call ID and participant as specified for R87.
 
+**Routing long recordings** (19 Nov 2026). A batch upload at or above the configured duration
+can use a different model. A participant or call policy that chooses its engines keeps them.
+The WAV probe reads the PCM frame count and sample rate. For other containers an idle loaded
+speech worker checks container time, then stream time, then decoded sample count. An hour
+without duration metadata may be decoded twice, once for measurement and once for transcription.
+The probe child gets five seconds and the Host bounds the worker reply at six. A missing, busy,
+failed or late probe leaves the ordinary engine selection in effect. Both paths return the usual
+batch response. The word of this feature changes no upload limit or client timeout.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

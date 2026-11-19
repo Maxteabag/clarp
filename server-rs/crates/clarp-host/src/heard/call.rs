@@ -90,7 +90,11 @@ pub(super) async fn hear(
             json!({"ok":false,"error":"call policy invalid","call_policy_error":policy.error,"language":policy.language,"engines":engines,"attempts":[]}),
         ));
     }
-    let resolved = resolve(app, &directory, &policy, session, requested);
+    let mut resolved = resolve(app, &directory, &policy, session, requested);
+    if resolved.allows_long_model() {
+        let long = app.ears.long_model(&directory, clip.0, clip.1).await;
+        resolved.use_long_model(long);
+    }
     let language = resolved.fields["language"]["value"].as_str().unwrap_or("");
     let steps = rules::plan(
         &resolved.order,
@@ -153,6 +157,6 @@ pub(super) async fn hear(
     }
     Err((
         StatusCode::CONFLICT,
-        json!({"ok":false,"error":"no compatible engine","language":language,"engines":resolved.fields["engines"]["value"],"attempts":report.finish()["attempts"]}),
+        json!({"ok":false,"error":"no compatible engine","language":language,"engines":steps.iter().map(|step|&step.engine).collect::<Vec<_>>(),"attempts":report.finish()["attempts"]}),
     ))
 }

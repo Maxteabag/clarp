@@ -1,0 +1,5569 @@
+{
+ "wav": [
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA+AAA=",
+   "seconds": 1.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YQEAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRi4AAABXQVZFSlVOSwEAAAB4AGZtdCAQAAAAAQABAEAfAAAAAAAAAAAQAGRhdGGAPgAA",
+   "seconds": 1.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZGF0YYA+AABmbXQgEAAAAAEAAQBAHwAAAAAAAAAAEAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRjwAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZm10IBAAAAABAAEAgD4AAAAAAAAAABAAZGF0YYA+AAA=",
+   "seconds": 0.5
+  },
+  {
+   "audio": "UklGRjAAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAATElTVAMAAABhYmMAZGF0YYA+AAA=",
+   "seconds": 1.0
+  },
+  {
+   "audio": "",
+   "seconds": 0.0
+  },
+  {
+   "audio": "bm90IGEgUklGRg==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRgAAAABXQVZF",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRhwAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRhgAAABXQVZFZm10IAMAAABiYWQAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRjwAAABXQVZFZm10ICgAAAD+/wEAQB8AAAAAAAAAABAAFgAQAAAAAAABAAAAAAAQAIAAAKoAOJtxZGF0YYA+AAA=",
+   "seconds": 1.0
+  },
+  {
+   "audio": "UklGRjwAAABXQVZFZm10ICgAAAD+/wEAQB8AAAAAAAAAABAAFgAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRjwAAABXQVZFZm10ICcAAAD+/wEAQB8AAAAAAAAAABAAFgAQAAAAAAABAAAAAAAQAIAAAKoAOJsAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAAAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAAQAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAAAQB8AAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAAAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 19.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 19.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 9.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 9.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAAQAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 6.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.002375
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.002375
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.001125
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.001125
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.00075
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAAAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 9.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 9.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 4.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 4.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAAQAAAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 3.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAAAAAZGF0YRMAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAAAEAZGF0YRMAAAA=",
+   "seconds": 0.001125
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAAAgAZGF0YRMAAAA=",
+   "seconds": 0.001125
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAAAkAZGF0YRMAAAA=",
+   "seconds": 0.0005
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAABAAZGF0YRMAAAA=",
+   "seconds": 0.0005
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAIAQB8AAAAAAAAAABgAZGF0YRMAAAA=",
+   "seconds": 0.000375
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAADAAEAQB8AAAAAAAAAABAAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAAB4eHh4Zm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGWCQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA+AAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "",
+   "seconds": 0.0
+  },
+  {
+   "audio": "Ug==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "Ukk=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklG",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRg==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQ=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABX",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQQ==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVY=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZF",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZg==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm0=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAAB",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAE=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8A",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAAA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAA",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZA==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGE=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YQ==",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA=",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA+",
+   "seconds": 0.0
+  },
+  {
+   "audio": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAAAAAAAAABAAZGF0YYA+AA==",
+   "seconds": 0.0
+  }
+ ],
+ "switches": [
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": 0.999,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": 1,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": 1.001,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 1,
+   "seconds": 7200,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": 29.999,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": 30,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": 30.001,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 30,
+   "seconds": 7200,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": 3599.999,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": 3600,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": 3600.001,
+   "selected": ""
+  },
+  {
+   "model": "",
+   "threshold": 3600,
+   "seconds": 7200,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": 0.999,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": 1,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": 1.001,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 1,
+   "seconds": 7200,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": 29.999,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": 30,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": 30.001,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 30,
+   "seconds": 7200,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": 3599.999,
+   "selected": ""
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": 3600,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": 3600.001,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": "deepgram:nova-3",
+   "threshold": 3600,
+   "seconds": 7200,
+   "selected": "deepgram:nova-3"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": 0.999,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": 1,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": 1.001,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 1,
+   "seconds": 7200,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": 29.999,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": 30,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": 30.001,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 30,
+   "seconds": 7200,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": 0,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": -1,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": 3599.999,
+   "selected": ""
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": 3600,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": 3600.001,
+   "selected": "custom:model"
+  },
+  {
+   "model": " custom:model ",
+   "threshold": 3600,
+   "seconds": 7200,
+   "selected": "custom:model"
+  }
+ ],
+ "calls": [
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": null,
+     "adapted": false,
+     "model": "local"
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": null,
+     "adapted": false,
+     "model": "local"
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": "en",
+     "adapted": false,
+     "model": "local"
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": "en",
+     "adapted": false,
+     "model": "local"
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "faster-whisper:small.en",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "faster-whisper:small.en",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "global"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "refusal": {
+    "ok": false,
+    "error": "no compatible engine",
+    "language": "no",
+    "engines": [
+     "faster-whisper:small.en"
+    ],
+    "attempts": [
+     {
+      "engine": "faster-whisper:small.en",
+      "outcome": "skipped",
+      "reason": "language_incompatible"
+     }
+    ]
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "refusal": {
+    "ok": false,
+    "error": "no compatible engine",
+    "language": "no",
+    "engines": [
+     "faster-whisper:small.en"
+    ],
+    "attempts": [
+     {
+      "engine": "faster-whisper:small.en",
+      "outcome": "skipped",
+      "reason": "language_incompatible"
+     }
+    ]
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "refusal": {
+    "ok": false,
+    "error": "no compatible engine",
+    "language": "no",
+    "engines": [
+     "faster-whisper:small.en"
+    ],
+    "attempts": [
+     {
+      "engine": "faster-whisper:small.en",
+      "outcome": "skipped",
+      "reason": "language_incompatible"
+     }
+    ]
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "faster-whisper:small.en"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "local",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "refusal": {
+    "ok": false,
+    "error": "no compatible engine",
+    "language": "no",
+    "engines": [
+     "faster-whisper:small.en"
+    ],
+    "attempts": [
+     {
+      "engine": "faster-whisper:small.en",
+      "outcome": "skipped",
+      "reason": "language_incompatible"
+     }
+    ]
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "device"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": true,
+    "reason": null
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "refusal": {
+    "ok": false,
+    "error": "no compatible engine",
+    "language": "no",
+    "engines": [
+     "faster-whisper:small.en"
+    ],
+    "attempts": [
+     {
+      "engine": "faster-whisper:small.en",
+      "outcome": "skipped",
+      "reason": "language_incompatible"
+     }
+    ]
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": null
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "elevenlabs:scribe_v2",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "elevenlabs:scribe_v2",
+   "engines": {
+    "value": [
+     "elevenlabs:scribe_v2"
+    ],
+    "source": "call_policy"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "call_policy"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": false,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": null,
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "en",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "en",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": null
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "local",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "local",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 29.9,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "deepgram:nova-3",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  },
+  {
+   "own": [
+    "deepgram:nova-3"
+   ],
+   "policy": {
+    "languages": "no",
+    "engines": [
+     "elevenlabs:scribe_v2"
+    ],
+    "global_engine": "deepgram:nova-3",
+    "configured": true,
+    "error": ""
+   },
+   "requested": "elevenlabs:scribe_v2",
+   "duration": 30.0,
+   "long": "faster-whisper:small.en",
+   "steps": [
+    {
+     "engine": "deepgram:nova-3",
+     "language": "no",
+     "adapted": false
+    }
+   ],
+   "first": "deepgram:nova-3",
+   "engines": {
+    "value": [
+     "deepgram:nova-3"
+    ],
+    "source": "agent"
+   },
+   "device": {
+    "value": "elevenlabs:scribe_v2",
+    "applied": false,
+    "reason": "agent"
+   }
+  }
+ ],
+ "containers": [
+  {
+   "fields": {
+    "container": 1000000,
+    "duration": 1,
+    "base": 0.1
+   },
+   "seconds": 1.0
+  },
+  {
+   "fields": {
+    "container": 500000,
+    "duration": 4,
+    "base": 1
+   },
+   "seconds": 0.5
+  },
+  {
+   "fields": {
+    "streams": [
+     "video",
+     "audio"
+    ],
+    "duration": 2,
+    "base": 0.5
+   },
+   "seconds": 1.0
+  },
+  {
+   "fields": {
+    "duration": 1,
+    "base": 0.25,
+    "rate": 1,
+    "frames": [
+     8
+    ]
+   },
+   "seconds": 0.25
+  },
+  {
+   "fields": {
+    "rate": 1000,
+    "frames": [
+     499,
+     501
+    ]
+   },
+   "seconds": 1.0
+  },
+  {
+   "fields": {
+    "rate": 1000,
+    "frames": [
+     499,
+     500
+    ]
+   },
+   "seconds": 0.999
+  },
+  {
+   "fields": {
+    "streams": [
+     "video"
+    ],
+    "container": 2000000
+   },
+   "seconds": 0.0
+  },
+  {
+   "fields": {
+    "rate": 0,
+    "frames": [
+     500
+    ]
+   },
+   "seconds": 0.0
+  },
+  {
+   "fields": {
+    "rate": 1,
+    "frames": []
+   },
+   "seconds": 0.0
+  }
+ ]
+}

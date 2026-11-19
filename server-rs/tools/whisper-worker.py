@@ -9,6 +9,8 @@ on standard input and answers each with one line on standard output:
     <- {"event":"ready"} | {"event":"load_error","error":"..."}
     -> {"op":"transcribe","id":"c1","path":"/.../clip.m4a","prompt":"...","beam_size":1,"language":"nb"}
     <- {"id":"c1","segments":[{"text":"...","no_speech_prob":0.1}]} | {"id":"c1","error":"..."}
+    -> {"op":"probe","id":"p1","path":"/.../clip.m4a"}
+    <- {"id":"p1","seconds":30.0}  # zero when unknown
     -> {"op":"quit"}
 
 The lines are the Python Host's own (`server/lib/stt_worker.py`), and so is how the model is
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import traceback
 
@@ -88,6 +91,32 @@ def say(answer: dict) -> None:
     sys.stdout.flush()
 
 
+def container_seconds(path: str) -> float:
+    import av
+    # A file-like input and restricted protocols keep a container within the uploaded clip.
+    with open(path, 'rb') as audio, av.open(audio, mode='r', options={'protocol_whitelist': 'pipe'}) as container:
+        stream = next((s for s in container.streams if s.type == 'audio'), None)
+        if stream is None:
+            return 0.0
+        if container.duration:
+            return float(container.duration) / av.time_base
+        if stream.duration and stream.time_base:
+            return float(stream.duration * stream.time_base)
+        rate = int(stream.rate or 0)
+        samples = sum(frame.samples for frame in container.decode(stream))
+        return samples / rate if rate > 0 else 0.0
+
+
+def probe(path: str) -> float:
+    # A stuck decoder must not cost the loaded Whisper model or consume CPU beyond the deadline.
+    try:
+        result = subprocess.run([sys.executable, __file__, '--probe-file', path], stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, timeout=5, check=True)
+        return float(result.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
 def main() -> int:
     model = None
     language: str | None = None
@@ -108,6 +137,8 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001 - whatever the library fails with is the answer
                 say({'event': 'load_error', 'error': f'{error}\n{traceback.format_exc()[-800:]}'})
                 return 1
+        elif op == 'probe':
+            say({'id': asked.get('id'), 'seconds': probe(asked['path'])})
         elif op == 'transcribe':
             ident = asked.get('id')
             if model is None:
@@ -123,4 +154,7 @@ def main() -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    if len(sys.argv) == 3 and sys.argv[1] == '--probe-file':
+        print(container_seconds(sys.argv[2]))
+    else:
+        sys.exit(main())

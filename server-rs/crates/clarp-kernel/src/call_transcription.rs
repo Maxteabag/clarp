@@ -258,6 +258,19 @@ pub struct Resolved {
     pub order: Vec<String>,
 }
 impl Resolved {
+    pub fn allows_long_model(&self) -> bool {
+        matches!(
+            self.fields["engines"]["source"].as_str(),
+            Some("device" | "global")
+        )
+    }
+
+    pub fn use_long_model(&mut self, model: &str) {
+        if self.allows_long_model() && !model.is_empty() {
+            self.order = vec![model.to_string()];
+        }
+    }
+
     pub fn report(&self) -> Value {
         json!({"language":self.fields["language"],"engines":self.fields["engines"],"effective_engine":null,"attempts":[],"language_adapted":null,"requested_model":self.requested})
     }
