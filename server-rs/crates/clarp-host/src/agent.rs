@@ -1216,8 +1216,8 @@ fn unavailable(error: &ActorError) -> Unavailable {
 }
 
 impl Drop for Worker {
-    fn drop(&mut self){
-        self.setup.speaks.counted(&self.setup.record.agent_id,&[]);
+    fn drop(&mut self) {
+        self.setup.speaks.counted(&self.setup.record.agent_id, &[]);
     }
 }
 
@@ -2149,7 +2149,7 @@ impl Worker {
                     && let Some(turn) = sent.turn
                     && let Some(c) = &self.setup.hub.capture
                 {
-                    c.turn(now,"accepted",&self.setup.record.agent_id,turn.0);
+                    c.turn(now, "accepted", &self.setup.record.agent_id, turn.0);
                 }
                 answered(sent, answer)?
             }
@@ -3036,10 +3036,10 @@ impl Worker {
         let ended = status.last.as_ref().filter(|_| turn_ended);
         if let Some(c) = &self.setup.hub.capture {
             if let Some(live) = began {
-                c.turn(now,"started",&self.setup.record.agent_id,live.turn.0);
+                c.turn(now, "started", &self.setup.record.agent_id, live.turn.0);
             }
             if let Some(last) = ended {
-                c.turn(now,"settled",&self.setup.record.agent_id,last.id.0);
+                c.turn(now, "settled", &self.setup.record.agent_id, last.id.0);
             }
         }
         if let Some(last) = ended

@@ -1172,7 +1172,7 @@ impl Mouth {
             Err(_) => (Err("the engine's thread ended".to_string()), 0),
         };
         if let Some(c) = &self.hub.capture {
-            c.synthesis(self.now_ms(),spoke.is_ok(),written,started);
+            c.synthesis(self.now_ms(), spoke.is_ok(), written, started);
         }
         // Whoever plays the clip as it grows hears at once that it grows no more.
         growing.progress.send_replace(Progress {
