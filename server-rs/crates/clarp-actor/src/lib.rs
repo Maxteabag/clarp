@@ -598,7 +598,7 @@ pub struct Actor {
     for_its_model: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
-    provider_sessions:std::collections::BTreeMap<String,clarp_kernel::provider_tasks::Session>,
+    provider_sessions: std::collections::BTreeMap<String, clarp_kernel::provider_tasks::Session>,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     /// What the agent made for its user and what it asks its user, as the log has it.
@@ -1003,11 +1003,18 @@ impl Actor {
                 jobs.apply(&record);
             },
         )?;
-        let mut provider_sessions=std::collections::BTreeMap::new();
-        records(recorder.log(),kind::JOBS,kind::PROVIDER_JOBS,|entry:clarp_kernel::provider_tasks::JournalEntry|{
-            for record in entry.records{jobs.apply(&record);}
-            provider_sessions.insert(entry.native,entry.session);
-        })?;
+        let mut provider_sessions = std::collections::BTreeMap::new();
+        records(
+            recorder.log(),
+            kind::JOBS,
+            kind::PROVIDER_JOBS,
+            |entry: clarp_kernel::provider_tasks::JournalEntry| {
+                for record in entry.records {
+                    jobs.apply(&record);
+                }
+                provider_sessions.insert(entry.native, entry.session);
+            },
+        )?;
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
         let mut goals = GoalBook::new();
@@ -1055,7 +1062,8 @@ impl Actor {
             profile,
             backend,
             recorder,
-            jobs,provider_sessions,
+            jobs,
+            provider_sessions,
             goals,
             artifacts,
             media,
@@ -2046,10 +2054,19 @@ impl Actor {
             let Some(first) = page.first() else { break };
             before = first.seq;
             for item in page.iter().rev() {
-                if item.kind==kind::PROVIDER_JOBS {
-                    let entry:clarp_kernel::provider_tasks::JournalEntry=serde_json::from_slice(&item.body).map_err(|e|ActorError::Corrupt(e.to_string()))?;
-                    let room=limit-entries.len();
-                    entries.extend(entry.records.into_iter().rev().filter(|r|r.timeline && r.job.id==id).take(room));
+                if item.kind == kind::PROVIDER_JOBS {
+                    let entry: clarp_kernel::provider_tasks::JournalEntry =
+                        serde_json::from_slice(&item.body)
+                            .map_err(|e| ActorError::Corrupt(e.to_string()))?;
+                    let room = limit - entries.len();
+                    entries.extend(
+                        entry
+                            .records
+                            .into_iter()
+                            .rev()
+                            .filter(|r| r.timeline && r.job.id == id)
+                            .take(room),
+                    );
                     continue;
                 }
                 if item.kind != kind::JOB || item.key.as_deref() != Some(&format!("j-{id}")) {
@@ -2254,17 +2271,27 @@ impl Actor {
         let count = rows.len();
         // The adopted runtime starts here. Older launches in its existing
         // transcript cannot create new jobs for this agent.
-        let binding = if self.backend_id()=="claude" {
+        let binding = if self.backend_id() == "claude" {
             match &how {
-                Command::TakeUp{backend_session} | Command::Adopt{backend_session:Some(backend_session),..} =>
-                    Some(clarp_kernel::provider_tasks::JournalEntry{
-                        native:backend_session.clone(),
-                        session:clarp_kernel::provider_tasks::Session{revision:1,bound_at:now_ms,cwd:self.profile.cwd.to_string_lossy().into_owned(),..Default::default()},
-                        records:Vec::new(),
-                    }),
-                _=>None,
+                Command::TakeUp { backend_session }
+                | Command::Adopt {
+                    backend_session: Some(backend_session),
+                    ..
+                } => Some(clarp_kernel::provider_tasks::JournalEntry {
+                    native: backend_session.clone(),
+                    session: clarp_kernel::provider_tasks::Session {
+                        revision: 1,
+                        bound_at: now_ms,
+                        cwd: self.profile.cwd.to_string_lossy().into_owned(),
+                        ..Default::default()
+                    },
+                    records: Vec::new(),
+                }),
+                _ => None,
             }
-        }else{None};
+        } else {
+            None
+        };
         let mut batch = self.recorder.batch();
         for row in rows {
             let ts_ms = row.ts_ms;
@@ -2277,11 +2304,17 @@ impl Actor {
         if let Err(refusal) = batch.command(how, now_ms) {
             return Ok((Err(refusal.to_string()), Outputs::default()));
         }
-        if let Some(entry)=&binding{
-            batch.item(NewItem::new(kind::PROVIDER_JOBS,now_ms,serde_json::to_vec(entry).map_err(|e|ActorError::Corrupt(e.to_string()))?));
+        if let Some(entry) = &binding {
+            batch.item(NewItem::new(
+                kind::PROVIDER_JOBS,
+                now_ms,
+                serde_json::to_vec(entry).map_err(|e| ActorError::Corrupt(e.to_string()))?,
+            ));
         }
         batch.commit()?;
-        if let Some(entry)=binding{self.provider_sessions.insert(entry.native,entry.session);}
+        if let Some(entry) = binding {
+            self.provider_sessions.insert(entry.native, entry.session);
+        }
         self.unstored_changes = 0;
         let out = Outputs {
             changed: Changed {

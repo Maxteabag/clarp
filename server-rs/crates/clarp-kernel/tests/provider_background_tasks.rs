@@ -44,7 +44,11 @@ fn replay_and_late_evidence_match_the_state_and_event_of_each_write() {
             let request = &step[0];
             let now = request["now"].as_i64().unwrap();
             let changed = match request["op"].as_str().unwrap() {
-                "action" => serde_json::from_value(request["action"].clone()).ok().is_some_and(|evidence|native::observe(&mut job, SESSION, NOW - 1, &evidence, now)),
+                "action" => serde_json::from_value(request["action"].clone())
+                    .ok()
+                    .is_some_and(|evidence| {
+                        native::observe(&mut job, SESSION, NOW - 1, &evidence, now)
+                    }),
                 "exit" => job.as_mut().is_some_and(|t| t.close_turn(TURN, now)),
                 "expire" => job
                     .as_mut()
@@ -98,15 +102,23 @@ fn only_exact_registrations_supersede_display_and_provider_cancellation_is_refus
 
 #[test]
 fn visits_rotate_across_eligible_runtime_bindings() {
-    type Case=(Vec<(String,String,Option<i64>,bool)>,(String,String),Vec<(String,String)>);
-    let cases:Vec<Case>=serde_json::from_str(include_str!("fixtures/provider-observer.json")).unwrap();
-    let mut count=0;
-    for (bindings,after,selected) in cases {
-        let eligible=bindings.into_iter().filter_map(|(agent,native,ended,unfinished)|{
-            native::visit_binding(ended,unfinished,NOW).then_some((agent,native))
-        }).collect();
-        assert_eq!(native::rotate_idle(eligible,&after),selected);
-        count+=1;
+    type Case = (
+        Vec<(String, String, Option<i64>, bool)>,
+        (String, String),
+        Vec<(String, String)>,
+    );
+    let cases: Vec<Case> =
+        serde_json::from_str(include_str!("fixtures/provider-observer.json")).unwrap();
+    let mut count = 0;
+    for (bindings, after, selected) in cases {
+        let eligible = bindings
+            .into_iter()
+            .filter_map(|(agent, native, ended, unfinished)| {
+                native::visit_binding(ended, unfinished, NOW).then_some((agent, native))
+            })
+            .collect();
+        assert_eq!(native::rotate_idle(eligible, &after), selected);
+        count += 1;
     }
-    assert_eq!(count,320);
+    assert_eq!(count, 320);
 }

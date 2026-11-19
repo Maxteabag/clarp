@@ -86,14 +86,14 @@ RUNS["reads"]=["test","--lib","helper_refresh_"]
 F="clarp-host/src/helper_source.rs"
 for label,old,new in [
     ("idle agents keep polling","live.then(||","true.then(||"),
-    ("end does not trigger its last listing","self.final_due = true;","self.final_due = false;"),
+    ("end does not trigger its last listing","if self.live && !live {","if false {"),
     ("each refresh reads every metadata file again","|(was, _)| *was == stamp","|_| false"),
     ("a changed sidecar keeps a cached alias","|(was, _)| *was == stamp","|_| true"),
     ("ignore the metadata size bound","stamp.bytes > META_BYTES","false"),
-    ('an append starts a full transcript parse', 'old.bytes==stamp.bytes && old!=stamp', 'old.bytes!=stamp.bytes || old!=stamp'),
+    ('an append starts a full transcript parse', 'old.bytes == stamp.bytes && old != stamp', 'old.bytes!=stamp.bytes || old!=stamp'),
     ('seek back to zero when the parent grows', 'file.seek(SeekFrom::Start(start))', 'file.seek(SeekFrom::Start(0))'),
-    ('read a live-only parent without imported cells', 'if request.parent {next.min(self.parent.offset)}', 'if true {next.min(self.parent.offset)}'),
-    ('forget a partial appended line', 'self.lines=lines;', 'self.lines=Default::default();'),
+    ('read a live-only parent without imported cells', 'if request.parent {\n            next.min(self.parent.offset)\n        }', 'if true {next.min(self.parent.offset)}'),
+    ('forget a partial appended line', 'self.lines = lines;', 'self.lines=Default::default();'),
 ]:
     PLANTS.append((F,"reads",label,old,new))
 if __name__=="__main__":

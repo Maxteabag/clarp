@@ -98,14 +98,18 @@ pub struct Spoke {
 pub enum Ask {
     VisitProvider(String),
     ExpireProviderLinks(String),
-    HistoricalRead { source: Box<crate::helper_source::HelperSource>, visit:Option<clarp_kernel::provider_tasks::Visit>, generation:u64 },
+    HistoricalRead {
+        source: Box<crate::helper_source::HelperSource>,
+        visit: Option<clarp_kernel::provider_tasks::Visit>,
+        generation: u64,
+    },
     HelperRead {
         source: Box<crate::helper_source::HelperSource>,
         session: String,
         cwd: String,
         generation: u64,
-        provider:Option<clarp_kernel::provider_tasks::Visit>,
-        more_helpers:bool,
+        provider: Option<clarp_kernel::provider_tasks::Visit>,
+        more_helpers: bool,
         changed: bool,
     },
     Send {
@@ -380,7 +384,7 @@ pub struct View {
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
     /// Idle native bindings and the last known runtime end, for the shared runner.
-    pub provider_bindings: Vec<(String,Option<i64>,Option<i64>)>,
+    pub provider_bindings: Vec<(String, Option<i64>, Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
     pub books: Arc<Books>,
     /// What the agent says aloud, and the clips it became: where a clip is looked for.
@@ -448,11 +452,11 @@ pub struct AgentHandle {
 }
 
 impl AgentHandle {
-    pub(crate) fn expire_provider_links(&self,native:&str){
-        let _=self.tx.send(Ask::ExpireProviderLinks(native.to_owned()));
+    pub(crate) fn expire_provider_links(&self, native: &str) {
+        let _ = self.tx.send(Ask::ExpireProviderLinks(native.to_owned()));
     }
-    pub(crate) fn visit_provider(&self,native:&str){
-        let _=self.tx.send(Ask::VisitProvider(native.to_owned()));
+    pub(crate) fn visit_provider(&self, native: &str) {
+        let _ = self.tx.send(Ask::VisitProvider(native.to_owned()));
     }
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
@@ -878,7 +882,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         finished: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
-        provider_bindings:Vec::new(),
+        provider_bindings: Vec::new(),
         books: Arc::default(),
         speech: Arc::default(),
         broken: Some(OPENING.to_string()),
@@ -907,7 +911,10 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         helper_rows: Default::default(),
         helper_source: Some(Default::default()),
         helper_clock: Default::default(),
-        provider_requested:false, provider_retry_at:None,historical_reading:false, historical_sources:BTreeMap::new(),
+        provider_requested: false,
+        provider_retry_at: None,
+        historical_reading: false,
+        historical_sources: BTreeMap::new(),
         helper_generation: 0,
         helper_owner: None,
         jobs_checked: Instant::now(),
@@ -971,10 +978,10 @@ struct Worker {
     helper_rows: clarp_actor::helper_cells::HelperRows,
     helper_source: Option<Box<crate::helper_source::HelperSource>>,
     helper_clock: crate::helper_source::RefreshClock,
-    provider_requested:bool,
-    provider_retry_at:Option<Instant>,
-    historical_reading:bool,
-    historical_sources:BTreeMap<String,Box<crate::helper_source::HelperSource>>,
+    provider_requested: bool,
+    provider_retry_at: Option<Instant>,
+    historical_reading: bool,
+    historical_sources: BTreeMap<String, Box<crate::helper_source::HelperSource>>,
     helper_generation: u64,
     helper_owner: Option<(String, String)>,
     /// When the goals were last looked at, on the Host's clock. A goal that was due then and
@@ -1272,42 +1279,71 @@ impl Worker {
         if self.setup.record.backend != "claude" {
             return None;
         }
-        let now_ms=self.now_ms();
+        let now_ms = self.now_ms();
         let actor = self.actor.as_mut()?;
         let (live, session) = actor.helper_context();
         let now = Instant::now();
         let helper_due = self.helper_clock.due(live, now);
-        if let Some(retry)=self.provider_retry_at.take() && retry>now{
-            self.provider_retry_at=Some(retry);
+        if let Some(retry) = self.provider_retry_at.take()
+            && retry > now
+        {
+            self.provider_retry_at = Some(retry);
             return Some(retry);
         }
         self.helper_source.as_ref()?;
-        let session=session.or_else(||actor.provider_session(&self.setup.profile.conversation_id)
-            .map(|_|self.setup.profile.conversation_id.as_str()))?.to_owned();
-        let attempt=actor.provider_attempt();
-        let newest=actor.provider_session(&session).and_then(|s|s.newest_owner());
-        if newest.is_some() && newest!=attempt {
-            let root=crate::past::projects(&crate::config::home());
-            if crate::helper_source::boundary(&root,&self.setup.record.cwd,&session)
-                .ok().is_none_or(|identity|actor.provider_boundary(&session,None,identity,now_ms).is_err()){
-                let retry=now+Duration::from_secs(1);self.provider_retry_at=Some(retry);return Some(retry);
+        let session = session
+            .or_else(|| {
+                actor
+                    .provider_session(&self.setup.profile.conversation_id)
+                    .map(|_| self.setup.profile.conversation_id.as_str())
+            })?
+            .to_owned();
+        let attempt = actor.provider_attempt();
+        let newest = actor
+            .provider_session(&session)
+            .and_then(|s| s.newest_owner());
+        if newest.is_some() && newest != attempt {
+            let root = crate::past::projects(&crate::config::home());
+            if crate::helper_source::boundary(&root, &self.setup.record.cwd, &session)
+                .ok()
+                .is_none_or(|identity| {
+                    actor
+                        .provider_boundary(&session, None, identity, now_ms)
+                        .is_err()
+                })
+            {
+                let retry = now + Duration::from_secs(1);
+                self.provider_retry_at = Some(retry);
+                return Some(retry);
             }
         }
-        let saved=actor.provider_session(&session);
-        let due=if saved.is_some_and(|s|s.final_read.is_some()) || self.provider_requested {now}else{helper_due?};
-        if due>now{return Some(due)}
-        let mut visit=saved.map_or_else(||clarp_kernel::provider_tasks::Session::default().visit(session.clone()),|s|s.visit(session.clone()));
-        if visit.bound_at==0{
-            visit.bound_at=match actor.first_provider_binding(&session){
-                Ok(Some(time))=>time,
-                Ok(None)=>now_ms,
-                Err(_)=>return Some(now+Duration::from_secs(1)),
+        let saved = actor.provider_session(&session);
+        let due = if saved.is_some_and(|s| s.final_read.is_some()) || self.provider_requested {
+            now
+        } else {
+            helper_due?
+        };
+        if due > now {
+            return Some(due);
+        }
+        let mut visit = saved.map_or_else(
+            || clarp_kernel::provider_tasks::Session::default().visit(session.clone()),
+            |s| s.visit(session.clone()),
+        );
+        if visit.bound_at == 0 {
+            visit.bound_at = match actor.first_provider_binding(&session) {
+                Ok(Some(time)) => time,
+                Ok(None) => now_ms,
+                Err(_) => return Some(now + Duration::from_secs(1)),
             };
         }
-        let helpers=helper_due.is_some_and(|t|t<=now) && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
-        if helper_due.is_some_and(|t|t<=now){self.helper_clock.started(now);}
-        self.provider_requested=false;
-        let session=session.to_owned();
+        let helpers = helper_due.is_some_and(|t| t <= now)
+            && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
+        if helper_due.is_some_and(|t| t <= now) {
+            self.helper_clock.started(now);
+        }
+        self.provider_requested = false;
+        let session = session.to_owned();
         let cwd = self.setup.record.cwd.clone();
         let owner = (cwd.clone(), session.clone());
         if self.helper_owner.as_ref() != Some(&owner) {
@@ -1320,23 +1356,28 @@ impl Worker {
         } else {
             None
         };
-        let at=now_ms;
-        let mut request=crate::helper_source::ProviderRead{helpers,parent:helpers && (self.helper_rows.has_imported || missed.is_some()),
-            visit};
+        let at = now_ms;
+        let mut request = crate::helper_source::ProviderRead {
+            helpers,
+            parent: helpers && (self.helper_rows.has_imported || missed.is_some()),
+            visit,
+        };
         let generation = self.helper_generation;
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let root = crate::past::projects(&crate::config::home());
-            let result=source.read_visit(&root,&cwd,&mut request,at);
-            let complete=result.is_ok() && request.visit.eof;
-            let more_helpers=result.is_ok() && request.parent && !complete;
-            let provider=result.is_ok().then_some(request.visit);
-            let changed=result.unwrap_or(false);
+            let result = source.read_visit(&root, &cwd, &mut request, at);
+            let complete = result.is_ok() && request.visit.eof;
+            let more_helpers = result.is_ok() && request.parent && !complete;
+            let provider = result.is_ok().then_some(request.visit);
+            let changed = result.unwrap_or(false);
             if missed.is_some() && complete {
                 source.recovered_through = missed;
             }
             let _ = tx.send(Ask::HelperRead {
-                source,provider,more_helpers,
+                source,
+                provider,
+                more_helpers,
                 cwd,
                 session,
                 generation,
@@ -1347,26 +1388,49 @@ impl Worker {
     }
 
     /// A runner hint never interrupts an active read of the same transcript.
-    fn visit_idle_provider(&mut self,native:String){
-        let Some(actor)=self.actor.as_ref() else{return;};
-        let (live,current)=actor.helper_context();
-        if self.setup.record.backend=="claude" && current==Some(&native){
-            if !live { self.provider_requested=true; }
+    fn visit_idle_provider(&mut self, native: String) {
+        let Some(actor) = self.actor.as_ref() else {
+            return;
+        };
+        let (live, current) = actor.helper_context();
+        if self.setup.record.backend == "claude" && current == Some(&native) {
+            if !live {
+                self.provider_requested = true;
+            }
             return;
         }
-        let Some(binding)=actor.provider_session(&native) else{return;};
-        if self.historical_reading {return;}
-        self.historical_reading=true;
-        let mut source=self.historical_sources.remove(&native).unwrap_or_default();
-        let mut request=crate::helper_source::ProviderRead{helpers:false,parent:false,visit:binding.visit(native)};
-        let cwd=if binding.cwd.is_empty(){self.setup.record.cwd.clone()}else{binding.cwd.clone()};
-        let generation=self.helper_generation;
-        let tx=self.tx.clone();
-        let now=self.now_ms();
-        self.setup.runtime.spawn_blocking(move ||{
-            let root=crate::past::projects(&crate::config::home());
-            let visit=source.read_visit(&root,&cwd,&mut request,now).ok().map(|_|request.visit);
-            let _=tx.send(Ask::HistoricalRead{source,visit,generation});
+        let Some(binding) = actor.provider_session(&native) else {
+            return;
+        };
+        if self.historical_reading {
+            return;
+        }
+        self.historical_reading = true;
+        let mut source = self.historical_sources.remove(&native).unwrap_or_default();
+        let mut request = crate::helper_source::ProviderRead {
+            helpers: false,
+            parent: false,
+            visit: binding.visit(native),
+        };
+        let cwd = if binding.cwd.is_empty() {
+            self.setup.record.cwd.clone()
+        } else {
+            binding.cwd.clone()
+        };
+        let generation = self.helper_generation;
+        let tx = self.tx.clone();
+        let now = self.now_ms();
+        self.setup.runtime.spawn_blocking(move || {
+            let root = crate::past::projects(&crate::config::home());
+            let visit = source
+                .read_visit(&root, &cwd, &mut request, now)
+                .ok()
+                .map(|_| request.visit);
+            let _ = tx.send(Ask::HistoricalRead {
+                source,
+                visit,
+                generation,
+            });
         });
     }
 
@@ -1413,8 +1477,8 @@ impl Worker {
         self.helper_rows = Default::default();
         self.helper_source = Some(Default::default());
         self.helper_clock = Default::default();
-        self.provider_requested=false;
-        self.historical_reading=false;
+        self.provider_requested = false;
+        self.historical_reading = false;
         self.historical_sources.clear();
         self.helper_owner = None;
         self.helper_generation += 1;
@@ -1431,27 +1495,60 @@ impl Worker {
             self.now_ms(),
         )
         .map_err(|error| error.to_string())?;
-        if self.setup.record.backend=="claude"{
+        if self.setup.record.backend == "claude" {
             // No jobs view escapes this rejoin until every ended attempt's
             // final byte boundary has been consumed and its tasks reconciled.
-            let current=actor.provider_attempt();
-            let recovering:Vec<_>=actor.provider_sessions().filter(|(_,s)|s.final_read.is_some() || s.newest_owner().is_some() && s.newest_owner()!=current).map(|(id,_)|id.clone()).collect();
-            let root=crate::past::projects(&crate::config::home());
-            for session in recovering{
-                let mut source=crate::helper_source::HelperSource::default();
-                if actor.provider_session(&session).and_then(|s|s.newest_owner()).is_some_and(|t|Some(t)!=current){
-                    let boundary=crate::helper_source::boundary(&root,&self.setup.record.cwd,&session).map_err(|e|e.to_string())?;
-                    actor.provider_boundary(&session,None,boundary,self.now_ms()).map_err(|e|e.to_string())?;
+            let current = actor.provider_attempt();
+            let recovering: Vec<_> = actor
+                .provider_sessions()
+                .filter(|(_, s)| {
+                    s.final_read.is_some()
+                        || s.newest_owner().is_some() && s.newest_owner() != current
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            let root = crate::past::projects(&crate::config::home());
+            for session in recovering {
+                let mut source = crate::helper_source::HelperSource::default();
+                if actor
+                    .provider_session(&session)
+                    .and_then(|s| s.newest_owner())
+                    .is_some_and(|t| Some(t) != current)
+                {
+                    let boundary =
+                        crate::helper_source::boundary(&root, &self.setup.record.cwd, &session)
+                            .map_err(|e| e.to_string())?;
+                    actor
+                        .provider_boundary(&session, None, boundary, self.now_ms())
+                        .map_err(|e| e.to_string())?;
                 }
-                while let Some(saved)=actor.provider_session(&session).filter(|s|s.final_read.is_some()){
-                    let now=self.now_ms();
-                    let mut read=crate::helper_source::ProviderRead{helpers:false,parent:false,
-                        visit:clarp_kernel::provider_tasks::Visit{native:session.clone(),expected:saved.revision,cursor:saved.cursor.clone(),bound_at:saved.bound_at,owner:saved.owner,final_read:saved.final_read.clone(),actions:Vec::new(),eof:false}};
-                    source.read_visit(&root,&self.setup.record.cwd,&mut read,now).map_err(|e|e.to_string())?;
+                while let Some(saved) = actor
+                    .provider_session(&session)
+                    .filter(|s| s.final_read.is_some())
+                {
+                    let now = self.now_ms();
+                    let mut read = crate::helper_source::ProviderRead {
+                        helpers: false,
+                        parent: false,
+                        visit: clarp_kernel::provider_tasks::Visit {
+                            native: session.clone(),
+                            expected: saved.revision,
+                            cursor: saved.cursor.clone(),
+                            bound_at: saved.bound_at,
+                            owner: saved.owner,
+                            final_read: saved.final_read.clone(),
+                            actions: Vec::new(),
+                            eof: false,
+                        },
+                    };
+                    source
+                        .read_visit(&root, &self.setup.record.cwd, &mut read, now)
+                        .map_err(|e| e.to_string())?;
 
-                    let changes=actor.apply_provider_visit(read.visit,now,||self.setup.revisions.next(now)).map_err(|e|e.to_string())?;
+                    let changes = actor
+                        .apply_provider_visit(read.visit, now, || self.setup.revisions.next(now))
+                        .map_err(|e| e.to_string())?;
                     out.changed.jobs |= changes.changed.jobs;
-
                 }
             }
         }
@@ -1971,25 +2068,35 @@ impl Worker {
                 }
                 answered(result, answer)?
             }
-            Ask::ExpireProviderLinks(native)=>{
-                if actor.expire_provider_links(&native,now)?{self.publish_view();}
+            Ask::ExpireProviderLinks(native) => {
+                if actor.expire_provider_links(&native, now)? {
+                    self.publish_view();
+                }
                 return Ok(());
             }
-            Ask::HistoricalRead{source,visit,generation}=>{
-                if generation!=self.helper_generation{return Ok(());}
-                self.historical_reading=false;
-                if let Some(visit)=visit{
-                    if source.has_uncommitted_bytes(&visit.cursor){
-                        self.historical_sources.insert(visit.native.clone(),source);
+            Ask::HistoricalRead {
+                source,
+                visit,
+                generation,
+            } => {
+                if generation != self.helper_generation {
+                    return Ok(());
+                }
+                self.historical_reading = false;
+                if let Some(visit) = visit {
+                    if source.has_uncommitted_bytes(&visit.cursor) {
+                        self.historical_sources.insert(visit.native.clone(), source);
                     }
-                    let revisions=&self.setup.revisions;
-                    let out=actor.apply_provider_visit(visit,now,||revisions.next(now))?;
+                    let revisions = &self.setup.revisions;
+                    let out = actor.apply_provider_visit(visit, now, || revisions.next(now))?;
                     self.after(out);
                 }
                 return Ok(());
             }
             Ask::HelperRead {
-                source,provider,more_helpers,
+                source,
+                provider,
+                more_helpers,
                 cwd,
                 session,
                 generation,
@@ -1997,18 +2104,30 @@ impl Worker {
             } => {
                 if self.helper_generation == generation {
                     if self.setup.record.cwd == cwd
-                        && actor.helper_context().1.unwrap_or(&self.setup.profile.conversation_id) == session.as_str()
+                        && actor
+                            .helper_context()
+                            .1
+                            .unwrap_or(&self.setup.profile.conversation_id)
+                            == session.as_str()
                     {
                         {
-                            if provider.is_none(){self.provider_retry_at=Some(Instant::now()+Duration::from_secs(1));}
-                            if more_helpers {self.helper_clock.finish_later();}
-                            let mut jobs_changed=false;
-                            if let Some(visit)=provider {
-                                let more=!visit.eof;
-                                let revisions=&self.setup.revisions;
-                                let applied=actor.apply_provider_visit(visit,now,||revisions.next(now))?;
-                                jobs_changed=applied.changed.jobs;
-                                if more && actor.helper_context().0 {self.provider_requested=true;}
+                            if provider.is_none() {
+                                self.provider_retry_at =
+                                    Some(Instant::now() + Duration::from_secs(1));
+                            }
+                            if more_helpers {
+                                self.helper_clock.finish_later();
+                            }
+                            let mut jobs_changed = false;
+                            if let Some(visit) = provider {
+                                let more = !visit.eof;
+                                let revisions = &self.setup.revisions;
+                                let applied = actor
+                                    .apply_provider_visit(visit, now, || revisions.next(now))?;
+                                jobs_changed = applied.changed.jobs;
+                                if more && actor.helper_context().0 {
+                                    self.provider_requested = true;
+                                }
                             }
                             actor.track_helpers(&mut self.helper_rows)?;
                             let mut out = actor.refresh_helpers(
@@ -2021,7 +2140,9 @@ impl Worker {
                                 self.helper_change_session = Some(session);
                             }
                             out.changed.jobs |= jobs_changed;
-                            if out.changed.conversation||out.changed.jobs{self.after(out);}
+                            if out.changed.conversation || out.changed.jobs {
+                                self.after(out);
+                            }
                         }
                         self.helper_source = Some(source);
                     } else {
@@ -2174,11 +2295,15 @@ impl Worker {
     /// A terminal on the agent's own tool was opened, or closed. When one is closed, the
     /// launch that waited is carried out by the way of any launch: where another terminal
     /// is still open it waits again.
-    fn terminal(&mut self, open: bool)->Result<(),ActorError> {
-        if self.setup.record.backend=="claude" && ((open && self.terminals==0)||(!open && self.terminals==1)){
-            let now=self.now_ms();
-            if let Some(actor)=self.actor.as_mut() && let Some(native)=actor.helper_context().1.map(str::to_owned){
-                actor.provider_terminal(&native,open,now)?;
+    fn terminal(&mut self, open: bool) -> Result<(), ActorError> {
+        if self.setup.record.backend == "claude"
+            && ((open && self.terminals == 0) || (!open && self.terminals == 1))
+        {
+            let now = self.now_ms();
+            if let Some(actor) = self.actor.as_mut()
+                && let Some(native) = actor.helper_context().1.map(str::to_owned)
+            {
+                actor.provider_terminal(&native, open, now)?;
                 self.publish_view();
             }
         }
@@ -2348,16 +2473,40 @@ impl Worker {
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(mut order) => {
-                if self.setup.record.backend=="claude" {
-                    let at=self.now_ms();
-                    if let Some(actor)=self.actor.as_mut(){
-                        let native=actor.helper_context().1.unwrap_or(&self.setup.profile.conversation_id).to_owned();
-                        let root=crate::past::projects(&crate::config::home());
-                        let mark=crate::helper_source::boundary(&root,&self.setup.record.cwd,&native)
-                            .map_err(|e|e.to_string()).and_then(|identity|actor.provider_boundary(&native,
-                                Some(clarp_kernel::provider_tasks::Attempt{turn:order.turn.0,attempt:order.attempt}),identity,at).map_err(|e|e.to_string()));
-                        if let Err(why)=mark{
-                            tell(&tx,order.turn,order.attempt,Told::Failed(format!("could not record provider turn boundary: {why}")));
+                if self.setup.record.backend == "claude" {
+                    let at = self.now_ms();
+                    if let Some(actor) = self.actor.as_mut() {
+                        let native = actor
+                            .helper_context()
+                            .1
+                            .unwrap_or(&self.setup.profile.conversation_id)
+                            .to_owned();
+                        let root = crate::past::projects(&crate::config::home());
+                        let mark =
+                            crate::helper_source::boundary(&root, &self.setup.record.cwd, &native)
+                                .map_err(|e| e.to_string())
+                                .and_then(|identity| {
+                                    actor
+                                        .provider_boundary(
+                                            &native,
+                                            Some(clarp_kernel::provider_tasks::Attempt {
+                                                turn: order.turn.0,
+                                                attempt: order.attempt,
+                                            }),
+                                            identity,
+                                            at,
+                                        )
+                                        .map_err(|e| e.to_string())
+                                });
+                        if let Err(why) = mark {
+                            tell(
+                                &tx,
+                                order.turn,
+                                order.attempt,
+                                Told::Failed(format!(
+                                    "could not record provider turn boundary: {why}"
+                                )),
+                            );
                             return;
                         }
                     }
@@ -2621,7 +2770,16 @@ impl Worker {
             ended: self.ended.clone(),
             finished: self.finished.clone(),
             backend: actor.backend_id(),
-            provider_bindings:actor.provider_sessions().map(|(id,s)|(id.clone(),s.ended_at,s.links.values().filter_map(|link|link.exited_at).min())).collect(),
+            provider_bindings: actor
+                .provider_sessions()
+                .map(|(id, s)| {
+                    (
+                        id.clone(),
+                        s.ended_at,
+                        s.links.values().filter_map(|link| link.exited_at).min(),
+                    )
+                })
+                .collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -3076,7 +3234,9 @@ fn refuse_for(
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
                 | Ask::HelperRead { .. }
-                | Ask::VisitProvider(_) | Ask::ExpireProviderLinks(_) | Ask::HistoricalRead{..}
+                | Ask::VisitProvider(_)
+                | Ask::ExpireProviderLinks(_)
+                | Ask::HistoricalRead { .. }
                 | Ask::Terminal { .. }
                 | Ask::AccountStop
                 | Ask::AccountBack

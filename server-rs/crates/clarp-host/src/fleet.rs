@@ -1344,12 +1344,24 @@ impl Fleet {
                     let _ = answer.send(self.claim_job(job_id, agent_id));
                 }
                 Ask::JobOwner { job_id, answer } => {
-                    let mut owner=self.jobs.get(&job_id).cloned();
+                    let mut owner = self.jobs.get(&job_id).cloned();
                     // The agent commits provider jobs autonomously. Recover
                     // their directory entry from the published committed book.
                     if owner.is_none() && job_id.starts_with("claude-task:") {
-                        owner=self.members.iter().find(|m|m.agent.view().jobs.iter().any(|j| j.provider_owned() && j.id==job_id)).map(|m|m.record.agent_id.clone());
-                        if let Some(id)=&owner{self.jobs.insert(job_id,id.clone());}
+                        owner = self
+                            .members
+                            .iter()
+                            .find(|m| {
+                                m.agent
+                                    .view()
+                                    .jobs
+                                    .iter()
+                                    .any(|j| j.provider_owned() && j.id == job_id)
+                            })
+                            .map(|m| m.record.agent_id.clone());
+                        if let Some(id) = &owner {
+                            self.jobs.insert(job_id, id.clone());
+                        }
                     }
                     let _ = answer.send(Ok(owner));
                 }
