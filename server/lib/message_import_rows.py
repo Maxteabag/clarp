@@ -134,6 +134,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
     trace_at = getattr(turn_index, "trace_at", lambda _: "")
     running_at = getattr(turn_index, "running_at", lambda _: ("", None))
     ended_before = getattr(turn_index, "ended_before", None)
+    began_after = getattr(turn_index, "began_after", None)
     outcomes = getattr(turn_index, "outcomes", {})
     result = {}
     for index, turn in enumerate(turns):
@@ -162,7 +163,9 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
                         own = _own_turns_row(
                             None, rows, running, began, trace_ids=client_traces, written_at=stamp,
                             ended_before=None if ended_before is None else (
-                                lambda sent, at=stamp: ended_before(sent, at)))
+                                lambda sent, at=stamp: ended_before(sent, at)),
+                            began_after=None if began_after is None else (
+                                lambda sent, at=stamp: began_after(sent, at)))
                     if rows and own is not None:
                         chosen = copied.take(key, rows, own)
                         current_trace = client_traces.get(chosen[0]) or ""
@@ -524,7 +527,8 @@ class _ClientProvenance:
 
 
 def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
-                   trace_ids=None, written_at: Any = None, ended_before=None) -> int | None:
+                   trace_ids=None, written_at: Any = None, ended_before=None,
+                   began_after=None) -> int | None:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -547,9 +551,13 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     same words every time, a copy with no row of its own took the next
     turn's row, that turn the one after, and the last an old failed send's:
     every later reply carried another prompt's trace (R89). The exclusions
-    hold also when no turn was running at the copy's time: then there is no
-    "sent since its turn began", and of the rows left the oldest is taken.
-    None: no row is this copy's, and it is stored as itself."""
+    hold also when no turn was running at the copy's time; then a row sent
+    after the copy is ruled out only when it was sent for a turn that began
+    after it (``began_after``): a copy outside every turn (a prompt typed in
+    the terminal, an older history) has no time a row without a turn could be
+    measured against. There is no "sent since its turn began" then, and of
+    the rows left the oldest is taken. None: no row is this copy's, and it is
+    stored as itself."""
     if ended_before is None and written_at is None and (not trace or len(rows) < 2):
         return 0            # a caller that gives neither bound: as before
 
@@ -569,7 +577,8 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
 
     def could_be(index):
         sent_at = iso_ms(rows[index][3])
-        if copy_at is not None and sent_at is not None and sent_at > copy_at + _START_SLACK_MS:
+        if copy_at is not None and sent_at is not None and sent_at > copy_at + _START_SLACK_MS and (
+                trace or (sent[index] and began_after is not None and began_after(sent[index]))):
             return False
         return not (sent[index] and ended_before is not None and ended_before(sent[index]))
     free = [index for index in range(len(rows)) if could_be(index)]
