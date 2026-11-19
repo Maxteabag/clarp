@@ -96,6 +96,7 @@ pub struct Spoke {
 /// What an agent's thread is asked.
 pub enum Ask {
     Send {
+        reservation: Option<Value>,
         message: Message,
         admission: Admission,
         answer: Answer<Sent>,
@@ -429,7 +430,17 @@ impl AgentHandle {
     }
 
     pub async fn send(&self, message: Message, admission: Admission) -> Result<Sent, Unavailable> {
+        self.send_reserved(message, admission, None).await
+    }
+
+    pub async fn send_reserved(
+        &self,
+        message: Message,
+        admission: Admission,
+        reservation: Option<Value>,
+    ) -> Result<Sent, Unavailable> {
         self.ask(|answer| Ask::Send {
+            reservation,
             message,
             admission,
             answer,
@@ -1667,8 +1678,15 @@ impl Worker {
             Ask::Send {
                 message,
                 admission,
+                reservation,
                 answer,
-            } => answered(actor.send(&message, admission, now), answer)?,
+            } => {
+                let sent = match reservation {
+                    Some(proof) => actor.send_for_opening(&message, admission, proof, now),
+                    None => actor.send(&message, admission, now),
+                };
+                answered(sent, answer)?
+            }
             Ask::Stop { by, answer } => {
                 // The turn is no longer the agent's to finish: the pool of its tool's
                 // accounts does not wait for it, and does not take it up.

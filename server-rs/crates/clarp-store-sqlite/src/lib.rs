@@ -301,12 +301,20 @@ impl KeyValue for SqliteTables {
         Ok(())
     }
 
-    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError> {
+    fn put_together(&mut self, writes: &[clarp_ports::kv::Write]) -> Result<(), StoreError> {
         let tx = self.conn.transaction().map_err(failed)?;
         {
             let mut put=tx.prepare_cached("INSERT INTO kv(tbl,key,value) VALUES (?1,?2,?3) ON CONFLICT(tbl,key) DO UPDATE SET value=excluded.value").map_err(failed)?;
             for (table, key, value) in writes {
-                put.execute(params![table, key, value]).map_err(failed)?;
+                if let Some(value) = value {
+                    put.execute(params![table, key, value]).map_err(failed)?;
+                } else {
+                    tx.execute(
+                        "DELETE FROM kv WHERE tbl=?1 AND key=?2",
+                        params![table, key],
+                    )
+                    .map_err(failed)?;
+                }
             }
         }
         tx.commit().map_err(failed)

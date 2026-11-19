@@ -575,8 +575,13 @@ enum Ask {
         answer: Answer<Result<(), Unavailable>>,
     },
     KeepTogether {
-        writes: Vec<(String, String, Vec<u8>)>,
+        writes: Vec<clarp_ports::kv::Write>,
         answer: Answer<Result<(), Unavailable>>,
+    },
+    OpeningAudio {
+        agent: String,
+        turn: u64,
+        answer: Answer<Result<Option<Vec<u8>>, Unavailable>>,
     },
     /// What was left of a kind: under one key, or all of it, ordered by key.
     Kept {
@@ -921,15 +926,41 @@ impl FleetHandle {
         &self,
         rows: Vec<(&'static str, String, Vec<u8>)>,
     ) -> Result<(), Unavailable> {
-        if rows.is_empty() {
+        self.change_together(rows, Vec::new()).await
+    }
+
+    pub async fn change_together(
+        &self,
+        rows: Vec<(&'static str, String, Vec<u8>)>,
+        deletes: Vec<(&'static str, String)>,
+    ) -> Result<(), Unavailable> {
+        if rows.is_empty() && deletes.is_empty() {
             return Ok(());
         }
         let writes = rows
             .into_iter()
-            .map(|(kind, key, value)| (shelf(kind), key, value))
+            .map(|(kind, key, value)| (shelf(kind), key, Some(value)))
+            .chain(
+                deletes
+                    .into_iter()
+                    .map(|(kind, key)| (shelf(kind), key, None)),
+            )
             .collect();
         self.ask(|answer| Ask::KeepTogether { writes, answer })
             .await?
+    }
+
+    pub async fn opening_audio(
+        &self,
+        agent: &str,
+        turn: u64,
+    ) -> Result<Option<Vec<u8>>, Unavailable> {
+        self.ask(|answer| Ask::OpeningAudio {
+            agent: agent.to_owned(),
+            turn,
+            answer,
+        })
+        .await?
     }
 
     /// What was left of a kind under a key.
@@ -1160,6 +1191,17 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
     })
 }
 
+fn read_opening_audio(
+    store: &dyn KeyValue,
+    agent: &str,
+    turn: u64,
+) -> Result<Option<Vec<u8>>, clarp_ports::kv::StoreError> {
+    match clarp_kernel::rings::binding::key(agent, turn) {
+        Some(key) => store.get(&shelf("opening_by_turn"), &key),
+        None => Ok(None),
+    }
+}
+
 impl Fleet {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
         let every = Duration::from_millis(self.works.config.helpers_checked_every_ms.max(1));
@@ -1316,6 +1358,15 @@ impl Fleet {
                     let result = self
                         .store
                         .put_together(&writes)
+                        .map_err(|e| Unavailable(e.to_string()));
+                    let _ = answer.send(Ok(result));
+                }
+                Ask::OpeningAudio {
+                    agent,
+                    turn,
+                    answer,
+                } => {
+                    let result = read_opening_audio(self.store.as_ref(), &agent, turn)
                         .map_err(|e| Unavailable(e.to_string()));
                     let _ = answer.send(Ok(result));
                 }
@@ -2435,5 +2486,55 @@ impl Fleet {
             self.keep_push(&stopped)?;
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod opening_reads {
+    use super::*;
+    use clarp_ports::kv::{StoreError, Write};
+    use std::cell::Cell;
+
+    struct Observed {
+        reads: Cell<usize>,
+        scans: Cell<usize>,
+    }
+    impl KeyValue for Observed {
+        fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+            self.reads.set(self.reads.get() + 1);
+            assert_eq!(table, "kept.opening_by_turn");
+            Ok((key == "agent:4").then(|| vec![4]))
+        }
+        fn list(&self, _: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+            self.scans.set(self.scans.get() + 1);
+            Ok(vec![("previous".into(), vec![1])])
+        }
+        fn put(&mut self, _: &str, _: &str, _: &[u8]) -> Result<(), StoreError> {
+            unreachable!()
+        }
+        fn put_together(&mut self, _: &[Write]) -> Result<(), StoreError> {
+            unreachable!()
+        }
+        fn delete(&mut self, _: &str, _: &str) -> Result<bool, StoreError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn ordinary_audio_reads_at_most_one_key_and_walks_no_openings() {
+        let port = Observed {
+            reads: Cell::new(0),
+            scans: Cell::new(0),
+        };
+        for (agent, turn, expected, reads) in [
+            ("agent", 0, None, 0),
+            ("agent", 3, None, 1),
+            ("other", 4, None, 1),
+            ("agent", 4, Some(vec![4]), 1),
+        ] {
+            port.reads.set(0);
+            assert_eq!(read_opening_audio(&port, agent, turn).ok(), Some(expected));
+            assert_eq!((port.reads.get(), port.scans.get()), (reads, 0));
+        }
     }
 }
