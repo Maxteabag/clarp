@@ -447,9 +447,28 @@ async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
             ))
         })
         .await?;
-    let Some((id, generation, bounds)) = owner else {
-        return Ok(i64::MAX);
-    };
+    when_enabled(owner, |owner| active_pass(app, now, owner)).await
+}
+
+type Owner = (String, u64, (i64, i64));
+
+/// A missing subscriber (including a paused one) stays asleep until the book changes.
+/// All history access and storage effects belong to the admitted pass.
+async fn when_enabled<F: std::future::Future<Output = Result<i64, Unavailable>>>(
+    owner: Option<Owner>,
+    active: impl FnOnce(Owner) -> F,
+) -> Result<i64, Unavailable> {
+    match owner {
+        Some(owner) => active(owner).await,
+        None => Ok(i64::MAX),
+    }
+}
+
+async fn active_pass(
+    app: &App,
+    now: i64,
+    (id, generation, bounds): Owner,
+) -> Result<i64, Unavailable> {
     if !site_enabled(app) {
         return Ok(now + 15_000);
     }
@@ -457,10 +476,6 @@ async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
     lane.last_check = stored(app, LAST).await?;
     if now < lane.next_run(bounds.0) {
         return Ok(lane.next_run(bounds.0));
-    }
-    let span = std::env::var("CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS").unwrap_or_default();
-    if !span.is_empty() && label_audit::quiet(&span, &crate::oracle::zone_of_this_machine(), now) {
-        return Ok(now + 15_000);
     }
     lane.start(bounds, now);
     lane.last_check = None; // The last check is its own record across ownership changes.
@@ -582,4 +597,25 @@ pub(crate) async fn show_cadence(app: &App, janitor: &mut Value) {
     let cap = janitor["options"]["max_interval_seconds"].as_i64();
     let next = lane.next_run_at.filter(|_| janitor["enabled"] == true);
     janitor["cadence"] = json!([adaptive::cadence(&lane.cadence, (base, cap), next, ROLE)]);
+}
+
+#[cfg(test)]
+mod paused_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_paused_checker_leaves_history_and_storage_unopened_on_repeated_looks() {
+        let mut active_passes = 0;
+        for _ in 0..4 {
+            // This is the boundary used by pass after resolving the Janitor.
+            // Even constructing the future that owns the history and store ports is observable.
+            let next = when_enabled(None, |_| {
+                active_passes += 1;
+                std::future::ready(Ok(0))
+            })
+            .await;
+            assert!(matches!(next, Ok(i64::MAX)));
+        }
+        assert_eq!(active_passes, 0);
+    }
 }
