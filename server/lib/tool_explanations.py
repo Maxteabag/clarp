@@ -153,6 +153,23 @@ def script_evidence(activity, cwd):
     return scripts
 
 
+
+def _failure_reason(error: BaseException) -> str:
+    """What a failed explanation run is told as, by what the failure says it is (issue 360, R88).
+
+    model_fallbacks.execute() turns a CLI's TimeoutExpired into a ProviderFailure of category
+    "timeout" (R82), and the fallback model's own timeout has always been one, so a timeout is
+    read from the category, never from a type a lower layer converts. execute() raises the last
+    attempt's own error otherwise: a missing CLI stays a FileNotFoundError and an unparsable
+    answer a ValueError."""
+    if getattr(error, "category", "") == "timeout":
+        return "timeout"
+    if isinstance(error, FileNotFoundError):
+        return "codex_unavailable"
+    if isinstance(error, ValueError):
+        return "invalid_response"
+    return "translator_failed"
+
 class ToolExplanations:
     def __init__(self, *, translate=None, debounce=.18, failure_ttl=60):
         self._translate = translate
@@ -491,7 +508,7 @@ class ToolExplanations:
                     # account could not use for 150+ runs.
                     log("toolExplanationsFail", f"model={run['configuration']['model']} "
                         f"backend={run['configuration'].get('backend', '')} error={type(error).__name__}: {str(error)[:300]}")
-                    reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
+                    reason = _failure_reason(error)
                     outcome = f"failed:{reason}"
                 values = [item.value(reason or "translator_failed", reasons) for item in items]
                 elapsed = int((time.monotonic() - started) * 1000)
