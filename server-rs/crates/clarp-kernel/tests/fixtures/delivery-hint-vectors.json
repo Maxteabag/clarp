@@ -1,0 +1,772 @@
+{
+ "about": "Written by server-rs/tools/delivery-hint-vectors.py from server/lib/persistence/sse_events.py (_egress). Do not edit by hand.",
+ "vectors": [
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "delivery": {
+     "rev": 2,
+     "seq": 4,
+     "state": "stopped"
+    },
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "delivery": {
+     "rev": 2,
+     "seq": 4,
+     "state": "stopped"
+    },
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "extra": 1,
+    "message_id": "u-m1",
+    "session": "s",
+    "trace_id": "t1",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "extra": 1,
+    "message_id": "u-m1",
+    "session": "s",
+    "trace_id": "t1",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "_clarp_runtime_event": true,
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "_clarp_runtime_event": true,
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "_clarp_runtime_event": true,
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": null,
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": null,
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": 5,
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": 5,
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": [
+     "u-m1"
+    ],
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": [
+     "u-m1"
+    ],
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": " ",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": " ",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": " ",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": " ",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": "",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": null,
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": null,
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": 5,
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": 5,
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": [
+     "u-m1"
+    ],
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": [
+     "u-m1"
+    ],
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": " ",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": " ",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": " ",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "session": " ",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "u-m1",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": "",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": null,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": null,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": 5,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": 5,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": [
+     "u-m1"
+    ],
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": [
+     "u-m1"
+    ],
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": " ",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": " ",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": " ",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "message_id": " ",
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": null,
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 41,
+    "session": "s",
+    "ts": 1794700000000,
+    "type": "delivery-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "delivery": {
+     "state": "x"
+    },
+    "event_id": 2,
+    "kind": "done",
+    "session": "s",
+    "ts": 1,
+    "type": "agent-state"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "delivery": {
+     "state": "x"
+    },
+    "event_id": 2,
+    "kind": "done",
+    "session": "s",
+    "ts": 1,
+    "type": "agent-state"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "delivery": {
+     "state": "x"
+    },
+    "event_id": 2,
+    "kind": "done",
+    "session": "s",
+    "ts": 1,
+    "type": "agent-state"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "delivery": {
+     "state": "x"
+    },
+    "event_id": 2,
+    "kind": "done",
+    "session": "s",
+    "ts": 1,
+    "type": "agent-state"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 3,
+    "message_id": "",
+    "session": "s",
+    "ts": 1,
+    "type": "queue-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 3,
+    "message_id": "",
+    "session": "s",
+    "ts": 1,
+    "type": "queue-updated"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 3,
+    "message_id": "",
+    "session": "s",
+    "ts": 1,
+    "type": "queue-updated"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 3,
+    "message_id": "",
+    "session": "s",
+    "ts": 1,
+    "type": "queue-updated"
+   }
+  },
+  {
+   "internal": false,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 4,
+    "ts": 1,
+    "type": "delivery-updatedx"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 4,
+    "ts": 1,
+    "type": "delivery-updatedx"
+   }
+  },
+  {
+   "internal": true,
+   "out": {
+    "agent_id": "ag",
+    "event_id": 4,
+    "ts": 1,
+    "type": "delivery-updatedx"
+   },
+   "stored": {
+    "agent_id": "ag",
+    "event_id": 4,
+    "ts": 1,
+    "type": "delivery-updatedx"
+   }
+  }
+ ]
+}
