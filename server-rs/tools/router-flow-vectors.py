@@ -354,8 +354,8 @@ STORIES = [
         message('again, as 100', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 100}),
         message('again, as 600', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 600}),
         message('again, as yes', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': True}),
-        message('again, as a word', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': '200'}),
-        message('again, as a fraction', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 200.0}),
+        message('again, as a word', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': '299'}),
+        message('again, as a fraction', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 299.0}),
         message('again, as nothing', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': '<drop>'}),
         message('again, its status kept and its session not: the session it was said to', 'Anna, the notes', to('mike'),
                 id='p-6', receipt={'answer_status': 202, 'answer_session': '<drop>'}),
@@ -379,6 +379,12 @@ STORIES = [
         message('given to an agent whose id is longer than a receipt keeps: the receipt is refused, and the run closed '
                 'with its action alone', 'tell the long one hello', to(LONG), id='p-8'),
         message('the same message again: by that receipt', 'tell the long one hello', to('mike'), id='p-8'),
+        message('a command not sure enough whose two names are two agents: its row names neither', 'stop Anna or Zoe',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'anna', 'confidence': 0.5,
+                 'control_payload': {'name': 'Zoe'}}, id='p-9'),
+        message('a command not sure enough whose two names are one agent: its row names her', 'stop Anna',
+                {'kind': 'agent_control', 'control_action': 'stop', 'target_session': 'anna', 'confidence': 0.5,
+                 'control_payload': {'name': 'ANNA'}}, id='p-10'),
     ], [('Long', LONG, 'codex', 'voice-long', False)]),
 ]
 

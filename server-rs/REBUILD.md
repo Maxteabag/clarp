@@ -2541,7 +2541,8 @@ turns it on.
   session longer and as long as a receipt keeps, with the receipt made another before it is sent again in
   each form the Python Host's own tests read (a status of 299, 204, 304, 100, 600, yes, a word, a fraction,
   none; no session, an empty one, none at all; a tool that is a number; an older receipt refused 413, 100,
-  503, yes, or with no status), and an agent whose id the bound refuses; and by the demand history's own
+  503, yes, or with no status), an agent whose id the bound refuses, and a command not sure enough whose two
+  names are two agents (its row names neither) or one (its row names her); and by the demand history's own
   vectors of what it takes (`fits_metadata`). On a Host, by the router's test: its question answers the
   session spoken to, and the same message sent again after a restart is answered what it was first.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,

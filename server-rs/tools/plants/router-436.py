@@ -185,18 +185,7 @@ HOLD_WAITING = '''            held.pending_id == decision.pending_id
 CLAIM_WAITING = '''                && held.expires_at > now_ms
                 && held.requested_session == requested'''
 STATUS_REFUSED = '''                action = Some(CLARIFY);
-                target = requested.to_string();
                 let refusal'''
-SWITCHED = '''                        session: on.clone(),
-                    }));
-                    target = on;'''
-STOPPED = '''                        agent_id: agent.agent_id.clone(),
-                    }));
-                    target = on;
-                }
-                "create"'''
-UNKNOWN = '''                    effects.extend(self.as_agent(requested, words, "", around).map(Effect::Say));
-                    target = on;'''
 PLANTS = [
     # Names as voice names: the fold.
     (K, 'vectors', 'a name is compared in its case as it is', '    let folded = python::casefold(name);', '    let folded = name.to_string();'),
@@ -265,7 +254,6 @@ PLANTS = [
     (K, 'vectors', 'a confirmation too late is held as a question', GONE, GONE.replace('                        action = Some(CLARIFY);\n', '')),
     (K, 'vectors', 'a confirmation too late keeps its kind', GONE, GONE.replace('                        decision.kind = CLARIFY.to_string();\n', '')),
     (K, 'vectors', 'a confirmation too late keeps the phrase key of its model', GONE, GONE.replace('\n                        decision.phrase_key = HELD_MESSAGE_GONE.key.to_string();', '')),
-    (K, 'vectors', 'a confirmation too late is not said where an app asked', SAID_GONE, SAID_GONE.replace('around);', 'around).filter(|_| !routing.fallback_request);')),
     (K, 'vectors', 'a confirmation too late is said as the agent it was for', SAID_GONE, SAID_GONE.replace('(requested,', '(&agent,')),
     # A hold, and a renewal.
     (K, 'vectors', "a hold is renewed from another agent's conversation", HOLD_WAITING, HOLD_WAITING.replace('\n                && held.requested_session == requested', '')),
@@ -299,19 +287,13 @@ PLANTS = [
     (K, 'vectors', 'the status told is of the agent spoken to', '                target = agent.unwrap_or(requested).to_string();', '                target = requested.to_string();'),
     (K, 'vectors', "the model's words of a status are not said", '                match decision.status_text.as_str() {', '                match decision.status_text.get(..0).unwrap_or_default() {'),
     (K, 'vectors', 'a status refused is a status told', STATUS_REFUSED, STATUS_REFUSED.replace('                action = Some(CLARIFY);\n', '')),
-    (K, 'vectors', 'a status refused is kept for the name as said', STATUS_REFUSED, STATUS_REFUSED.replace('                target = requested.to_string();\n', '')),
     (K, 'vectors', 'a name nobody has is out of reach', '                    0 => NO_SUCH_AGENT,', '                    0 => CANNOT_CHECK,'),
     (K, 'vectors', 'an agent out of reach is nobody', '                    1 => CANNOT_CHECK,', '                    1 => NO_SUCH_AGENT,'),
     (K, 'vectors', 'a name two have is out of reach', '                    _ => WHICH_AGENT,', '                    _ => CANNOT_CHECK,'),
     (K, 'vectors', 'a status refused is said as the agent spoken to', '            effects.push(router_says(text));\n        }\n        // The agent a command acts on', '            effects.extend(self.as_agent(requested, text, "", around).map(Effect::Say));\n        }\n        // The agent a command acts on'),
     # Commands carried out, on the agent named.
-    (K, 'vectors', 'what is played again is of the name as said', '                        session: on.clone(),\n                        or:', '                        session: target.clone(),\n                        or:'),
-    (K, 'vectors', 'a command for an agent looks up the name as said', '            let agent = lookup(agents, &on);', '            let agent = lookup(agents, &target);'),
-    (K, 'vectors', 'the agent opened is told by the name as said', SWITCHED, SWITCHED.replace('session: on.clone(),', 'session: target.clone(),')),
-    (K, 'vectors', 'an agent opened is kept for the name as said', SWITCHED, SWITCHED.replace('\n                    target = on;', '')),
-    (K, 'vectors', 'an agent stopped is kept for the name as said', STOPPED, STOPPED.replace('\n                    target = on;', '')),
-    (K, 'vectors', 'what nobody knows how to do is kept for the name as said', UNKNOWN, UNKNOWN.replace('\n                    target = on;', '')),
     # What nothing was delivered for, and a message sent again (PR 443).
+    (K, 'vectors', 'what a command does is done to the name as it was said', '        let on = decision.target_session.clone();', '        let on = raw.get("target_session").and_then(Value::as_str).unwrap_or_default().to_string();'),
     (K, 'vectors', 'a question answers the session its target named', '        let nothing_done = action == CLARIFY || (command && action != CONTROL);', '        let nothing_done = command && action != CONTROL;'),
     (K, 'vectors', 'a command that failed after it was taken answers the session it named', '        let nothing_done = action == CLARIFY || (command && action != CONTROL);', '        let nothing_done = action == CLARIFY;'),
     (K, 'vectors', "a question keeps its target as the model said it", '            target = resolved(around.agents, &decision.target_session);', '            target.clone_from(&decision.target_session);'),
