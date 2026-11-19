@@ -7445,6 +7445,85 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
 }
 
 #[test]
+fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_where_it_is() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("limited");
+    let host = place.start_with_token(ADMIN);
+    host.new_agent("Echo");
+    let (limited, _) = pair(&host, "A limited watch", "limited");
+    let (full, _) = pair(&host, "A full phone", "full");
+    let ask = |token: &str, method: &str, path: &str, body: &[u8]| {
+        let got = fetch(
+            &host,
+            token,
+            method,
+            path,
+            &[("Content-Type", "application/json")],
+            body,
+        );
+        (got.status, got.text())
+    };
+    let refused = (
+        403,
+        r#"{"error":"full device access required"}"#.to_string(),
+    );
+    // Refused at the door, each family: what is closed altogether (read too), what is on the
+    // disk or in a terminal, and every change but what it may send.
+    for (method, path, body) in [
+        ("GET", "/backend-auth", &b""[..]),
+        ("GET", "/paired-devices", b""),
+        ("GET", "/calls", b""),
+        ("GET", "/dirs", b""),
+        ("GET", "/past-sessions", b""),
+        ("GET", "/terminal/echo", b""),
+        ("POST", "/stop", b"{\"session\":\"echo\"}"),
+        ("POST", "/agents", b"{}"),
+        ("POST", "/controller-actions/a/b/invoke", b"{}"),
+        ("POST", "/controller-actions/audit", b"{}"),
+        ("DELETE", "/agents/echo", b""),
+        ("PUT", "/agents/echo", b"{}"),
+        ("PATCH", "/schedules/s1", b"{}"),
+    ] {
+        assert_eq!(
+            ask(&limited, method, path, body),
+            refused,
+            "{method} {path}"
+        );
+    }
+    // A device with full access is not refused for its scope where a limited one is.
+    for path in ["/dirs", "/past-sessions", "/backend-auth"] {
+        assert_ne!(ask(&full, "GET", path, b""), refused, "{path}");
+    }
+    // Refused by the route itself, in the same words: a report's page, the push rows.
+    assert_eq!(ask(&limited, "GET", "/artifacts/none/html", b""), refused);
+    assert_eq!(ask(&limited, "GET", "/devices/push-tokens", b""), refused);
+    // Let through where the Python Host lets it through: what it reads, what it sends, an
+    // action it invokes, a PATCH outside the schedules, and a read of what it may not do.
+    for (method, path, body) in [
+        ("GET", "/log?session=echo", &b""[..]),
+        ("GET", "/agents/snapshot", b""),
+        ("GET", "/pairing/issue", b""),
+        ("GET", "/terminal", b""),
+        (
+            "POST",
+            "/send",
+            b"{\"session\":\"echo\",\"text\":\"hi\",\"client_msg_id\":\"m-limited\"}",
+        ),
+        ("POST", "/calendar/response", b"{}"),
+        ("POST", "/remote-action", b"{}"),
+        ("POST", "/controller-actions/a/invoke", b"{}"),
+        ("PATCH", "/agents/echo", b"{}"),
+    ] {
+        let (status, said) = ask(&limited, method, path, body);
+        assert_ne!(
+            (status, said.as_str()),
+            (403, refused.1.as_str()),
+            "{method} {path}"
+        );
+    }
+}
+
+#[test]
 fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // Two Hosts. The agent lives on the first and has said something there.
     let (old_place, new_place) = (Place::new("move-from"), Place::new("move-to"));
@@ -27507,7 +27586,7 @@ fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
     let kept_out = asked_for_a_socket(&host, &limited, "/server-terminal");
     assert_eq!(
         (kept_out.status, kept_out.text().as_str()),
-        (403, r#"{"error":"this device may not do that"}"#)
+        (403, r#"{"error":"full device access required"}"#)
     );
     assert_eq!(
         asked_for_a_socket(&host, &limited, "/terminal/echo").status,
