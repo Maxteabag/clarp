@@ -724,9 +724,7 @@ mod tests {
     #[test]
     fn a_receipt_waits_for_its_card_only_while_its_recovery_awaits_one_and_names_none() {
         let owner = ("k-1", 3);
-        let receipt = |agent: &str, generation: u64, recovery: Value| {
-            json!({ "agent_id": agent, "owner_generation": generation, "recovery": recovery })
-        };
+        let receipt = |agent: &str, generation: u64, recovery: Value| json!({ "agent_id": agent, "owner_generation": generation, "recovery": recovery });
         let awaiting = json!({ "status": "awaiting_approval" });
         assert!(unasked(&receipt("k-1", 3, awaiting.clone()), owner));
         let named = json!({ "status": "awaiting_approval", "artifact_id": "decision-1" });
@@ -739,7 +737,10 @@ mod tests {
         // A recovery that runs, or none at all, waits for no card.
         let running = json!({ "status": "recovering" });
         assert!(!unasked(&receipt("k-1", 3, running), owner));
-        assert!(!unasked(&json!({ "agent_id": "k-1", "owner_generation": 3 }), owner));
+        assert!(!unasked(
+            &json!({ "agent_id": "k-1", "owner_generation": 3 }),
+            owner
+        ));
     }
 
     #[test]
