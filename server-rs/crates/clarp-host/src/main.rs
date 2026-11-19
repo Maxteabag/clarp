@@ -253,6 +253,7 @@ async fn serve(config: Config) -> Result<(), String> {
         oracle: Arc::default(),
         keeper: Arc::default(),
         quota_keeper: Arc::default(),
+        label_checker: Arc::default(),
         audio: Arc::default(),
         limits,
         // A Host that keeps the logins itself lets the owner's tool renew one as it reads.

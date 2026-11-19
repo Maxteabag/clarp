@@ -115,21 +115,47 @@ pub fn report(
 }
 
 /// A single Jev choice request shares the evidence across all questions.
-pub fn batch(entries:&[Evidence])->Option<Value>{
+pub fn batch(entries: &[Evidence]) -> Option<Value> {
     use std::sync::LazyLock;
     #[allow(clippy::expect_used)]
-    static QUESTION:LazyLock<Value>=LazyLock::new(||serde_json::from_str(include_str!("label-question.json")).expect("reference label question"));
-    if entries.is_empty(){return None;}
-    let mut agents=serde_json::Map::new();
-    let mut questions=serde_json::Map::new();
-    for (index,entry) in entries.iter().enumerate(){
-        let key=format!("a{}",index+1);
-        let mut q=QUESTION.clone();
-        q["instructions"]=json!(q["instructions"].as_str()?.replace("agents.a1",&format!("agents.{key}")));
-        questions.insert(format!("l_{key}"),q);
-        agents.insert(key,entry.packet.clone());
+    static QUESTION: LazyLock<Value> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("label-question.json")).expect("reference label question")
+    });
+    if entries.is_empty() {
+        return None;
+    }
+    let mut agents = serde_json::Map::new();
+    let mut questions = serde_json::Map::new();
+    for (number, entry) in (1..).zip(entries) {
+        let key = format!("a{number}");
+        let mut q = QUESTION.clone();
+        q["instructions"] = json!(
+            q["instructions"]
+                .as_str()?
+                .replace("agents.a1", &format!("agents.{key}"))
+        );
+        questions.insert(format!("l_{key}"), q);
+        agents.insert(key, entry.packet.clone());
     }
     Some(json!({"model":"jev-latest","state":{"agents":agents},"questions":questions}))
 }
 
-pub const JUDGE_SECONDS:u64=15;
+pub const JUDGE_SECONDS: u64 = 15;
+
+/// Apply the heartbeat's active hours using the Host's local time at this check.
+pub fn quiet(span: &str, zone: &str, now: i64) -> bool {
+    let Ok(at) = jiff::Timestamp::from_millisecond(now) else {
+        return false;
+    };
+    let local = crate::oracle::threads::zone_named(zone).to_datetime(at);
+    crate::heartbeat::outside_active_hours(span, local.hour() as u32 * 60 + local.minute() as u32)
+}
+
+pub fn summary(checked: usize, found: usize, filed: bool) -> String {
+    let repeat = if found > 0 && !filed {
+        " (already reported)"
+    } else {
+        ""
+    };
+    format!("Checked {checked} working labels; {found} look wrong{repeat}")
+}

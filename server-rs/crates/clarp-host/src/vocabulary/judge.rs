@@ -58,7 +58,7 @@ fn budget(dir: &crate::fleet::Directory) -> u64 {
         .clamp(100, 30000)
 }
 
-pub(crate) fn endpoint(app:&App)->String {
+pub(crate) fn endpoint(app: &App) -> String {
     if app.config.judge_endpoint.is_empty() {
         URL
     } else {
@@ -67,7 +67,12 @@ pub(crate) fn endpoint(app:&App)->String {
     .to_string()
 }
 
-pub(crate) async fn post(url:String,key:String,state:Value,timeout:u64)->Result<Value,bool>{
+pub(crate) async fn post(
+    url: String,
+    key: String,
+    state: Value,
+    timeout: u64,
+) -> Result<Value, bool> {
     tokio::task::spawn_blocking(move || {
         let client: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_millis(timeout)))
@@ -85,7 +90,9 @@ pub(crate) async fn post(url:String,key:String,state:Value,timeout:u64)->Result<
         }
         let answer: Value = response.body_mut().read_json().map_err(|_| false)?;
         Ok(answer)
-    }).await.unwrap_or(Err(false))
+    })
+    .await
+    .unwrap_or(Err(false))
 }
 
 pub async fn kept(app: &App, text: String) -> String {
@@ -101,17 +108,19 @@ pub async fn kept(app: &App, text: String) -> String {
     };
     let timeout = budget(&directory);
     let state = json!({"model":"jev-latest","state":{"transcript":text},"questions":{"junk":*clarp_kernel::vocabulary::JUNK_QUESTION}});
-    let verdict = post(endpoint(app), key, state, timeout).await.and_then(|answer| {
-        let junk = answer["answers"].get("junk").ok_or(false)?;
-        let n = &junk["noul"];
-        if n.is_null() {
-            return Ok(0.0);
-        }
-        n.as_f64()
-            .or_else(|| n.as_str()?.trim().parse().ok())
-            .filter(|f| f.is_finite())
-            .ok_or(false)
-    });
+    let verdict = post(endpoint(app), key, state, timeout)
+        .await
+        .and_then(|answer| {
+            let junk = answer["answers"].get("junk").ok_or(false)?;
+            let n = &junk["noul"];
+            if n.is_null() {
+                return Ok(0.0);
+            }
+            n.as_f64()
+                .or_else(|| n.as_str()?.trim().parse().ok())
+                .filter(|f| f.is_finite())
+                .ok_or(false)
+        });
     match verdict {
         Ok(n) => {
             judge.record(true, false);
@@ -180,7 +189,7 @@ pub async fn set(State(app): State<App>, body: Bytes) -> Result<Json<Value>, Api
             let flag = v
                 .as_bool()
                 .ok_or_else(|| bad(&format!("sites.{k} must be a boolean")))?;
-            if k != "junk" && flag {
+            if k != "junk" && k != "labels" && flag {
                 return Err(ApiError::new(
                     StatusCode::NOT_IMPLEMENTED,
                     format!("the {k} judgment site is not built on this Host yet"),
