@@ -59,7 +59,7 @@ import sys
 from lib import db, turn_usage
 from pathlib import Path
 db.reset_for_tests(Path(sys.argv[1]))
-print(turn_usage.claude_cost_delta("s", float(sys.argv[2]), fresh=False))
+print(turn_usage.session_cost_delta("claude", "s", float(sys.argv[2]), fresh=False))
 """, database, str(second["total_cost_usd"])], cwd=Path(__file__).resolve().parents[2] / "server",
                              capture_output=True, text=True, check=True)
     assert float(resumed.stdout.strip().splitlines()[-1]) == pytest.approx(0.050047)
@@ -103,7 +103,7 @@ def test_rolling_cost_uses_writer_marker_but_counts_all_tokens():
 
 def test_cursor_advance_survives_skipped_usage_insert(complete):
     # Crash after cursor commit and before the usage row: replay cannot rebill.
-    assert turn_usage.claude_cost_delta("s", 8, fresh=True) == 8
+    assert turn_usage.session_cost_delta("claude", "s", 8, fresh=True) == 8
     db.close_local()
     assert complete(8, fresh=False) == 0
     assert complete(9) == 1
@@ -133,7 +133,7 @@ def test_upgrading_preserves_prior_rows_and_activation(tmp_path):
 def test_cursor_failure_still_publishes_unknown_cost(complete, monkeypatch):
     import sqlite3
 
-    monkeypatch.setattr(turn_usage, "claude_cost_delta",
+    monkeypatch.setattr(turn_usage, "session_cost_delta",
                         Mock(side_effect=sqlite3.OperationalError("unavailable")))
     assert complete(3, fresh=True) is None
 
@@ -143,10 +143,10 @@ def test_each_unknown_total_logs_only_the_reason(monkeypatch):
 
     notice = Mock()
     monkeypatch.setattr(host_log, "log", notice)
-    assert turn_usage.claude_cost_delta("session", 50, fresh=False) is None
-    assert turn_usage.claude_cost_delta("session", 2, fresh=False) is None
-    assert turn_usage.claude_cost_delta("session", None, fresh=False) is None
-    assert turn_usage.claude_cost_delta("session", 2, fresh=False) == 0
+    assert turn_usage.session_cost_delta("claude", "session", 50, fresh=False) is None
+    assert turn_usage.session_cost_delta("claude", "session", 2, fresh=False) is None
+    assert turn_usage.session_cost_delta("claude", "session", None, fresh=False) is None
+    assert turn_usage.session_cost_delta("claude", "session", 2, fresh=False) == 0
     assert [call.args for call in notice.call_args_list] == [
         ("claudeTurnCostUnknown", "reason=missing_baseline"),
         ("claudeTurnCostUnknown", "reason=decreased_total"),
@@ -220,3 +220,12 @@ def test_out_of_order_replay_rebaselines_and_can_repeat_a_rise(complete, monkeyp
              for i, v in enumerate((1, 1.25, 1, 1.25))]
     assert costs == [1, .25, None, .25]
     assert ("claudeTurnCostUnknown", "reason=decreased_total") in [call.args for call in notices.call_args_list]
+
+
+def test_a_session_cost_cursor_is_kept_under_the_backend_that_reported_it():
+    """The cursor's backend is bound from the caller's own id, not written as a literal (G1)."""
+    assert turn_usage.session_cost_delta("claude", "same-session", 5, fresh=True) == 5
+    assert turn_usage.session_cost_delta("codex", "same-session", 7, fresh=True) == 7
+    rows = dict(db.conn().execute(
+        "SELECT backend, last_total FROM usage_cursors WHERE native_session_id='same-session'").fetchall())
+    assert rows == {"claude": 5, "codex": 7}
