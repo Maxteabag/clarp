@@ -1673,10 +1673,12 @@ struct MovedArtifact {
 
 /// A plan that comes with an agent.
 #[derive(Debug, Deserialize)]
-struct MovedPlan {
-    plan: Value,
+pub struct MovedPlan {
+    pub(crate) plan: Value,
     #[serde(default)]
-    documents: Vec<Value>,
+    pub(crate) events: Option<Vec<clarp_kernel::goals::ledger::Event>>,
+    #[serde(default)]
+    pub(crate) documents: Vec<Value>,
 }
 
 /// An agent made for what then failed does not stay. Where it cannot be let go, that is
@@ -1794,7 +1796,7 @@ async fn import_agent(
         .map_err(|why| ApiError::new(StatusCode::CONFLICT, why))?;
     let outcome = member
         .agent
-        .import(request.from, backend_session, rows)
+        .import(request.from.clone(), backend_session, rows)
         .await;
     let imported = match outcome {
         Ok(Ok(imported)) => imported,
@@ -1828,11 +1830,7 @@ async fn import_agent(
         };
         directory.members.iter().find(has).map(|_| id.to_string())
     });
-    let plans: Vec<(Value, Vec<Value>)> = request
-        .plans
-        .into_iter()
-        .map(|moved| (moved.plan, moved.documents))
-        .collect();
+    let plans = request.plans;
     let taken = match elsewhere {
         Some(id) => Ok(Err(format!(
             "another agent on this Host has an artifact with the id {id}"
@@ -1840,7 +1838,7 @@ async fn import_agent(
         None => member.agent.take_library(library).await,
     };
     let taken = match taken {
-        Ok(Ok(artifacts)) => match member.agent.take_plans(plans).await {
+        Ok(Ok(artifacts)) => match member.agent.take_plans(request.from, plans).await {
             Ok(Ok(plans)) => Ok(Ok((artifacts, plans))),
             Ok(Err(why)) => Ok(Err(why)),
             Err(unavailable) => Err(unavailable),

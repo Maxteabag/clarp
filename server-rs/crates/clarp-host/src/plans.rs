@@ -120,23 +120,36 @@ async fn action(
     let Some(revision) = given.get("revision").and_then(Value::as_i64) else {
         return Err(conflict("revision required"));
     };
-    // The apps call this for the user; an agent uses its own tool. A turn's token that is
-    // there has to be one the Host gave out, and this Host gives none out yet: whoever
-    // carries one is never the user.
-    if headers.contains_key(TURN_HEADER) {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "verified turn identity required",
-        ));
-    }
-    let ask = Ask::UserAct {
-        plan_id: plan_id.clone(),
-        revision,
-        action: said(given, "action"),
-        data: given.get("data").cloned().unwrap_or(Value::Null),
+    let caller = match headers.get(TURN_HEADER) {
+        Some(value) => {
+            crate::turn_identity::presented(&app, Some(value.to_str().unwrap_or(""))).await?
+        }
+        None => None,
+    };
+    let action = said(given, "action");
+    let data = given.get("data").cloned().unwrap_or(Value::Null);
+    let (ask, attribution) = match caller {
+        Some(who) => (
+            Ask::Act {
+                plan_id: plan_id.clone(),
+                revision,
+                action,
+                data,
+            },
+            crate::agent::GoalCaller::Verified(who.record.agent_id.clone()),
+        ),
+        None => (
+            Ask::UserAct {
+                plan_id: plan_id.clone(),
+                revision,
+                action,
+                data,
+            },
+            crate::agent::GoalCaller::Default,
+        ),
     };
     let answered = match owner(&app, &plan_id) {
-        Some(member) => member.agent.goal(ask).await?,
+        Some(member) => member.agent.goal_as(ask, attribution).await?,
         None => goaltool::nobody(&ask, app.clock.now_ms()),
     };
     if answered.exit != 0 {
