@@ -56,6 +56,7 @@ use clarp_kernel::turn::{
 use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
+pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
 
 pub mod conversation;
 pub mod helper_cells;
@@ -1998,26 +1999,41 @@ impl Actor {
         if self.recorder.log().find("ledger/installed")?.is_some() {
             return Ok(());
         }
-        for plan in self.goals.plans().filter(|p| p.goal.is_some()) {
-            // An interrupted initialization resumes at the first missing tail.
-            if goal_ledger::has_plan(self.recorder.log(), &plan.plan_id)? {
+        let plans: Vec<_> = self
+            .goals
+            .plans()
+            .filter(|p| p.goal.is_some())
+            .map(|p| p.plan_id.clone())
+            .collect();
+        for id in plans {
+            // A tail and corrected summary are committed together. A crash
+            // between plans resumes without relabelling any existing events.
+            if goal_ledger::has_plan(self.recorder.log(), &id)? {
                 continue;
             }
+            let plan = self
+                .goals
+                .plan(&id)
+                .ok_or_else(|| ActorError::Corrupt("missing legacy plan".into()))?;
+            let events = ledger::legacy(plan);
+            let mut change = GoalChange {
+                plan: plan.clone(),
+                documents: Vec::new(),
+            };
+            change.plan.event_count = events.len() as i64;
+            change.plan.last_event_at = events.iter().map(|e| e.at).max();
             let mut items = Vec::new();
-            goal_ledger::stage(
-                self.recorder.log(),
-                &plan.plan_id,
-                ledger::legacy(plan),
-                0,
-                0,
-                now,
-                &mut items,
-            )?;
+            let baseline =
+                goal_ledger::stage(self.recorder.log(), &id, events, 0, 0, now, &mut items)?;
+            let mut record = self.goals.record(&change, now);
+            record.import_keeper_cursor(plan, None, baseline);
+            items.push(record_item(kind::GOAL, format!("g-{id}"), &record, now)?);
             let mut batch = self.recorder.batch();
             for item in items {
                 batch.item(item);
             }
             batch.commit()?;
+            self.goals.apply(&record);
         }
         // Avoid adding any log item merely for opening a brand-new agent.
         if self.goals.plans().any(|p| p.goal.is_some()) {
@@ -2031,6 +2047,15 @@ impl Actor {
             batch.commit()?;
         }
         Ok(())
+    }
+
+    pub fn goal_events(
+        &self,
+        plan: &str,
+        after: i64,
+        limit: usize,
+    ) -> Result<(Vec<LedgerEvent>, bool), ActorError> {
+        goal_ledger::page(self.recorder.log(), plan, after, limit)
     }
 
     pub fn next_goal_event_id(&self) -> Result<i64, ActorError> {
@@ -2059,17 +2084,13 @@ impl Actor {
 
     /// What the log is to keep of changes to the books.
     fn written(&self, kept: &Kept<'_>, now_ms: i64) -> Result<Written, ActorError> {
-        let goal = kept.goal.map(|change| self.goals.record(change, now_ms));
+        let mut goal = kept.goal.map(|change| self.goals.record(change, now_ms));
         let artifacts: Vec<ArtifactRecord> = kept
             .artifacts
             .iter()
             .map(|artifact| ArtifactBook::record(artifact, now_ms))
             .collect();
         let mut items = Vec::new();
-        if let Some(record) = &goal {
-            let key = format!("g-{}", record.plan_id);
-            items.push(record_item(kind::GOAL, key, record, now_ms)?);
-        }
         if let Some(change) = kept.goal {
             let plan = &change.plan;
             let (mut events, imported) = match kept.imported_events {
@@ -2086,7 +2107,19 @@ impl Actor {
             if let Some(source) = kept.entry_source {
                 events.push(ledger::entry_marker(plan, source, &events, now_ms));
             }
-            goal_ledger::stage(
+            if let Some(record) = goal
+                .as_mut()
+                .filter(|_| kept.imported_events.is_some() || matches!(kept.author, Author::Legacy))
+            {
+                record.event_count = i64::try_from(events.len())
+                    .map_err(|_| ActorError::Corrupt("too many imported goal events".into()))?;
+                record.last_event_at = events.iter().map(|e| e.at).max();
+                if events.is_empty() && plan.goal.is_some() {
+                    // An explicitly empty incoming ledger must stay empty after a restart.
+                    goal_ledger::mark_empty(&plan.plan_id, now_ms, &mut items)?;
+                }
+            }
+            let last = goal_ledger::stage(
                 self.recorder.log(),
                 &plan.plan_id,
                 events,
@@ -2095,6 +2128,19 @@ impl Actor {
                 now_ms,
                 &mut items,
             )?;
+            if let Some(record) = goal
+                .as_mut()
+                .filter(|_| matches!(kept.author, Author::Legacy) || kept.imported_events.is_some())
+            {
+                // For an entry into an existing owner the entry marker is new, even
+                // when all the source history has already been seen by its keeper.
+                let baseline = last - i64::from(kept.entry_source.is_some());
+                record.import_keeper_cursor(plan, kept.imported_events, baseline);
+            }
+        }
+        if let Some(record) = &goal {
+            let key = format!("g-{}", record.plan_id);
+            items.push(record_item(kind::GOAL, key, record, now_ms)?);
         }
         if let Some((delegation, requested)) = kept.applied_cursor {
             items.push(goal_ledger::cursor(
