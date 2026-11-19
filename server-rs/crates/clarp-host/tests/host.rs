@@ -26567,11 +26567,20 @@ else:
         decided["error"], "claude exited with status 2 (runner_exit)",
         "{decided}"
     );
-    let kept = json!([
-        h.get("/orchestrator/decisions?limit=30"),
-        kept_records(&place, "model-fallback-attempt")
-    ])
-    .to_string();
+    // What is kept of the failure, not the utterance a decision rightly keeps beside it.
+    let decisions = h.get("/orchestrator/decisions?limit=30");
+    let attempts = kept_records(&place, "model-fallback-attempt");
+    let said = decisions["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|decision| {
+            ["error", "reason", "raw_response_json"].map(|field| decision[field].clone())
+        });
+    let said = said.chain(attempts.values().flat_map(|attempt| {
+        ["reason", "result_json", "error"].map(|field| attempt[field].clone())
+    }));
+    let kept = Value::Array(said.collect()).to_string();
     for question in question(before) {
         assert!(!clarp_kernel::failures::echoes(&kept, &question), "{kept}");
     }
