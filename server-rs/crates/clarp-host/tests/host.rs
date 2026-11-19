@@ -40143,3 +40143,98 @@ fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
     assert!(book["all"].get("model_policy").is_some());
     assert_eq!(kept_records(&place, "janitor-run").len(), 2);
 }
+
+#[test]
+fn a_quota_notice_that_reached_no_phone_waits_and_is_pushed_again_after_the_keepers_interval() {
+    // A stand-in relay that refuses at first: the push reaches no phone.
+    let relay = StandInRelay::start();
+    relay.answers(500, json!({ "error": "the relay is down" }));
+    let place = Place::new("quota-retry");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    let tokens = json!({ "account_id": "an-account", "access_token": "a-token" });
+    let login = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+    std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+    let codex = place.root.join("codex-says-its-limits");
+    program(&codex, CODEX_SAYS_ITS_LIMITS);
+    let seconds = now_ms() / 1000;
+    let window = |used: f64, minutes: i64, resets: i64| json!({ "used_percent": used, "window_minutes": minutes, "resets_at": resets });
+    let record = json!({
+        "limit_id": "codex", "limit_name": null,
+        "primary": window(80.0, 300, seconds + 4 * 3_600),
+        "secondary": window(10.0, 10_080, seconds + 96 * 3_600),
+        "credits": { "has_credits": false, "unlimited": false, "balance": null },
+        "individual_limit": null, "spend_control_reached": null, "plan_type": "pro",
+        "rate_limit_reached_type": null,
+    });
+    std::fs::write(own.join("limits.json"), record.to_string()).unwrap();
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CODEX_HOME", own.to_str().unwrap()),
+    ];
+    let pushed_to = format!("http://{}", relay.address);
+    let start = || {
+        let more = ["--push-relay", pushed_to.as_str()];
+        place.start_in("the-administrators-token", &more, &world)
+    };
+    let told = || -> usize {
+        let bodies = relay.taken().into_iter().filter_map(|(_, _, body)| {
+            let said = &body["notifications"][0]["payload"]["aps"]["alert"]["body"];
+            said.as_str().map(str::to_string)
+        });
+        bodies.filter(|said| said.contains("quota remaining")).count()
+    };
+    const KEEPER: &str = "/janitors/clarp-quota-monitor";
+    let runs = |host: &Host| host.get(&format!("{KEEPER}/runs"))["runs"].clone();
+
+    let host = start();
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!("pg1.{}.{}.{}", "1".repeat(64), "2".repeat(16), "3".repeat(64));
+    let device = json!({ "token": "a1".repeat(32), "session": "cody", "push_grant": grant });
+    let registered = host.ask_as(&phone, "POST", "/devices", Some(&device));
+    assert_eq!(registered, (200, json!({ "ok": true })));
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    host.send(&cody, "one", "u-1");
+    wait_for("the windows to be shown", || {
+        let shown = host.get("/backend-usage")["providers"]["codex"]["windows"].clone();
+        shown.as_array().is_some_and(|windows| windows.len() == 2)
+    });
+    let keeper = host.get(KEEPER)["janitor"].clone();
+    let on = json!({ "expected_revision": keeper["revision"], "enabled": true });
+    let (status, turned) = host.ask("POST", &format!("{KEEPER}/enabled"), Some(&on));
+    assert_eq!(status, 200, "{turned}");
+    wait_for("the push the relay refused", || told() == 1);
+    wait_for("the run to be kept", || runs(&host)[0]["status"] == "completed");
+    drop(host);
+
+    // Nobody got it because the transport failed: it waits, its attempt written on it.
+    let mut receipts = kept_records(&place, "quota-keeper-receipt");
+    assert_eq!(receipts.len(), 1);
+    let (id, mut receipt) = receipts.pop_first().unwrap();
+    assert_eq!(receipt["delivery"], Value::Null, "{receipt}");
+    let retry = receipt["payload"]["delivery_retry"].clone();
+    assert_eq!(retry["attempts"], 1, "{receipt}");
+    assert_eq!(retry["last"], json!({ "sent": 0, "failed": 1, "disabled": 0 }));
+    assert!(receipt["payload"]["window_key"].as_str().unwrap().starts_with("quota-keeper.window."));
+
+    // The Host is started again, and the next look comes past the keeper's interval since
+    // that attempt (both moved back in the store); the relay takes pushes again. It is pushed
+    // once more, and settled with its attempts.
+    receipt["payload"]["delivery_retry"]["at"] = json!(retry["at"].as_i64().unwrap() - 300_001);
+    keep_record(&place, "quota-keeper-receipt", &id, &receipt);
+    let mut lane = kept_records(&place, "quota-keeper-lane").remove("quota-keeper").unwrap();
+    lane["next_run_at"] = json!(1);
+    keep_record(&place, "quota-keeper-lane", "quota-keeper", &lane);
+    let delivered = json!({ "results": [{ "status": 200, "reason": "", "apnsId": "apns-2" }] });
+    relay.answers(200, delivered);
+    let host = start();
+    wait_for("the push tried again", || told() == 2);
+    wait_for("the second look", || runs(&host).as_array().unwrap().len() == 2);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(told(), 2);
+    drop(host);
+    let receipt = kept_records(&place, "quota-keeper-receipt").remove(&id).unwrap();
+    let settled = json!({ "enabled": true, "sent": 1, "failed": 0, "disabled": 0, "attempts": 2 });
+    assert_eq!(receipt["delivery"], settled, "{receipt}");
+}

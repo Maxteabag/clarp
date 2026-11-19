@@ -80,6 +80,9 @@ struct Receipt {
     created_at: i64,
     /// When what became of it was written.
     settled_at: Option<i64>,
+    /// The order receipts were written in, the first one: what waits is delivered in that
+    /// order, as the Python Host reads its table. 0: one written before this was kept.
+    order: u64,
 }
 
 /// The Quota keeper of this Host.
@@ -351,6 +354,7 @@ async fn pass(app: &App) {
             recovery_mode: keeper.mode(),
         };
         let notices = quota::looked(&usage, &owner, &mut windows);
+        let mut order = receipts.values().map(|receipt| receipt.order).max().unwrap_or(0);
         let switched = switcher_tells(book, world);
         let (mut told, mut recoveries) = (0, Vec::new());
         for notice in notices {
@@ -368,7 +372,9 @@ async fn pass(app: &App) {
             // Where the switcher tells, the receipt is cancelled as it is kept; any other
             // waits to be delivered (or marked, beside another Host), below.
             let delivery = suppressed.then(|| json!({ "cancelled": quota::SWITCHER_TELLS }));
+            order += 1;
             let receipt = Receipt {
+                order,
                 receipt_id: notice.receipt_id.clone(),
                 run_id: run_id.clone(),
                 payload,
@@ -441,9 +447,13 @@ async fn pass(app: &App) {
 /// What waits to be delivered is pushed, or cancelled where its keeper was set anew since,
 /// and what became of each is written on it, in one write.
 async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Receipt>) {
-    let waiting: Vec<quota::Waiting<'_>> = receipts
+    let mut written: Vec<&Receipt> = receipts
         .values()
         .filter(|receipt| receipt.delivery.is_none())
+        .collect();
+    written.sort_by_key(|receipt| (receipt.order, receipt.created_at, receipt.receipt_id.clone()));
+    let waiting: Vec<quota::Waiting<'_>> = written
+        .iter()
         .map(|receipt| {
             (
                 receipt.receipt_id.as_str(),
