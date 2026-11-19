@@ -2474,7 +2474,8 @@ turns it on.
 - **How much a model is shown when everyone is in view.** Every agent by its name; what they were last
   told and said, and what they are doing, of the agent the message was said to, of the one that is open,
   and of the twenty others that were last active (of those equally recent, the first listed): the kernel's
-  packet chooses them (`BROAD_DETAIL_MOST`), and the Host reads the last words of as many. The Python Host
+  packet chooses them (`in_view`, `BROAD_DETAIL_MOST`), and the Host reads the last words of those and of no
+  other, as the packet chooses them. The Python Host
   does the same since 18 Nov 2026 (its `BROAD_DETAIL_AGENTS`); before, it showed every agent's last words
   (measured on the owner's Host on 17 Nov, read-only: 204 agents, half a megabyte of question). Of an agent's conversation the model is shown what
   people and other agents wrote to it and what it answered, and not what the Host sends by itself on its
@@ -2490,7 +2491,14 @@ turns it on.
   line, the same message again (answered, nobody given it twice, no model asked), the same id for other
   words (409), a message held and then given in its own words when its user says yes, a question about an
   agent, a command that opens an agent, a model that fails (the message goes where it was said to), what is
-  kept through a restart, and the router turned off again.
+  kept through a restart, and the router turned off again. And by
+  `the_router_shows_twenty_agents_in_detail_and_says_a_start_the_host_refuses`: with twenty-four agents, the
+  second asking shows in detail the agent spoken to, the one that is open and the twenty most recently active
+  (one of them by a turn it had, the others by when they were made), the rest by name, and the last words are
+  read of those only; a start the Host itself refuses (an agent of no name) is said in the router's sentence,
+  in the voice of the agent spoken to and before the apps are told, kept as a question with the Host's word
+  for why (`name required`), and makes no agent. The order of agents equally recent is the kernel's one rule,
+  held by its vectors: a Host's clock gives two agents the same moment by chance only.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
   only those of the call who can take speech are shown, as there.
 
