@@ -24,6 +24,7 @@ from typing import Any, Callable
 from . import agent_goals, agents as agents_db, backend_usage, eventlog, settings_store, tts_queue
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
+from .hook_runtime import without_inherited_identity
 from .log import log, log_exception
 from .protocol import TurnSource
 from . import turn_lifecycle
@@ -209,9 +210,8 @@ class _Client:
         # and no agent identity. Naming the agent that started it would let a
         # tool in any agent's shell act as that one; without it they refuse
         # (BACKENDS-N1).
-        env = dict(os.environ)
-        env.pop("CLARP_PROVIDER_TURN", None)
-        env.pop("CLAUDE_PWA_SESSION", None)
+        # Nor one the Host inherited (R111): see hook_runtime.INHERITED_IDENTITY_ENV.
+        env = without_inherited_identity(os.environ)
         # Its own process group, so a recycle (BACKENDS-07b) kills the server
         # and the helpers in its group. Codex starts each shell tool command
         # in its own session with SIGTERM as its parent-death signal, so those

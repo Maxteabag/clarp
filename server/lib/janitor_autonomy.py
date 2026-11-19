@@ -9,6 +9,7 @@ from . import agents,db,janitors,janitor_builtins,settings_store,backends,janito
 from . import janitor_store,hotseat_status
 from .protocol import AgentState
 from .log import log
+from .hook_runtime import without_inherited_identity
 
 from .persistence.schema_parts.janitor_autonomy import SCHEMA
 
@@ -133,7 +134,7 @@ def decision_model(packet,run):
         from .launch_paths import existing_workspace_path
         from .routing_input import prepared
         with prepared(adapter.id,cmd,prompt) as call:
-            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120,check=False,env={**without_inherited_identity(os.environ),**adapter.routing_env()})
             p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
         if p.returncode:raise model_fallbacks.cli_failure(adapter.id,p.stderr or p.stdout,prompt=prompt,returncode=p.returncode)
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
@@ -176,7 +177,7 @@ def model_json(run,prompt,request_suffix=''):
         from .launch_paths import existing_workspace_path
         from .routing_input import prepared
         with prepared(adapter.id,cmd,prompt) as call:
-            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
+            p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=150,check=False,env={**without_inherited_identity(os.environ),**adapter.routing_env()})
             p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
         if p.returncode:raise model_fallbacks.cli_failure(adapter.id,p.stderr or p.stdout,prompt=prompt,returncode=p.returncode)
         return orchestrator._extract_json(adapter.routing_text(p.stdout))

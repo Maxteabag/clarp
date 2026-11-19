@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from typing import Any
 from . import backends, config
+from .hook_runtime import without_inherited_identity
 from .orchestrator_types import DECISION_AGENT_CONTROL, DECISION_AGENT_MESSAGE, DECISION_AMBIGUOUS, DECISION_CLARIFY, DECISION_CONTROL, DECISION_CORRECTION, DECISION_ERROR, DECISION_IGNORED, DECISION_STATUS, DEFAULT_EFFORT, OPENAI_EFFORTS, OPENAI_PROVIDER, OrchestratorDecision, OrchestratorSettings, TYPESAFE_DECISION_MIN, TYPESAFE_PROVIDER, TYPESAFE_TARGET_MIN
 
 
@@ -68,7 +69,7 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=max(0.25, settings.timeout_ms / 1000.0),
-            env={**os.environ, **runner.routing_env()},
+            env={**without_inherited_identity(os.environ), **runner.routing_env()},
             check=False,
         )
     # Bytes in (routing_input encodes the prompt as argv would), text out as before.
