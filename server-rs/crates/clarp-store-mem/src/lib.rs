@@ -23,7 +23,13 @@ struct Row {
     stored: Vec<u8>,
 }
 
-type Rows = Arc<Mutex<Vec<Row>>>;
+#[derive(Default)]
+struct IndexedRows {
+    items: Vec<Row>,
+    latest: HashMap<String, usize>,
+}
+
+type Rows = Arc<Mutex<IndexedRows>>;
 
 #[derive(Default)]
 pub struct MemEngine {
@@ -58,7 +64,7 @@ struct MemLog {
 }
 
 impl MemLog {
-    fn rows(&self) -> Result<MutexGuard<'_, Vec<Row>>, LogError> {
+    fn rows(&self) -> Result<MutexGuard<'_, IndexedRows>, LogError> {
         self.rows.lock().map_err(|_| poisoned())
     }
 
@@ -90,19 +96,25 @@ impl AgentLog for MemLog {
             });
         }
         let mut rows = self.rows()?;
-        rows.extend(encoded);
-        Ok(rows.len() as Seq)
+        for row in encoded {
+            if let Some(key) = &row.key {
+                let position = rows.items.len();
+                rows.latest.insert(key.clone(), position);
+            }
+            rows.items.push(row);
+        }
+        Ok(rows.items.len() as Seq)
     }
 
     fn last_seq(&self) -> Result<Seq, LogError> {
-        Ok(self.rows()?.len() as Seq)
+        Ok(self.rows()?.items.len() as Seq)
     }
 
     fn read_after(&self, after: Seq, kinds: Kinds, limit: usize) -> Result<Vec<Item>, LogError> {
         let rows = self.rows()?;
         let from = usize::try_from(after).unwrap_or(usize::MAX);
         let mut items = Vec::new();
-        for (index, row) in rows.iter().enumerate().skip(from) {
+        for (index, row) in rows.items.iter().enumerate().skip(from) {
             if items.len() >= limit {
                 break;
             }
@@ -118,9 +130,9 @@ impl AgentLog for MemLog {
         // The item at index i has position i + 1, so "before position p" is "index below p - 1".
         let end = usize::try_from(before.saturating_sub(1))
             .unwrap_or(usize::MAX)
-            .min(rows.len());
+            .min(rows.items.len());
         let mut items = Vec::new();
-        for (index, row) in rows.iter().enumerate().take(end).rev() {
+        for (index, row) in rows.items.iter().enumerate().take(end).rev() {
             if items.len() >= limit {
                 break;
             }
@@ -134,12 +146,10 @@ impl AgentLog for MemLog {
 
     fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
         let rows = self.rows()?;
-        for (index, row) in rows.iter().enumerate().rev() {
-            if row.key.as_deref() == Some(key) {
-                return Ok(Some(self.item(index, row)?));
-            }
-        }
-        Ok(None)
+        rows.latest
+            .get(key)
+            .map(|&index| self.item(index, &rows.items[index]))
+            .transpose()
     }
 }
 

@@ -1248,6 +1248,614 @@ fn a_goal_change_keeps_its_event_and_number_in_its_owners_append() {
     }
 }
 
+/// The actor's identity and verification as seen through the same door an observer uses.
+fn ledger_actor(
+    host: &Host,
+    id: &str,
+    kind: &str,
+    who: &str,
+    agent_id: &str,
+    verified: Value,
+) -> Value {
+    let page = host.get(&format!("/goal-ledger?plan_id={id}&limit=500"));
+    let event = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|row| row["kind"] == kind)
+        .unwrap_or_else(|| panic!("no {kind} in {page}"));
+    assert_eq!(
+        (
+            &event["actor_kind"],
+            &event["actor_agent_id"],
+            &event["new"]["actor_verified"]
+        ),
+        (&json!(who), &json!(agent_id), &verified),
+        "{kind}: {event}"
+    );
+    event.clone()
+}
+
+fn enable_test_keeper(host: &Host, owner: &str) {
+    let path = "/janitors/clarp-goal-keeper";
+    let keeper = host.get(path)["janitor"].clone();
+    let changed = host.post(
+        &format!("{path}/configure"),
+        json!({
+            "expected_revision":keeper["revision"], "attachments":folding_nothing(&keeper),
+            "scope":{"agent_ids":[owner]}
+        }),
+    );
+    let enabled = host.post(
+        &format!("{path}/enabled"),
+        json!({
+            "expected_revision":changed["janitor"]["revision"],"enabled":true
+        }),
+    );
+    assert_eq!(enabled["janitor"]["enabled"], true);
+}
+
+#[test]
+fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
+    let place = Place::new("ledger-doors");
+    let (keeper, _) = keeping_model(&place, "agy");
+    let agy = place.root.join("agy");
+    let store = place.root.join(".gemini/antigravity-cli/conversations");
+    std::fs::create_dir_all(&store).unwrap();
+    let tokens = place.root.join("tokens");
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, sys, uuid
+args = sys.argv[1:]
+if "--json-schema" in args:
+    os.execv({keeper}, [{keeper}, *args])
+sid = args[args.index("--conversation")+1] if "--conversation" in args else str(uuid.uuid4())
+pathlib.Path({store}, sid+".db").touch()
+with open({tokens}, "a") as out:
+    out.write(json.dumps([sid,os.environ["CLARP_PROVIDER_TURN"]])+"\n")
+print(json.dumps({{"event":"init","conversation_id":sid,"init":{{"model":"fixture"}}}}))
+print(json.dumps({{"event":"result","result":{{"conversation_id":sid,"status":"SUCCESS","response":"done"}}}}))
+"#,
+        keeper = json!(keeper),
+        store = json!(store),
+        tokens = json!(tokens)
+    );
+    program(&agy, &script);
+    let running = place.root.join("janitor-working");
+    let janitor = janitors_tool(
+        &place,
+        &format!(
+            "\ntouch \"{0}\"\nwhile [ -e \"{0}\" ]; do sleep 0.1; done\n",
+            running.display()
+        ),
+    );
+    let host = place.start_in(
+        "",
+        &[
+            "--goals-kept-every-ms",
+            "100",
+            "--janitors-checked-every-ms",
+            "100",
+        ],
+        &[
+            ("HOME", place.root.to_str().unwrap()),
+            ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", janitor.to_str().unwrap()),
+        ],
+    );
+    let begin = |name: &str| {
+        let made = host.post("/agents", json!({"name":name,"backend":"agy"}));
+        let session = made["session"].as_str().unwrap().to_string();
+        host.send(&session, "bind", "first");
+        wait_for("the turn to finish", || host.state(&session) == "done");
+        let written = std::fs::read_to_string(&tokens).unwrap();
+        let row: Vec<String> = serde_json::from_str(written.lines().last().unwrap()).unwrap();
+        (session, row[0].clone(), row[1].clone())
+    };
+    let (owner, native, mine) = begin("Owner");
+    let (peer, _, theirs) = begin("Peer");
+    let owner_id = row_id(&host, &owner);
+    let peer_id = row_id(&host, &peer);
+    let call = |tool: &str, argv: &[&str], token: Option<&str>| {
+        let env = token.map_or_else(|| json!({}), |v| json!({"CLARP_PROVIDER_TURN":v}));
+        host.post("/tools/run", json!({"tool":tool,"argv":argv,"env":env}))
+    };
+    let commitment = r#"{"outcome":"Deliver","criteria":["Done"],"limits":"None","enroll":true}"#;
+    let mut number = 0;
+    let mut create = |session: &str, token: Option<&str>| {
+        number += 1;
+        let alias = format!("fixture-{number}");
+        let said = call(
+            "clarp-goal",
+            &["create", session, &alias, "Fixture", "[]", commitment],
+            token,
+        );
+        assert_eq!(said["exit"], 0, "{said}");
+        let plan: Value = serde_json::from_str(said["stdout"].as_str().unwrap()).unwrap();
+        plan["plan_id"].as_str().unwrap().to_owned()
+    };
+    let mut plan = String::new();
+    for (token, who, id, proof) in [
+        (Some(mine.as_str()), "owner", &owner_id, true),
+        (Some(theirs.as_str()), "peer", &peer_id, true),
+        (None, "owner", &owner_id, false),
+    ] {
+        plan = create(&owner, token);
+        ledger_actor(&host, &plan, "created", who, id, json!(proof));
+    }
+    let revision = |plan: &str| goal(&host, &place.root, &["get", plan])["revision"].clone();
+    for (action, token, who, id, proof) in [
+        (
+            "pause",
+            Some(theirs.as_str()),
+            "peer",
+            peer_id.as_str(),
+            json!(true),
+        ),
+        ("resume", None, "user", "", Value::Null),
+    ] {
+        let headers: Vec<_> = token
+            .map(|value| ("X-Clarp-Turn", value))
+            .into_iter()
+            .collect();
+        let body = json!({"plan_id":plan,"revision":revision(&plan),"action":action,"data":{"reason":"fixture"}});
+        let resp = fetch(
+            &host,
+            &host.token,
+            "POST",
+            "/task-plan/action",
+            &headers,
+            body.to_string().as_bytes(),
+        );
+        assert_eq!(resp.status, 200, "{}", resp.text());
+        ledger_actor(&host, &plan, action, who, id, proof);
+    }
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/goal-ledger-vectors.json"
+    ))
+    .unwrap();
+    let cases = vectors["peer_calls"].as_array().unwrap();
+    for caller in ["a", "b", ""] {
+        let token = match caller {
+            "a" => Some(mine.as_str()),
+            "b" => Some(theirs.as_str()),
+            _ => None,
+        };
+        let check = |door: &str, id: &str, kind: &str| {
+            let row = cases
+                .iter()
+                .find(|r| r["door"] == door && r["caller"] == caller)
+                .unwrap();
+            let identity = match row["actor_agent_id"].as_str().unwrap() {
+                "a" => &owner_id,
+                "b" => &peer_id,
+                other => panic!("unknown oracle identity {other}"),
+            };
+            ledger_actor(
+                &host,
+                id,
+                kind,
+                row["actor_kind"].as_str().unwrap(),
+                identity,
+                row["verified"].clone(),
+            );
+        };
+        let id = create(&owner, None);
+        let send = |id: &str, text: &str| {
+            call(
+                "clarp-admin",
+                &[
+                    "request", "--to", &peer, "--from", &owner, "--goal", id, "--text", text,
+                ],
+                token,
+            )
+        };
+        let sent = send(&id, "answer");
+        assert_eq!(sent["exit"], 0, "{sent}");
+        check("arm", &id, "checkpoint");
+        let req: Value = serde_json::from_str(sent["stdout"].as_str().unwrap()).unwrap();
+        let request_id = req["request_id"].as_str().unwrap();
+        // A busy peer takes a queued request into its conversation when its turn starts.
+        let incoming = format!("[Request {request_id} from ");
+        wait_for("the peer to receive this request before replying", || {
+            host.conversation(&peer)
+                .iter()
+                .any(|(role, text)| role == "user" && text.starts_with(&incoming))
+        });
+        let said = call(
+            "clarp-admin",
+            &[
+                "reply",
+                "--from",
+                &peer,
+                "--request",
+                request_id,
+                "--kind",
+                "result",
+                "--text",
+                "done",
+            ],
+            token,
+        );
+        assert_eq!(said["exit"], 0, "{said}");
+        check("reply", &id, "dependency");
+
+        let id = create(&owner, None);
+        let refused = send(&id, &"x".repeat(61 * 1024));
+        assert_eq!(refused["exit"], 1, "{refused}");
+        assert!(
+            refused["stderr"]
+                .as_str()
+                .unwrap()
+                .contains("not delivered"),
+            "{refused}"
+        );
+        check("abandon", &id, "dependency");
+    }
+    // Each Stop pauses a fresh active goal. The reference records the user as its
+    // author even when the caller has presented another agent's signed turn token.
+    for case in vectors["stop_calls"].as_array().unwrap() {
+        let id = create(&owner, None);
+        let mut headers = vec![("Content-Type", "application/json")];
+        if case["verified"] == true {
+            headers.push(("X-Clarp-Turn", theirs.as_str()));
+        }
+        let body = json!({"session":owner,"actor":case["actor"],"reason":case["reason"]});
+        let response = fetch(
+            &host,
+            &host.token,
+            "POST",
+            "/stop",
+            &headers,
+            body.to_string().as_bytes(),
+        );
+        assert_eq!(response.status, 200, "{}", response.text());
+        let stopped: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(stopped["stop_actor"], case["actor"]);
+        assert_eq!(stopped["stop_actor_verified"], case["verified"]);
+        let expected = &case["event"];
+        let row = ledger_actor(
+            &host,
+            &id,
+            "pause",
+            expected["actor_kind"].as_str().unwrap(),
+            expected["actor_agent_id"].as_str().unwrap(),
+            Value::Null,
+        );
+        assert_eq!(row["reason"], expected["reason"]);
+        assert_eq!(row["new"], expected["new"]);
+    }
+    host.post("/turn-queue/resume", json!({"session":owner}));
+    std::fs::remove_file(store.join(format!("{native}.db"))).unwrap();
+    host.send(&owner, "continue", "carry");
+    wait_for("the new session binding", || {
+        goal(&host, &place.root, &["get", &plan])["goal"]["native_session_id"] != native
+    });
+    ledger_actor(&host, &plan, "rebind", "system", "", Value::Null);
+
+    // The keeper writes beside an active owner; its own agent ID and delegation are exposed.
+    let kept = create(&peer, None);
+    enable_test_keeper(&host, &peer_id);
+    host.send(&peer, "work ended", "for-keeper");
+    wait_for("the keeper to write", || {
+        goal(&host, &place.root, &["get", &kept])["goal"]["updater"].is_object()
+    });
+    let janitor_id = host.get("/janitors/clarp-goal-keeper")["janitor"]["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        ledger_actor(&host, &kept, "updater", "system", &janitor_id, Value::Null)["delegation_id"],
+        "goal-keeper"
+    );
+
+    // Cutting off a scheduled run is a real non-user Stop. Release the janitor
+    // afterwards so observers can read its goal through the ordinary plan route.
+    let worker = host.post("/agents", json!({"name":"Sweeper","backend":"claude"}))["session"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let work = goal(
+        &host,
+        &place.root,
+        &[
+            "create",
+            &worker,
+            "sweep",
+            "Sweep",
+            "[]",
+            r#"{"outcome":"Sweep","limits":"None","criteria":["Done"]}"#,
+        ],
+    )["plan_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let settings = host.post("/janitors", every_minute(&worker, 0));
+    let path = format!("/janitors/{worker}");
+    let on = host.post(
+        &format!("{path}/enabled"),
+        json!({"expected_revision":settings["janitor"]["revision"],"enabled":true}),
+    );
+    wait_a_minute("the scheduled turn to begin", || {
+        let run = host.get(&format!("{path}/runs"))["runs"][0].clone();
+        run["status"] == "running" && running.is_file()
+    });
+    host.post(
+        &format!("{path}/enabled"),
+        json!({"expected_revision":on["janitor"]["revision"],"enabled":false}),
+    );
+    wait_for("the stopped janitor to be released", || {
+        let row = host.get(&path);
+        if row["janitor"]["cancellation_pending"] == true {
+            return false;
+        }
+        let (status, answer) = host.ask(
+            "POST",
+            &format!("{path}/release"),
+            Some(&json!({"expected_revision":row["janitor"]["revision"]})),
+        );
+        if status == 409 && answer["code"] == "agent_busy" {
+            return false;
+        }
+        assert_eq!(status, 200, "{answer}");
+        true
+    });
+    assert_eq!(
+        ledger_actor(&host, &work, "pause", "user", "", Value::Null)["reason"],
+        "Stopped by janitor (unverified)"
+    );
+}
+
+#[test]
+fn the_keeper_follows_the_next_event_after_a_trimmed_goal_is_upgraded_reopened_and_moved() {
+    use clarp_kernel::{
+        goals::{GoalBook, Owner},
+        journal::kind,
+    };
+    use clarp_ports::log::{LogEngine, NewItem};
+    let place = Place::new("ledger-keeper-upgrade");
+    let (model, _) = keeping_model(&place, "agy");
+    let start = |p: &Place| {
+        p.start_in(
+            "",
+            &["--goals-kept-every-ms", "100"],
+            &[
+                ("HOME", p.root.to_str().unwrap()),
+                ("CLARP_AGY_PROGRAM", model.to_str().unwrap()),
+            ],
+        )
+    };
+    let host = start(&place);
+    let session = host.new_agent("Legacy");
+    let owner = row_id(&host, &session);
+    let plan = format!("{owner}:upgrade");
+    host.kill();
+    let now = now_ms();
+    let history:Vec<_>=(0..50).map(|n|json!({"kind":"step","revision":351+n,"at":now-100,"detail":{"reason":"historical"}})).collect();
+    let shown = json!({"plan_id":plan,"agent_id":owner,"session":session,"status":"active","revision":400,"created_at":now-500,"updated_at":now-100,
+        "goal":{"history_offset":350,"history":history,"updater":{"through_event":400,"through_ms":now-100,"progress":"Already read"},
+        "criteria":[],"outcome":"Deliver","checkpoint":{},"continuation":{"state":"not_enrolled"}}});
+    let book = GoalBook::new();
+    let change = book
+        .taken_over(
+            Owner {
+                agent_id: &owner,
+                session: &session,
+            },
+            &shown,
+            &[],
+        )
+        .unwrap();
+    let record = book.record(&change, now);
+    let log_path = place.root.join("data/agents").join(&owner);
+    let open_log = || {
+        clarp_store_sqlite::SqliteEngine::new()
+            .open(&log_path, clarp_codec::standard_set("none").unwrap())
+            .unwrap()
+    };
+    let append_record = |r: &clarp_kernel::goals::GoalRecord| {
+        open_log()
+            .append(&[
+                NewItem::new(kind::GOAL, now, serde_json::to_vec(r).unwrap())
+                    .keyed(format!("g-{plan}")),
+            ])
+            .unwrap();
+    };
+    append_record(&record);
+    let get = |host: &Host| host.get(&format!("/task-plans?session={session}"))["plans"][0].clone();
+    let page = |host: &Host| host.get(&format!("/goal-ledger?plan_id={plan}"));
+    let notice = |host: &Host, stage: &str| {
+        let prior = get(host)["revision"].as_i64().unwrap();
+        let checkpoint = json!({"progress":stage,"next_work":"Check the next event"}).to_string();
+        let updated = goal(
+            host,
+            &place.root,
+            &["checkpoint", &plan, &prior.to_string(), &checkpoint],
+        );
+        assert_eq!(updated["revision"], prior + 1);
+        let ledger = page(host);
+        let event = ledger["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|e| e["kind"] == "checkpoint" && e["new"]["detail"]["progress"] == stage)
+            .unwrap();
+        let expected = event["event_id"].as_i64().unwrap();
+        // A completed owner turn makes the keeper gather immediately with this
+        // fixture's zero fold interval. The citation must name the checkpoint.
+        host.send(&session, stage, &format!("keeper-trigger-{expected}"));
+        wait_for(
+            &format!("the keeper to cite event {expected} after {stage}"),
+            || {
+                let current = get(host);
+                assert!(
+                    current["updater"]["goal_error"].is_null(),
+                    "{stage}: {}",
+                    current["updater"]
+                );
+                let updated = &current["goal"]["updater"];
+                updated["through_event"] == expected
+                    && updated["source_refs"]
+                        .as_array()
+                        .is_some_and(|v| v.contains(&json!(format!("goal_event:{expected}"))))
+            },
+        );
+        wait_for("the keeper to finish recording its run", || {
+            host.get("/janitors/clarp-goal-keeper/runs")["runs"][0]["status"] == "completed"
+        });
+    };
+
+    let host = start(&place);
+    assert_eq!(get(&host)["goal"]["updater"]["through_event"], 51);
+    assert_eq!(page(&host)["events"][50]["kind"], "ledger_started");
+    enable_test_keeper(&host, &owner);
+    notice(&host, "upgrade");
+    host.kill();
+    let host = start(&place);
+    notice(&host, "restart");
+
+    // The move preserves a valid cursor behind the plan tail, and caps a bad
+    // one. A later event is still reported at the destination in both cases.
+    let source = get(&host);
+    let events = page(&host)["events"].clone();
+    let tail = events.as_array().unwrap().last().unwrap()["event_id"]
+        .as_i64()
+        .unwrap();
+    let valid = source["goal"]["updater"]["through_event"].as_i64().unwrap();
+    assert!(valid < tail);
+    for (incoming, wanted) in [(valid, valid), (tail + 500, tail)] {
+        let destination = Place::new("ledger-keeper-move");
+        let target = start(&destination);
+        let mut moved = source.clone();
+        moved["goal"]["updater"]["through_event"] = json!(incoming);
+        let imported=target.post("/agents/import",json!({"agent":{"agent_id":owner,"session":session,"persona":"Legacy","backend":"scripted","cwd":destination.root.join("work")},
+            "from":"fixture","turns":[],"plans":[{"plan":moved,"events":events}]}));
+        assert_eq!(imported["ok"], true, "{imported}");
+        assert_eq!(get(&target)["goal"]["updater"]["through_event"], wanted);
+        enable_test_keeper(&target, &owner);
+        notice(&target, "import");
+    }
+
+    // A document already in the ledger with an impossibly high cursor:
+    // gather clamps the starting cursor even when there are no newer events.
+    host.kill();
+    let mut bad = record;
+    bad.set.clear();
+    bad.set.insert(
+        "updater".into(),
+        json!({"through_ms":now,"through_event":tail+9000,"progress":"Corrupt cursor"}),
+    );
+    bad.history = Default::default();
+    bad.revision = source["revision"].as_i64().unwrap();
+    append_record(&bad);
+    let host = start(&place);
+    host.send(&session, "Evidence for the keeper", "keeper-evidence");
+    wait_for("the keeper to persist the bounded start", || {
+        get(&host)["goal"]["updater"]["through_event"] == tail
+    });
+    notice(&host, "cursor repair");
+}
+
+#[test]
+fn ledger_pages_and_the_goal_tool_read_the_same_attributed_events_after_a_restart() {
+    let place = Place::new("ledger-read");
+    let host = place.start();
+    let session = host.new_agent("Reader");
+    let make = |alias: &str| {
+        goal(
+            &host,
+            &place.root,
+            &[
+                "create",
+                &session,
+                alias,
+                "Fixture",
+                "[]",
+                r#"{"outcome":"Deliver","limits":"None","criteria":["works"]}"#,
+            ],
+        )
+    };
+    let first = make("first");
+    let second = make("second");
+    let id = first["plan_id"].as_str().unwrap();
+    let req = json!({"plan_id":id,"revision":0,"action":"pause","data":{"reason":"Review"}});
+    assert_eq!(host.ask("POST", "/task-plan/action", Some(&req)).0, 200);
+    let whole = host.get(&format!("/goal-ledger?plan_id={id}"));
+    let rows = whole["events"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["event_id"], 1);
+    assert_eq!(rows[0]["actor_session"], session);
+    assert_eq!(rows[1]["event_id"], 3);
+    assert_eq!(rows[1]["kind"], "pause");
+    assert_eq!(rows[1]["actor_kind"], "user");
+    assert_eq!(rows[1]["actor_session"], "");
+    assert_eq!(rows[1]["reason"], "Review");
+    assert_eq!(rows[1]["new"]["status"], "paused");
+    assert_eq!(rows[1]["prior"]["status"], "active");
+    assert!(rows[0].get("idempotency_key").is_none());
+    let url = format!("/goal-ledger?plan_id={id}&limit=0&after=-1");
+    let first_page = host.get(&url);
+    assert_eq!(first_page["events"], json!([rows[0]]));
+    assert_eq!(first_page["has_more"], true);
+    assert_eq!(first_page["next_after"], 1);
+    assert_eq!(
+        host.get(&format!(
+            "/goal-ledger?plan_id={}&limit=501",
+            second["plan_id"].as_str().unwrap()
+        ))["next_after"],
+        2
+    );
+    let after = host.get(&format!("/goal-ledger?plan_id={id}&after=2"));
+    assert_eq!(after["events"], json!([rows[1]]));
+    assert_eq!(after["has_more"], false);
+    assert_eq!(after["next_after"], 3);
+    for after in ["9223372036854775808", "-9223372036854775809"] {
+        assert_eq!(
+            host.ask(
+                "GET",
+                &format!("/goal-ledger?plan_id={id}&after={after}"),
+                None
+            ),
+            (400, json!({"error":"after outside signed integer range"}))
+        );
+    }
+    let empty = host.get("/goal-ledger?plan_id=unknown&after=17");
+    assert_eq!(
+        empty,
+        json!({"plan_id":"unknown","events":[],"has_more":false,"next_after":17})
+    );
+    let again = host.ask("POST", "/task-plan/action", Some(&req));
+    assert_eq!(again.0, 409);
+    assert_eq!(host.get(&format!("/goal-ledger?plan_id={id}")), whole);
+    host.kill();
+    let host = place.start();
+    assert_eq!(goal(&host, &place.root, &["ledger", id]), whole);
+    assert_eq!(goal(&host, &place.root, &["ledger", id, "2"]), after);
+    let second_id = second["plan_id"].as_str().unwrap();
+    let (status, reply) = host.ask("DELETE", &format!("/agents/{session}"), None);
+    assert_eq!(status, 200, "{reply}");
+    let ended = host.get(&format!("/goal-ledger?plan_id={second_id}&after=2"));
+    let e = &ended["events"][0];
+    assert_eq!(e["kind"], "cancelled");
+    assert_eq!(e["reason"], "Owner agent deleted");
+    assert_eq!(e["prior"]["status"], "active");
+    assert_eq!(e["new"]["status"], "cancelled");
+    assert_eq!(e["actor_kind"], "system");
+    host.kill();
+    let host = place.start();
+    assert_eq!(
+        host.get(&format!("/goal-ledger?plan_id={second_id}&after=2")),
+        ended
+    );
+    assert_eq!(
+        host.get(&format!("/goal-ledger?plan_id={id}")),
+        whole,
+        "a paused goal has no deletion cancellation"
+    );
+}
+
 #[test]
 fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_killed() {
     let place = Place::new("goal");
@@ -9080,6 +9688,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         plan.as_object_mut().unwrap().remove("server_now");
         plan
     };
+    let events_before = old_host.get(&format!("/goal-ledger?plan_id={plan_id}"));
+    assert!(!events_before["events"].as_array().unwrap().is_empty());
     let plan_before = without_now(goal(&old_host, &dir, &["get", &plan_id]));
     let notes_before = goal(&old_host, &dir, &["read", &plan_id, "working-notes.md"]);
     // And it has a library there: notes its user pinned, a report it revised, a request
@@ -9197,6 +9807,10 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     let new_dir = new_place.root.clone();
     let plan_here = without_now(goal(&new_host, &new_dir, &["get", &plan_id]));
     assert_eq!(plan_here, plan_before);
+    assert_eq!(
+        new_host.get(&format!("/goal-ledger?plan_id={plan_id}")),
+        events_before
+    );
     assert_eq!(
         goal(&new_host, &new_dir, &["read", &plan_id, "working-notes.md"]),
         notes_before

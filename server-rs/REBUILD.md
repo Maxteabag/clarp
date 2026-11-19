@@ -1325,7 +1325,13 @@ events, their per-plan ordinals and their ID locators together. The next number 
 agent. A new agent arriving from another Host keeps its supplied IDs, and its next number is above
 all of them. When a plan enters an existing ledger, its disjoint IDs stay and an entry marker names
 their source and range. Colliding IDs are refused before the append. Earlier goal history available
-at upgrade is marked as legacy.
+at upgrade is marked as legacy. The tool and GET /goal-ledger seek within one plan by its ordinal
+and return its events in commit order. A page reads only the actor identities it returns. A moved
+agent brings the events of each goal with their source IDs. The keeper uses these same numbers
+in its source references. A goal already updated at upgrade gets the ID of its own legacy baseline
+as its keeper cursor in the same append. A moved goal retains the cursor up to its source tail.
+The keeper bounds its initial page by the owner's committed high-water inside the same actor ask.
+Bookkeeping delegations and explicit subgoals remain separate work.
 
 **The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
 runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's

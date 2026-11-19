@@ -207,6 +207,17 @@ pub enum Ask {
         text: String,
         answer: Answer<bool>,
     },
+    KeeperEvents {
+        plan: String,
+        after: i64,
+        answer: Answer<(i64, Vec<clarp_kernel::goals::ledger::Event>, bool)>,
+    },
+    GoalEvents {
+        plan: String,
+        after: i64,
+        limit: usize,
+        answer: Answer<(Vec<clarp_kernel::goals::ledger::Event>, bool)>,
+    },
     Tail {
         limit: usize,
         which: Which,
@@ -381,7 +392,7 @@ pub enum Ask {
         fields: Value,
     },
     /// The agent was removed: the thread ends.
-    Close,
+    Close(mpsc::Sender<()>),
 }
 
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
@@ -687,6 +698,35 @@ impl AgentHandle {
     }
 
     /// One thing of the agent's conversation, by its id. `None`: there is no such thing.
+    pub async fn goal_events(
+        &self,
+        plan: String,
+        after: i64,
+        limit: usize,
+    ) -> Result<(Vec<clarp_kernel::goals::ledger::Event>, bool), Unavailable> {
+        self.ask(|answer| Ask::GoalEvents {
+            plan,
+            after,
+            limit,
+            answer,
+        })
+        .await
+    }
+
+    /// The keeper's first page and bounded starting cursor come from one actor ask.
+    pub async fn keeper_events(
+        &self,
+        plan: String,
+        after: i64,
+    ) -> Result<(i64, Vec<clarp_kernel::goals::ledger::Event>, bool), Unavailable> {
+        self.ask(|answer| Ask::KeeperEvents {
+            plan,
+            after,
+            answer,
+        })
+        .await
+    }
+
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
         self.ask(|answer| Ask::Row { id, answer }).await
     }
@@ -891,7 +931,10 @@ impl AgentHandle {
 
     /// Ends the agent's thread. Its turn, if one runs, is not touched.
     pub fn close(&self) {
-        let _ = self.tx.send(Ask::Close);
+        let (closed, wait) = mpsc::channel();
+        if self.tx.send(Ask::Close(closed)).is_ok() {
+            let _ = wait.recv();
+        }
     }
 }
 
@@ -1290,12 +1333,14 @@ impl Worker {
                     Err(RecvTimeoutError::Disconnected) => return,
                 },
             };
-            if matches!(ask, Ask::Close) {
+            if let Ask::Close(closed) = ask {
                 // The agent is gone: the pool of its tool's accounts does not wait for its
                 // turn, and does not take it up.
                 if let (Some(pool), Some(_)) = (self.setup.pool(), self.pooled) {
                     pool.disowned(&self.setup.record.agent_id);
                 }
+                self.actor = None;
+                let _ = closed.send(());
                 return;
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
@@ -2109,11 +2154,7 @@ impl Worker {
                             &self.setup.record,
                             change,
                             None,
-                            if by == "user" {
-                                clarp_kernel::goals::ledger::Author::User
-                            } else {
-                                clarp_kernel::goals::ledger::Author::System
-                            },
+                            clarp_kernel::goals::ledger::Author::User,
                             now,
                         )?;
                         out.changed.goals |= kept.changed.goals;
@@ -2309,6 +2350,25 @@ impl Worker {
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
+            Ask::KeeperEvents {
+                plan,
+                after,
+                answer,
+            } => {
+                let page = actor.next_goal_event_id().and_then(|next| {
+                    let after = after.clamp(0, next - 1);
+                    actor
+                        .goal_events(&plan, after, 500)
+                        .map(|(events, more)| (after, events, more))
+                });
+                return read(page, answer);
+            }
+            Ask::GoalEvents {
+                plan,
+                after,
+                limit,
+                answer,
+            } => return read(actor.goal_events(&plan, after, limit), answer),
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
             Ask::RevisionAt { ts_ms, answer } => return read(actor.revision_at(ts_ms), answer),
             // Answered above, where what they change is published first.
@@ -2392,7 +2452,7 @@ impl Worker {
                 attempt,
                 reason,
             } => (actor.launch_failed(turn, attempt, &reason, now)?, nobody()),
-            Ask::Close => return Ok(()),
+            Ask::Close(_) => return Ok(()),
         };
         // What follows from a command is done and published before its answer is given.
         self.after(out);
@@ -3347,6 +3407,8 @@ fn refuse_for(
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
@@ -3379,7 +3441,11 @@ fn refuse_for(
                 amended(*record);
                 let _ = taken.send(());
             }
-            Ok(Ask::Close) | Err(RecvTimeoutError::Disconnected) => return false,
+            Ok(Ask::Close(closed)) => {
+                let _ = closed.send(());
+                return false;
+            }
+            Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,
         }
     }

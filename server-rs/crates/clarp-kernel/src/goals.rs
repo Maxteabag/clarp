@@ -323,6 +323,41 @@ pub struct GoalRecord {
     pub documents: Vec<Document>,
 }
 
+impl GoalRecord {
+    /// A legacy keeper had counted history entries in this goal. Its surviving
+    /// history is the baseline in the new ledger. An incoming ledger already
+    /// uses event IDs, so preserve outstanding events and cap at its own tail.
+    pub fn import_keeper_cursor(
+        &mut self,
+        plan: &Plan,
+        source: Option<&[ledger::Event]>,
+        baseline: i64,
+    ) {
+        let Some(updater) = plan
+            .goal
+            .as_ref()
+            .and_then(|goal| goal.fields.get("updater"))
+            .and_then(Value::as_object)
+        else {
+            return;
+        };
+        if !updater.get("through_ms").is_some_and(crate::python::truthy) {
+            return;
+        }
+        let mut updater = updater.clone();
+        let through = match source {
+            None => baseline,
+            Some(events) => updater
+                .get("through_event")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, events.last().map_or(0, |event| event.event_id)),
+        };
+        updater.insert("through_event".into(), json!(through));
+        self.set.insert("updater".into(), Value::Object(updater));
+    }
+}
+
 /// Whose plan it is: the agent, and the name its session has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Owner<'a> {

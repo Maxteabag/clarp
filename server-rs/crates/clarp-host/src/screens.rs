@@ -116,25 +116,6 @@ async fn no_agent_goal(uri: Uri) -> ApiError {
     not_built_at(&uri, "A goal of this kind is")
 }
 
-/// `GET /goal-ledger?plan_id=&after=&limit=`: what was written into a goal's ledger. This
-/// Host keeps no ledger: a goal's history is in its plan.
-async fn goal_ledger(Query(asked): Asked) -> Answered {
-    let said = |key: &str| asked.get(key).map_or("", |said| said.trim());
-    if said("plan_id").is_empty() {
-        return Err(bad("plan_id required"));
-    }
-    let whole = |key: &str| said(key).is_empty() || said(key).parse::<i64>().is_ok();
-    if !(whole("after") && whole("limit")) {
-        return Err(bad("after and limit are integers"));
-    }
-    Ok(Json(json!({
-        "events": [], "has_more": false, "next_after": 0, "plan_id": said("plan_id"),
-    })))
-}
-
-// ---- pictures ------------------------------------------------------------------------------
-
-/// `GET /agent-portrait-generation?session=`: no picture is made here.
 async fn portrait_generation() -> Json<Value> {
     Json(kept("/agent-portrait-generation"))
 }
@@ -380,7 +361,6 @@ pub fn routes() -> Router<App> {
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
-        .route("/goal-ledger", get(goal_ledger))
         .route(
             "/agent-portrait-generation",
             get(portrait_generation).post(no_pictures),
