@@ -113,3 +113,23 @@ pub fn report(
         ),
     )
 }
+
+/// A single Jev choice request shares the evidence across all questions.
+pub fn batch(entries:&[Evidence])->Option<Value>{
+    use std::sync::LazyLock;
+    #[allow(clippy::expect_used)]
+    static QUESTION:LazyLock<Value>=LazyLock::new(||serde_json::from_str(include_str!("label-question.json")).expect("reference label question"));
+    if entries.is_empty(){return None;}
+    let mut agents=serde_json::Map::new();
+    let mut questions=serde_json::Map::new();
+    for (index,entry) in entries.iter().enumerate(){
+        let key=format!("a{}",index+1);
+        let mut q=QUESTION.clone();
+        q["instructions"]=json!(q["instructions"].as_str()?.replace("agents.a1",&format!("agents.{key}")));
+        questions.insert(format!("l_{key}"),q);
+        agents.insert(key,entry.packet.clone());
+    }
+    Some(json!({"model":"jev-latest","state":{"agents":agents},"questions":questions}))
+}
+
+pub const JUDGE_SECONDS:u64=15;
