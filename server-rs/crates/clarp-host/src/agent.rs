@@ -1362,13 +1362,35 @@ impl Worker {
             .engine
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
-        let (actor, out) = Actor::open(
+        let (mut actor, mut out) = Actor::open(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
             log,
             self.now_ms(),
         )
         .map_err(|error| error.to_string())?;
+        if self.setup.record.backend=="claude"{
+            // No jobs view escapes this rejoin until every ended attempt's
+            // final byte boundary has been consumed and its tasks reconciled.
+            let current=actor.provider_attempt();
+            let recovering:Vec<_>=actor.provider_sessions().filter(|(_,s)|s.final_read.is_some() || s.owner.is_some() && s.owner!=current).map(|(id,_)|id.clone()).collect();
+            let root=crate::past::projects(&crate::config::home());
+            for session in recovering{
+                let mut source=crate::helper_source::HelperSource::default();
+                loop{
+                    let Some(saved)=actor.provider_session(&session)else{break};
+                    let Some(attempt)=saved.final_read.as_ref().map(|e|e.attempt).or(saved.owner)else{break};
+                    let now=self.now_ms();
+                    let mut read=crate::helper_source::ProviderRead{helpers:false,parent:false,closing:Some((attempt,now)),
+                        visit:clarp_kernel::provider_tasks::Visit{native:session.clone(),expected:saved.revision,cursor:saved.cursor.clone(),bound_at:saved.bound_at,owner:Some(attempt),final_read:saved.final_read.clone(),actions:Vec::new(),eof:false}};
+                    source.read_visit(&root,&self.setup.record.cwd,&mut read,now).map_err(|e|e.to_string())?;
+                    let eof=read.visit.eof;
+                    let changes=actor.apply_provider_visit(read.visit,now,||self.setup.revisions.next(now)).map_err(|e|e.to_string())?;
+                    out.changed.jobs |= changes.changed.jobs;
+                    if eof{break;}
+                }
+            }
+        }
         self.actor = Some(actor);
         if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
             actor.pooled(pool.of(&self.setup.record.agent_id));

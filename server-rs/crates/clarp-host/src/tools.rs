@@ -249,6 +249,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                     format!("usage: agent_bg.py <session> {verb} <job-id> <kind> <title> [detail]"),
                 );
             }
+            if argv[2].trim().starts_with("claude-task:"){return ToolAnswer::said(1,clarp_kernel::jobs::JobRefusal::ReservedId.to_string());}
             let Some(member) = app.anyone(session) else {
                 return ToolAnswer::said(1, format!("agent_bg: unknown session: {session}"));
             };

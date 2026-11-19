@@ -620,7 +620,7 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
         "heartbeat_age_ms": job.heartbeat_at_ms.map(|at| (now_ms - at).max(0)),
         "worker_freshness": freshness,
         "is_terminal": !active,
-        "can_cancel": active,
+        "can_cancel": active && !job.provider_owned(),
         "elapsed_ms": (job.terminal_at_ms.unwrap_or(now_ms) - job.started_at_ms).max(0),
         "outcome_state": outcome,
     })
