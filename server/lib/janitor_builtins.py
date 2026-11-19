@@ -28,7 +28,9 @@ SEED_VERSION = 1
 DEMAND_RUN_TTL_MS = 180_000  # Two bounded 60-second routing probes plus overhead.
 _METADATA_KEYS = frozenset({"input_hash", "request_hash", "candidate_count", "item_count",
     "detail_level", "target_count", "target_agent_id", "policy_revision", "summary", "status", "reason",
-    "decision_id", "http_status"})
+    "decision_id", "http_status",
+    # What a routing run's first answer said, so a replay answers the same (R83).
+    "answer_session", "answer_dispatch", "answer_status"})
 
 
 def _role(role: str) -> str:

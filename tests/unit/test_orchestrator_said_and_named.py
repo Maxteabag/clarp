@@ -168,6 +168,13 @@ NAMED = {
     "unsure, naming nobody": (_command("stop", "ZED", confidence=0.4), None, "", "mike", "clarify"),
     "fork of a real agent": (_command("fork", "ANTONI"), None, "antoni", "mike", "clarify"),
     "fork naming nobody": (_command("fork", "ZED"), None, "", "mike", "clarify"),
+    "unsure, the name only in the payload": (_command("stop", "", confidence=0.4, name="Antoni"), None,
+                                             "antoni", "mike", "clarify"),
+    "unsure, names that disagree": (_command("stop", "ANTONI", confidence=0.4, name="Mike"), None, "",
+                                    "mike", "clarify"),
+    "fork, the name only in the payload": (_command("fork", "", name="Antoni"), None, "antoni", "mike",
+                                           "clarify"),
+    "fork, names that disagree": (_command("fork", "ANTONI", name="Mike"), None, "", "mike", "clarify"),
     "an archived agent": (_command("stop", "ANTONI"), _archive_antoni, "antoni", "mike", "clarify"),
     "an agent taking no voice commands": (_command("stop", "clarp-message-delegator"), None,
                                           "clarp-message-delegator", "mike", "clarify"),
@@ -324,3 +331,120 @@ def test_a_clarifys_receipt_names_its_resolved_target_and_its_replay_answers_as_
     again = send()                                                       # answered from the run
     assert len(asked) == calls
     assert again.session == "mike"
+
+
+# ---- the hold of 02:43: a replay answers what the first answer said, for every outcome kind ----
+
+def _broken_create(monkeypatch):
+    def broken(self, payload):
+        raise RuntimeError("the lifecycle could not start it")
+    monkeypatch.setattr(agent_lifecycle.AgentLifecycleService, "create", broken)
+
+
+def _dispatch_fails(status):
+    from lib.turn_dispatch import DispatchError
+
+    def dispatch(**kwargs):
+        raise DispatchError(status, "dispatch failed")
+    return dispatch
+
+
+def _model_fails(packet):
+    raise RuntimeError("the routing model failed")
+
+
+# outcome kind -> (the model's decision or a model, a setup, how dispatch answers)
+OUTCOMES = {
+    "route": (_message("antoni"), None, None),
+    "control": ({"kind": "control", "control_action": "repeat", "target_session": "ANTONI",
+                 "confidence": 0.95}, None, None),
+    "a command carried out": (_command("stop", "ANTONI"), None, None),
+    "status": ({"kind": "status_query", "target_session": "antoni", "confidence": 0.95}, None, None),
+    "clarify": (_message("antoni", 0.4), None, None),
+    "the model's own clarify": ({"kind": "clarify", "target_session": "ANTONI", "confidence": 0.9}, None, None),
+    "refused: a name nobody has": (_command("stop", "ZED"), None, None),
+    "refused: two of that name": (_command("stop", "SAM"), _two_sams, None),
+    "refused: an archived agent": (_command("stop", "ANTONI"), _archive_antoni, None),
+    "refused: no voice commands": (_command("stop", "clarp-message-delegator"), None, None),
+    "refused by the lifecycle": (_command("restart", "ANTONI"), _lifecycle_refuses, None),
+    "a routed dispatch fails 4xx": (_message("antoni"), None, _dispatch_fails(413)),
+    "a routed dispatch fails 5xx": (_message("antoni"), None, _dispatch_fails(503)),
+    "an error after a command was accepted": (_command("create", "NOVA", name="Nova"), _broken_create, None),
+    "the model fails": (_model_fails, None, None),
+}
+
+
+def _service(model, effects):
+    from tests.unit.test_orchestrator_janitor import ROLE, builtins
+    for session in ("mike", "antoni"):
+        agents.create_agent(persona=session.title(), voice_id="", cwd="/tmp", session=session)
+    builtins().ensure_builtins(initial={ROLE: {
+        "enabled": True, "backend": "codex", "provider": "codex",
+        "model": "gpt-5.3-codex-spark", "effort": "", "options": {"fallback_only": False}}})
+    return orchestrator.OrchestratorService(
+        SimpleNamespace(default_session="mike", stream=SimpleNamespace(broadcast=lambda _e: None),
+                        speak_announcement=lambda text, *a, **k: effects["spoken"].append(text)),
+        model_call=lambda packet, *_: model(packet) if callable(model) else {"reason": "case", **model})
+
+
+def _sender(service, *, app, dispatch=None, client="request-replayed"):
+    from lib import prompt_admissions
+    admission = prompt_admissions.create(
+        authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
+        observed_at=db.now_ms(), client_admission_id=client, trace_id="route-r",
+        original_text="the request")
+
+    def delivered(**kwargs):
+        return SimpleNamespace(session=kwargs["forced_session"], backend="claude")
+
+    def send():
+        return service.handle_send(text="the request", requested_session="mike", trace_id="route-r",
+                                   prompt_admission=admission, hands_free=True, synthesize_audio=False,
+                                   dispatch=dispatch or delivered, fallback_request=app)
+    return send
+
+
+def _said(outcome):
+    return (outcome.status, outcome.action, outcome.session, outcome.dispatch)
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["voice", "app"])
+@pytest.mark.parametrize("kind", sorted(OUTCOMES))
+def test_a_replay_answers_what_the_first_answer_said(effects, monkeypatch, kind, app):
+    model, setup, dispatch = OUTCOMES[kind]
+    service = _service(model, effects)
+    if setup:
+        setup(monkeypatch)
+    send = _sender(service, app=app, dispatch=dispatch)
+    first = send()
+    assert _said(send()) == _said(first)
+    assert _said(send()) == _said(first)
+    if kind == "a routed dispatch fails 4xx":
+        assert _said(first) == (413, "error", "antoni", "")         # the routed target, as main
+
+
+def test_a_replay_while_the_request_runs_is_pending_and_after_it_the_first_answer(effects):
+    service = _service({}, effects)
+    seen = {}
+
+    def model(packet):
+        seen["during"] = _said(seen["send"]())        # the same request again while its run is held
+        return {"reason": "case", **_message("antoni")}
+    service.model_call = lambda packet, *_: model(packet)
+    seen["send"] = _sender(service, app=False)
+    first = seen["send"]()
+    assert seen["during"] == (202, "pending", "mike", "")
+    assert first.action == "route" and _said(seen["send"]()) == _said(first)
+
+
+def test_a_receipt_written_before_the_answer_was_kept_replays_as_main_did(effects):
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False)
+    first = send()
+    row = db.conn().execute("SELECT rowid, result_json FROM janitor_demand_results"
+                            " ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
+    older = {key: value for key, value in json.loads(row["result_json"]).items()
+             if not key.startswith("answer_")}
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?",
+                      (json.dumps(older), row["rowid"]))
+    assert _said(send()) == _said(first) == (200, "route", "antoni", "claude")

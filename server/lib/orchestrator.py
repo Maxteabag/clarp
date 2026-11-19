@@ -536,7 +536,10 @@ class OrchestratorService:
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
         receipt = {"summary": f"Message routing finished: {result.action}",
                    "status": result.action,
-                   "target_agent_id": (recipient or {}).get("agent_id", "")}
+                   "target_agent_id": (recipient or {}).get("agent_id", ""),
+                   # What the first answer said: a replay answers exactly this.
+                   "answer_session": result.session, "answer_dispatch": result.dispatch,
+                   "answer_status": result.status}
         if result.action == FINAL_ERROR and result.status != 500:
             receipt["http_status"] = result.status
         if result.retry_dispatch:
@@ -660,17 +663,26 @@ class OrchestratorService:
         recipient = identity.lookup(receipt.get("target_agent_id")) or {}
         pending = run.get("status") in {"queued", "running"}
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
+        status = (202 if pending
+                  else int(receipt.get("http_status") or 500) if action == FINAL_ERROR
+                  else 200)
+        # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
+        # A receipt written before it kept that answers as main did, by its recipient.
+        if not pending and "answer_session" in receipt:
+            session = str(receipt.get("answer_session") or "")
+            dispatched = str(receipt.get("answer_dispatch") or "")
+            status = int(receipt.get("answer_status") or status)
+        elif pending:
+            session, dispatched = requested_session, ""
+        else:
+            session = recipient.get("session", requested_session)
+            dispatched = recipient.get("backend", "") if action == FINAL_ROUTE else ""
         return OrchestratorOutcome(
             handled=True, ok=action != FINAL_ERROR,
-            # The receipt names the resolved target (R83); only what reached it answers with it.
-            session=(recipient.get("session", requested_session)
-                     if action in {FINAL_ROUTE, FINAL_CONTROL, FINAL_STATUS} else requested_session),
-            dispatch=recipient.get("backend", "") if action == FINAL_ROUTE else "",
+            session=session, dispatch=dispatched,
             trace_id=trace_id, action=action,
             error="Message routing failed" if action == FINAL_ERROR else "",
-            status=(202 if pending
-                    else int(receipt.get("http_status") or 500) if action == FINAL_ERROR
-                    else 200),
+            status=status,
         )
 
     def transcribe_should_skip_herald(self, *, hands_free: bool) -> bool:
