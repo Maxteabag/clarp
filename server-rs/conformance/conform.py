@@ -1489,19 +1489,51 @@ def asking_tried(stamped) -> int:
         return got, unfinished, lines, ok
     one = [{'id': 's'}]
     tried = 0
-    # A sound later answer explains: the reference gave the Rust Host's answer at try 2, which is
-    # one more recording (the fourth), and nothing is asked after it.
-    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [common, rare, common]})
-    assert ok and asked == [(1, ['s']), (2, ['s'])] and sorted(got) == [1, 2], (asked, got)
-    assert 's: recorded 2 more time(s), 4 recordings in all; nothing left unexplained' in lines, lines
-    assert "  s / http / [0].body.answer: a later recording gave the Rust Host's answer: recording 4 (try 2)" in lines
+    every = [(attempt, ['s']) for attempt in range(1, MORE_TRIES + 1)]
+    place_line = "  s / http / [0].body.answer: "
+    cut = answer('rare', error='timed out')
+    # One of three does not explain: the place stays unexplained, said with its count, and the
+    # scenario is asked all three times (nothing stops early).
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': ['rare', 'common', 'common']})
+    assert not ok and asked == every and sorted(got) == [1, 2, 3], (asked, got)
+    assert f's: recorded {MORE_TRIES} more time(s), 3 ran to their end' in lines, lines
+    assert place_line + "1 of 3 gave the Rust Host's answer: STILL UNEXPLAINED" in lines, lines
+    assert lines[-1] == 'THE RUST HOST DIFFERS: 1 unexplained difference(s), 0 run error(s)', lines[-1]
+    tried += 1
+    # Two of three explain: the reference's usual answer, said with its count; the third try is
+    # still asked though two already agreed.
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': ['rare', 'common', 'rare']})
+    assert ok and asked == every, asked
+    assert place_line + "2 of 3 gave the Rust Host's answer: the reference's usual answer, explained" in lines, lines
+    assert any("the reference's usual answer when asked again: 1  unexplained: 0" in line for line in lines), lines
     assert lines[-1] == 'THE RUST HOST CONFORMS', lines[-1]
     tried += 1
-    # None in three tries: it stays unexplained, and it was asked as often as it may be.
-    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [common]})
-    assert not ok and asked == [(attempt, ['s']) for attempt in range(1, MORE_TRIES + 1)], asked
-    assert f's: recorded {MORE_TRIES} more time(s), {2 + MORE_TRIES} recordings in all; 1 place(s) still ' \
-           'unexplained' in lines and lines[-1].startswith('THE RUST HOST DIFFERS: 1 unexplained'), lines
+    # Three of three, said so.
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': ['rare']})
+    assert ok and place_line + "3 of 3 gave the Rust Host's answer: the reference's usual answer, explained" in lines
+    tried += 1
+    # None of three: unexplained, 0 of 3.
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': ['common']})
+    assert not ok and place_line + "0 of 3 gave the Rust Host's answer: STILL UNEXPLAINED" in lines, lines
+    tried += 1
+    # Three tries all cut short explain nothing, and each is said.
+    got, unfinished, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': [cut]})
+    assert not ok and asked == every and not got and len(unfinished) == MORE_TRIES, (got, unfinished)
+    tried += 1
+    # Two that ran and agree explain, the third cut short and said.
+    got, unfinished, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': [cut, 'rare', 'rare']})
+    assert ok and sorted(got) == [2, 3] and len(unfinished) == 1 and 'try 1' in unfinished[0], (got, unfinished)
+    assert 's: recorded 3 more time(s), 2 ran to their end' in lines and \
+        place_line + "2 of 2 gave the Rust Host's answer: the reference's usual answer, explained" in lines, lines
+    tried += 1
+    # One that ran, giving the Rust Host's answer, beside two cut short: not two, so unexplained.
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': [cut, cut, 'rare']})
+    assert not ok and place_line + "1 of 1 gave the Rust Host's answer: STILL UNEXPLAINED" in lines, lines
+    tried += 1
+    # The first recordings count for nothing: the reference wavering between them (one of them
+    # the Rust Host's answer) is held as before, and nothing is asked.
+    got, _, lines, ok = run([{'s': common}, {'s': rare}], {'s': rare}, one, {'s': ['common']})
+    assert ok and not asked and not got, asked
     tried += 1
     # A Rust Host that is late: an answer newer than the cursor its own snapshot handed out. The
     # reference, asked three times, is on time every time: it is never asked away.
@@ -1509,37 +1541,31 @@ def asking_tried(stamped) -> int:
         made = stamped(revision)
         return {**made, 'core': {**made['core'], 'scenario': 's', 'error': None}}
     late, on_time = stamped_in(1), stamped_in(0)
-    got, _, lines, ok = run([{'s': on_time}, {'s': on_time}], {'s': late}, one, {'s': [on_time]})
-    assert not ok and len(asked) == MORE_TRIES and 'unexplained' in lines[-1], (asked, lines[-1])
+    got, _, lines, ok = run([{'s': on_time}] * 2, {'s': late}, one, {'s': [on_time]})
+    assert not ok and asked == every and 'unexplained' in lines[-1], (asked, lines[-1])
     tried += 1
     # A Rust Host that changed: an answer the reference never gives, however often it is asked
     # (the planted changes are of this kind), while the reference wavers between two others.
-    got, _, lines, ok = run([{'s': common}, {'s': rare}], {'s': answer('changed')}, one, {'s': [rare, common]})
-    assert not ok and len(asked) == MORE_TRIES and 'unexplained' in lines[-1], (asked, lines[-1])
+    got, _, lines, ok = run([{'s': common}, {'s': rare}], {'s': answer('changed')}, one, {'s': ['rare', 'common']})
+    assert not ok and asked == every and 'unexplained' in lines[-1], (asked, lines[-1])
     tried += 1
     # A Rust Host that did not run to its end is not asked about: that fails the run as it did.
-    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': answer('rare', error='timed out')}, one,
-                            {'s': [rare]})
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': answer('rare', error='timed out')}, one, {'s': ['rare']})
     assert not ok and not asked and not got, asked
     tried += 1
     # Nothing unexplained, or only what a register says: nothing is asked, nothing is said.
-    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': common}, one, {'s': [rare]})
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': common}, one, {'s': ['rare']})
     assert ok and not asked and not got and not any(line.startswith('# Asked again') for line in lines), asked
     ident = differences({'s': common}, {'s': rare}, one, view='core').items[0]['id']
-    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [rare]}, {ident})
+    got, _, lines, ok = run([{'s': common}] * 2, {'s': rare}, one, {'s': ['rare']}, {ident})
     assert ok and not asked and not got, asked
     tried += 2
-    # Two scenarios: the one explained at try 1 is not asked again; the other is asked to the end.
+    # Two scenarios: each is asked all three times, and each is judged on its own.
     two = [{'id': 's'}, {'id': 't'}]
     got, _, lines, ok = run([each('common', two)] * 2, each('rare', two), two, {'s': ['rare'], 't': ['common']})
-    assert not ok and asked == [(1, ['s', 't']), (2, ['t']), (3, ['t'])], asked
-    assert 's: recorded 1 more time(s), 3 recordings in all; nothing left unexplained' in lines, lines
-    tried += 1
-    # A try that did not run to its end is no recording, and is said.
-    got, unfinished, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one,
-                                     {'s': [answer('rare', error='timed out'), rare]})
-    assert ok and sorted(got) == [2] and len(unfinished) == 1 and 'try 1' in unfinished[0], (got, unfinished)
-    assert any(line.endswith('recording 3 (try 2)') for line in lines), lines
+    assert not ok and asked == [(attempt, ['s', 't']) for attempt in range(1, MORE_TRIES + 1)], asked
+    assert place_line + "3 of 3 gave the Rust Host's answer: the reference's usual answer, explained" in lines and \
+        "  t / http / [0].body.answer: 0 of 3 gave the Rust Host's answer: STILL UNEXPLAINED" in lines, lines
     tried += 1
     # The bound: more than ASK_MOST scenarios with an unexplained difference is a real difference,
     # judged as it stands, and the report says it was not asked again.
@@ -1551,7 +1577,7 @@ def asking_tried(stamped) -> int:
     # ... and ASK_MOST of them are asked.
     some = many[:ASK_MOST]
     got, _, lines, ok = run([each('common', some)] * 2, each('rare', some), some, {'*': ['rare']})
-    assert ok and asked == [(1, [s['id'] for s in some])], asked
+    assert ok and asked == [(attempt, [s['id'] for s in some]) for attempt in range(1, MORE_TRIES + 1)], asked
     tried += 1
     # What was written down is judged again the same way: the answers as `load_asked` gives them.
     with tempfile.TemporaryDirectory() as where:
@@ -2052,9 +2078,10 @@ def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
 
 
 def rendered(report, intended: set, shaped: dict, title: str, errors=(), awaited=()) -> str:
-    """A report of differences in five kinds: registered by its id as intended, registered as
+    """A report of differences in six kinds: registered by its id as intended, registered as
     awaited (the reference moved and this Host's port is owed), a defect of the reference told
-    by its shape, an event's place in its lane, and unexplained. `shaped`: what a rule says of a
+    by its shape, an event's place in its lane, the reference's usual answer when it was asked
+    again (`usual`), and unexplained. `shaped`: what a rule says of a
     difference, by its id (`told_by_rule`)."""
     registered = lambda d: d['id'] in intended or d['id'] in awaited  # noqa: E731
     explained = lambda d: registered(d) or d['id'] in shaped  # noqa: E731
@@ -2062,12 +2089,15 @@ def rendered(report, intended: set, shaped: dict, title: str, errors=(), awaited
     ruled = [shaped[d['id']] for d in report.items if not registered(d) and d['id'] in shaped]
     waiting = sum(1 for d in report.items if d['id'] in awaited and d['id'] not in intended)
     placed = ruled.count(PLACE)
-    by_shape = len(ruled) - placed
+    usual_answer = ruled.count(ASKED)
+    by_shape = len(ruled) - placed - usual_answer
     lines = [f'# Replay difference report: {title}', '',
              f'differences: {len(report.items)}  registered intended: '
              f'{len(report.items) - len(unexplained) - len(ruled) - waiting}  awaited: {waiting}  '
              f'a defect of the reference by its shape: '
-             f'{by_shape}  only an event\'s place in its lane: {placed}  unexplained: {len(unexplained)}']
+             f'{by_shape}  only an event\'s place in its lane: {placed}  '
+             + (f"the reference's usual answer when asked again: {usual_answer}  " if usual_answer else '')
+             + f'unexplained: {len(unexplained)}']
     counts: dict = {}
     for d in report.items:
         counts[d['scenario']] = counts.get(d['scenario'], 0) + 1
@@ -2166,10 +2196,11 @@ def to_ask(recordings: list, seen: dict, chosen, registered: set) -> tuple:
     return left, len(left) > ASK_MOST
 
 
-def with_answers(recordings: list, answers: dict) -> list:
-    """The recordings, and one more for every try of `asked_again` that gave answers: the first
-    recording with those answers in their places, so that each has the whole corpus."""
-    return [*recordings, *({**recordings[0], **got} for _, got in sorted(answers.items()) if got)]
+# How many of the recordings asked for (`asked_again`) must give the Rust Host's answer at a place
+# for it to be the reference's usual answer there.
+USUAL = 2
+# What the report calls a difference explained so (`judged`).
+ASKED = 'asked again'
 
 
 def asked_again(recordings: list, seen: dict, chosen, registered: set, again) -> tuple:
@@ -2177,70 +2208,76 @@ def asked_again(recordings: list, seen: dict, chosen, registered: set, again) ->
 
     Every scenario where the Rust Host would end with an unexplained difference is recorded
     again by the reference (`again(scenarios, attempt)` answers scenario id -> its two views),
-    up to `MORE_TRIES` times, and each answer that ran to its end is one more recording. It is
-    judged by the rule there is: a place counts only where the Rust Host differs from every
-    recording. A scenario stops being asked when nothing in it is unexplained. The Rust Host is
-    never recorded again: the reference may waver, it may not. A scenario where the Rust Host
-    did not run to its end is not asked about (that fails the run as before), and a run with
-    more than `ASK_MOST` such scenarios is not asked about at all: it is judged as it stands.
-    Answers (try -> scenario id -> views, only those that ran to their end) and lines for a
-    try that did not."""
+    always `MORE_TRIES` times: nothing stops early. What those recordings say is `usual`: a
+    place is explained only where at least `USUAL` of them give the Rust Host's answer. The
+    Rust Host is never recorded again: the reference may waver, it may not. A scenario where
+    the Rust Host did not run to its end is not asked about (that fails the run as before), and
+    a run with more than `ASK_MOST` such scenarios is not asked about at all: it is judged as it
+    stands. Answers (try -> scenario id -> views, only those that ran to their end) and lines
+    for a try that did not."""
     left, too_many = to_ask(recordings, seen, chosen, registered)
     if not left or too_many:
         return {}, []
+    asking = [scenario for scenario in steady(chosen) if scenario['id'] in left]
     answers: dict = {}
     unfinished = []
     for attempt in range(1, MORE_TRIES + 1):
-        asking = [scenario for scenario in steady(chosen) if scenario['id'] in left]
-        if not asking:
-            break
         more = again(asking, attempt)
-        answers[attempt] = {}
+        got = {}
         for scenario in asking:
             views = more[scenario['id']]
             if views['full']['error']:
                 unfinished.append(f"{scenario['id']}: asked again (try {attempt}), and it did not run to its end: "
                                   f"{views['full']['error']}")
             else:
-                answers[attempt][scenario['id']] = views
-        left = sorted(set(left) & set(unexplained_at(with_answers(recordings, answers), seen, asking, registered)))
-    return {attempt: got for attempt, got in answers.items() if got}, unfinished
+                got[scenario['id']] = views
+        if got:
+            answers[attempt] = got
+    return answers, unfinished
 
 
-def said_of_asking(recordings: list, answers: dict, seen: dict, chosen, registered: set) -> list:
-    """What the report says of `asked_again`: every scenario asked again, how many recordings it
-    took, and each place where a later recording gave the Rust Host's answer. That list goes to
-    the release owner: each line is the reference wavering, or this Host having moved into one
-    of its rare answers."""
+def usual(recordings: list, answers: dict, seen: dict, chosen, registered: set) -> tuple:
+    """What the recordings asked for say (`asked_again`): (place (scenario, channel, locator) ->
+    (how many of them gave the Rust Host's answer there, how many ran to their end), the
+    scenarios asked about, whether there were too many to ask). Only the places that are
+    unexplained against the first recordings are counted, and those recordings count for
+    nothing here: they are why the scenario was asked."""
     left, too_many = to_ask(recordings, seen, chosen, registered)
+    counts: dict = {}
+    if too_many:
+        return counts, left, True
+    before = unexplained_at(recordings, seen, chosen, registered)
+    for name in left:
+        later = [got[name] for _, got in sorted(answers.items()) if name in got]
+        scenario = [s for s in chosen if s['id'] == name]
+        differing = [{place(d) for d in differences({name: views}, seen, scenario, view='core').items}
+                     for views in later]
+        for where in before[name]:
+            counts[(name, *where)] = (sum(1 for found in differing if where not in found), len(later))
+    return counts, left, False
+
+
+def said_of_asking(counts: dict, left: list, too_many: bool, answers: dict) -> list:
+    """What the report says of `asked_again`: every scenario asked again, how many of its later
+    recordings ran to their end, and for each place how many of them gave the Rust Host's
+    answer. That list goes to the release owner: a place explained is the reference wavering
+    with this Host on its usual answer, or this Host having moved into an answer the reference
+    gives often enough to be its usual one."""
     if too_many:
         return ['', '# Asked again', f'NOT ASKED AGAIN: {len(left)} scenarios end with an unexplained difference, '
                 f'more than {ASK_MOST}: a real difference, judged as it stands ({", ".join(left)})']
-    asked = sorted({name for got in answers.values() for name in got})
-    if not asked:
+    if not answers:
         return []
-    before = unexplained_at(recordings, seen, chosen, registered)
-    every = with_answers(recordings, answers)
-    after = unexplained_at(every, seen, chosen, registered)
-    numbered = [(len(recordings) + n + 1, attempt, got)
-                for n, (attempt, got) in enumerate(sorted((a, g) for a, g in answers.items() if g))]
-    lines = ['', '# Asked again: a difference is not called unexplained before the reference has been asked again '
-             '(the Rust Host is never asked again)']
-    for name in asked:
-        scenario = [s for s in chosen if s['id'] == name]
-        mine = [(number, attempt, got[name]) for number, attempt, got in numbered if name in got]
-        explained = sorted(before.get(name, set()) - after.get(name, set()))
-        still = after.get(name, set())
-        lines.append(f'{name}: recorded {len(mine)} more time(s), {len(recordings) + len(mine)} recordings in all; '
-                     + (f'{len(still)} place(s) still unexplained' if still else 'nothing left unexplained'))
-        for where in explained:
-            gave = [number for number, _, views in mine
-                    if where not in {place(d) for d in differences({name: views}, seen, scenario, view='core').items}]
-            tries = {number: attempt for number, attempt, _ in mine}
-            lines.append(f'  {name} / {where[0]} / {where[1]}: ' + (
-                f"a later recording gave the Rust Host's answer: recording {gave[0]} (try {tries[gave[0]]})" if gave
-                else 'no later recording gave the Rust Host\'s answer, and a rule of a defect of the reference '
-                     'tells it against the recordings as they now are'))
+    lines = ['', f'# Asked again: a difference is not called unexplained before the reference has been asked again, '
+             f'{MORE_TRIES} times; a place is explained where at least {USUAL} of those recordings give the Rust '
+             "Host's answer (the first recordings count for nothing here; the Rust Host is never asked again)"]
+    for name in left:
+        ran = sum(1 for got in answers.values() if name in got)
+        lines.append(f'{name}: recorded {MORE_TRIES} more time(s), {ran} ran to their end')
+        for (scenario, channel, locator), (gave, of) in sorted(counts.items()):
+            if scenario == name:
+                lines.append(f"  {name} / {channel} / {locator}: {gave} of {of} gave the Rust Host's answer: "
+                             + ("the reference's usual answer, explained" if gave >= USUAL else 'STILL UNEXPLAINED'))
     return lines
 
 
@@ -2248,21 +2285,25 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=
     """What the Rust Host answered (`seen`), held to the recordings of the reference: the lines
     of the report, and whether it conforms. Nothing is started here: a run that was written
     down can be judged again. `answers` are what the reference answered when it was asked again
-    (`asked_again`), try -> scenario id -> views: each is one more recording, and the report
-    says what they explained."""
+    (`asked_again`), try -> scenario id -> views: they are not more recordings held to the rule
+    above; a place they speak to is explained only where at least `USUAL` of them give the Rust
+    Host's answer (`usual`), and the report says each."""
     awaited = awaited or {}
     both_registers(intended, awaited)
     registered = intended | set(awaited)
     answers = answers or {}
-    asking = said_of_asking(recordings, answers, seen, chosen, registered)
-    recordings = with_answers(recordings, answers)
+    counts, left, too_many = usual(recordings, answers, seen, chosen, registered)
     report, shaped, held_to = held(recordings, seen, chosen, registered)
+    for d in report.items:
+        if d['id'] not in registered and d['id'] not in shaped:
+            if counts.get((d['scenario'], *place(d)), (0, 0))[0] >= USUAL:
+                shaped[d['id']] = ASKED
     unexplained = [d for d in report.items if d['id'] not in registered and d['id'] not in shaped]
     lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors,
                       awaited)]
     by_defect: dict = {}
     for said in shaped.values():
-        if said != PLACE:
+        if said not in (PLACE, ASKED):
             defect = said.removeprefix('defect ')
             by_defect[defect] = by_defect.get(defect, 0) + 1
     if by_defect:
@@ -2270,7 +2311,8 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=
                   + ', '.join(f'{defect} at {count} place(s)' for defect, count in sorted(by_defect.items())), '']
     if held_to:
         lines += ['', 'held to more than the first recording:', *(f'  {line}' for line in held_to)]
-    lines += ['', '# The same differences by shape', *diff.shapes(report, top=200), *asking]
+    lines += ['', '# The same differences by shape', *diff.shapes(report, top=200),
+              *said_of_asking(counts, left, too_many, answers)]
     said, ok = verdict(unexplained, errors, awaited, {d['id'] for d in report.items}, chosen)
     lines += ['', *said]
     return lines, ok

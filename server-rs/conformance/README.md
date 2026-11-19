@@ -126,54 +126,66 @@ row that really changed after the snapshot (its turn settled later, as in older 
 
 A mark needs its family read first, and every family not yet read leaves the train red, so one
 rule covers all of them, known and unknown: **a difference is not called unexplained before
-the reference has been asked again.** In `cross` (the only mode with both Hosts), after the Rust
-Host has been judged, every scenario that would end with an unexplained difference is recorded
-again by the reference, up to three times (`MORE_TRIES`). Each answer that runs to its end is
-one more recording, and the scenario is judged again by the rule the tool already has: a place
-counts only where the Rust Host differs from every recording. A scenario stops being asked
-once nothing in it is unexplained (`asked_again`).
+the reference has been asked again.** In `cross` (the only mode with both Hosts), after the
+Rust Host has been judged, every scenario that would end with an unexplained difference is
+recorded again by the reference, always three times (`MORE_TRIES`), with no stopping early
+(`asked_again`). **The Rust Host's answer must be the reference's usual answer among those
+recordings, not any one of them.** A place is explained only where at least two of the
+recordings asked for, among those that ran to their end, give the Rust Host's answer there
+(`USUAL`, `usual`). Otherwise it stays unexplained. The first two recordings count for nothing
+in this rule: they are why the scenario was asked. A place the reference answers in three or
+more ways, none of them usual, stays red; that family gets a mark.
 
 - **The reference may waver; the Rust Host may not.** The Rust Host is never recorded again. A
-  place the reference never gives its answer at stays unexplained. A scenario where the Rust Host
-  did not run to its end is not asked about: it fails the run as before.
-- **It is said.** The report's `# Asked again` section names every scenario asked again and how
-  many recordings it took. For each place a later recording explained, it names the recording
-  and the try that gave the Rust Host's answer. That list goes to the release owner. A try that
-  did not run to its end is said too, and makes no recording.
+  scenario where the Rust Host did not run to its end is not asked about: it fails the run as
+  before.
+- **It is said.** The report's `# Asked again` section names every scenario asked again and
+  how many of its three recordings ran to their end. For each place it gives how many of them
+  gave the Rust Host's answer (`2 of 3`, `3 of 3`, `2 of 2` when one was cut short), and a
+  place with fewer than two is named STILL UNEXPLAINED with its count. A try that did not run
+  to its end is said too. The report's head counts the places explained this way apart, as
+  "the reference's usual answer when asked again". That list goes to the release owner.
 - **It is bounded.** At most five scenarios a run are asked about (`ASK_MOST`). A run with more
   is a real difference: it is judged as it stands, and the report says it was not asked again
   and names the scenarios.
 - **It is written down.** Each try's answers go to `golden-asked-<try>/` beside `golden/` in
-  the report, holding only the scenarios asked. `judge` reads them with the other recordings,
-  asks nothing itself, and says the same.
+  the report, holding only the scenarios asked. `judge` reads them, asks nothing itself, and
+  says the same.
 
-Tried before every run (`selftest`, 12 cases): a sound later answer explains, and nothing is
-asked after it. No answer in three tries does not. A Rust Host that is late (an answer newer
-than its own cursor) or changed (an answer the reference never gives) is never asked away. A
-Rust Host that did not run to its end is not asked about. Nothing unexplained, or only what a
-register says, asks nothing. Two scenarios are asked each for as long as it needs. A try that
-did not run to its end is no recording. Six scenarios are not asked and five are. What was
-written down reads back as it was.
+Tried before every run (`selftest`, 17 cases):
+- 1 of 3 does not explain, and is said with its count. 2 of 3 explains, and the third try is
+  still asked. 3 of 3 explains. 0 of 3 does not.
+- Three tries all cut short explain nothing. Two that ran and agree explain (2 of 2). One that
+  ran beside two cut short does not.
+- First recordings that waver between them (one of them the Rust Host's answer) ask nothing.
+- A Rust Host that is late (an answer newer than its own cursor) or changed (an answer the
+  reference never gives) is never asked away. A Rust Host that did not run to its end is not
+  asked about.
+- Nothing unexplained, or only what a register says, asks nothing.
+- Two scenarios are each asked three times and judged apart.
+- Six scenarios are not asked and five are.
+- What was written down reads back as it was.
 
-What this rule could hide. If this Host regresses into one of the reference's rare answers, the
-regression passes whenever the reference happens to give that answer in one of its
-recordings. Before the rule a run had two recordings; now it can have up to five. The table of
-73 runs since 18 Nov puts the rare answers' rates at about 9% in `oracle-delegations` (most of
-that already marked as R19), 7% in `retried-turns`, 5% in `turn-timer-after-stop`, 3–4% for R115, the
-late stamp (9 of 268 recordings), and 2% or less in the rest. A regression into a rate-*p* answer
-passes one run with chance 1 − (1 − *p*)^5 where it used to be 1 − (1 − *p*)^2:
+What this rule could hide. A regression of this Host into one of the reference's rare answers
+already passed a run whenever one of the first two recordings gave that rare answer (that is
+the rule for a reference that answers in more than one way). With this rule it also passes
+when both first recordings gave the usual answer and then at least two of the three
+recordings asked for happen to give the rare one: 3*p*²(1 − *p*) + *p*³. A true waver (this
+Host on the usual answer, both first recordings rare) stays red with the same chance. The
+table of 73 runs since 18 Nov puts the rare answers' rates at about 9% in `oracle-delegations`
+(most of that already marked as R19), 7% in `retried-turns`, 5% in `turn-timer-after-stop`,
+3–4% for R115, the late stamp (9 of 268 recordings), and 2% or less in the rest:
 
-| *p* | before | now |
-|---|---|---|
-| 9% | 17% | 38% |
-| 7% | 14% | 30% |
-| 3.4% | 7% | 16% |
-| 1.4% | 3% | 7% |
+| *p* | two of three rare | a regression passes a run: before the rule | with it |
+|---|---|---|---|
+| 9% | 2.3% | 17.2% | 19.1% |
+| 7% | 1.4% | 13.5% | 14.7% |
+| 3.4% | 0.34% | 6.7% | 7.0% |
+| 1.4% | 0.06% | 2.8% | 2.8% |
 
-A regression is in every run after it, and each run draws again. At 7%, it passes three runs
-in a row with chance 3%. Every time it passes this way, the report's `# Asked again` section
-names the place and the recording that gave it. The same place in that list run after run is a
-regression, not the reference wavering.
+A regression is in every run after it, and each run draws again. Every time a place passes
+this way, the report's `# Asked again` section names it with its count. The same place in that
+list run after run is a regression, not the reference wavering.
 
 A test Host of the reference sometimes does not come to rest. On an agent's first turn the
 Python Host can take the tool's end before it has written down that the turn began; it refuses
