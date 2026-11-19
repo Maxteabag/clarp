@@ -12,6 +12,7 @@
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build status           who holds the queue, the machine's load and free build space
+# A build that needs more free space sets CLARP_BUILD_MIN_FREE_BYTES to its required byte count.
 #
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
@@ -56,7 +57,7 @@ set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
 JOBS="${CLARP_BUILD_JOBS:-6}"
-floor="${CLARP_BUILD_MIN_FREE_BYTES:-21474836480}" # 20 GiB
+floor="${CLARP_BUILD_MIN_FREE_BYTES:-10737418240}" # 10 GiB
 # Extra environment for the remote cargo, as NAME=value words. The tests that run a real tool
 # only run when asked this way, for example:
 #   CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- --ignored
