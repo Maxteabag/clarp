@@ -95,8 +95,8 @@ PLANTS = [
     (F, 'host', 'a mint takes no account of the names already taken',
      'clarp_kernel::contacts::given_name(backend, &occupied, &existing)', 'clarp_kernel::contacts::given_name(backend, &occupied, &[])'),
     (F, 'host', 'an assignment by the rule mints nothing in the fleet\'s turn',
-     'Ok(clarp_kernel::contacts::Assigned::Mint) => self.mint_contact(&record.backend, fetched),',
-     'Ok(clarp_kernel::contacts::Assigned::Mint) => Ok(None),'),
+     '            Ok(clarp_kernel::contacts::Assigned::Mint) => {\n                self.mint_contact(&record.backend, fetched)\n            }\n',
+     '            Ok(clarp_kernel::contacts::Assigned::Mint) => Ok(None),\n'),
     (E, 'host', 'a contact started again in place may be asked for', '    if replaces.is_some()\n        && let Launch::Refused',
      '    if false\n        && let Launch::Refused'),
 ]
