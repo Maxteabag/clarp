@@ -324,7 +324,8 @@ def pytest_collection_modifyitems(config, items):
     except ImportError:    # a copy of this conftest in a test's temp dir has no sibling modules
         return
     if quarantine.active(os.environ):
-        quarantine.skip_listed(items, quarantine.load(), pytest.mark.skip(reason=quarantine.REASON))
+        quarantine.skip_listed(items, quarantine.load(),
+                               lambda note: pytest.mark.skip(reason=quarantine.reason(note)))
 
 
 @pytest.hookimpl(trylast=True)

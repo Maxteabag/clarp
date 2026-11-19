@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import pathlib
 
-REASON = "quarantined (refactor program)"
+REASON = "quarantined"
+
+
+def reason(note: str) -> str:
+    """The skip reason a listed test shows: its own note, its cause."""
+    return f"{REASON}: {note}" if note else REASON
 LIST = pathlib.Path(__file__).with_name("quarantine.txt")
 
 
@@ -31,10 +36,11 @@ def active(environ) -> bool:
 
 
 def skip_listed(items, entries, mark) -> int:
-    """Add `mark` to every collected item whose node id is listed; return how many."""
+    """Add ``mark(note)`` to every collected item whose node id is listed, the note being its
+    entry's own (its cause); return how many."""
     hits = 0
     for item in items:
         if item.nodeid in entries:
-            item.add_marker(mark)
+            item.add_marker(mark(entries[item.nodeid]))
             hits += 1
     return hits
