@@ -85,7 +85,89 @@ def reply_cases():
     return rows
 
 
+"""Reference cases for the wired countdown projection and its accepted payload."""
+from datetime import datetime
+from unittest.mock import patch
+
+
+def countdown_cases():
+    from lib import artifacts, countdown_attention, attention_index
+    target='2026-11-19T12:00:00.000+02:00'
+    at=int(datetime.fromisoformat(target).timestamp()*1000)
+    base=dict(artifact_id='deadline',server_id='fixture',updated_at=7,status='ready',target_at=target,time_zone='Europe/Oslo',type='countdown')
+    projections=[]
+    with patch('lib.settings_store.get_text',return_value='fixture'):
+        for status in ['draft','cancelled','expired','active','failed','ready','completed','paused','other']:
+            for purpose in [None,'informational','actionable']:
+                row=dict(base,status=status,purpose=purpose)
+                for delta in [-1,0,1,59999,60000,60001]:
+                    projections.append(dict(row=row,now=at+delta,projection=countdown_attention.project(row,now_ms=at+delta),
+                                            bucket=attention_index._bucket(row,row,at+delta)))
+        for target_at in [None,False,'','not-a-date','2026-02-30T12:00:00Z','2026-11-19T12:00:00','1970-01-01T00:00:00.000999Z']:
+            row=dict(base,target_at=target_at)
+            projections.append(dict(row=row,now=0,projection=countdown_attention.project(row,now_ms=0),
+                                    bucket=attention_index._bucket(row,row,0)))
+    # Each sampling clock has an unambiguous ordinary spelling, even when
+    # the input under test has an hour an interpreter cannot read.
+    for stamp, clock in [
+        ('1969-12-31T23:59:59.999999Z', '1969-12-31T23:59:59.999999Z'),
+        ('2024-02-29T23:00:00.123456789123-05:30', '2024-03-01T04:30:00.123456Z'),
+        ('2026-01-01T00:00:00.001+23:59', '2025-12-31T00:01:00.001Z'),
+        ('2024-02-29T24:00:00.0000001-05:30', '2024-03-01T05:30:00Z'),
+        ('9999-12-30T24:00:00Z', '9999-12-31T00:00:00Z'),
+        ('9999-12-31T23:59:59Z', '9999-12-31T23:59:59Z'),
+    ]:
+        moment=int(datetime.fromisoformat(clock).timestamp()*1000)
+        row=dict(base,target_at=stamp)
+        with patch('lib.settings_store.get_text',return_value='fixture'):
+            for delta in [-1,0,59999,60000]:
+                now = moment + delta
+                projections.append(dict(row=row, now=now, projection=countdown_attention.project(row,now_ms=now),
+                                        bucket=attention_index._bucket(row,row,now)))
+    cases=[]
+    for key,values in [('time_zone',[None,False,'',' ','UTC','Europe/Oslo','America/New_York','does/notexist','europe/oslo','../etc','UTC+00']),
+                       ('target_at',[None,False,'','now','2026-01-01','2026-01-01 01:02:03Z','2026-01-01T01:02:03','2026-01-01T01:02:03z','2026-01-01T01:02:03Z','2026-01-01T01:02:03-00:00','2026-01-01T01:02:03+23:59','2026-01-01T01:02:03+24:00','2026-01-01T01:02:03.123456789123Z','2024-02-29T00:00:00Z','2026-02-29T00:00:00Z','2026-01-01T24:00:00Z','2026-01-01T24:00:01Z','2026-01-01T24:01:00Z','2026-01-01T24:00:00.000001Z','2026-01-01T24:00:00.0000001Z','9999-12-30T24:00:00Z','9999-12-31T00:00:00Z','9999-12-31T23:59:59Z','9999-12-31T24:00:00Z','2026-01-01T25:00:00Z','2026-01-01T23:59:60Z','0000-01-01T00:00:00Z','2026-01-01T00:00:00+00:60','2026-01-01T00:00:00+23:60'])]:
+        for value in values:
+            payload=dict(target_at=target,time_zone='UTC')
+            payload[key]=value
+            cases.append(payload)
+    missing = object()
+    for instant in [missing, None, False, 17, [], {}, '', 'bad', target]:
+        for zone in [missing, None, False, 17, [], {}, '', 'unknown/zone', 'UTC']:
+            payload = {k: v for k, v in [('target_at', instant), ('time_zone', zone)] if v is not missing}
+            cases.append(payload)
+
+    def publish(payload):
+        try:
+            artifacts.create(session='fixture', artifact_id='deadline', type='countdown',
+                             title='Deadline', payload=payload)
+        except ValueError as exc:
+            return str(exc)
+        return None
+
+    validation = []
+    with patch.object(artifacts, '_agent', return_value={'session':'fixture'}), \
+         patch.object(artifacts, '_insert_artifact', return_value={}):
+        for payload in cases:
+            error = publish(payload)
+            errors = [] if error is None else [error]
+            # _payload visits a set intersection. With two non-string fields
+            # either field can be first, depending on the interpreter hash seed.
+            if all(k in payload and not isinstance(payload[k], str) for k in ('target_at','time_zone')):
+                errors = sorted({publish({**payload,'time_zone':'UTC'}),
+                                 publish({**payload,'target_at':target})})
+                assert error in errors
+            validation.append(dict(payload=payload, errors=errors))
+    return dict(projections=projections,validation=validation)
+
+
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as root:
-        OUT.write_text(json.dumps(reference(Path(root)),ensure_ascii=True,separators=(',',':'))+'\n')
-        (OUT.parent/'form-reply-dispatch.json').write_text(json.dumps(reply_cases(),ensure_ascii=True,separators=(',',':'))+'\n')
+        writer = 'server-rs/tools/forms-events-vectors.py with Python ' + sys.version.split()[0]
+        for name, fields in [
+            (OUT.name, {'cases': reference(Path(root))}),
+            ('form-reply-dispatch.json', {'cases': reply_cases()}),
+            ('countdown-attention.json', countdown_cases()),
+        ]:
+            fixture = {'written_by': writer, **fields}
+            (OUT.parent / name).write_text(json.dumps(fixture, ensure_ascii=True, separators=(',', ':')) + '\n')

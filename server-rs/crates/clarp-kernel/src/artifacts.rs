@@ -17,8 +17,7 @@
 //! ([`reports`]): the page is kept beside the log and the artifact names it, with what the
 //! report was version by version.
 //!
-//! Not here yet: HTML forms that take answers, countdowns, and podcast episodes. Asking for
-//! one says so.
+//! Interactive forms and countdowns have their own rules below.
 
 use std::collections::BTreeMap;
 
@@ -31,6 +30,7 @@ use crate::media::MediaBook;
 use crate::python;
 
 pub mod answers;
+pub mod countdown;
 pub mod decisions;
 pub mod form_events;
 pub mod forms;
@@ -59,8 +59,6 @@ const TYPES: [&str; 15] = [
     "directory",
     "workflow_run",
 ];
-/// The kinds this Host cannot make yet.
-const NOT_HERE: [&str; 1] = ["countdown"];
 const STATUSES: [&str; 7] = [
     "draft",
     "active",
@@ -671,6 +669,7 @@ fn require_payload(
         }
     }
     match kind {
+        "countdown" => countdown::validate(payload),
         "data" => require_table(payload),
         "research" => {
             let none = Value::Array(Vec::new());
@@ -1006,11 +1005,6 @@ impl ArtifactBook {
         };
         if !valid_id(&artifact_id) {
             return refuse("invalid artifact id");
-        }
-        if NOT_HERE.contains(&kind.as_str()) {
-            return refuse(format!(
-                "{kind} artifacts are not available on this Host yet (the Rust Host)"
-            ));
         }
         let page = kind == "html_form";
         let payload = if page {

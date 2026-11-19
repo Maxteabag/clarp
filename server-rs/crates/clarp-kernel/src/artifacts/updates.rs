@@ -48,7 +48,7 @@ const MOST: i64 = 200;
 /// ready or done, `working` while it is being made. `None` when it is not shown: a kind
 /// that has a list of its own, a draft, what was called off or ran out, what was thrown
 /// away.
-pub fn bucket(artifact: &Artifact) -> Option<&'static str> {
+pub fn bucket(artifact: &Artifact, now: i64) -> Option<&'static str> {
     if !TYPES.contains(&artifact.kind.as_str()) || artifact.deleted_at.is_some() {
         return None;
     }
@@ -56,9 +56,13 @@ pub fn bucket(artifact: &Artifact) -> Option<&'static str> {
     if kind.and_then(Value::as_str) == Some("janitor_failure") {
         return None;
     }
-    // A countdown stands where its clock stands, which this Host does not keep yet.
     if artifact.kind == "countdown" {
-        return None;
+        return match super::countdown::project(&artifact.status, &artifact.payload, now).0 {
+            "correction" => Some("blocking"),
+            "working" => Some("working"),
+            "review" => Some("review"),
+            _ => None,
+        };
     }
     match artifact.status.as_str() {
         "failed" => Some("blocking"),
@@ -76,7 +80,7 @@ struct Shown<'a> {
 }
 
 /// The list: what failed, what is ready, what is in the making, each the oldest first.
-fn shown<'a>(shelves: &'a [Shelf<'a>]) -> Vec<Shown<'a>> {
+fn shown<'a>(shelves: &'a [Shelf<'a>], now: i64) -> Vec<Shown<'a>> {
     let mut shown: Vec<Shown<'a>> = shelves
         .iter()
         .flat_map(|shelf| {
@@ -84,7 +88,7 @@ fn shown<'a>(shelves: &'a [Shelf<'a>]) -> Vec<Shown<'a>> {
                 Some(Shown {
                     shelf,
                     artifact,
-                    bucket: bucket(artifact)?,
+                    bucket: bucket(artifact, now)?,
                 })
             })
         })
@@ -212,7 +216,7 @@ pub fn page(shelves: &[Shelf<'_>], limit: i64, cursor: &str, now: i64) -> Result
     if cursor.chars().count() > 2048 {
         return refuse(NO_CURSOR);
     }
-    let shown = shown(shelves);
+    let shown = shown(shelves, now);
     let name = name_of(&shown);
     let offset = match cursor {
         "" => 0,
