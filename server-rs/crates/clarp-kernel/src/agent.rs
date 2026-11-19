@@ -1601,13 +1601,11 @@ mod tests {
     fn replaying_a_refused_native_session_binding_clears_the_previous_one() {
         let mut a = Driven::new();
         for value in ["kept-id", "_obsolete"] {
-            a.agent
-                .apply(&AgentEvent::Adopted {
-                    from: "elsewhere".to_owned(),
-                    backend_session: Some(value.to_owned()),
-                    at_ms: 0,
-                })
-                .unwrap();
+            a.send(Command::Adopt {
+                from: "elsewhere".to_owned(),
+                backend_session: Some(value.to_owned()),
+            })
+            .unwrap();
         }
         assert_eq!(a.agent.backend_session(), None);
         a.user(10);
