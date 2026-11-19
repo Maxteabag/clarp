@@ -2108,6 +2108,12 @@ answers so with the token of the turn it is called in. Held by the Python Host's
 refusal and two answers (the last scenario of `artifact-vectors.json`) and its `config.load` over nine owner's
 files (`decision-on-behalf-vectors.json`); the wrong rules are `tools/plants/decision-on-behalf.py`.
 
+**Transcription guidance** (19 Nov 2026). The guidance settings route reads and updates the names
+switch and the technical glossary. Its previews count Unicode characters and estimate tokens within
+the reference limits. Display and delegated speech now share a creation-ordered roster of active
+personas, retaining the first casefolded spelling. Under R109 both omit archived names. A settings
+preview reads the roster and saved values without creating a vocabulary audit.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
