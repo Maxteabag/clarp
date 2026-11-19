@@ -31,6 +31,7 @@ pub mod grok_muse;
 pub mod grok_muse_history;
 pub mod heard;
 pub mod heartbeat;
+pub mod helper_cells;
 pub mod helpers;
 pub mod herald;
 pub mod janitors;

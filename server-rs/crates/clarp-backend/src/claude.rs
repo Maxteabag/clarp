@@ -429,6 +429,7 @@ pub struct ClaudeInterpreter {
     told: HashMap<String, u32>,
     /// Every tool call of this turn, as it stands.
     tools: BTreeMap<String, ToolCall>,
+    helpers: BTreeMap<String, Value>,
     /// The tool calls whose start was reported as an activity.
     announced: HashSet<String>,
     usage_limit: bool,
@@ -470,6 +471,21 @@ fn result_text(content: &Value) -> String {
     }
 }
 
+fn update_helper(call: &mut ToolCall, state: &Value, t: i64, out: &mut Vec<Signal>) {
+    let cell = clarp_kernel::helper_cells::shown(state, &Default::default());
+    if call.cell.as_ref() == Some(&cell) {
+        return;
+    }
+    call.status = match cell["status"].as_str() {
+        Some("ok") => ToolStatus::Ok,
+        Some("error") => ToolStatus::Error,
+        _ => ToolStatus::Running,
+    };
+    call.ended_at_ms = (call.status != ToolStatus::Running).then_some(t);
+    call.cell = Some(cell);
+    out.push(Signal::Tool(call.clone()));
+}
+
 impl ClaudeInterpreter {
     pub fn new(turn: u64, name: &str) -> Self {
         Self {
@@ -482,6 +498,7 @@ impl ClaudeInterpreter {
             replies: 0,
             told: HashMap::new(),
             tools: BTreeMap::new(),
+            helpers: BTreeMap::new(),
             announced: HashSet::new(),
             usage_limit: false,
             api_error: None,
@@ -615,7 +632,25 @@ impl ClaudeInterpreter {
             "system" => self.on_system(&event, out),
             "stream_event" => self.on_stream(&event["event"], out),
             "assistant" => self.on_assistant(&event, t, out),
-            "user" => self.on_user(&event["message"], t, out),
+            "user" => {
+                self.on_user(&event["message"], &event["toolUseResult"], t, out);
+                let content = &event["message"]["content"];
+                if let Some(s) = content.as_str() {
+                    self.helper_notifications(s, t, out);
+                } else if let Some(parts) = content.as_array() {
+                    let texts = parts
+                        .iter()
+                        .filter(|b| b["type"] == "text")
+                        .filter_map(|b| b["text"].as_str())
+                        .collect::<Vec<_>>();
+                    self.helper_notifications(&texts.join("\n"), t, out);
+                }
+            }
+            "queue-operation" => {
+                if let Some(s) = event["content"].as_str() {
+                    self.helper_notifications(s, t, out);
+                }
+            }
             "result" => {
                 // One process can answer more than one thing: a session resumed with background
                 // work behind it answers that first, with a result of its own. The turn is over
@@ -812,7 +847,20 @@ impl ClaudeInterpreter {
                         // The call belongs to its message, and is told when that message
                         // is whole: after the reply it is shown on.
                         self.draft_for(&id, out).tools.push(call_id.to_string());
+                        let cell = if clarp_kernel::helper_cells::is_helper(name)
+                            && block["type"] == "tool_use"
+                        {
+                            let state =
+                                clarp_kernel::helper_cells::started(call_id, &block["input"]);
+                            let cell =
+                                clarp_kernel::helper_cells::shown(&state, &Default::default());
+                            self.helpers.insert(call_id.to_owned(), state);
+                            Some(cell)
+                        } else {
+                            None
+                        };
                         let call = ToolCall {
+                            cell,
                             origin: clarp_kernel::turn::Origin::User,
                             id: call_id.to_string(),
                             turn: self.turn,
@@ -843,10 +891,19 @@ impl ClaudeInterpreter {
                 _ => {}
             }
         }
+        // A complete Agent/Task block can run for minutes before another
+        // parent message arrives. Publish its row as soon as the call is known.
+        if self
+            .draft
+            .as_ref()
+            .is_some_and(|d| d.tools.iter().any(|id| self.helpers.contains_key(id)))
+        {
+            self.settle(out);
+        }
     }
 
     /// What came back to the agent: the results of its tool calls.
-    fn on_user(&mut self, message: &Value, t: i64, out: &mut Vec<Signal>) {
+    fn on_user(&mut self, message: &Value, meta: &Value, t: i64, out: &mut Vec<Signal>) {
         let Some(content) = message["content"].as_array() else {
             return;
         };
@@ -871,6 +928,12 @@ impl ClaudeInterpreter {
             let Some(call) = self.tools.get_mut(text_of(&block["tool_use_id"])) else {
                 continue;
             };
+            if let Some(state) = self.helpers.get_mut(&call.id) {
+                clarp_kernel::helper_cells::returned(state, block, meta);
+                update_helper(call, state, t, out);
+                finished |= call.status != ToolStatus::Running;
+                continue;
+            }
             if call.status != ToolStatus::Running {
                 continue;
             }
@@ -887,6 +950,20 @@ impl ClaudeInterpreter {
         if finished {
             self.moved(Activity::Thinking, out);
         }
+    }
+
+    fn helper_notifications(&mut self, text: &str, t: i64, out: &mut Vec<Signal>) {
+        if !text.contains("<task-notification>") {
+            return;
+        }
+        clarp_kernel::helper_cells::notifications(text, |id, status, agent, result| {
+            if let Some(state) = self.helpers.get_mut(id)
+                && let Some(call) = self.tools.get_mut(id)
+            {
+                clarp_kernel::helper_cells::notified(state, status, agent, result);
+                update_helper(call, state, t, out);
+            }
+        });
     }
 
     fn on_exit(&mut self, code: Option<i32>, signal: Option<i32>, out: &mut Vec<Signal>) {
