@@ -70,6 +70,9 @@ struct Told {
 }
 
 impl Wire for Told {
+    fn hook(&mut self, hook: clarp_kernel::oracle::conversation::Hook) {
+        self.voice.push(json!({"hook":hook}));
+    }
     fn voice(&mut self, said: Value) {
         self.voice.push(said);
     }
@@ -214,10 +217,14 @@ impl<'a> Played<'a> {
             thread,
             ids: Ids::new("e-"),
         };
+        let mut call = Conversation::begin(begin, WALL);
+        if opened["provider"] == "gemini" {
+            call.use_gemini();
+        }
         Self {
             vectors,
             opened,
-            call: Conversation::begin(begin, WALL),
+            call,
             ms: 0,
             told: Told::default(),
             rows: BTreeMap::new(),
@@ -615,13 +622,13 @@ fn a_call_goes_as_the_python_hosts_goes_story_by_story() {
             landed: counted.landed + of_story.landed,
         };
     }
-    assert_eq!(stories.len(), 79);
+    assert_eq!(stories.len(), 80);
     assert_eq!(
         counted,
         Counted {
-            steps: 1609,
-            routings: 71,
-            asked: 55,
+            steps: 1623,
+            routings: 73,
+            asked: 56,
             done: 33,
             written: 21,
             again: 3,

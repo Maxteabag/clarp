@@ -202,6 +202,11 @@ TALK = [heard('What happened ', 0, 900), heard('at station four?', 950, 1800), s
 # The voice speaks, falls silent, and the Host looks again.
 SPOKEN = [speaks(), wait(2.0), tick()]
 STORIES = [
+    story('Gemini interrupts, reports usage, and takes the answer of its route',
+          voice('session.started'), speaks(), phone({'type':'oracle_v2.interrupt'}),
+          voice('session.output_audio.interrupted'), voice('session.usage.updated', usage={'seconds': 3, 'voice_estimate_usd': .1}),
+          heard('Ask Theo.'), wanted(1), wait(1.02), route('del-1', asked(words('Routed.'))),
+          call('handoff_hold'), wanted(2), route('del-2'), voice('session.closed'), provider='gemini'),
     story('what a phone may send, and what is none of it',
           phone('not json'), phone('[1]'), phone('"text"'), phone({'type': 'session.start'}), phone({'type': 7}),
           phone({}), hears(''), hears(7), hears('!!!!'), hears('AAA='), hears('AA=='), hears(still(1)[:2] + '=='),
@@ -862,7 +867,16 @@ def run() -> dict:
             return arguments, json.loads(pathlib.Path(found.group(1)).read_text(encoding='utf-8'))
 
         class Voice:
-            provider = None
+            provider = opened.get('provider')
+
+            def local_interrupt(self):
+                told['voice'].append({'hook': 'local_interrupt'})
+
+            def delegation_routing(self, ident):
+                told['voice'].append({'hook': {'delegation_routing': ident}})
+
+            def delegation_finished(self, ident):
+                told['voice'].append({'hook': {'delegation_finished': ident}})
 
             def send(self, written):
                 told['voice'].append(json.loads(written))
@@ -982,6 +996,9 @@ def run() -> dict:
                                          tools, 'a-key', lambda: 100.0 + clocks['ms'] * scale / 1000.0,
                                          delegation_strategy=opened.get('strategy', 'operator'),
                                          memory=memory, provider_session='conn-1')
+        if conversation.gemini:
+            from lib.oracle_live_usage import LiveUsage
+            conversation.usage = LiveUsage('gemini')
         conversation.principal = OWNER
         conversation.direct_call_prefix = 'prefix'
         conversation.pool.shutdown(wait=False)
