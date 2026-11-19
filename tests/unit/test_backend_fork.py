@@ -8,6 +8,7 @@ import pytest
 
 from lib import backends, codex_app_server
 from lib.backend.base import Unsupported
+from tests.qa.fake_codex import rollout_path
 
 FAKE_CODEX = Path(__file__).resolve().parents[2] / "tests/qa/fake_codex.py"
 
@@ -30,11 +31,11 @@ def test_codex_forks_through_the_app_server(tmp_path, monkeypatch):
     codex = backends.get("codex")
     monkeypatch.setattr(codex, "required_binary", str(FAKE_CODEX))
     codex_app_server._CLIENTS.clear()
-    (home / "sessions" / "rollout-thread-a.jsonl").write_text(
+    rollout_path(home / "sessions", "thread-a").write_text(
         json.dumps({"type": "event_msg", "payload": {"message": "hello"}}) + "\n")
     new = codex.fork_conversation("thread-a", source_cwd=str(tmp_path), cwd=str(tmp_path))
     assert new and new != "thread-a"
-    assert (home / "sessions" / f"rollout-{new}.jsonl").read_text().count("hello") == 1
+    assert rollout_path(home / "sessions", new).read_text().count("hello") == 1
     assert codex.supports_fork
 
 
