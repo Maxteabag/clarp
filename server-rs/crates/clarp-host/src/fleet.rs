@@ -1171,19 +1171,22 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         }
     }
     works.telling.settings_are(Arc::new(settings.clone()));
-    let mut launch_usage=Ledger::new();
-    for (key,bytes) in store.list(&shelf(LAUNCH_USAGE)).map_err(|e|e.to_string())? {
-        let usage:launches::Usage=serde_json::from_slice(&bytes).map_err(|e|e.to_string())?;
-        launch_usage.insert(key,usage);
+    let mut launch_usage = Ledger::new();
+    for (key, bytes) in store
+        .list(&shelf(LAUNCH_USAGE))
+        .map_err(|e| e.to_string())?
+    {
+        let usage: launches::Usage = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        launch_usage.insert(key, usage);
     }
-    let launch_usage=Arc::new(launch_usage);
-    let mut owners=Owners::new();
+    let launch_usage = Arc::new(launch_usage);
+    let mut owners = Owners::new();
     let mut members = Vec::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
         let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
             format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
         })?;
-        owners.insert(agent_id.clone(),(record.cwd.clone(),record.is_janitor));
+        owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         if let Some(at) = record.deleted_at_ms {
             if !record.ledger_retired {
                 retire_goals(&works, &record, at)?;
@@ -1256,9 +1259,10 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         peers.insert(name, peer);
     }
     let (roster, janitors) = apart(&members);
-    let cwd_owners=Arc::new(owners);
+    let cwd_owners = Arc::new(owners);
     let (directory, read) = watch::channel(Arc::new(Directory {
-        launch_usage: launch_usage.clone(),cwd_owners: cwd_owners.clone(),
+        launch_usage: launch_usage.clone(),
+        cwd_owners: cwd_owners.clone(),
         members: roster,
         janitors,
         focus: focus.clone(),
@@ -1271,7 +1275,8 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let (tx, rx) = mpsc::channel();
     let log = works.log.clone();
     let fleet = Fleet {
-        launch_usage,cwd_owners,
+        launch_usage,
+        cwd_owners,
         works,
         store,
         members,
@@ -1562,7 +1567,8 @@ impl Fleet {
         self.works.telling.settings_are(settings.clone());
         let (roster, janitors) = apart(&self.members);
         self.directory.send_replace(Arc::new(Directory {
-            launch_usage:self.launch_usage.clone(),cwd_owners:self.cwd_owners.clone(),
+            launch_usage: self.launch_usage.clone(),
+            cwd_owners: self.cwd_owners.clone(),
             members: roster,
             janitors,
             focus: self.focus.clone(),
@@ -1916,7 +1922,7 @@ impl Fleet {
         }
         let (took, _taken) = oneshot::channel();
         self.put_launch(&record)?;
-        self.replaced(at,record.clone(),took);
+        self.replaced(at, record.clone(), took);
         self.works
             .hub
             .publish(wire::roster_started_again(&record), self.now_ms());
@@ -2132,7 +2138,11 @@ impl Fleet {
             ..AgentRecord::default()
         };
         let setup = setup(&self.works, &record)?;
-        if by_request { self.put_launch(&record)?; } else { self.put(&record)?; }
+        if by_request {
+            self.put_launch(&record)?;
+        } else {
+            self.put(&record)?;
+        }
         self.members.push(Arc::new(Member {
             record: record.clone(),
             agent: agent::spawn(setup),
@@ -2257,11 +2267,11 @@ impl Fleet {
         took: oneshot::Sender<()>,
     ) -> Result<(), Unavailable> {
         self.put(&record).map_err(Unavailable)?;
-        self.replaced(at,record,took);
+        self.replaced(at, record, took);
         Ok(())
     }
 
-    fn replaced(&mut self,at:usize,record:AgentRecord,took:oneshot::Sender<()>) {
+    fn replaced(&mut self, at: usize, record: AgentRecord, took: oneshot::Sender<()>) {
         // The agent's thread is told in the order the fleet made the changes.
         let agent = self.members[at].agent.clone();
         agent.amended(record.clone(), took);
@@ -2508,19 +2518,33 @@ impl Fleet {
         Ok(member)
     }
 
-    fn remember_owner(&mut self, record:&AgentRecord) {
-        if !self.cwd_owners.get(&record.agent_id).is_some_and(|(cwd,janitor)|cwd==&record.cwd && *janitor==record.is_janitor){
-            Arc::make_mut(&mut self.cwd_owners).insert(record.agent_id.clone(),(record.cwd.clone(), record.is_janitor));
+    fn remember_owner(&mut self, record: &AgentRecord) {
+        if !self
+            .cwd_owners
+            .get(&record.agent_id)
+            .is_some_and(|(cwd, janitor)| cwd == &record.cwd && *janitor == record.is_janitor)
+        {
+            Arc::make_mut(&mut self.cwd_owners).insert(
+                record.agent_id.clone(),
+                (record.cwd.clone(), record.is_janitor),
+            );
         }
     }
 
     /// The fleet is the single writer. A failed registration cannot count a launch.
-    fn put_launch(&mut self, record:&AgentRecord)->Result<(),String>{
-        let Some(usage)=launches::launched(&self.launch_usage,&record.cwd,self.now_ms()) else{return self.put(record);};
-        let bytes=serde_json::to_vec(&usage).map_err(|e|e.to_string())?;
-        let agent=serde_json::to_vec(record).map_err(|e|e.to_string())?;
-        self.store.put_together(&[(AGENTS.into(),record.agent_id.clone(),Some(agent)),(shelf(LAUNCH_USAGE),usage.path.clone(),Some(bytes))]).map_err(|e|e.to_string())?;
-        Arc::make_mut(&mut self.launch_usage).insert(usage.path.clone(),usage);
+    fn put_launch(&mut self, record: &AgentRecord) -> Result<(), String> {
+        let Some(usage) = launches::launched(&self.launch_usage, &record.cwd, self.now_ms()) else {
+            return self.put(record);
+        };
+        let bytes = serde_json::to_vec(&usage).map_err(|e| e.to_string())?;
+        let agent = serde_json::to_vec(record).map_err(|e| e.to_string())?;
+        self.store
+            .put_together(&[
+                (AGENTS.into(), record.agent_id.clone(), Some(agent)),
+                (shelf(LAUNCH_USAGE), usage.path.clone(), Some(bytes)),
+            ])
+            .map_err(|e| e.to_string())?;
+        Arc::make_mut(&mut self.launch_usage).insert(usage.path.clone(), usage);
         self.remember_owner(record);
         Ok(())
     }
