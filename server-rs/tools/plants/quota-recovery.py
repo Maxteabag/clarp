@@ -42,7 +42,17 @@ PLANTS = [
     (A, 'host', "the pool's first turn is one its agent no longer owns", '        let first = self.attempts.iter().find(|attempt| attempt.owned)?;',
      '        let first = self.attempts.iter().find(|attempt| !attempt.owned)?;'),
     (K, 'host', "a Host that keeps the logins reads no owner's answer", '    let selects = app.config.accounts == Accounts::Select;', '    let selects = false;'),
-    (L, 'host', "a janitor's card is on no shelf", '        let agents = directory.members.iter().chain(&directory.janitors);', '        let agents = directory.members.iter();'),
+    # ---- the keeper is quiet: its shelf is opened by its name or by the exact id of a card on it (the Label
+    #      checker's Fleet::scoped and this piece's Fleet::holding), never for a list the roster's members make
+    (L, 'host', "the keeper reads its owner's answers from no shelf", '    let fleet = Fleet::scoped(app, session, "");',
+     '    let fleet = Fleet::of(app);'),
+    (L, 'host', "a janitor's card is among what claims the owner's attention",
+     '        let agents = directory.members.iter();', '        let agents = directory.members.iter().chain(&directory.janitors);'),
+    (L, 'host', "a janitor's card pages the owner", '    if muted || quiet {', '    if muted || (quiet && false) {'),
+    (L, 'host', "a janitor's card cannot be answered by its id", '    let fleet = Fleet::holding(app, &decision_id);',
+     '    let fleet = Fleet::of(app);'),
+    (L, 'host', "a janitor's session lists none of its cards",
+     '        let fleet = Fleet::scoped(&app, &listing.session, &listing.agent_id);', '        let fleet = Fleet::of(&app);'),
 ]
 
 
