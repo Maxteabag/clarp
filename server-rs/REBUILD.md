@@ -3010,6 +3010,12 @@ of the same name, which refuses, for every tool of the Python Host that is not b
 from `~/.local/bin`, so taking a directory off the path would not keep them away): a tool that is not there yet
 says so, and is never an action on the other Host.
 
+**Controller narration** (19 Nov 2026). A limited or full device can request a tutorial line of at most
+240 printable characters after normalization. Cartesia speaks with the tutorial persona's configured
+voice and model. The Host keeps primary MP3s by voice, model and text in its preview store. Both kinds
+of cached clip must be regular files owned by the Host. A configured built-in fallback can speak on a
+primary failure; its bytes last for that response. Both kinds of response accept byte ranges.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |

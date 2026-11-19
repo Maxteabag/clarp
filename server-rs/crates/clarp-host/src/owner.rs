@@ -169,7 +169,7 @@ pub fn voices(file: &Table) -> Voices {
         ..Voices::default()
     }
     .with_agents(&given)
-    .with_cartesia(&named(&["cartesia", "voices"]))
+    .with_cartesia(&texts_at(file, &["cartesia", "voices"]))
 }
 
 /// Which of Gemini's models speaks, and through which of Google's doors.
