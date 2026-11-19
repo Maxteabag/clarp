@@ -249,27 +249,51 @@ async fn members(
 /// Asks the model a routing has to ask next: the tool of the Host its janitor is set to,
 /// once, for no longer than the router is set to wait. Answers the object in what the
 /// model said, or why there is none.
-async fn ask(app: &App, routing: &Routing) -> Result<Map<String, Value>, String> {
+async fn ask(app: &App, routing: &Routing, phase: &str) -> Result<Map<String, Value>, String> {
     let settings = &routing.settings;
     let provider = rules::provider(Some(&settings.provider));
-    if !TOOLS.iter().any(|(tool, _)| *tool == provider) {
-        return Err(not_a_tool(&provider));
-    }
-    let said = |text: &str| Some(text.to_string()).filter(|text| !text.is_empty());
-    let question = Question {
-        prompt: rules::prompt(routing.packet()),
-        model: said(&settings.model),
-        effort: said(&settings.effort),
+    let primary = clarp_kernel::janitors::fallbacks::Pick {
+        backend: provider,
+        model: settings.model.clone(),
+        effort: settings.effort.clone(),
     };
+    let prompt = rules::prompt(routing.packet());
     let within = Duration::from_millis(u64::try_from(settings.timeout_ms).unwrap_or(0));
-    let cwd = &app.config.default_cwd;
-    let _login = crate::pool::Service::use_login(app, &provider)
-        .await
-        .map_err(|_| "The login lock is unavailable")?;
-    match once::ask(&provider, &question, cwd, within).await {
-        Ok(answer) => rules::extract_json(&answer),
-        Err(unanswered) => Err(unanswered.words()),
-    }
+    crate::model_fallbacks::execute(app, routing.run_id(), phase, primary, |pick| {
+        let prompt = prompt.clone();
+        async move {
+            use crate::model_fallbacks::Failure;
+            if !TOOLS.iter().any(|(t, _)| *t == pick.backend) {
+                return Err(
+                    Failure::model("tool_unavailable", not_a_tool(&pick.backend))
+                        .because("RuntimeError"),
+                );
+            }
+            let word = |s: String| (!s.is_empty()).then_some(s);
+            let question = Question {
+                prompt,
+                model: word(pick.model),
+                effort: word(pick.effort),
+            };
+            let _lock = crate::pool::Service::use_login(app, &pick.backend)
+                .await
+                .map_err(|_| Failure::model("tool_unavailable", "The login lock is unavailable"))?;
+            let answer = once::ask(
+                &app.config.run_dir,
+                &pick.backend,
+                &question,
+                &app.config.default_cwd,
+                within,
+            )
+            .await
+            .map_err(Failure::routing)?;
+            rules::extract_json(&answer)
+                .map_err(|e| Failure::model("parse_error", e).because("ValueError"))
+        }
+    })
+    .await
+    .map(|(answer, _)| answer)
+    .map_err(|e| e.detail)
 }
 
 /// What is said of a provider this Host cannot ask.
@@ -502,7 +526,7 @@ pub(crate) async fn route(
             kept.await?
         }
         Begun::Ask(mut routing) => {
-            let first = ask(app, &routing).await;
+            let first = ask(app, &routing, "initial").await;
             let answered = desk.step(app, &agents, |book, around| {
                 book.answered(&mut routing, first, around)
             });
@@ -514,7 +538,7 @@ pub(crate) async fn route(
                     book.widen(&mut routing, around)
                 });
                 widened.await?;
-                let second = ask(app, &routing).await;
+                let second = ask(app, &routing, "broad").await;
                 if let Err(why) = &second {
                     // The first answer stands.
                     eprintln!("clarp-host: the router's second asking failed ({trace_id}): {why}");

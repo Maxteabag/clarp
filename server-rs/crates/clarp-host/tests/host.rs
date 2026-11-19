@@ -151,6 +151,32 @@ impl Drop for Place {
     }
 }
 
+/// Records in a stopped test Host's fleet store, in the key order of the port.
+fn kept_records(place: &Place, kind: &str) -> std::collections::BTreeMap<String, Value> {
+    use clarp_ports::kv::KeyValueEngine as _;
+    clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .list(&clarp_host::fleet::shelf(kind))
+        .unwrap()
+        .into_iter()
+        .map(|(key, bytes)| (key, serde_json::from_slice(&bytes).unwrap()))
+        .collect()
+}
+
+fn keep_record(place: &Place, kind: &str, key: &str, value: &Value) {
+    use clarp_ports::kv::KeyValueEngine as _;
+    clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .put(
+            &clarp_host::fleet::shelf(kind),
+            key,
+            &serde_json::to_vec(value).unwrap(),
+        )
+        .unwrap();
+}
+
 struct Host {
     process: Child,
     address: String,
@@ -23896,7 +23922,13 @@ else:
         let argv: Vec<String> =
             serde_json::from_slice(&std::fs::read(place.root.join("one-question")).unwrap())
                 .unwrap();
-        assert!(argv.last().unwrap().contains("How is Recorder doing?"));
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg.contains("How is Recorder doing?"))
+        );
+        assert_eq!(argv[argv.len() - 2], "--prompt-file");
+        assert!(!std::path::Path::new(argv.last().unwrap()).exists());
         assert_eq!(argv.contains(&"--no-session-log".into()), tool == "muse");
         assert!(argv.windows(2).any(|pair| pair == ["--model", "synthetic"]));
         assert!(
@@ -25248,6 +25280,736 @@ else:sys.exit(2)
     assert!(calls.contains(r#"["codex", "--no-quota", "--json"]"#));
     assert!(calls.contains(r#"["codex", "--json"]"#));
     assert!(!calls.contains("reset"));
+}
+
+#[test]
+fn inherited_models_retry_only_the_isolated_question_and_record_the_actual_model() {
+    let place = Place::new("model-fallbacks");
+    let scripts = r#"#!/usr/bin/env python3
+import json,sys,pathlib,time
+root=pathlib.Path(__file__).parent
+provider=pathlib.Path(__file__).name
+args=sys.argv[1:]
+turn="stream-json" in args
+prompt=sys.stdin.readline() if turn else sys.stdin.read()
+model=args[args.index("--model")+1] if "--model" in args else None
+with (root/"asked").open("a") as log:print(json.dumps([provider,model]),file=log)
+mode=(root/"mode").read_text()
+if mode=="managed" and turn:
+    print(json.dumps({"type":"system","subtype":"init","session_id":"stand-in","model":model}))
+    print(json.dumps({"type":"result","subtype":"success","is_error":True,"result":"usage limit reached","session_id":"stand-in"}))
+    sys.exit(1)
+if provider=="codex" and mode in ("decline","unavailable","slow"):
+    print("permission denied" if mode=="decline" else "fetch failed",file=sys.stderr)
+    sys.exit(1)
+if mode=="slow":
+    (root/"alternate-entered").touch()
+    for _ in range(100):
+        if (root/"release").exists():break
+        time.sleep(.05)
+if model=="timeout-explanation":
+    (root/"slow-explanation-started").touch()
+    time.sleep(120)
+    sys.exit(9)
+if mode=="reads":
+    if model=="first-read":
+        print("usage limit reached",file=sys.stderr)
+        sys.exit(1)
+    assert provider=="codex" and model=="second-read"
+    schema=json.loads(pathlib.Path("schema.json").read_text())
+    if "explanations" in schema["properties"]:
+        result={"explanations":[{"id":"1","text":"Runs the sample.","template":""}]}
+    else:
+        result={"steps":{k:{"status":"pending","evidence":"","note":""} for k in schema["properties"]["steps"]["required"]},
+                "checkpoint":{"progress":"A synthetic keeper answered.","next_work":"Continue the test."},"changed":True}
+    print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":json.dumps(result)}}))
+    sys.exit(0)
+decision={"kind":"agent_message","target_session":"anna","confidence":0.99,"addressing":True,"reason":"synthetic routing"}
+if provider=="claude":print(json.dumps(decision))
+else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":json.dumps(decision)}}))
+"#;
+    let codex = place.root.join("codex");
+    let claude = place.root.join("claude");
+    for tool in [&codex, &claude] {
+        program(tool, scripts);
+    }
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let start = || place.start_in("private", &[], &world);
+    let h = start();
+    let anna = h.new_agent("Anna");
+    let mike = h.new_agent("Mike");
+    let policy = "/janitor-policy";
+    let router = "clarp-message-delegator";
+    let path = format!("/janitors/{router}/effective-model-chain");
+    let save = |h: &Host, rev: Value, patch: Value| {
+        h.ask(
+            "POST",
+            policy,
+            Some(&json!({"configuration":patch,"expected_revision":rev})),
+        )
+    };
+    let primary = json!({"provider":"codex","model":"primary"});
+    let alternate = json!({"provider":"claude","model":"alternate"});
+    let chain = json!([primary, alternate]);
+    assert_eq!(h.ask_as("wrong", "GET", policy, None).0, 401);
+    assert_eq!(
+        h.get(policy),
+        json!({"revision":0,"model_chain":[],"inherit_sessions":[]})
+    );
+    assert_eq!(h.get(&path)["source"], "explicit");
+    assert_eq!(
+        h.get("/janitors/clarp-audio-bookkeeper/effective-model-chain")["source"],
+        "deterministic"
+    );
+    assert_eq!(
+        h.ask("GET", "/janitors/missing/effective-model-chain", None)
+            .0,
+        404
+    );
+    assert_eq!(save(&h, json!(false), json!({})).0, 409);
+    assert_eq!(
+        save(&h, json!(0), json!({"model_chain":[primary,primary]})).1,
+        json!({"error":"Duplicate model"})
+    );
+    let update = json!({"expected_revision":0,"configuration":{"model_chain":chain,"inherit_sessions":[router]}});
+    let (limited, _) = pair(&h, "Read policy", "limited");
+    assert_eq!(
+        h.ask_as(&limited, "GET", policy, None),
+        (200, h.get(policy))
+    );
+    assert_eq!(
+        h.ask_as(&limited, "POST", policy, Some(&update)),
+        (403, json!({"error":"this device may not do that"}))
+    );
+    assert_eq!(h.get(policy)["revision"], 0);
+    assert_eq!(h.ask_as("wrong", "POST", policy, Some(&update)).0, 401);
+    let (full, _) = pair(&h, "Manage policy", "full");
+    let (code, saved) = h.ask_as(&full, "POST", policy, Some(&update));
+    assert_eq!(code, 200, "{saved}");
+    assert_eq!(
+        h.get(&path),
+        json!({"revision":1,"source":"global","chain":chain})
+    );
+    assert_eq!(
+        save(&h, json!(0), json!({})),
+        (
+            409,
+            json!({"error":"Policy changed; refresh before saving","code":"revision_conflict"})
+        )
+    );
+    h.post(
+        "/orchestrator/settings",
+        json!({"enabled":true,"fallback_only":false}),
+    );
+    let mode = |m: &str| std::fs::write(place.root.join("mode"), m).unwrap();
+    let calls = || -> Vec<Value> {
+        std::fs::read_to_string(place.root.join("asked"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    };
+    let dictate = |h: &Host, id: &str| {
+        h.ask("POST","/send",Some(&json!({"session":mike,"text":format!("take a note {id}"),"hands_free":true,"client_msg_id":id})))
+    };
+    mode("unavailable");
+    assert_eq!(dictate(&h, "one").1["session"], anna);
+    assert_eq!(
+        calls(),
+        vec![
+            json!(["codex", "primary"]),
+            json!(["claude", "alternate"]),
+            json!(["codex", "primary"]),
+            json!(["claude", "alternate"]),
+        ]
+    );
+    wait_for("a single delivery after the alternate answers", || {
+        h.conversation(&anna)
+            .contains(&said("assistant", "take a note one"))
+    });
+    assert_eq!(
+        h.conversation(&anna)
+            .iter()
+            .filter(|(role, _)| role == "user")
+            .count(),
+        1
+    );
+    let receipts = |place: &Place| {
+        kept_records(place, "model-fallback-attempt")
+            .into_values()
+            .collect::<Vec<_>>()
+    };
+    let delegator = h.get("/janitors/clarp-message-delegator")["janitor"]["agent_id"].clone();
+    drop(h);
+    let first = receipts(&place);
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        (
+            &first[0]["backend"],
+            &first[0]["model"],
+            &first[0]["attempt"],
+            &first[0]["status"]
+        ),
+        (
+            &json!("claude"),
+            &json!("alternate"),
+            &json!(0),
+            &json!("completed")
+        )
+    );
+    // Routing away from Mike triggers a broad scan. Each phase owns a claim;
+    // the caller delivers the message only after both phases have finished.
+    let phases: Vec<_> = first
+        .iter()
+        .map(|row| {
+            row["request_id"]
+                .as_str()
+                .unwrap()
+                .rsplit(':')
+                .next()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(phases, ["broad", "initial"]);
+    assert!(first[0]["finished_at"].as_i64() >= first[0]["started_at"].as_i64());
+    assert!(first[0]["result_json"].is_null());
+    assert_eq!(first[0]["reason"], "RuntimeError");
+    assert_eq!(first[0]["effort"], "");
+    assert_eq!(first[0]["agent_id"], delegator);
+    let h = start();
+    assert_eq!(h.get(policy), saved);
+    mode("ok");
+    assert_eq!(dictate(&h, "two").1["session"], anna);
+    assert_eq!(
+        calls()[4..],
+        [json!(["codex", "primary"]), json!(["codex", "primary"])]
+    );
+    drop(h);
+    assert_eq!(receipts(&place), first);
+    let h = start();
+    mode("decline");
+    let _ = dictate(&h, "denied");
+    assert_eq!(calls()[6..], [json!(["codex", "primary"])]);
+    drop(h);
+    assert_eq!(receipts(&place), first);
+    // A crash can leave a durable running receipt. Restore that state for a distinct
+    // request in the synthetic Host database and verify only its primary is called.
+    let request = clarp_kernel::router::flow::request_id(None, "u-interrupted-claim");
+    let id = clarp_kernel::janitors::demand::request_run_id("message-delegator", &request).unwrap();
+    let mut claimed = first[0].clone();
+    claimed["request_id"] = json!(format!("{id}:initial"));
+    claimed["status"] = json!("running");
+    claimed["finished_at"] = Value::Null;
+    let key = json!([claimed["agent_id"], claimed["request_id"], 0]).to_string();
+    keep_record(&place, "model-fallback-attempt", &key, &claimed);
+    let h = start();
+    mode("unavailable");
+    let before = calls().len();
+    let _ = dictate(&h, "interrupted-claim");
+    assert_eq!(&calls()[before..], &[json!(["codex", "primary"])]);
+    drop(h);
+    assert!(receipts(&place).contains(&claimed));
+    let h = start();
+    mode("slow");
+    std::thread::scope(|threads| {
+        // Ask for an explicit routing decision. Ordinary hands-free fallback would
+        // deliver to the focused agent (Anna) independently of the stale answer.
+        let running = threads.spawn(|| h.ask("POST","/send",Some(&json!({"session":mike,
+            "text":"take a note stale","hands_free":true,"client_msg_id":"stale","orchestrator_fallback":true}))));
+        wait_for("a durable claim before the alternate replies", || {
+            place.root.join("alternate-entered").exists()
+        });
+        assert_eq!(save(&h, json!(1), json!({"inherit_sessions":[]})).0, 200);
+        std::fs::write(place.root.join("release"), "").unwrap();
+        let (code, answer) = running.join().unwrap();
+        assert_eq!(code, 200, "{answer}");
+        assert_eq!(answer["orchestrator"]["action"], "fallback", "{answer}");
+    });
+
+    assert!(
+        !h.conversation(&anna)
+            .contains(&said("user", "take a note stale"))
+    );
+    assert_eq!(h.get(&path)["source"], "explicit");
+    let api_a = json!({"provider":"openai","model":"api-primary"});
+    let api_b = json!({"provider":"openai","model":"api-backup"});
+    let mixed = json!([api_a, api_b, alternate]);
+    assert_eq!(
+        save(
+            &h,
+            json!(2),
+            json!({"model_chain":mixed,"inherit_sessions":[router]})
+        )
+        .0,
+        200
+    );
+    assert_eq!(h.get(policy)["model_chain"], mixed);
+    assert_eq!(h.get(&path)["chain"], mixed);
+    mode("ok");
+    let count = calls().len();
+    assert_eq!(dictate(&h, "mixed").1["session"], anna);
+    assert_eq!(
+        &calls()[count..],
+        &[
+            json!(["claude", "alternate"]),
+            json!(["claude", "alternate"])
+        ]
+    );
+    drop(h);
+    let rows = receipts(&place);
+    assert!(rows.iter().any(|r| r["status"] == "cancelled"));
+    let h = start();
+    let missed = rows
+        .iter()
+        .find(|r| r["model"] == "api-backup" && r["status"] == "failed")
+        .unwrap();
+    assert_eq!(missed["attempt"], 0);
+    assert!(rows.iter().any(|r| r["request_id"] == missed["request_id"]
+        && r["attempt"] == 1
+        && r["model"] == "alternate"
+        && r["status"] == "completed"));
+    assert!(!rows.iter().any(|r| r["model"] == "api-primary"));
+    assert_eq!(
+        save(&h, json!(3), json!({"model_chain":[api_a,api_b]})).0,
+        200
+    );
+    let count = calls().len();
+    let _ = dictate(&h, "no-provider");
+    assert_eq!(calls().len(), count);
+    drop(h);
+    assert_eq!(
+        receipts(&place)
+            .iter()
+            .filter(|r| r["model"] == "api-backup" && r["status"] == "failed")
+            .count(),
+        3
+    );
+    let h = start();
+    let first_read = json!({"provider":"codex","model":"first-read"});
+    let next_read = json!({"provider":"codex","model":"second-read"});
+    let keeper_name = "clarp-goal-keeper";
+    let explain_name = "clarp-tool-explainer";
+    let keeper = h.get("/janitors/clarp-goal-keeper")["janitor"].clone();
+    let keeper = h.post(
+        "/janitors/clarp-goal-keeper/configure",
+        json!({
+            "expected_revision":keeper["revision"],"attachments":folding_nothing(&keeper),
+            "backend":"codex","model":"","execution":{"executor":"ephemeral","provider":"codex"}
+        }),
+    )["janitor"]
+        .clone();
+    assert_eq!(save(&h,json!(4),json!({"model_chain":[first_read,next_read],"inherit_sessions":[explain_name,keeper_name]})).0,200);
+    mode("reads");
+    h.post("/tool-explanations/settings", json!({"enabled":true}));
+    let explainer = h.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    h.post(
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({"expected_revision":explainer["revision"],"enabled":true}),
+    );
+    let ask_explain = || {
+        h.post("/tool-explanations",json!({"session":mike,"detail_level":2,"items":[{"id":"one","activity":{"name":"Bash","command":"unrecognized_synthetic_task"}}]}))
+    };
+    wait_for("the second explanation model's answer", || {
+        ask_explain()["items"][0]["text"] == "Runs the sample."
+    });
+    let items = json!([{"id":"probe","title":"Probe behavior"}]).to_string();
+    let commitment=json!({"outcome":"Answer received","criteria":["model answered"],"limits":"stand-ins only"}).to_string();
+    let goal_row = goal(
+        &h,
+        &place.root,
+        &["create", &mike, "probe", "Probe it", &items, &commitment],
+    );
+    let goal_id = goal_row["plan_id"].as_str().unwrap();
+    h.send(&mike, "The probe is running.", "keeper-progress");
+    h.post(
+        "/janitors/clarp-goal-keeper/enabled",
+        json!({"expected_revision":keeper["revision"],"enabled":true}),
+    );
+    wait_for("the keeper receipt to name the alternate model", || {
+        goal(&h, &place.root, &["get", goal_id])["updater"]["last_receipt"]["model"]
+            == "second-read"
+    });
+    let old = h.get("/janitors/clarp-goal-keeper")["janitor"].clone();
+    h.post(
+        "/janitors/clarp-goal-keeper/enabled",
+        json!({"expected_revision":old["revision"],"enabled":false}),
+    );
+    mode("managed");
+    let make_claude = |name: &str| {
+        h.post("/agents", json!({"name":name,"backend":"claude"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let ordinary = make_claude("Ordinary");
+    let worker = make_claude("Sweep");
+    let scheduled = h.post("/janitors", every_minute(&worker, 60))["janitor"].clone();
+    let c1 = json!({"provider":"claude","model":"managed-primary"});
+    let c2 = json!({"provider":"claude","model":"managed-spare"});
+    assert_eq!(
+        save(
+            &h,
+            json!(5),
+            json!({"model_chain":[c1,c2],"inherit_sessions":[worker]})
+        )
+        .0,
+        200
+    );
+    let n = calls().len();
+    h.send(&ordinary, "ordinary failure", "ordinary");
+    wait_for("ordinary conversation failure", || {
+        h.state(&ordinary) == "interrupted"
+    });
+    assert_eq!(calls().len(), n + 1);
+    assert_ne!(calls()[n][1], "managed-primary");
+    h.post(
+        &format!("/janitors/{worker}/enabled"),
+        json!({"expected_revision":scheduled["revision"],"enabled":true}),
+    );
+    wait_a_minute("a managed turn to use the inherited primary", || {
+        calls().len() > n + 1
+    });
+    let runs_path = format!("/janitors/{worker}/runs");
+    wait_for(
+        "the exhausted managed turn to finish on its own provider",
+        || {
+            h.get(&runs_path)["runs"]
+                .as_array()
+                .is_some_and(|rows| rows.first().is_some_and(|r| !r["finished_at"].is_null()))
+        },
+    );
+    assert_eq!(&calls()[n + 1..], &[json!(["claude", "managed-primary"])]);
+    let scheduled_run = h.get(&runs_path)["runs"][0].clone();
+    assert_eq!(
+        scheduled_run["configuration"]["effective_chain"],
+        json!({"source":"global","revision":6,"chain":[c1,c2]})
+    );
+    // Run the explanation on a real clock while the routing transport is exercised below.
+    let slow_model = json!({"provider":"codex","model":"timeout-explanation"});
+    assert_eq!(
+        save(
+            &h,
+            json!(6),
+            json!({"model_chain":[slow_model],"inherit_sessions":[explain_name]})
+        )
+        .0,
+        200
+    );
+    let slow_explanation = || {
+        h.post("/tool-explanations",json!({
+        "session":mike,"detail_level":2,
+        "items":[{"id":"slow","activity":{"name":"Bash","command":"a_different_synthetic_operation"}}]
+    }))
+    };
+    assert_eq!(slow_explanation()["items"][0]["status"], "pending");
+    wait_for("the slow explanation model to start", || {
+        place.root.join("slow-explanation-started").exists()
+    });
+    // These are the actual argv and input seen by each synthetic CLI. The recorder
+    // opens the prompt file while the process is running, before it gives its answer.
+    let doors = Place::new("routing-input");
+    let bins: Vec<_> = ["claude", "codex", "grok", "muse", "opencode"]
+        .iter()
+        .map(|tool| doors.root.join(tool))
+        .collect();
+    let recorder = r#"#!/usr/bin/env python3
+import json,pathlib,stat,sys
+root=pathlib.Path(__file__).parent
+tool=pathlib.Path(__file__).name
+argv=sys.argv[1:]
+incoming=sys.stdin.read()
+row={"tool":tool,"argv":argv,"stdin":incoming}
+if "--prompt-file" in argv:
+    path=pathlib.Path(argv[argv.index("--prompt-file")+1])
+    row.update(path=str(path),contents=path.read_text(),mode=stat.S_IMODE(path.stat().st_mode),directory_mode=stat.S_IMODE(path.parent.stat().st_mode))
+with (root/"observed").open("a") as out: print(json.dumps(row),file=out)
+if (root/"hang").exists() and tool=="opencode":
+    import time
+    time.sleep(20)
+if (root/"fail").exists():sys.exit(3)
+answer=json.dumps({"kind":"status_query","target_session":"recorder","confidence":0.99})
+if tool=="muse": print(json.dumps({"payload_type":"run.terminal.completed","payload":{"text":answer}}))
+elif tool=="grok":print(json.dumps({"type":"text","data":answer}))
+elif tool=="codex":print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":answer}}))
+elif tool=="opencode":print(json.dumps({"type":"text","text":answer}))
+else:print(answer)
+"#;
+    for bin in &bins {
+        program(bin, recorder);
+    }
+    let vars = [
+        "CLARP_CLAUDE_PROGRAM",
+        "CLARP_CODEX_PROGRAM",
+        "CLARP_GROK_PROGRAM",
+        "CLARP_MUSE_PROGRAM",
+        "CLARP_OPENCODE_PROGRAM",
+    ];
+    let mut env: Vec<_> = vars
+        .iter()
+        .zip(&bins)
+        .map(|(v, bin)| (*v, bin.to_str().unwrap()))
+        .collect();
+    env.push(("HOME", doors.root.to_str().unwrap()));
+    let host = doors.start_in("", &[], &env);
+    host.new_agent("Recorder");
+    host.post(
+        "/orchestrator/settings",
+        json!({"enabled":true,"fallback_only":false}),
+    );
+    let ask = |text: &str, id: &str| {
+        host.ask(
+            "POST",
+            "/send",
+            Some(&json!({"session":"recorder","text":text,"hands_free":true,"client_msg_id":id})),
+        )
+    };
+    let observed = || {
+        std::fs::read_to_string(doors.root.join("observed"))
+            .unwrap_or_default()
+            .lines()
+            .map(|s| serde_json::from_str::<Value>(s).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let who = |tool: &str| json!({"provider":tool,"model":"synthetic-model"});
+    let mut rev = 0;
+    for tool in ["claude", "codex", "grok", "muse"] {
+        assert_eq!(
+            save(
+                &host,
+                json!(rev),
+                json!({"model_chain":[who(tool)],"inherit_sessions":[router]})
+            )
+            .0,
+            200
+        );
+        rev += 1;
+        for broken in [false, true] {
+            let flag = doors.root.join("fail");
+            if broken {
+                std::fs::write(&flag, "").unwrap();
+            }
+            let token = format!("private-test-utterance-{tool}-{broken}");
+            let before = observed().len();
+            let reply = ask(&token, &token);
+            if !broken {
+                assert_eq!(reply.1["orchestrator"]["action"], "status", "{reply:?}");
+            }
+            let rows = observed();
+            assert_eq!(rows.len(), before + 1);
+            let row = rows.last().unwrap();
+            assert_eq!(row["tool"], tool);
+            let argv = row["argv"].as_array().unwrap();
+            assert!(
+                !argv.iter().any(|a| a.as_str().unwrap().contains(&token)),
+                "{tool} prompt on argv"
+            );
+            if matches!(tool, "grok" | "muse") {
+                assert_eq!(argv[argv.len() - 2], "--prompt-file");
+                assert_eq!(row["stdin"], "");
+                assert!(row["contents"].as_str().unwrap().contains(&token));
+                assert_eq!(row["directory_mode"], 0o700);
+                assert_eq!(row["mode"], 0o600);
+                let path = std::path::Path::new(row["path"].as_str().unwrap());
+                assert!(!path.exists());
+                assert!(!path.parent().unwrap().exists());
+            } else {
+                assert!(row["stdin"].as_str().unwrap().contains(&token));
+                if tool == "codex" {
+                    assert_eq!(argv.last().unwrap(), "-");
+                }
+            }
+            if broken {
+                std::fs::remove_file(flag).unwrap();
+            }
+        }
+    }
+    assert_eq!(
+        save(
+            &host,
+            json!(rev),
+            json!({"model_chain":[who("opencode"),who("codex")]})
+        )
+        .0,
+        200
+    );
+    let before = observed().len();
+    assert_eq!(
+        ask("short question", "small-argv").1["orchestrator"]["action"],
+        "status"
+    );
+    assert_eq!(observed()[before]["tool"], "opencode");
+    let before = observed().len();
+    let long = format!("private-broad-question-{}", "x".repeat(131072));
+    assert_eq!(ask(&long, "overflow").1["orchestrator"]["action"], "status");
+    let rows = observed();
+    assert_eq!(
+        rows.len(),
+        before + 1,
+        "an oversized argv-only command must never start"
+    );
+    assert_eq!(rows[before]["tool"], "codex");
+    assert!(rows[before]["stdin"].as_str().unwrap().contains(&long));
+    host.post("/orchestrator/settings", json!({"timeout_ms":400}));
+    std::fs::write(doors.root.join("hang"), "").unwrap();
+    assert_eq!(
+        ask("short timeout question", "timeout-fallback").1["orchestrator"]["action"],
+        "status"
+    );
+    let revision = host.get(policy)["revision"].clone();
+    assert_eq!(
+        save(&host, revision, json!({"model_chain":[who("opencode")]})).0,
+        200
+    );
+    let _ = ask("short exhausted question", "timeout-final");
+    let recent = host.get("/orchestrator/decisions");
+    assert_eq!(
+        recent["decisions"][0]["error"],
+        "opencode timed out after 0.4 s"
+    );
+    drop(host);
+    let overflow_receipt = receipts(&doors)
+        .into_iter()
+        .find(|r| {
+            r["backend"] == "codex" && r["reason"] == "PromptTooLarge" && r["status"] == "completed"
+        })
+        .unwrap();
+    assert_eq!(
+        overflow_receipt["reason"], "PromptTooLarge",
+        "the size check must precede exec"
+    );
+    assert!(
+        receipts(&doors)
+            .iter()
+            .any(|r| r["reason"] == "TimeoutExpired" && r["status"] == "completed")
+    );
+    // Restore a historical row in this test's store; both screens redact on read.
+    let legacy = "Command '['/opt/agy', '--print=PRIVATE-MARKER']' timed out after 30.0 seconds";
+    let mut book = kept_records(&doors, "router").remove("all").unwrap();
+    let last = book["decisions"]
+        .as_array_mut()
+        .unwrap()
+        .last_mut()
+        .unwrap();
+    last["error"] = json!(legacy);
+    last["final_action"] = json!("ignored");
+    keep_record(&doors, "router", "all", &book);
+    let runtime = doors.root.join("run");
+    let old = runtime.join("clarp-routing-0000000000000001");
+    let young = runtime.join("clarp-routing-0000000000000002");
+    let outside = doors.root.join("other-host");
+    let link = runtime.join("clarp-routing-0000000000000003");
+    let unrelated = runtime.join("abcdef0123456789");
+    for dir in [&old, &young, &outside, &unrelated] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("prompt.txt"), "sample").unwrap();
+    }
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+    std::os::unix::fs::symlink(&outside, old.join("inside")).unwrap();
+    for dir in [&old, &outside, &unrelated] {
+        std::fs::File::open(dir)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1000))
+            .unwrap();
+    }
+    let host = doors.start_in("", &[], &env);
+    assert!(!old.exists());
+    assert!(
+        young.join("prompt.txt").exists()
+            && outside.join("prompt.txt").exists()
+            && unrelated.exists()
+            && link.is_symlink()
+    );
+    for (route, key) in [
+        ("/orchestrator/decisions", "decisions"),
+        ("/orchestrator/settings", "recent_decisions"),
+        ("/orchestrator/settings", "ignored_decisions"),
+    ] {
+        let rows = host.get(route);
+        assert_eq!(rows[key][0]["error"], "agy timed out after 30 s");
+        assert!(!rows.to_string().contains("PRIVATE-MARKER"));
+    }
+    drop(host);
+    let persisted = kept_records(&doors, "router");
+    assert_eq!(
+        persisted["all"]["decisions"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["error"],
+        legacy
+    );
+    wait_a_minute("the explanation model's timeout", || {
+        slow_explanation()["items"][0]["status"] == "failed"
+    });
+    assert_eq!(
+        slow_explanation()["items"],
+        json!([{"id":"slow","status":"failed","reason":"timeout"}])
+    );
+    let runs = h.get("/janitors/clarp-tool-explainer/runs");
+    let finished = &runs["runs"][0];
+    assert_eq!(finished["status"], "failed", "{finished}");
+    assert_eq!(finished["demand_result"]["reason"], "timeout", "{finished}");
+    assert_eq!(
+        calls()
+            .iter()
+            .filter(|call| call[1] == "timeout-explanation")
+            .count(),
+        1
+    );
+    let revision = h.get(policy)["revision"].clone();
+    assert_eq!(
+        save(
+            &h,
+            revision,
+            json!({"model_chain":chain,"inherit_sessions":[router]})
+        )
+        .0,
+        200
+    );
+    std::fs::remove_file(place.root.join("alternate-entered")).unwrap();
+    std::fs::remove_file(place.root.join("release")).unwrap();
+    mode("slow");
+    // Interrupt a second request while its alternate is still inside the stand-in.
+    // Inspect its durable claim only after the fleet has released its store.
+    let interrupted = json!({"session":mike,"text":"take a note interrupted","hands_free":true,
+        "client_msg_id":"claim-at-crash","orchestrator_fallback":true})
+    .to_string();
+    let mut socket = TcpStream::connect(&h.address).unwrap();
+    write!(socket,"POST /send HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",h.token,interrupted.len(),interrupted).unwrap();
+    wait_for("the alternate to start before the crash", || {
+        place.root.join("alternate-entered").exists()
+    });
+    h.kill();
+    drop(socket);
+    let crash_request = clarp_kernel::router::flow::request_id(None, "u-claim-at-crash");
+    let crash_run =
+        clarp_kernel::janitors::demand::request_run_id("message-delegator", &crash_request)
+            .unwrap();
+    assert!(
+        receipts(&place)
+            .iter()
+            .any(|r| r["request_id"] == format!("{crash_run}:initial") && r["status"] == "running")
+    );
+    let recorded = receipts(&place);
+    assert!(
+        recorded
+            .iter()
+            .any(|r| r["agent_id"] == explainer["agent_id"]
+                && r["model"] == "second-read"
+                && r["status"] == "completed")
+    );
+    assert!(recorded.iter().any(|r| r["agent_id"] == keeper["agent_id"]
+        && r["model"] == "second-read"
+        && r["status"] == "completed"));
+    assert!(
+        !recorded
+            .iter()
+            .any(|row| row["agent_id"] == scheduled["agent_id"])
+    );
 }
 
 #[test]

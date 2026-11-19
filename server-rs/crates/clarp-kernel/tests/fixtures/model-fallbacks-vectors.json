@@ -1,0 +1,4467 @@
+{
+ "calls": [
+  {
+   "models": [],
+   "receipts": [],
+   "request": "case-0",
+   "result": {
+    "error": "provider unavailable"
+   },
+   "results": [
+    "fail"
+   ],
+   "tried": [
+    "a"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [],
+   "request": "case-1",
+   "result": {
+    "ok": "a"
+   },
+   "results": [
+    "ok"
+   ],
+   "tried": [
+    "a"
+   ]
+  },
+  {
+   "models": [
+    "a",
+    "b",
+    "c"
+   ],
+   "receipts": [
+    {
+     "attempt": 1,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "completed"
+    }
+   ],
+   "request": "case-2",
+   "result": {
+    "ok": "b"
+   },
+   "results": [
+    "fail",
+    "ok"
+   ],
+   "tried": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "models": [
+    "b",
+    "c"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "failed"
+    },
+    {
+     "attempt": 1,
+     "backend": "codex",
+     "effort": "",
+     "model": "c",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "completed"
+    }
+   ],
+   "request": "case-3",
+   "result": {
+    "ok": "c"
+   },
+   "results": [
+    "fail",
+    "fail",
+    "ok"
+   ],
+   "tried": [
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "models": [
+    "b",
+    "c"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "cancelled"
+    }
+   ],
+   "request": "case-4",
+   "result": {
+    "error": "request is no longer current"
+   },
+   "results": [
+    "fail",
+    "cancel"
+   ],
+   "tried": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [],
+   "request": "case-5",
+   "result": {
+    "error": "permission denied"
+   },
+   "results": [
+    "deny"
+   ],
+   "tried": [
+    "a"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "cancelled"
+    }
+   ],
+   "request": "case-6",
+   "result": {
+    "error": "permission denied"
+   },
+   "results": [
+    "fail",
+    "deny"
+   ],
+   "tried": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "completed"
+    }
+   ],
+   "request": "case-7",
+   "result": {
+    "ok": "b"
+   },
+   "results": [
+    "fail",
+    "ok"
+   ],
+   "tried": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "completed"
+    }
+   ],
+   "request": "case-7",
+   "result": {
+    "error": "fallback invocation already claimed; inspect its receipt"
+   },
+   "results": [
+    "fail",
+    "ok"
+   ],
+   "tried": [
+    "a"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "failed"
+    }
+   ],
+   "request": "case-8",
+   "result": {
+    "error": "provider unavailable"
+   },
+   "results": [
+    "fail",
+    "fail"
+   ],
+   "tried": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "models": [
+    "b"
+   ],
+   "receipts": [
+    {
+     "attempt": 0,
+     "backend": "codex",
+     "effort": "",
+     "model": "b",
+     "reason": "RuntimeError",
+     "result_json": null,
+     "status": "failed"
+    }
+   ],
+   "request": "case-8",
+   "result": {
+    "error": "fallback invocation already claimed; inspect its receipt"
+   },
+   "results": [
+    "fail",
+    "fail"
+   ],
+   "tried": [
+    "a"
+   ]
+  }
+ ],
+ "encodings": [
+  {
+   "backend": "claude",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "claude",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "claude",
+   "error": "prompt cannot be encoded for claude",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "claude",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "claude",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "claude",
+   "error": "prompt cannot be encoded for claude",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "claude",
+   "error": "prompt cannot be encoded for claude",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "claude",
+   "error": "prompt cannot be encoded for claude",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "claude",
+   "error": "prompt cannot be encoded for claude",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "claude",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  },
+  {
+   "backend": "codex",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "codex",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "codex",
+   "error": "prompt cannot be encoded for codex",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "codex",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "codex",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "codex",
+   "error": "prompt cannot be encoded for codex",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "codex",
+   "error": "prompt cannot be encoded for codex",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "codex",
+   "error": "prompt cannot be encoded for codex",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "codex",
+   "error": "prompt cannot be encoded for codex",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "codex",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  },
+  {
+   "backend": "grok",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "grok",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "grok",
+   "error": "prompt cannot be encoded for grok",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "grok",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "grok",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "grok",
+   "error": "prompt cannot be encoded for grok",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "grok",
+   "error": "prompt cannot be encoded for grok",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "grok",
+   "error": "prompt cannot be encoded for grok",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "grok",
+   "error": "prompt cannot be encoded for grok",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "grok",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  },
+  {
+   "backend": "muse",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "muse",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "muse",
+   "error": "prompt cannot be encoded for muse",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "muse",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "muse",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "muse",
+   "error": "prompt cannot be encoded for muse",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "muse",
+   "error": "prompt cannot be encoded for muse",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "muse",
+   "error": "prompt cannot be encoded for muse",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "muse",
+   "error": "prompt cannot be encoded for muse",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "muse",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  },
+  {
+   "backend": "agy",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "agy",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "agy",
+   "error": "prompt cannot be encoded for agy",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "agy",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "agy",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "agy",
+   "error": "prompt cannot be encoded for agy",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "agy",
+   "error": "prompt cannot be encoded for agy",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "agy",
+   "error": "prompt cannot be encoded for agy",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "agy",
+   "error": "prompt cannot be encoded for agy",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "agy",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  },
+  {
+   "backend": "opencode",
+   "bytes": [
+    0
+   ],
+   "points": [
+    0
+   ]
+  },
+  {
+   "backend": "opencode",
+   "bytes": [
+    97,
+    195,
+    169,
+    240,
+    159,
+    153,
+    130
+   ],
+   "points": [
+    97,
+    233,
+    128578
+   ]
+  },
+  {
+   "backend": "opencode",
+   "error": "prompt cannot be encoded for opencode",
+   "points": [
+    56447
+   ]
+  },
+  {
+   "backend": "opencode",
+   "bytes": [
+    128
+   ],
+   "points": [
+    56448
+   ]
+  },
+  {
+   "backend": "opencode",
+   "bytes": [
+    233,
+    255
+   ],
+   "points": [
+    56553,
+    56575
+   ]
+  },
+  {
+   "backend": "opencode",
+   "error": "prompt cannot be encoded for opencode",
+   "points": [
+    56576
+   ]
+  },
+  {
+   "backend": "opencode",
+   "error": "prompt cannot be encoded for opencode",
+   "points": [
+    55296
+   ]
+  },
+  {
+   "backend": "opencode",
+   "error": "prompt cannot be encoded for opencode",
+   "points": [
+    56319
+   ]
+  },
+  {
+   "backend": "opencode",
+   "error": "prompt cannot be encoded for opencode",
+   "points": [
+    57343
+   ]
+  },
+  {
+   "backend": "opencode",
+   "bytes": [
+    237,
+    159,
+    191,
+    238,
+    128,
+    128,
+    244,
+    143,
+    191,
+    191
+   ],
+   "points": [
+    55295,
+    57344,
+    1114111
+   ]
+  }
+ ],
+ "failures": [
+  {
+   "retry": true,
+   "text": "usage limit reached"
+  },
+  {
+   "retry": true,
+   "text": "fetch failed"
+  },
+  {
+   "retry": true,
+   "text": "Error 529 overloaded"
+  },
+  {
+   "retry": true,
+   "text": "runner exited rc=1"
+  },
+  {
+   "retry": true,
+   "text": "an unexpected provider answer"
+  },
+  {
+   "retry": false,
+   "text": "aborted by user"
+  },
+  {
+   "retry": false,
+   "text": "turn_aborted by user"
+  },
+  {
+   "retry": false,
+   "text": "permission denied"
+  },
+  {
+   "retry": false,
+   "text": "approval REQUIRED"
+  },
+  {
+   "retry": false,
+   "text": "NOT AUTHORIZED"
+  },
+  {
+   "retry": false,
+   "text": "ownership lost"
+  },
+  {
+   "retry": false,
+   "text": "configuration changed"
+  },
+  {
+   "retry": false,
+   "text": "fetch failed: permission denied"
+  },
+  {
+   "retry": true,
+   "text": ""
+  }
+ ],
+ "historical": [
+  {
+   "expected": "ordinary error",
+   "stored": "ordinary error"
+  },
+  {
+   "expected": "",
+   "stored": ""
+  },
+  {
+   "expected": "agy timed out after 30 s",
+   "stored": "Command '['/opt/bin/agy', '--print=private-example']' timed out after 30.0 seconds"
+  },
+  {
+   "expected": "the routing CLI timed out after 0.4 s",
+   "stored": "Command '[]' timed out after 0.4 seconds"
+  },
+  {
+   "expected": "the routing CLI timed out after 0.001 s",
+   "stored": "Command '['', 'private-example']' timed out after 0.001 seconds"
+  },
+  {
+   "expected": "codex timed out after 7 s",
+   "stored": "Command '['codex', 'line1\nline2']' timed out after 7 seconds"
+  },
+  {
+   "expected": "prefix Command '[]' timed out after 2 seconds",
+   "stored": "prefix Command '[]' timed out after 2 seconds"
+  },
+  {
+   "expected": "Command '[]' timed out after 2 seconds trailing",
+   "stored": "Command '[]' timed out after 2 seconds trailing"
+  }
+ ],
+ "policy": [
+  {
+   "answer": [
+    400,
+    {
+     "error": "Unsupported policy fields"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": null,
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Unsupported policy fields"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "unknown": 1
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Expected existing Janitor sessions"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "inherit_sessions": "keeper"
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Expected existing Janitor sessions"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "inherit_sessions": [
+     "absent"
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Expected existing Janitor sessions"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "inherit_sessions": [
+     false
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Duplicate inherited session"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "inherit_sessions": [
+     "keeper",
+     "keeper"
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Inherited Janitors require a primary model"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "inherit_sessions": [
+     "keeper"
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "At least one model is required"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": []
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "At least one model is required"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": "wrong"
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Each model needs provider and model identifiers"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     null
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Each model needs provider and model identifiers"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "effort": "low",
+      "model": "primary",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Each model needs provider and model identifiers"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "m"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Each model needs provider and model identifiers"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": " ",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Each model needs provider and model identifiers"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Invalid provider model identifier"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "invalid",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Unsupported model provider"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "m",
+      "provider": "other"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Duplicate model"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "primary",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    409,
+    {
+     "code": "revision_conflict",
+     "error": "Policy changed; refresh before saving"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {},
+   "revision": false
+  },
+  {
+   "answer": [
+    409,
+    {
+     "code": "revision_conflict",
+     "error": "Policy changed; refresh before saving"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {},
+   "revision": 0.0
+  },
+  {
+   "answer": [
+    409,
+    {
+     "code": "revision_conflict",
+     "error": "Policy changed; refresh before saving"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {},
+   "revision": "0"
+  },
+  {
+   "answer": [
+    409,
+    {
+     "code": "revision_conflict",
+     "error": "Policy changed; refresh before saving"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [],
+    "revision": 0
+   },
+   "patch": {},
+   "revision": 1
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [],
+     "model_chain": [
+      {
+       "model": "primary",
+       "provider": "codex"
+      },
+      {
+       "model": "alternate",
+       "provider": "claude"
+      }
+     ],
+     "revision": 1
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "alternate",
+      "provider": "claude"
+     }
+    ],
+    "revision": 1
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "alternate",
+      "provider": "claude"
+     }
+    ]
+   },
+   "revision": 0
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Model provider incompatible with keeper"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "alternate",
+      "provider": "claude"
+     }
+    ],
+    "revision": 1
+   },
+   "patch": {
+    "inherit_sessions": [
+     "keeper",
+     "scheduled"
+    ]
+   },
+   "revision": 1
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [
+      "router"
+     ],
+     "model_chain": [
+      {
+       "model": "primary",
+       "provider": "codex"
+      },
+      {
+       "model": "alternate",
+       "provider": "claude"
+      }
+     ],
+     "revision": 2
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "primary",
+       "provider": "codex"
+      },
+      {
+       "model": "alternate",
+       "provider": "claude"
+      }
+     ],
+     "revision": 2,
+     "source": "global"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [
+     "router"
+    ],
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "alternate",
+      "provider": "claude"
+     }
+    ],
+    "revision": 2
+   },
+   "patch": {
+    "inherit_sessions": [
+     "router"
+    ]
+   },
+   "revision": 1
+  },
+  {
+   "answer": [
+    400,
+    {
+     "error": "Deterministic Janitors do not inherit models"
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "primary",
+       "provider": "codex"
+      },
+      {
+       "model": "alternate",
+       "provider": "claude"
+      }
+     ],
+     "revision": 2,
+     "source": "global"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [
+     "router"
+    ],
+    "model_chain": [
+     {
+      "model": "primary",
+      "provider": "codex"
+     },
+     {
+      "model": "alternate",
+      "provider": "claude"
+     }
+    ],
+    "revision": 2
+   },
+   "patch": {
+    "inherit_sessions": [
+     "audio"
+    ]
+   },
+   "revision": 2
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [
+      "router"
+     ],
+     "model_chain": [
+      {
+       "model": "alternate",
+       "provider": "claude"
+      },
+      {
+       "model": "primary",
+       "provider": "codex"
+      }
+     ],
+     "revision": 3
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "alternate",
+       "provider": "claude"
+      },
+      {
+       "model": "primary",
+       "provider": "codex"
+      }
+     ],
+     "revision": 3,
+     "source": "global"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [
+     "router"
+    ],
+    "model_chain": [
+     {
+      "model": "alternate",
+      "provider": "claude"
+     },
+     {
+      "model": "primary",
+      "provider": "codex"
+     }
+    ],
+    "revision": 3
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "alternate",
+      "provider": "claude"
+     },
+     {
+      "model": "primary",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 2
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [],
+     "model_chain": [
+      {
+       "model": "alternate",
+       "provider": "claude"
+      },
+      {
+       "model": "primary",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "alternate",
+      "provider": "claude"
+     },
+     {
+      "model": "primary",
+      "provider": "codex"
+     }
+    ],
+    "revision": 4
+   },
+   "patch": {
+    "inherit_sessions": []
+   },
+   "revision": 3
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [],
+     "model_chain": [
+      {
+       "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "provider": "openai"
+      }
+     ],
+     "revision": 5
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "provider": "openai"
+     }
+    ],
+    "revision": 5
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "provider": "openai"
+     }
+    ]
+   },
+   "revision": 4
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [],
+     "model_chain": [
+      {
+       "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "provider": "openai"
+      }
+     ],
+     "revision": 6
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "provider": "openai"
+     }
+    ],
+    "revision": 6
+   },
+   "patch": {},
+   "revision": 5
+  },
+  {
+   "answer": [
+    200,
+    {
+     "inherit_sessions": [],
+     "model_chain": [
+      {
+       "model": "0",
+       "provider": "codex"
+      },
+      {
+       "model": "1",
+       "provider": "codex"
+      },
+      {
+       "model": "2",
+       "provider": "codex"
+      },
+      {
+       "model": "3",
+       "provider": "codex"
+      },
+      {
+       "model": "4",
+       "provider": "codex"
+      },
+      {
+       "model": "5",
+       "provider": "codex"
+      },
+      {
+       "model": "6",
+       "provider": "codex"
+      },
+      {
+       "model": "7",
+       "provider": "codex"
+      },
+      {
+       "model": "8",
+       "provider": "codex"
+      },
+      {
+       "model": "9",
+       "provider": "codex"
+      },
+      {
+       "model": "10",
+       "provider": "codex"
+      },
+      {
+       "model": "11",
+       "provider": "codex"
+      },
+      {
+       "model": "12",
+       "provider": "codex"
+      },
+      {
+       "model": "13",
+       "provider": "codex"
+      },
+      {
+       "model": "14",
+       "provider": "codex"
+      },
+      {
+       "model": "15",
+       "provider": "codex"
+      },
+      {
+       "model": "16",
+       "provider": "codex"
+      },
+      {
+       "model": "17",
+       "provider": "codex"
+      },
+      {
+       "model": "18",
+       "provider": "codex"
+      },
+      {
+       "model": "19",
+       "provider": "codex"
+      },
+      {
+       "model": "20",
+       "provider": "codex"
+      },
+      {
+       "model": "21",
+       "provider": "codex"
+      },
+      {
+       "model": "22",
+       "provider": "codex"
+      },
+      {
+       "model": "23",
+       "provider": "codex"
+      },
+      {
+       "model": "24",
+       "provider": "codex"
+      },
+      {
+       "model": "25",
+       "provider": "codex"
+      },
+      {
+       "model": "26",
+       "provider": "codex"
+      },
+      {
+       "model": "27",
+       "provider": "codex"
+      },
+      {
+       "model": "28",
+       "provider": "codex"
+      },
+      {
+       "model": "29",
+       "provider": "codex"
+      }
+     ],
+     "revision": 7
+    }
+   ],
+   "effective": {
+    "audio": {
+     "chain": [],
+     "revision": 4,
+     "source": "deterministic"
+    },
+    "keeper": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "router": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    },
+    "scheduled": {
+     "chain": [
+      {
+       "model": "m",
+       "provider": "codex"
+      }
+     ],
+     "revision": 4,
+     "source": "explicit"
+    }
+   },
+   "kept": {
+    "inherit_sessions": [],
+    "model_chain": [
+     {
+      "model": "0",
+      "provider": "codex"
+     },
+     {
+      "model": "1",
+      "provider": "codex"
+     },
+     {
+      "model": "2",
+      "provider": "codex"
+     },
+     {
+      "model": "3",
+      "provider": "codex"
+     },
+     {
+      "model": "4",
+      "provider": "codex"
+     },
+     {
+      "model": "5",
+      "provider": "codex"
+     },
+     {
+      "model": "6",
+      "provider": "codex"
+     },
+     {
+      "model": "7",
+      "provider": "codex"
+     },
+     {
+      "model": "8",
+      "provider": "codex"
+     },
+     {
+      "model": "9",
+      "provider": "codex"
+     },
+     {
+      "model": "10",
+      "provider": "codex"
+     },
+     {
+      "model": "11",
+      "provider": "codex"
+     },
+     {
+      "model": "12",
+      "provider": "codex"
+     },
+     {
+      "model": "13",
+      "provider": "codex"
+     },
+     {
+      "model": "14",
+      "provider": "codex"
+     },
+     {
+      "model": "15",
+      "provider": "codex"
+     },
+     {
+      "model": "16",
+      "provider": "codex"
+     },
+     {
+      "model": "17",
+      "provider": "codex"
+     },
+     {
+      "model": "18",
+      "provider": "codex"
+     },
+     {
+      "model": "19",
+      "provider": "codex"
+     },
+     {
+      "model": "20",
+      "provider": "codex"
+     },
+     {
+      "model": "21",
+      "provider": "codex"
+     },
+     {
+      "model": "22",
+      "provider": "codex"
+     },
+     {
+      "model": "23",
+      "provider": "codex"
+     },
+     {
+      "model": "24",
+      "provider": "codex"
+     },
+     {
+      "model": "25",
+      "provider": "codex"
+     },
+     {
+      "model": "26",
+      "provider": "codex"
+     },
+     {
+      "model": "27",
+      "provider": "codex"
+     },
+     {
+      "model": "28",
+      "provider": "codex"
+     },
+     {
+      "model": "29",
+      "provider": "codex"
+     }
+    ],
+    "revision": 7
+   },
+   "patch": {
+    "model_chain": [
+     {
+      "model": "0",
+      "provider": "codex"
+     },
+     {
+      "model": "1",
+      "provider": "codex"
+     },
+     {
+      "model": "2",
+      "provider": "codex"
+     },
+     {
+      "model": "3",
+      "provider": "codex"
+     },
+     {
+      "model": "4",
+      "provider": "codex"
+     },
+     {
+      "model": "5",
+      "provider": "codex"
+     },
+     {
+      "model": "6",
+      "provider": "codex"
+     },
+     {
+      "model": "7",
+      "provider": "codex"
+     },
+     {
+      "model": "8",
+      "provider": "codex"
+     },
+     {
+      "model": "9",
+      "provider": "codex"
+     },
+     {
+      "model": "10",
+      "provider": "codex"
+     },
+     {
+      "model": "11",
+      "provider": "codex"
+     },
+     {
+      "model": "12",
+      "provider": "codex"
+     },
+     {
+      "model": "13",
+      "provider": "codex"
+     },
+     {
+      "model": "14",
+      "provider": "codex"
+     },
+     {
+      "model": "15",
+      "provider": "codex"
+     },
+     {
+      "model": "16",
+      "provider": "codex"
+     },
+     {
+      "model": "17",
+      "provider": "codex"
+     },
+     {
+      "model": "18",
+      "provider": "codex"
+     },
+     {
+      "model": "19",
+      "provider": "codex"
+     },
+     {
+      "model": "20",
+      "provider": "codex"
+     },
+     {
+      "model": "21",
+      "provider": "codex"
+     },
+     {
+      "model": "22",
+      "provider": "codex"
+     },
+     {
+      "model": "23",
+      "provider": "codex"
+     },
+     {
+      "model": "24",
+      "provider": "codex"
+     },
+     {
+      "model": "25",
+      "provider": "codex"
+     },
+     {
+      "model": "26",
+      "provider": "codex"
+     },
+     {
+      "model": "27",
+      "provider": "codex"
+     },
+     {
+      "model": "28",
+      "provider": "codex"
+     },
+     {
+      "model": "29",
+      "provider": "codex"
+     }
+    ]
+   },
+   "revision": 6
+  }
+ ],
+ "routing": [
+  {
+   "args": [],
+   "argv": [],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p"
+   ],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--"
+   ],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p"
+   ],
+   "backend": "claude",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "-"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "-"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "-"
+   ],
+   "backend": "codex",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "stdin"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "--prompt-file",
+    "@file"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "file"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "@prompt"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "--prompt-file",
+    "@file"
+   ],
+   "backend": "grok",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "file"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "@prompt"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--prompt-file",
+    "@file"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "file"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "backend": "muse",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "@prompt"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "@prompt"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "backend": "deepseek",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [],
+   "argv": [],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "-p",
+    "@prompt"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--",
+    "@prompt"
+   ],
+   "argv": [
+    "--",
+    "@prompt"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "argv": [
+    "--print=@prompt"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "argv": [
+    "unrelated",
+    "@prompt",
+    "tail"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt",
+    "-p",
+    "@prompt"
+   ],
+   "backend": "unknown",
+   "count": 0,
+   "prompt": "example",
+   "unit": "e",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 131070,
+   "prompt": "",
+   "unit": "x",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 131070,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 131071,
+   "prompt": "",
+   "unit": "x",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 131071,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 131072,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 131072,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 65535,
+   "prompt": "",
+   "unit": "\u00e9",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 65535,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "backend": "agy",
+   "count": 65536,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "agy",
+   "count": 65536,
+   "error": "prompt too large for agy: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131070,
+   "prompt": "",
+   "unit": "x",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131070,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131071,
+   "prompt": "",
+   "unit": "x",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131071,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131072,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 131072,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 65535,
+   "prompt": "",
+   "unit": "\u00e9",
+   "where": "argv"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 65535,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "backend": "opencode",
+   "count": 65536,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "opencode",
+   "count": 65536,
+   "error": "prompt too large for opencode: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 131070,
+   "prompt": "",
+   "unit": "x",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 131070,
+   "error": "prompt too large for codex: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 131071,
+   "prompt": "",
+   "unit": "x",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 131071,
+   "error": "prompt too large for codex: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 131072,
+   "prompt": "",
+   "unit": "x",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 131072,
+   "error": "prompt too large for codex: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "x"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 65535,
+   "prompt": "",
+   "unit": "\u00e9",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 65535,
+   "error": "prompt too large for codex: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  },
+  {
+   "args": [
+    "@prompt"
+   ],
+   "argv": [
+    "-"
+   ],
+   "backend": "codex",
+   "count": 65536,
+   "prompt": "",
+   "unit": "\u00e9",
+   "where": "stdin"
+  },
+  {
+   "args": [
+    "--print=@prompt"
+   ],
+   "backend": "codex",
+   "count": 65536,
+   "error": "prompt too large for codex: the CLI takes it only as an argument",
+   "prompt": "",
+   "unit": "\u00e9"
+  }
+ ],
+ "schema": {
+  "additionalProperties": false,
+  "properties": {
+   "answer": {
+    "maxLength": 5,
+    "type": "string"
+   }
+  },
+  "required": [
+   "answer"
+  ],
+  "type": "object"
+ },
+ "shapes": [
+  {
+   "answer": "{\"answer\":\"yes\"}",
+   "before": "",
+   "expected": {
+    "answer": "yes"
+   },
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"fine\"}",
+   "before": "noise {bad} ",
+   "expected": {
+    "answer": "fine"
+   },
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":false}",
+   "before": "",
+   "expected": null,
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"abcdef\"}",
+   "before": "",
+   "expected": null,
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"done\",\"toolAction\":1}",
+   "before": "",
+   "expected": null,
+   "pad": 0
+  },
+  {
+   "answer": "{\"toolSummary\":1}",
+   "before": "",
+   "expected": null,
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"ok\"}",
+   "before": "{ { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { ",
+   "expected": {
+    "answer": "ok"
+   },
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"ok\"}",
+   "before": "{ { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { { ",
+   "expected": null,
+   "pad": 0
+  },
+  {
+   "answer": "{\"answer\":\"a\"}",
+   "before": "",
+   "expected": {
+    "answer": "a"
+   },
+   "pad": 511986
+  },
+  {
+   "answer": "{\"answer\":\"a\"}",
+   "before": "",
+   "expected": null,
+   "pad": 511987
+  },
+  {
+   "answer": "{\"answer\": \"discard\", \"toolAction\": \"finished\"} {\"answer\":\"kept\"}",
+   "before": "",
+   "expected": {
+    "answer": "kept"
+   },
+   "pad": 0,
+   "schema": {
+    "required": [
+     "answer"
+    ],
+    "type": "object"
+   }
+  },
+  {
+   "answer": "{\"answer\": \"discard\", \"toolSummary\": \"finished\"} {\"answer\":\"kept\"}",
+   "before": "",
+   "expected": {
+    "answer": "kept"
+   },
+   "pad": 0,
+   "schema": {
+    "required": [
+     "answer"
+    ],
+    "type": "object"
+   }
+  }
+ ],
+ "timeouts": [
+  {
+   "backend": "codex",
+   "expected": "codex timed out after 30 s",
+   "origin": "TimeoutExpired",
+   "seconds": 30
+  },
+  {
+   "backend": "opencode",
+   "expected": "opencode timed out after 0.4 s",
+   "origin": "TimeoutExpired",
+   "seconds": 0.4
+  },
+  {
+   "backend": "agy",
+   "expected": "agy timed out after 1.23457 s",
+   "origin": "TimeoutExpired",
+   "seconds": 1.2345678
+  },
+  {
+   "backend": "grok",
+   "expected": "grok timed out after 1e-05 s",
+   "origin": "TimeoutExpired",
+   "seconds": 1e-05
+  },
+  {
+   "backend": "muse",
+   "expected": "muse timed out after 1e+06 s",
+   "origin": "TimeoutExpired",
+   "seconds": 1000000
+  },
+  {
+   "backend": "grok",
+   "expected": "grok timed out after 1.23457e-05 s",
+   "origin": "TimeoutExpired",
+   "seconds": 1.2345678e-05
+  },
+  {
+   "backend": "muse",
+   "expected": "muse timed out after 1.23457e+06 s",
+   "origin": "TimeoutExpired",
+   "seconds": 1234567.8
+  }
+ ]
+}

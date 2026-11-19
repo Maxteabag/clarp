@@ -119,6 +119,10 @@ impl World for Around<'_> {
         true
     }
 
+    fn policy_model_error(&self, backend: &str, model: &str) -> Option<String> {
+        self.app.models.policy_model_error(backend, model)
+    }
+
     fn efforts(&self, backend: &str) -> Vec<String> {
         let efforts = clarp_backend::efforts(backend).iter();
         efforts.map(|effort| (*effort).to_string()).collect()
@@ -353,12 +357,29 @@ async fn deliver(app: &App, hand: &Handed) -> Delivery {
     let Some(member) = directory.janitor(&hand.session) else {
         return Delivery::NotTaken;
     };
+    let managed_model = app
+        .janitors
+        .read(app, |book, _, _| {
+            let frozen = book
+                .runs
+                .get(&hand.run_id)?
+                .configuration
+                .get("effective_chain")?;
+            let first = &frozen["chain"][0];
+            (frozen["source"] == "global" && first["provider"] == member.record.backend)
+                .then(|| first["model"].as_str().map(str::to_owned))
+                .flatten()
+        })
+        .await
+        .ok()
+        .flatten();
     let (id, marked) = Message::filed(&hand.run_id);
     let message = Message {
         id,
         marked,
         unminted: true,
         text: hand.prompt.clone(),
+        managed_model,
         origin: Origin::Trigger {
             name: FROM_A_JANITOR.to_string(),
         },
@@ -604,6 +625,21 @@ async fn more(
     Path((key, what)): Path<(String, String)>,
     Query(query): Query<Runs>,
 ) -> Response {
+    if what == "effective-model-chain" {
+        return match app
+            .janitors
+            .read(&app, |book, world, _| {
+                let agent = world.agent(&key)?;
+                let config = book.configs.get(&agent.agent_id)?;
+                Some(book.model_policy.effective(&key, &agent, config))
+            })
+            .await
+        {
+            Ok(Some(chain)) => Json(chain).into_response(),
+            Ok(None) => refusal(&Refused::new(404, "not_found", "Janitor unavailable")),
+            Err(why) => unavailable(&why),
+        };
+    }
     let shown = app
         .janitors
         .read(&app, |book, world, now_ms| book.shown(&key, world, now_ms));
@@ -1143,8 +1179,43 @@ pub async fn jobs(app: &App) -> std::collections::BTreeMap<String, String> {
     jobs.await.unwrap_or_default()
 }
 
+async fn policy(State(app): State<App>) -> Response {
+    match app
+        .janitors
+        .read(&app, |book, _, _| json!(book.model_policy))
+        .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(why) => unavailable(&why),
+    }
+}
+
+async fn set_policy(State(app): State<App>, body: Bytes) -> Response {
+    let Some(body) = object(&body) else {
+        return bad("Expected a JSON object");
+    };
+    let result = app
+        .janitors
+        .with(&app, |book, world, _| {
+            book.model_policy.configure(
+                body.get("configuration").unwrap_or(&Value::Null),
+                body.get("expected_revision").unwrap_or(&Value::Null),
+                world,
+                &book.configs,
+            )
+        })
+        .await;
+    match result {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(why)) if why.code.is_empty() => bad(&why.message),
+        Ok(Err(why)) => refusal(&why),
+        Err(why) => unavailable(&why),
+    }
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/janitor-policy", get(policy).post(set_policy))
         .route("/janitors", get(list).post(make))
         .route("/janitors/{session}", get(one).delete(remove))
         .route("/janitors/{session}/{action}", get(more).post(change))

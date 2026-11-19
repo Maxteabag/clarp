@@ -48,7 +48,8 @@ use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::{Directory, Member};
 use crate::goaltool::{self, Ask, Written};
-use crate::once::{self, Unanswered};
+use crate::model_fallbacks::{Failure, execute};
+use crate::once;
 use crate::tools::ToolAnswer;
 use crate::wire;
 
@@ -768,22 +769,36 @@ async fn keep(
         model: word(&run.model),
         effort: word(&run.effort),
     };
-    let answer = match once::read_on(app, &run.tool, &reading, WITHIN).await {
-        Ok(answer) => answer,
-        Err(Unanswered::TimedOut) => return Ended::Failed("timeout"),
-        Err(Unanswered::NoSuchTool(_) | Unanswered::NotStarted(_)) => {
-            return Ended::Failed("tool_unavailable");
+    let primary = clarp_kernel::janitors::fallbacks::Pick {
+        backend: run.tool.clone(),
+        model: run.model.clone(),
+        effort: run.effort.clone(),
+    };
+    let plan = &read.plan;
+    let answer = execute(app, &run.run_id, plan_id, primary, |pick| {
+        let mut reading = reading.clone();
+        async move {
+            reading.model = (!pick.model.is_empty()).then_some(pick.model);
+            reading.effort = (!pick.effort.is_empty()).then_some(pick.effort);
+            let answer = once::read_on(app, &pick.backend, &reading, WITHIN)
+                .await
+                .map_err(Failure::runner)?;
+            let raw = clarp_kernel::router::extract_json(&answer)
+                .map_err(|e| Failure::model("parse_error", e))?;
+            let result = rules::decide(plan, &Value::Object(raw));
+            if result.1.is_empty() {
+                return Err(Failure::model("parse_error", "invalid keeper response"));
+            }
+            Ok(result)
         }
-        Err(Unanswered::NoAnswer(_)) => return Ended::Failed("parse_error"),
-        Err(Unanswered::Failed(_)) => return Ended::Failed("tool_failed"),
+    })
+    .await;
+    let ((steps, progress, next_work), actual) = match answer {
+        Ok(value) => value,
+        Err(error) if error.code == "cancelled" => return Ended::Cancelled,
+        Err(error) => return Ended::Failed(error.code),
     };
-    let Ok(answer) = clarp_kernel::router::extract_json(&answer) else {
-        return Ended::Failed("parse_error");
-    };
-    let (steps, progress, next_work) = rules::decide(&read.plan, &Value::Object(answer));
-    if progress.is_empty() {
-        return Ended::Failed("parse_error");
-    }
+    receipt["model"] = json!(actual.model);
     let progress = if line.is_empty() || progress.starts_with(&line) {
         progress
     } else {
@@ -797,7 +812,7 @@ async fn keep(
         .filter(|(_, _, note)| note.starts_with(rules::HELD_NOTE))
         .map(|(item_id, _, _)| item_id.clone())
         .collect();
-    let by_model = written(steps, progress, &next_work, &run.model);
+    let by_model = written(steps, progress, &next_work, &actual.model);
     write(owner, plan_id, by_model, (&held, None, previous), receipt).await
 }
 

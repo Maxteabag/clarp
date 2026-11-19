@@ -243,6 +243,7 @@ pub struct App {
     /// The heartbeat: its settings, and what is remembered of each agent it wakes.
     pub heartbeat: Arc<crate::heartbeat::Desk>,
     /// The janitors: what is kept of each agent that has a job of maintenance.
+    pub fallbacks: Arc<crate::model_fallbacks::Desk>,
     pub janitors: Arc<crate::janitors::Desk>,
     /// The router of spoken messages: what it decided, and what it holds.
     pub router: Arc<crate::router::Desk>,
@@ -2132,6 +2133,7 @@ async fn send_as(
         _ => false,
     };
     let message = Message {
+        managed_model: None,
         id,
         marked,
         unminted: own,

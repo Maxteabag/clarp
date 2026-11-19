@@ -130,6 +130,7 @@ impl Kept {
     /// The decision as an app reads it: the row, and what the row keeps as text also read.
     pub fn shown(&self) -> Value {
         let mut shown = self.row();
+        shown["error"] = json!(crate::janitors::routing_input::public_error(&self.error));
         shown["mentioned_sessions"] = json!(self.mentioned_sessions);
         shown["name_corrections"] = json!(self.name_corrections);
         shown["candidate_scores"] = json!(self.candidate_scores);
@@ -300,6 +301,10 @@ pub struct Routing {
 }
 
 impl Routing {
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     /// What the model is shown now.
     pub fn packet(&self) -> &Value {
         self.wider.as_ref().unwrap_or(&self.packet)

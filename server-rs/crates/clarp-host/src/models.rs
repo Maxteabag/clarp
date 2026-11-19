@@ -79,7 +79,8 @@ struct Kept {
 /// What was last found of the tools, kept for a while.
 #[derive(Default)]
 pub struct Shelf {
-    kept: tokio::sync::Mutex<Option<Kept>>,
+    kept: std::sync::Mutex<Option<Kept>>,
+    reading: tokio::sync::Mutex<()>,
 }
 
 /// Where a tool's program is: a path that is a file, or the first of that name on the
@@ -252,6 +253,40 @@ async fn row_of(
 }
 
 impl Shelf {
+    pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
+        if !matches!(tool, "codex" | "agy") {
+            return None;
+        }
+        let kept = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let observed = kept
+            .as_ref()
+            .map(|k| &k.told["providers"][tool])
+            .filter(|r| r["source"]["kind"] == "cli_probe");
+        let bundled = catalogue::declared(tool);
+        let row = observed.or_else(|| (tool == "agy").then_some(&bundled))?;
+        let mut ids: Vec<_> = row["models"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        if ids.contains(&model.trim()) || (ids.is_empty() && tool == "codex") {
+            return None;
+        }
+        let reason = "Invalid provider model identifier";
+        if tool == "agy" {
+            return Some(reason.into());
+        }
+        ids.sort_unstable();
+        Some(format!(
+            "{reason}: {tool} has no model '{model}'; it offers {}",
+            ids.join(", ")
+        ))
+    }
+
     /// The catalogue: what was found within the last five minutes under the logins that
     /// are there now, or what the tools say when they are asked now. Who asks while the
     /// tools are being asked waits for that answer and is given it.
@@ -260,8 +295,12 @@ impl Shelf {
         let of = home.clone();
         let logins = tokio::task::spawn_blocking(move || logins(&of)).await;
         let logins = logins.unwrap_or_default();
-        let mut kept = self.kept.lock().await;
-        if let Some(kept) = kept.as_ref()
+        let _reader = self.reading.lock().await;
+        if let Some(kept) = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
             && kept.at.elapsed() <= KEPT_FOR
             && kept.logins == logins
         {
@@ -274,7 +313,10 @@ impl Shelf {
         let named = TOOLS.iter().map(|tool| (*tool).to_string());
         let rows: Vec<(String, Value)> = named.zip(found).collect();
         let told = catalogue::whole(rows, &observed_at);
-        *kept = Some(Kept {
+        *self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Kept {
             at: Instant::now(),
             logins,
             told: told.clone(),

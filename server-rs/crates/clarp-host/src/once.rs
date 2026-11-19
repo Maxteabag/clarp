@@ -10,7 +10,7 @@
 //! answer after the Host is gone.
 //!
 //! This is how the Python Host asks a tool one question (`lib/orchestrator_model.py`,
-//! `call_model`), except that there the question is on the command line.
+//! `call_model`), including its choice of stdin, a private file or a bounded argument.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -33,6 +33,9 @@ pub enum Unanswered {
     NotStarted(String),
     /// It did not answer in its time, and was ended.
     TimedOut,
+    RoutingTimeout(String),
+    PromptNotEncodable(String),
+    PromptTooLarge(String),
     /// It ended badly: what it said, cut short.
     Failed(String),
     /// It ended well, and there is no answer in what it printed.
@@ -44,8 +47,71 @@ impl Unanswered {
     pub fn words(&self) -> String {
         match self {
             Self::NoSuchTool(name) => format!("unsupported provider: {name}"),
-            Self::NotStarted(why) | Self::Failed(why) | Self::NoAnswer(why) => why.clone(),
+            Self::RoutingTimeout(why)
+            | Self::PromptNotEncodable(why)
+            | Self::PromptTooLarge(why)
+            | Self::NotStarted(why)
+            | Self::Failed(why)
+            | Self::NoAnswer(why) => why.clone(),
             Self::TimedOut => "the model did not answer in time".to_string(),
+        }
+    }
+}
+
+/// The scratch home is removed when an in-flight model question is cancelled.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+struct ChildGroup(nix::unistd::Pid);
+
+impl Drop for ChildGroup {
+    fn drop(&mut self) {
+        let _ = nix::sys::signal::killpg(self.0, nix::sys::signal::Signal::SIGKILL);
+    }
+}
+
+fn prepare(
+    root: &Path,
+    tool: &str,
+    launch: &mut Launch,
+    prompt: &str,
+) -> Result<Option<Scratch>, Unanswered> {
+    use clarp_kernel::janitors::routing_input::{self, Input};
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+    // Claude and Codex adapters already supply stdin. Their final argument is a
+    // genuine option even if it happens to equal the prompt.
+    if !launch.stdin.is_empty() {
+        return Ok(None);
+    }
+    let raw = routing_input::prompt_bytes(tool, prompt.chars().map(u32::from))
+        .map_err(Unanswered::PromptNotEncodable)?;
+    match routing_input::prepare(tool, &mut launch.args, prompt)
+        .map_err(Unanswered::PromptTooLarge)?
+    {
+        Input::Arguments => Ok(None),
+        Input::Stdin => {
+            launch.stdin = raw;
+            Ok(None)
+        }
+        Input::File => {
+            let root = Scratch(private_place(root, "routing")?);
+            let path = root.0.join("prompt.txt");
+            let failed = |err: std::io::Error| Unanswered::NotStarted(err.to_string());
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .map_err(failed)?;
+            file.write_all(&raw).map_err(failed)?;
+            launch.args.push(path.to_string_lossy().into_owned());
+            Ok(Some(root))
         }
     }
 }
@@ -53,6 +119,7 @@ impl Unanswered {
 /// Asks the tool of this name one question, in `cwd`, and waits for its answer for
 /// `within` at most.
 pub async fn ask(
+    routing_root: &Path,
     backend: &str,
     question: &Question,
     cwd: &Path,
@@ -63,26 +130,79 @@ pub async fn ask(
     let mut launch = tool.once(question).ok_or_else(none)?;
     // A tool that answers in a home of its own is given one for this question, and it is
     // taken away afterwards with whatever the tool kept of the question.
-    let apart = match tool.own_home() {
+    let _apart = match tool.own_home() {
         Some(given) => {
-            let place = a_place("asking")?;
-            let home = own_home(&place, &given);
+            let place = Scratch(a_place("asking")?);
+            let home = own_home(&place.0, &given);
             launch.env.push(("HOME".to_string(), home?));
             Some(place)
         }
         None => None,
     };
+    let _prompt_file = prepare(routing_root, backend, &mut launch, &question.prompt)?;
     let printed = run(&launch, cwd, within).await;
-    if let Some(place) = apart {
-        let _ = std::fs::remove_dir_all(&place);
+    tool.answered(&routing_result(backend, within, printed)?)
+        .map_err(Unanswered::NoAnswer)
+}
+
+fn routing_result(
+    tool: &str,
+    within: Duration,
+    printed: Result<String, Unanswered>,
+) -> Result<String, Unanswered> {
+    printed.map_err(|e| match e {
+        Unanswered::TimedOut => Unanswered::RoutingTimeout(
+            clarp_kernel::janitors::routing_input::timeout(tool, within.max(LEAST).as_secs_f64()),
+        ),
+        other => other,
+    })
+}
+
+/// Sweep only this Host's private prompt directories. symlink_metadata checks the
+/// entry itself; remove_dir_all on Unix does not follow links inside the tree.
+pub fn sweep_routing(root: &Path, now: std::time::SystemTime) {
+    use std::os::unix::fs::MetadataExt;
+    if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
+        return;
     }
-    tool.answered(&printed?).map_err(Unanswered::NoAnswer)
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(suffix) = name.to_str().and_then(|s| s.strip_prefix("clarp-routing-")) else {
+            continue;
+        };
+        if suffix.len() != 16 || !suffix.bytes().all(|b| b.is_ascii_hexdigit()) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.is_dir()
+            && meta.uid() == nix::unistd::getuid().as_raw()
+            && meta
+                .modified()
+                .ok()
+                .and_then(|m| now.duration_since(m).ok())
+                .is_some_and(|age| age > Duration::from_secs(3600))
+        {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
 }
 
 /// A directory of the Host's own for one question, that nobody else may look into.
 pub(crate) fn a_place(what: &str) -> Result<PathBuf, Unanswered> {
+    private_place(&std::env::temp_dir(), what)
+}
+
+fn private_place(parent: &Path, what: &str) -> Result<PathBuf, Unanswered> {
     use std::os::unix::fs::DirBuilderExt as _;
-    let place = std::env::temp_dir().join(format!("clarp-{what}-{}", crate::ids::hex(8)));
+    let place = std::path::absolute(parent)
+        .map_err(|e| Unanswered::NotStarted(e.to_string()))?
+        .join(format!("clarp-{what}-{}", crate::ids::hex(8)));
     let made = std::fs::DirBuilder::new().mode(0o700).create(&place);
     made.map_err(|error| Unanswered::NotStarted(format!("{}: {error}", place.display())))?;
     Ok(place)
@@ -144,13 +264,13 @@ pub async fn read(
     if matches!(backend, "grok" | "muse") {
         return Err(none());
     }
-    let place = a_place("reading")?;
+    let scratch = Scratch(a_place("reading")?);
+    let place = &scratch.0;
     // A tool that answers in a home of its own has it here, and works beside it: what it
     // reads for is not where its login is linked.
-    let (home, works_in) = match tool.own_home().map(|given| own_home(&place, &given)) {
+    let (home, works_in) = match tool.own_home().map(|given| own_home(place, &given)) {
         Some(Ok(home)) => (Some(home), place.join("work")),
         Some(Err(why)) => {
-            let _ = std::fs::remove_dir_all(&place);
             return Err(why);
         }
         None => (None, place.clone()),
@@ -168,6 +288,8 @@ pub async fn read(
                 *arg = arg.replace("{dir}", &here);
             }
             at_home(&mut launch);
+            clarp_kernel::janitors::routing_input::check(backend, &launch.args)
+                .map_err(Unanswered::PromptTooLarge)?;
             let mut given = apart.files.iter();
             match given.try_for_each(|(name, holds)| std::fs::write(place.join(name), holds)) {
                 Ok(()) => run_with(&launch, &works_in, within, Some(&apart.keeps)).await,
@@ -188,14 +310,15 @@ pub async fn read(
             match tool.once(&question) {
                 Some(mut launch) => {
                     at_home(&mut launch);
+                    let _prompt_file = prepare(place, backend, &mut launch, &question.prompt)?;
                     run_with(&launch, &works_in, within, None).await
                 }
                 None => Err(none()),
             }
         }
     };
-    let _ = std::fs::remove_dir_all(&place);
-    tool.answered(&printed?).map_err(Unanswered::NoAnswer)
+    tool.answered(&routing_result(backend, within, printed)?)
+        .map_err(Unanswered::NoAnswer)
 }
 
 /// Runs a tool once, as it says it is started for one question, and answers what it
@@ -221,6 +344,7 @@ async fn run_with(
         }
     }
     command
+        .process_group(0)
         .args(&launch.args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -237,6 +361,9 @@ async fn run_with(
     let mut child = command
         .spawn()
         .map_err(|error| Unanswered::NotStarted(format!("{}: {error}", launch.program)))?;
+    let _group = child
+        .id()
+        .map(|pid| ChildGroup(nix::unistd::Pid::from_raw(pid as i32)));
     let asked = async {
         if let Some(mut stdin) = child.stdin.take() {
             // A tool that ends without reading its question says why itself.
@@ -282,18 +409,38 @@ mod tests {
         assert_eq!(failed.words(), "no login");
     }
 
+    #[test]
+    fn a_prompt_directory_stays_through_its_last_live_instant() {
+        use std::time::{Duration, SystemTime};
+        let root = Scratch(a_place("sweep-test").unwrap());
+        let dir = root.0.join("clarp-routing-0000000000000000");
+        std::fs::create_dir(&dir).unwrap();
+        let written = SystemTime::UNIX_EPOCH + Duration::from_secs(1000);
+        std::fs::File::open(&dir)
+            .unwrap()
+            .set_modified(written)
+            .unwrap();
+        sweep_routing(&root.0, written + Duration::from_secs(3600));
+        assert!(dir.exists());
+        sweep_routing(
+            &root.0,
+            written + Duration::from_secs(3600) + Duration::from_nanos(1),
+        );
+        assert!(!dir.exists());
+    }
+
     #[tokio::test]
     async fn a_tool_nobody_has_and_one_that_cannot_be_asked_once_answer_nothing() {
         let question = Question::default();
         let here = std::env::temp_dir();
         let short = Duration::from_millis(300);
         assert_eq!(
-            ask("abacus", &question, &here, short).await,
+            ask(&here, "abacus", &question, &here, short).await,
             Err(Unanswered::NoSuchTool("abacus".to_string()))
         );
         // The stand-in tool of the tests has turns and no single questions.
         assert_eq!(
-            ask("scripted", &question, &here, short).await,
+            ask(&here, "scripted", &question, &here, short).await,
             Err(Unanswered::NoSuchTool("scripted".to_string()))
         );
     }

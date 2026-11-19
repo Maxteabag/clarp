@@ -35,7 +35,8 @@ use sha2::{Digest, Sha256};
 
 use crate::agent::Unavailable;
 use crate::edge::{ApiError, App};
-use crate::once::{self, Unanswered};
+use crate::model_fallbacks::{Failure, execute};
+use crate::once;
 
 /// The job of the janitor that explains.
 pub(crate) const JOB: &str = "tool-explainer";
@@ -421,21 +422,51 @@ async fn ask(app: &App, batch: &Batch) -> Option<Said> {
         effort: word("effort"),
     };
     let tool = word("backend").unwrap_or_else(|| "codex".to_string());
-    let said = match once::read_on(app, &tool, &reading, WITHIN).await {
-        Ok(answer) => {
-            let read = clarp_kernel::router::extract_json(&answer).ok();
-            let table = read.and_then(|read| rules::tabled(&Value::Object(read)));
-            match table {
-                None => Said::Failed("invalid_response"),
-                Some(table) if learned::answers(&table, batch.requests.len()).is_none() => {
-                    Said::Failed("translator_failed")
-                }
-                Some(table) => Said::Answered(table),
+    let primary = clarp_kernel::janitors::fallbacks::Pick {
+        backend: tool,
+        model: reading.model.clone().unwrap_or_default(),
+        effort: reading.effort.clone().unwrap_or_default(),
+    };
+    let result = execute(app, &run_id, "", primary, |pick| {
+        let mut reading = reading.clone();
+        async move {
+            reading.model = (!pick.model.is_empty()).then_some(pick.model);
+            reading.effort = (!pick.effort.is_empty()).then_some(pick.effort);
+            let bounded = rules::schema(&batch.requests, true);
+            if pick.backend != "codex" {
+                reading.schema = bounded.to_string();
             }
+            let answer = once::read_on(app, &pick.backend, &reading, WITHIN)
+                .await
+                .map_err(Failure::runner)?;
+            let raw = if pick.backend == "codex" {
+                clarp_kernel::router::extract_json(&answer)
+                    .ok()
+                    .map(Value::Object)
+            } else {
+                clarp_kernel::janitors::fallbacks::schema_object(&answer, &bounded)
+            };
+            let table = raw.and_then(|v| rules::tabled(&v)).ok_or_else(|| {
+                Failure::model("invalid_response", "invalid explanation response")
+            })?;
+            if learned::answers(&table, batch.requests.len()).is_none() {
+                return Err(Failure::model(
+                    "translator_failed",
+                    "invalid explanation response",
+                ));
+            }
+            Ok(table)
         }
-        Err(Unanswered::TimedOut) => Said::Failed("timeout"),
-        Err(Unanswered::NotStarted(_)) => Said::Failed("codex_unavailable"),
-        Err(_) => Said::Failed("translator_failed"),
+    })
+    .await;
+    let said = match result {
+        Ok((table, _)) => Said::Answered(table),
+        Err(error) => Said::Failed(match error.code {
+            "tool_unavailable" => "codex_unavailable",
+            "invalid_response" => "invalid_response",
+            "timeout" => "timeout",
+            _ => "translator_failed",
+        }),
     };
     let count = batch.requests.len();
     let (outcome, result, error) = match &said {

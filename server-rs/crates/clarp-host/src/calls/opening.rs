@@ -411,6 +411,7 @@ impl Desk {
         }
         let (filed, marked) = Message::filed(id);
         let msg = Message {
+            managed_model: None,
             id: filed,
             marked,
             unminted: true,

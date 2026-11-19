@@ -1353,6 +1353,29 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+**Model fallbacks**. A Janitor inherits the Host's ordered model policy when its session
+is named in `POST /janitor-policy`. The update takes the revision shown by
+`GET /janitor-policy`. Each Janitor exposes its effective chain at
+`GET /janitors/<session>/effective-model-chain`. Deterministic jobs have no model.
+A managed scheduled turn can use the inherited primary on its own backend.
+
+An isolated request by the router, the tool explainer or the Goal keeper starts on its
+primary. On provider failure the Host durably claims each alternate before calling it.
+A cancellation, permission refusal or changed policy ends the chain. Claims identify
+the Janitor, request and alternate's position. A claim survives a restart, even when
+its tool never answered. The next distinct request starts with the primary again.
+Claude and Codex read a one-shot prompt on stdin. Grok and Muse receive a private
+prompt file that is removed when the call ends. For argument-only tools the Host checks
+the byte length, including the terminating NUL, before starting the process. An oversized
+argument lets the next model try. At startup the Host removes its own private prompt
+directories older than an hour.
+
+Routing timeouts name the backend and duration. Attempt receipts retain the original
+failure type. A tool explanation uses the failure category and reports `timeout` to
+the app. Decision history and recent decisions in settings also hide command lines in
+historical timeout errors. The Goal keeper records the model that answered. Conversations
+keep their own provider session and account recovery rules.
+
 **Antigravity** (17 Nov 2026). The third tool of the owner's agents (35 of his 191 ran on it when this was
 counted), and the one the Goal keeper's job recommends. `clarp-backend` `agy.rs`, by the Python Host's
 `backend/agy.py`:
@@ -2423,11 +2446,9 @@ turns it on.
   by a send that says whom it is for, as the message came in (a held message as it came in then, under its
   own id); an agent is opened as an app opens it and stopped as an app stops it; a word aloud is a clip in
   the agent's voice or the router's, played whichever agent is open, where an engine of this Host can say it.
-- **Whom the model is, and how it is asked.** A tool of the Host, Codex or Claude Code, asked one question
-  outside every conversation (`once.rs`), with the question on standard input. The Python Host gives it as an
-  argument of the command line, where every process of the machine can read it and where Linux takes no
-  more than 128 KiB (R35); it can also ask the OpenAI API and a typed decision model, which this Host has
-  not built in and refuses in words when it is set to one.
+- **How the router asks its model.** The router asks one question outside every conversation.
+  Claude Code and Codex read it on stdin. Grok and Muse read a private file. For tools
+  that require an argument, the Host checks the byte limit before launch. See **Model fallbacks**.
 - **How much a model is shown when everyone is in view.** The Python Host shows the last ten messages of
   every agent that is not put away. Measured on the owner's Host on 17 Nov (read-only, by a query of the
   check's own): 204 such agents, half a megabyte of question. Here every agent is in view by its name and

@@ -70,6 +70,7 @@ async fn serve(config: Config) -> Result<(), String> {
         );
     }
 
+    clarp_host::once::sweep_routing(&config.run_dir, std::time::SystemTime::now());
     let mut store = tables
         .open(&config.data_dir.join("fleet.db"))
         .map_err(|error| error.to_string())?;
@@ -237,6 +238,7 @@ async fn serve(config: Config) -> Result<(), String> {
         schedules: Arc::default(),
         heartbeat: Arc::default(),
         janitors: Arc::default(),
+        fallbacks: Arc::default(),
         router: Arc::default(),
         explain: Arc::default(),
         oracle: Arc::default(),
