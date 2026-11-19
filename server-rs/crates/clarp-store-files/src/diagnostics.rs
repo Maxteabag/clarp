@@ -107,7 +107,7 @@ mod tests {
         let mut store = HourFiles::new(path.clone(), 10);
         assert_eq!(store.append(clock.now_ms(), &[]).unwrap(), 0);
         assert!(!path.exists());
-        assert_eq!(store.append(0,&[(0,b"1234".to_vec())]).unwrap(),0);
+        assert_eq!(store.append(0, &[(0, b"1234".to_vec())]).unwrap(), 0);
         let records = vec![(0, b"5678".to_vec()); 99];
         assert_eq!(store.append(0, &records).unwrap(), 98);
         assert_eq!(fs::read(path.join("0.jsonl")).unwrap(), b"1234\n5678\n");

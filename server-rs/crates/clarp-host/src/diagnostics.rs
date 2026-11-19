@@ -23,12 +23,25 @@ use tokio::sync::{mpsc, watch};
 pub const CAP: u64 = 256 * 1024 * 1024;
 const MAX_RECORD: usize = 32 * 1024;
 type Row = (i64, Vec<u8>);
-#[derive(Default,Clone,Copy)]
-struct LastSeen{success:Option<i64>,error:Option<i64>}
-#[derive(Clone,Copy)]
-pub enum Subsystem { Stt,Tts,Relay }
+#[derive(Default, Clone, Copy)]
+struct LastSeen {
+    success: Option<i64>,
+    error: Option<i64>,
+}
+#[derive(Clone, Copy)]
+pub enum Subsystem {
+    Stt,
+    Tts,
+    Relay,
+}
 impl Subsystem {
-    fn name(self)->&'static str{match self{Self::Stt=>"stt",Self::Tts=>"tts_worker",Self::Relay=>"relay"}}
+    fn name(self) -> &'static str {
+        match self {
+            Self::Stt => "stt",
+            Self::Tts => "tts_worker",
+            Self::Relay => "relay",
+        }
+    }
 }
 pub struct Capture {
     bits: AtomicU16,
@@ -36,7 +49,7 @@ pub struct Capture {
     dropped: Arc<AtomicU64>,
     settings_lock: tokio::sync::Mutex<()>,
     resources: watch::Sender<bool>,
-    health: Mutex<[LastSeen;3]>,
+    health: Mutex<[LastSeen; 3]>,
 }
 impl Capture {
     pub fn start(
@@ -129,32 +142,44 @@ impl Capture {
         slot.send((now, bytes));
         true
     }
-    pub fn transcription(&self,at:i64,ok:bool,size:usize,elapsed:Option<Instant>){
-        self.mark(Subsystem::Stt,ok,at);
-        if let Some(t)=elapsed{
+    pub fn transcription(&self, at: i64, ok: bool, size: usize, elapsed: Option<Instant>) {
+        self.mark(Subsystem::Stt, ok, at);
+        if let Some(t) = elapsed {
             self.emit("transcript",at,||json!({"kind":"transcription","size":size,"duration_ms":t.elapsed().as_millis(),"ok":ok}));
         }
     }
-    pub fn mark(&self,subsystem:Subsystem,ok:bool,at:i64){
-        let mut clocks=self.health.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let entry=&mut clocks[subsystem as usize];
-        if ok{entry.success=Some(at);}else{entry.error=Some(at);}
+    pub fn mark(&self, subsystem: Subsystem, ok: bool, at: i64) {
+        let mut clocks = self
+            .health
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = &mut clocks[subsystem as usize];
+        if ok {
+            entry.success = Some(at);
+        } else {
+            entry.error = Some(at);
+        }
     }
-    fn subsystems(&self)->Value{
-        let clocks=*self.health.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut value=json!({});
-        for s in [Subsystem::Stt,Subsystem::Tts,Subsystem::Relay] {
-            let e=clocks[s as usize];
-            if e.success.is_some() || e.error.is_some(){
-                let seconds=|at:i64|at as f64/1000.0;
-                value[s.name()]=json!({"last_success_at":e.success.map(seconds),"last_error_at":e.error.map(seconds),"last_error":e.error.map(|_|"failed")});
+    fn subsystems(&self) -> Value {
+        let clocks = *self
+            .health
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut value = json!({});
+        for s in [Subsystem::Stt, Subsystem::Tts, Subsystem::Relay] {
+            let e = clocks[s as usize];
+            if e.success.is_some() || e.error.is_some() {
+                let seconds = |at: i64| at as f64 / 1000.0;
+                value[s.name()] = json!({"last_success_at":e.success.map(seconds),"last_error_at":e.error.map(seconds),"last_error":e.error.map(|_|"failed")});
             }
         }
         value
     }
 }
-fn sample(dir:&Path)->Value{ sample_from(dir,Path::new("/proc")) }
-fn sample_from(dir: &Path, procfs:&Path) -> Value {
+fn sample(dir: &Path) -> Value {
+    sample_from(dir, Path::new("/proc"))
+}
+fn sample_from(dir: &Path, procfs: &Path) -> Value {
     let mut v = json!({"kind":"sample"});
     if let Ok(s) = std::fs::read_to_string(procfs.join("self/status")) {
         for (prefix, key) in [
@@ -226,7 +251,7 @@ pub async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, 
     Ok(Json(json!({"ok":true,"settings":s.public()})))
 }
 pub async fn health(State(app): State<App>) -> Json<Value> {
-    let subsystems=app.capture.subsystems();
+    let subsystems = app.capture.subsystems();
     let (pending, active) = app.mouth.queue_counts();
     let mut reply = rules::health(
         app.ears.ready(),
@@ -242,8 +267,12 @@ pub async fn health(State(app): State<App>) -> Json<Value> {
     }
     Json(reply)
 }
-pub type RequestCapture=(Arc<Capture>,Arc<dyn Clock+Send+Sync>);
-pub async fn request(State((capture,clock)): State<RequestCapture>, req: Request, next: Next) -> Response {
+pub type RequestCapture = (Arc<Capture>, Arc<dyn Clock + Send + Sync>);
+pub async fn request(
+    State((capture, clock)): State<RequestCapture>,
+    req: Request,
+    next: Next,
+) -> Response {
     if !capture.settings().requests() {
         return next.run(req).await;
     }
@@ -264,16 +293,21 @@ pub async fn request(State((capture,clock)): State<RequestCapture>, req: Request
 }
 // Stop the size check as soon as the input cannot fit. Do not allocate
 // a second copy of a large client string just to decide to discard it.
-fn detail_fits(detail:&Value)->bool{
+fn detail_fits(detail: &Value) -> bool {
     struct Budget(usize);
     impl std::io::Write for Budget {
-        fn write(&mut self,bytes:&[u8])->std::io::Result<usize>{
-            self.0=self.0.checked_sub(bytes.len()).ok_or_else(||std::io::Error::other("oversize detail"))?;
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 = self
+                .0
+                .checked_sub(bytes.len())
+                .ok_or_else(|| std::io::Error::other("oversize detail"))?;
             Ok(bytes.len())
         }
-        fn flush(&mut self)->std::io::Result<()>{Ok(())}
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
-    serde_json::to_writer(Budget(MAX_RECORD),detail).is_ok()
+    serde_json::to_writer(Budget(MAX_RECORD), detail).is_ok()
 }
 pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let s = app.capture.settings();
@@ -320,59 +354,103 @@ pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, Ap
 mod tests {
     use super::*;
     #[tokio::test]
-    async fn diagnostic_request_records_only_the_route_pattern(){
-        use axum::{Router,routing::get,body::Body,middleware};
-        use tower::ServiceExt;
+    async fn diagnostic_request_records_only_the_route_pattern() {
+        use axum::{Router, body::Body, middleware, routing::get};
         use clarp_ports::clock::ManualClock;
+        use tower::ServiceExt;
         // A stand-in for the file store receives exactly what the writer was given.
         struct Probe(tokio::sync::mpsc::UnboundedSender<Value>);
-        impl DiagnosticStore for Probe{
-            fn append(&mut self,_:i64,records:&[Row])->std::io::Result<usize>{
-                for (_,bytes) in records{self.0.send(serde_json::from_slice(bytes).unwrap()).unwrap();}
+        impl DiagnosticStore for Probe {
+            fn append(&mut self, _: i64, records: &[Row]) -> std::io::Result<usize> {
+                for (_, bytes) in records {
+                    self.0.send(serde_json::from_slice(bytes).unwrap()).unwrap();
+                }
                 Ok(0)
             }
         }
-        let (tx,mut records)=mpsc::unbounded_channel();
-        let clock:Arc<dyn Clock+Send+Sync>=Arc::new(ManualClock::starting_at(123));
-        let capture=Capture::start(Box::new(Probe(tx)),clock.clone(),Settings::update(&json!({"enabled":true,"categories":["database","transcript"]})).unwrap(),PathBuf::new());
-        let app=Router::new().route("/agents/{id}",get(||async{StatusCode::ACCEPTED}))
-            .layer(middleware::from_fn_with_state((capture.clone(),clock),request));
-        let reply=app.oneshot(Request::builder().uri("/agents/private-path?secret=private-query").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(reply.status(),StatusCode::ACCEPTED);
-        let record=tokio::time::timeout(Duration::from_secs(3),records.recv()).await.unwrap().unwrap();
-        assert_eq!(record["at"],123);
-        let event=&record["event"];
-        assert_eq!(event["route"],"/agents/{id}");
-        assert_eq!(event["status"],202);
-        assert_eq!(event["method"],"GET");
+        let (tx, mut records) = mpsc::unbounded_channel();
+        let clock: Arc<dyn Clock + Send + Sync> = Arc::new(ManualClock::starting_at(123));
+        let capture = Capture::start(
+            Box::new(Probe(tx)),
+            clock.clone(),
+            Settings::update(&json!({"enabled":true,"categories":["database","transcript"]}))
+                .unwrap(),
+            PathBuf::new(),
+        );
+        let app = Router::new()
+            .route("/agents/{id}", get(|| async { StatusCode::ACCEPTED }))
+            .layer(middleware::from_fn_with_state(
+                (capture.clone(), clock),
+                request,
+            ));
+        let reply = app
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/private-path?secret=private-query")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::ACCEPTED);
+        let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record["at"], 123);
+        let event = &record["event"];
+        assert_eq!(event["route"], "/agents/{id}");
+        assert_eq!(event["status"], 202);
+        assert_eq!(event["method"], "GET");
         assert!(event["duration_ms"].is_number());
         assert!(!record.to_string().contains("private-"));
-        capture.transcription(3000,false,99,Some(Instant::now()));
-        let record=tokio::time::timeout(Duration::from_secs(3),records.recv()).await.unwrap().unwrap();
-        assert_eq!(record["event"]["size"],99);
-        assert_eq!(record["event"]["ok"],false);
-        capture.transcription(4000,true,0,None);
-        assert_eq!(capture.subsystems()["stt"],json!({"last_success_at":4.0,"last_error_at":3.0,"last_error":"failed"}));
+        capture.transcription(3000, false, 99, Some(Instant::now()));
+        let record = tokio::time::timeout(Duration::from_secs(3), records.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record["event"]["size"], 99);
+        assert_eq!(record["event"]["ok"], false);
+        capture.transcription(4000, true, 0, None);
+        assert_eq!(
+            capture.subsystems()["stt"],
+            json!({"last_success_at":4.0,"last_error_at":3.0,"last_error":"failed"})
+        );
     }
     #[test]
-    fn diagnostic_resource_sample_uses_only_the_named_measurements(){
-        let root=std::env::temp_dir().join(format!("clarp-diag-sample-{}",std::process::id()));
-        let _=std::fs::remove_dir_all(&root);
-        let procfs=root.join("proc");
-        let data=root.join("data");
-        for p in [procfs.join("self"),procfs.join("pressure"),data.clone()]{std::fs::create_dir_all(p).unwrap();}
-        std::fs::write(procfs.join("self/status"),"Name: private-process\nVmHWM: 123 kB\nThreads: 7\n").unwrap();
-        std::fs::write(procfs.join("loadavg"),"0.25 0.3 0.5 1/100 999\n").unwrap();
-        for kind in ["cpu","io","memory"]{std::fs::write(procfs.join("pressure").join(kind),"some avg10=1.0 avg60=2.0 total=999\n").unwrap();}
-        std::fs::write(data.join("fleet.db"),b"synthetic").unwrap();
-        let v=sample_from(&data,&procfs);
-        assert_eq!(v["process_rss_kb"],123);
-        assert_eq!(v["process_threads"],7);
-        assert_eq!(v["load_1m"],0.25);
-        assert_eq!(v["state_bytes"],9);
-        assert_eq!(v["telemetry_bytes"],0);
-        for kind in ["cpu","io","memory"]{assert_eq!(v[format!("{kind}_avg10")],1.0);assert_eq!(v[format!("{kind}_avg60")],2.0);}
-        assert_eq!(v.as_object().unwrap().len(),12);
+    fn diagnostic_resource_sample_uses_only_the_named_measurements() {
+        let root = std::env::temp_dir().join(format!("clarp-diag-sample-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let procfs = root.join("proc");
+        let data = root.join("data");
+        for p in [procfs.join("self"), procfs.join("pressure"), data.clone()] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        std::fs::write(
+            procfs.join("self/status"),
+            "Name: private-process\nVmHWM: 123 kB\nThreads: 7\n",
+        )
+        .unwrap();
+        std::fs::write(procfs.join("loadavg"), "0.25 0.3 0.5 1/100 999\n").unwrap();
+        for kind in ["cpu", "io", "memory"] {
+            std::fs::write(
+                procfs.join("pressure").join(kind),
+                "some avg10=1.0 avg60=2.0 total=999\n",
+            )
+            .unwrap();
+        }
+        std::fs::write(data.join("fleet.db"), b"synthetic").unwrap();
+        let v = sample_from(&data, &procfs);
+        assert_eq!(v["process_rss_kb"], 123);
+        assert_eq!(v["process_threads"], 7);
+        assert_eq!(v["load_1m"], 0.25);
+        assert_eq!(v["state_bytes"], 9);
+        assert_eq!(v["telemetry_bytes"], 0);
+        for kind in ["cpu", "io", "memory"] {
+            assert_eq!(v[format!("{kind}_avg10")], 1.0);
+            assert_eq!(v[format!("{kind}_avg60")], 2.0);
+        }
+        assert_eq!(v.as_object().unwrap().len(), 12);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
