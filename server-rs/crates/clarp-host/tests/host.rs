@@ -21620,6 +21620,179 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
 }
 
 #[test]
+fn a_prompts_copy_in_its_tools_stream_is_never_a_row_of_its_own() {
+    // The Python Host matches a prompt's copy in a tool's transcript to the row its app's send
+    // made (its PR 446). This Host never has such a copy: a prompt's row is written once, when
+    // the message is taken, and no reader makes a row of the user's. Held here with tools that
+    // print the prompt back into their streams, the same words sent again and again.
+    let place = Place::new("prompt-copy");
+    let (claude, agy) = (place.root.join("claude"), place.root.join("agy"));
+    let (hold, counted) = (place.root.join("hold"), place.root.join("counted"));
+    let holding = place.root.join("holding");
+    let quoted = |path: &std::path::Path| serde_json::to_string(path.to_str().unwrap()).unwrap();
+    // Claude Code, as it prints a turn: the user's words back into its stream first. Where the
+    // file `hold` is, it waits before it answers; each answer is numbered by its turn.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+line = sys.stdin.readline()
+try:
+    content = json.loads(line).get("message", {{}}).get("content", "")
+except ValueError:
+    content = line.strip()
+prompt = content if isinstance(content, str) else "".join(
+    block.get("text", "") for block in content if isinstance(block, dict))
+counted = {counted}
+number = (int(open(counted).read()) if os.path.exists(counted) else 0) + 1
+open(counted, "w").write(str(number))
+def say(**event):
+    print(json.dumps(event), flush=True)
+say(type="system", subtype="init", session_id="stand-in", model="stand-in")
+say(type="user", session_id="stand-in",
+    message={{"role": "user", "content": [{{"type": "text", "text": prompt}}]}})
+if os.path.exists({hold}):
+    open({holding}, "w").write(str(number))
+while os.path.exists({hold}):
+    time.sleep(0.1)
+answer = "answer %d" % number
+say(type="assistant", session_id="stand-in", message={{"id": "msg_%d" % number, "role": "assistant",
+    "model": "stand-in", "content": [{{"type": "text", "text": answer}}]}})
+say(type="result", subtype="success", is_error=False, session_id="stand-in", result=answer, num_turns=1,
+    usage={{"input_tokens": 1, "output_tokens": 1}})
+"#,
+        counted = quoted(&counted),
+        hold = quoted(&hold),
+        holding = quoted(&holding),
+    );
+    program(&claude, &script);
+    // Antigravity, as it prints a turn: a step of the user's input first, here with its words.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
+conversation = "11111111-2222-3333-4444-555555555555"
+counted = {counted}
+number = (int(open(counted).read()) if os.path.exists(counted) else 0) + 1
+open(counted, "w").write(str(number))
+def say(event, **body):
+    print(json.dumps({{"event": event, **body}}), flush=True)
+def step(index, state, kind, **more):
+    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
+    say("step_update", step_update=update)
+say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []}})
+step(0, "DONE", "user_input", text_delta=prompt)
+answer = "agy answer %d" % number
+step(1, "DONE", "agent_response", text_delta=answer)
+say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": answer}})
+"#,
+        counted = quoted(&place.root.join("agy-counted")),
+    );
+    program(&agy, &script);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let made = |name: &str, backend: &str| -> String {
+        let made = host.post("/agents", json!({ "name": name, "backend": backend }));
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (cleo, gaia) = (made("Cleo", "claude"), made("Gaia", "agy"));
+    const WORDS: &str = "the same words";
+    let answered = |session: &str, answer: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let (talk, state) = (host.conversation(session), host.state(session));
+            if talk.contains(&said("assistant", answer)) && state == "done" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {answer:?} at {session}: {state}, {talk:?}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    // Each prompt's row once, under its own id; each answer once, under the turn and the trace
+    // of the prompt it answers; and the agent's newest row is the last answer.
+    let held = |session: &str, prompts: &[&str], answers: &[(&str, &str)]| {
+        let rows = host.turns(session);
+        let text = |row: &Value, key: &str| row[key].as_str().unwrap_or("").to_string();
+        let words: Vec<(String, String)> = rows
+            .iter()
+            .filter(|row| text(row, "text") == WORDS)
+            .map(|row| (text(row, "role"), text(row, "id")))
+            .collect();
+        let expected: Vec<(String, String)> = prompts
+            .iter()
+            .map(|id| ("user".to_string(), format!("u-{id}")))
+            .collect();
+        assert_eq!(words, expected, "{rows:?}");
+        let replies: Vec<&Value> = rows
+            .iter()
+            .filter(|row| row["role"] == "assistant" && text(row, "text").contains("answer"))
+            .collect();
+        let replied: Vec<String> = replies.iter().map(|row| text(row, "text")).collect();
+        let wanted: Vec<String> = answers
+            .iter()
+            .map(|(_, answer)| answer.to_string())
+            .collect();
+        assert_eq!(replied, wanted, "{rows:?}");
+        for (prompt, answer) in answers {
+            let prompt_row = rows.iter().find(|row| row["id"] == format!("u-{prompt}"));
+            let answer_row = replies.iter().find(|row| row["text"] == *answer);
+            let (prompt_row, answer_row) = (prompt_row.unwrap(), answer_row.unwrap());
+            assert_eq!(answer_row["trace_id"], prompt_row["trace_id"], "{answer}");
+            assert_ne!(answer_row["trace_id"], "", "{answer}");
+        }
+        let snapshot = host.get("/agents/snapshot");
+        let mut agents = snapshot["agents"].as_array().unwrap().iter();
+        let shown = agents.find(|agent| agent["session"] == session).unwrap();
+        assert_eq!(shown["last_message_id"], replies.last().unwrap()["id"]);
+    };
+
+    // Claude: the words once, answered; again, held, and another time behind it in the queue;
+    // the held turn is cut off by a stop, the one behind it runs; and once more after all that
+    // had ended.
+    host.send(&cleo, WORDS, "s1");
+    answered(&cleo, "answer 1");
+    std::fs::write(&hold, "").unwrap();
+    host.send(&cleo, WORDS, "s2");
+    wait_for("the second to be held by its tool", || holding.exists());
+    let left = host.post(
+        "/send",
+        json!({ "session": cleo, "text": WORDS, "client_msg_id": "s3", "queue_if_busy": true }),
+    );
+    assert_eq!(left["queued"], true, "{left}");
+    host.post("/stop", json!({ "session": cleo }));
+    wait_for("the held turn to be cut off", || {
+        host.state(&cleo) == "interrupted"
+    });
+    std::fs::remove_file(&hold).unwrap();
+    host.post("/turn-queue/resume", json!({ "session": cleo }));
+    answered(&cleo, "answer 3");
+    host.send(&cleo, WORDS, "s4");
+    answered(&cleo, "answer 4");
+    held(
+        &cleo,
+        &["s1", "s2", "s3", "s4"],
+        &[("s1", "answer 1"), ("s3", "answer 3"), ("s4", "answer 4")],
+    );
+
+    // Antigravity, whose stream names a step of the user's input: the same.
+    host.send(&gaia, WORDS, "g1");
+    answered(&gaia, "agy answer 1");
+    host.send(&gaia, WORDS, "g2");
+    answered(&gaia, "agy answer 2");
+    held(
+        &gaia,
+        &["g1", "g2"],
+        &[("g1", "agy answer 1"), ("g2", "agy answer 2")],
+    );
+}
+
+#[test]
 fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_the_new_ones() {
     let place = Place::new("queue-reword");
     let host = place.start();
