@@ -271,6 +271,18 @@ def _call_typesafe(packet: dict[str, Any], settings: OrchestratorSettings,
     }
 
 
+class ModelAnswerNotJson(ValueError):
+    """The model's answer held no JSON: told in the Host's own words, the same on every interpreter
+    and in the Rust Host. CPython's own message (which differs between 3.12 and 3.13) goes to the
+    log line only (R90): a failure is told by its facts, never by an interpreter's wording."""
+
+
+def _not_json(error: json.JSONDecodeError) -> None:
+    from .log import log
+    log("orchestratorAnswerNotJson", f"{type(error).__name__}: {error}")
+    raise ModelAnswerNotJson("the model's answer was not JSON (JSONDecodeError)") from None
+
+
 def _extract_json(text: str) -> dict[str, Any]:
     text = text.strip()
     if not text:
@@ -280,11 +292,14 @@ def _extract_json(text: str) -> dict[str, Any]:
         text = re.sub(r"```$", "", text).strip()
     try:
         data = json.loads(text)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as error:
         m = _JSON_RE.search(text)
         if not m:
-            raise
-        data = json.loads(m.group(0))
+            _not_json(error)
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError as again:
+            _not_json(again)
     if not isinstance(data, dict):
         raise ValueError("orchestrator response must be a JSON object")
     return data
