@@ -2701,6 +2701,9 @@ impl Worker {
         let spawned = match action {
             Action::Launch(mut order) => {
                 if self.setup.record.backend == "claude" {
+                    if let Some(settings)=self.setup.launcher.claude_settings(&self.setup.record.agent_id){
+                        order.args.extend(["--settings".into(),settings]);
+                    }
                     let at = self.now_ms();
                     if let Some(actor) = self.actor.as_mut() {
                         let native = actor

@@ -1,0 +1,12 @@
+[package]
+name = "clarp-provider-hook"
+description = "Pure Claude tool-input rules shared by the Host kernel and the standalone shim"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

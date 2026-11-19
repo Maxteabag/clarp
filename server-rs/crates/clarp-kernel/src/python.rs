@@ -502,6 +502,18 @@ pub fn first(text: &str, count: usize) -> &str {
     }
 }
 
+/// A word as a shell is given it safely (`shlex.quote`).
+pub fn shell_quote(word: &str) -> String {
+    let plain = |sign: char| sign.is_ascii_alphanumeric() || "_@%+=:,./-".contains(sign);
+    if word.is_empty() {
+        "''".to_string()
+    } else if word.chars().all(plain) {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\"'\"'"))
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

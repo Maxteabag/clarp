@@ -37841,11 +37841,32 @@ while [ -d "$1" ] && [ ! -f detached-end ]; do
     sleep 0.05
 done
 "#);
+    // This stand-in calls the hook named in the real launch settings.
+    // It never executes the updated Bash command.
+    let probe=place.root.join("call-hook");
+    program(&probe,r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
+settings=json.loads(sys.argv[sys.argv.index('--settings')+1])
+hook=settings['hooks']['PreToolUse'][0]
+assert set(settings)=={'hooks'} and set(settings['hooks'])=={'PreToolUse'}
+assert hook['matcher']=='Bash' and len(hook['hooks'])==1
+command=hook['hooks'][0]['command']
+def invoke(data):
+    result=subprocess.run(command,shell=True,input=data,stdout=subprocess.PIPE,timeout=4)
+    assert result.returncode==0
+    return result.stdout
+payload={'session_id':'a10bafe2-20cd-4d3e-b884-8dacf57c5aa4','tool_use_id':'managed','tool_name':'Bash','tool_input':{'run_in_background':True,'command':'fixture'}}
+for invalid in (b'{',b' '*65537,json.dumps(dict(payload,tool_name='Read')).encode()):
+    assert invoke(invalid)==b''
+reply=json.loads(invoke(json.dumps(payload).encode()))['hookSpecificOutput']
+assert set(reply)=={'updatedInput','additionalContext','hookEventName'}
+pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
+"#);
     program(
         &fake,
         &format!(
-            "#!/bin/sh\nread -r request\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
-            detached.display(), place.root.display(), place.root.join("started").display(),place.root.display(),release.display()
+            "#!/bin/sh\nread -r request\n\x27{}\x27 \"$@\" || exit 1\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
+            probe.display(), detached.display(), place.root.display(), place.root.join("started").display(),place.root.display(),release.display()
         ),
     );
     let env = [
@@ -37891,6 +37912,15 @@ done
     wait_for("the running managed task reaches the registry", || {
         job(&host, "managed")["status"] == "running"
     });
+    let hook:Value=serde_json::from_slice(&std::fs::read(place.root.join("hook-reply")).unwrap()).unwrap();
+    assert_eq!(hook["hookEventName"],"PreToolUse");
+    assert!(hook["additionalContext"].as_str().unwrap().contains("run_detached_job.sh --goal"));
+    let amended=hook["updatedInput"]["command"].as_str().unwrap();
+    let origin=amended.strip_prefix("export CLARP_BACKGROUND_ORIGIN='").unwrap().strip_suffix("'\nfixture").unwrap();
+    let origin_json:Value=serde_json::from_str(origin).unwrap();
+    assert_eq!(origin_json["agent_id"],job(&host,"managed")["agent_id"]);
+    assert_eq!(origin_json["native_session_id"],sid);
+    assert_eq!(origin_json["tool_use_id"],"managed");
     let shown = job(&host, "managed");
     assert_eq!(shown["generation"], 1);
     assert_eq!(shown["kind"], "provider-task");
