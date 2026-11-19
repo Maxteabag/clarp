@@ -9944,6 +9944,11 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
     assert_eq!(history.as_array().unwrap().len(), 500);
     assert_eq!(history[0]["event"], "delete");
     assert_eq!(history[499]["at"], 1);
+    // The page limit can hide a surplus row. Verify the retained history too.
+    host.kill();
+    let records = kept_records(&place, "controller-actions");
+    let stored = records["audit"].as_array().unwrap();
+    assert!(stored.iter().rev().eq(history.as_array().unwrap()));
     stop.store(true, Ordering::SeqCst);
     server.join().unwrap();
 }
