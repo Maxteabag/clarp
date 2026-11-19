@@ -24,6 +24,16 @@ def emit(event):
     print(json.dumps(event), flush=True)
 
 
+def rollout_path(root: Path, thread_id: str) -> Path:
+    """The thread's rollout under ``root``, named as real Codex names it,
+    rollout-<YYYY-MM-DDTHH-MM-SS>-<thread id>.jsonl: the Host's lookup
+    (codex_transcript) takes no other name. A thread's existing rollout is kept."""
+    for existing in sorted(root.glob(f"rollout-*-{thread_id}.jsonl")):
+        return existing
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+    return root / f"rollout-{stamp}-{thread_id}.jsonl"
+
+
 def _thread_lock(thread_id: str):
     """Exclusive flock when CODEX_HOME is set, matching real Codex writer locks."""
     home = os.environ.get("CODEX_HOME")
@@ -194,7 +204,7 @@ def app_server():
             return
         root = sessions_root()
         root.mkdir(parents=True, exist_ok=True)
-        with (root / f"rollout-{thread_id}.jsonl").open("a") as stream:
+        with rollout_path(root, thread_id).open("a") as stream:
             stream.write(json.dumps({
                 "type": kind,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -303,7 +313,7 @@ def app_server():
         elif method == "thread/resume":
             thread_id = params.get("threadId") or current_thread
             record(method, {"threadId": thread_id})
-            rollout = sessions_root() / f"rollout-{thread_id}.jsonl"
+            rollout = rollout_path(sessions_root(), thread_id)
             if rollout.is_file() and '"session_meta"' not in rollout.read_text():
                 # Real Codex on a transit rollout without session_meta (Miso,
                 # 2026-10-10): the thread store cannot read it.
@@ -350,13 +360,13 @@ def app_server():
             # against codex-cli 0.159): no writer lock, a copy under a new id.
             source = str(params.get("threadId") or "")
             root = Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "sessions"
-            rollout = root / f"rollout-{source}.jsonl"
+            rollout = rollout_path(root, source)
             if not source or not rollout.is_file():
                 emit({"id": request["id"], "error": {
                     "code": -32600, "message": f"no rollout found for thread id {source}"}})
                 continue
             thread_id = str(uuid.uuid4())
-            (root / f"rollout-{thread_id}.jsonl").write_text(rollout.read_text())
+            rollout_path(root, thread_id).write_text(rollout.read_text())
             result = {"thread": {"id": thread_id, "forkedFromId": source}}
         elif method == "turn/start":
             thread_id = params.get("threadId") or current_thread
