@@ -592,7 +592,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
     let mut answer = heard::answer(&text, &trace, hands_free);
     if run_id > 0 {
-        let _ = app
+        let finished = app
             .ears
             .vocab
             .finish(
@@ -603,6 +603,9 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
                 report.as_ref(),
             )
             .await;
+        if let Err((_, why)) = finished {
+            app.fleet.unkept("vocabulary run", &why);
+        }
         answer["vocab_run_id"] = json!(run_id);
     }
     if crate::vocabulary::audio::enabled(&app.fleet.directory()) {

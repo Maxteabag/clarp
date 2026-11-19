@@ -186,6 +186,8 @@ pub fn sweep_routing(root: &Path, now: std::time::SystemTime) {
                 .and_then(|m| now.duration_since(m).ok())
                 .is_some_and(|age| age > Duration::from_secs(3600))
         {
+            // One that cannot be removed is left unsaid, as the Python Host leaves it
+            // (`shutil.rmtree(..., ignore_errors=True)`): the next start tries again.
             let _ = std::fs::remove_dir_all(path);
         }
     }

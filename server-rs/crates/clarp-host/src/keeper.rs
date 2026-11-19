@@ -184,9 +184,8 @@ impl Desk {
         let written = serde_json::to_vec(&progress).unwrap_or_default();
         kept.progress.insert(attachment.to_string(), progress);
         drop(held);
-        let _ = app
-            .fleet
-            .keep(PROGRESS, attachment.to_string(), Some(written))
+        app.fleet
+            .keep_said(PROGRESS, attachment.to_string(), Some(written))
             .await;
     }
 
@@ -212,9 +211,9 @@ impl Desk {
             let old = of_the_goal.drain(..over);
             let_go.extend(old.filter_map(|old| old["receipt_id"].as_str().map(str::to_string)));
         }
-        let _ = app.fleet.keep(RECEIPTS, id, Some(written)).await;
+        app.fleet.keep_said(RECEIPTS, id, Some(written)).await;
         for old in let_go {
-            let _ = app.fleet.keep(RECEIPTS, old, None).await;
+            app.fleet.keep_said(RECEIPTS, old, None).await;
         }
     }
 

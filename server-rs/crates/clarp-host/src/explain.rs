@@ -135,7 +135,7 @@ async fn keep(app: &App, changes: Vec<Change>) {
         }
     }
     for ((kind, key), value) in last {
-        let _ = app.fleet.keep(kind, key, value).await;
+        app.fleet.keep_said(kind, key, value).await;
     }
 }
 

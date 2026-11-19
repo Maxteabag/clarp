@@ -104,7 +104,7 @@ impl Desk {
 
 async fn keep_fact(app: &App, fact: &Fact) {
     if let Ok(written) = serde_json::to_vec(fact) {
-        let _ = app.fleet.keep(FACTS, place(fact), Some(written)).await;
+        app.fleet.keep_said(FACTS, place(fact), Some(written)).await;
     }
 }
 
@@ -194,7 +194,7 @@ pub(crate) async fn keep(app: &App) {
     if now - held.forgot_at >= FORGETS_EVERY_MS {
         held.forgot_at = now;
         for gone in held.seen.forget_before(now - spoken::KEPT_FOR_MS) {
-            let _ = app.fleet.keep(FACTS, place(&gone), None).await;
+            app.fleet.keep_said(FACTS, place(&gone), None).await;
         }
     }
 }

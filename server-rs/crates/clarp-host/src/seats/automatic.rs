@@ -323,7 +323,7 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
         kept.notifications.insert(tool.into(), situation);
     }
     if let Ok(data) = serde_json::to_vec(kept) {
-        let _ = app.fleet.keep(KIND, KEPT.into(), Some(data)).await;
+        app.fleet.keep_said(KIND, KEPT.into(), Some(data)).await;
     }
     drop(state);
     let serving = if switched {

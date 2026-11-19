@@ -566,10 +566,13 @@ pub async fn reply(app: &App, args: &[String]) -> ToolAnswer {
                         // A helper that answers the agent that made it has reported, as a
                         // message to it would say.
                         let (helper, maker) = (&replier.record, &requester.record);
-                        let _ = app
+                        let noted = app
                             .fleet
                             .noted(helper.agent_id.clone(), maker.agent_id.clone())
                             .await;
+                        if let Err(why) = noted {
+                            app.fleet.unkept("agent", &why.0);
+                        }
                         let wake = &plan["goal"]["continuation"];
                         let state = wake["state"].as_str().unwrap_or("");
                         let mut via = format!("goal {}", plan["plan_id"].as_str().unwrap_or(""));

@@ -220,9 +220,8 @@ impl Desk {
             if name == "agy" {
                 if let Some(record) = answer {
                     let data = json!({"at":with.now_ms,"groups":record.value});
-                    let _ = with
-                        .fleet
-                        .keep(KIND, name.into(), Some(data.to_string().into_bytes()))
+                    with.fleet
+                        .keep_said(KIND, name.into(), Some(data.to_string().into_bytes()))
                         .await;
                 }
                 continue;
@@ -247,9 +246,8 @@ impl Desk {
                             known.keep_standing(with.fleet, kept.clone()).await;
                         }
                     } else if kept.seen_at_ms().is_none() {
-                        let _ = with
-                            .fleet
-                            .keep(
+                        with.fleet
+                            .keep_said(
                                 KIND,
                                 "claude-failure".into(),
                                 Some(with.now_ms.to_string().into_bytes()),
@@ -584,7 +582,7 @@ impl Known {
 
     async fn keep(&mut self, fleet: &FleetHandle, tool: &str, kept: Kept) {
         if let Ok(written) = serde_json::to_vec(&kept) {
-            let _ = fleet.keep(KIND, tool.to_string(), Some(written)).await;
+            fleet.keep_said(KIND, tool.to_string(), Some(written)).await;
         }
         self.kept.insert(tool.to_string(), kept);
     }
@@ -604,7 +602,9 @@ impl Known {
 
     async fn keep_standing(&mut self, fleet: &FleetHandle, kept: Standing) {
         if let Ok(written) = serde_json::to_vec(&kept) {
-            let _ = fleet.keep(KIND, CLAUDE.to_string(), Some(written)).await;
+            fleet
+                .keep_said(KIND, CLAUDE.to_string(), Some(written))
+                .await;
         }
         self.standing = Some(kept);
     }

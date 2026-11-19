@@ -158,7 +158,7 @@ impl Chip {
     async fn keep_day(app: &App, budget: &Budget<Carried>) {
         if let Some(day) = budget.spent().day() {
             let kept = serde_json::to_vec(day).unwrap_or_default();
-            let _ = app.fleet.keep(KIND, DAY.to_string(), Some(kept)).await;
+            app.fleet.keep_said(KIND, DAY.to_string(), Some(kept)).await;
         }
     }
 
@@ -466,7 +466,9 @@ impl Chip {
                 Outcome::Dead(_) => {
                     gone += 1;
                     held.register.unregister("", &token);
-                    let _ = Self::keep_register(app, &held.register).await;
+                    if let Err(why) = Self::keep_register(app, &held.register).await {
+                        app.fleet.unkept(KIND, &why.0);
+                    }
                 }
                 Outcome::Refused { status: 429, .. } => {
                     failed += 1;
