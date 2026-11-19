@@ -19,4 +19,12 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote" || exit 3
 rsync -a --delete --exclude .git --exclude .venv --exclude node_modules --exclude target/ --exclude __pycache__ \
     --exclude .pytest_cache --exclude 'desktop-rs/target' -e "ssh ${ssh_opts[*]}" "$root/" "$HOST:$remote/" || exit 3
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $(basename "$root") repo-gates"
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote && exec flock /var/tmp/clarp-build/lock bash -c 'echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder; nice -n 19 ionice -c3 make test-critical; c=\$?; echo critical_exit=\$c; nice -n 19 ionice -c3 make test-guards; g=\$?; echo guards_exit=\$g; : > /var/tmp/clarp-build/holder; [ \$c -eq 0 ] && [ \$g -eq 0 ]'"
+printf -v queued '%q ' python3 server-rs/tools/build-queue.py "$who" bash -c '
+    nice -n 19 ionice -c3 make test-critical
+    c=$?
+    echo critical_exit=$c
+    nice -n 19 ionice -c3 make test-guards
+    g=$?
+    echo guards_exit=$g
+    [ $c -eq 0 ] && [ $g -eq 0 ]'
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote && exec $queued"
