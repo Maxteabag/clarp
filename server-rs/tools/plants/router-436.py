@@ -12,11 +12,38 @@ import runner
 
 RUNS = {
     'vectors': ['test', '--test', 'router_flow_vectors'],
+    'host': ['test', '--test', 'host', '--', 'the_router_shows_twenty_agents_in_detail_and_says_a_start_the_host_refuses'],
 }
+H = 'clarp-host/src/router.rs'
 K = 'clarp-kernel/src/router/flow.rs'
 P = 'clarp-kernel/src/router/packet.rs'
-DETAIL = '''        let detail = detailed.contains(&agent.session.as_str())
-            || others.iter().any(|other| other.agent_id == agent.agent_id);'''
+DETAIL = '''        detailed.contains(&agent.session.as_str())
+            || others.iter().any(|other| other.agent_id == agent.agent_id)'''
+REFUSED_START = '''            Done::Refused {
+                code: why.unwrap_or("the agent could not be made").to_string(),
+            }'''
+SAID_THEN_TOLD = '''                    if let Some(words) = &outcome.say {
+                        say(app, words).await;
+                    }
+                    outcome
+                }
+            }
+        }
+    };
+    if let Some(told) = &outcome.told {
+        app.hub.publish(told.clone(), app.clock.now_ms());
+    }'''
+TOLD_THEN_SAID = '''                    outcome
+                }
+            }
+        }
+    };
+    if let Some(told) = &outcome.told {
+        app.hub.publish(told.clone(), app.clock.now_ms());
+    }
+    if let Some(words) = &outcome.say {
+        say(app, words).await;
+    }'''
 RANKED = '''            .filter(|agent| !detailed.contains(&agent.session.as_str()))
             .collect();
         others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));'''
@@ -34,12 +61,6 @@ RANKED = '''            .filter(|agent| !detailed.contains(&agent.session.as_str
 #     texts; `command_check` names the agent of every command it lets through), and are not asked again after.
 #   the keys of a refusal of a status question and of a start the Host refused (`cannot_check`, `command_refused`):
 #     neither is kept with a decision, and no phrase is kept ready-spoken on this Host.
-#   that the Host hands the router a start it refused as refused, with its word for why (`router.rs`, `start`), and
-#     says what the router still has to say (`outcome.say`): no test of the Host makes a start it refuses through
-#     the router; the kernel's side is planted.
-#   that the Host reads the last words of as many agents as the packet shows in detail, ranked as the packet ranks
-#     them (`WHOLE_MOST`, `members` in `router.rs`): the stories give the kernel every agent's words, and the
-#     kernel chooses.
 #   that an agent that was put away takes no command: no packet shows one, and the command is refused as for an agent
 #     of no call (the reference also asks `archived_at`, which it never finds there).
 CHECKED = '''    if !sure {
@@ -257,13 +278,18 @@ PLANTS = [
     (K, 'vectors', 'a new hold takes the id the model named', '                pending_id: hold_as.to_string(),', '                pending_id: if decision.pending_id.is_empty() {\n                    hold_as.to_string()\n                } else {\n                    decision.pending_id.clone()\n                },'),
     (P, 'vectors', "the packet shows what was held in another agent's conversation", '            && held.requested_session == shown.requested_session', '            && !held.requested_session.is_empty()'),
     # Everyone in view: the twenty most recently active in detail.
-    (P, 'vectors', 'everyone in view is shown in detail', DETAIL, DETAIL.replace('agent.agent_id);', 'agent.agent_id)\n            || shown.scope_all;')),
+    (P, 'vectors', 'everyone in view is shown in detail', DETAIL, DETAIL.replace('agent.agent_id)', 'agent.agent_id)\n            || view.scope_all')),
     (P, 'vectors', 'twenty-one are shown in detail', '        others.truncate(BROAD_DETAIL_MOST);', '        others.truncate(BROAD_DETAIL_MOST + 1);'),
     (P, 'vectors', 'nineteen are shown in detail', '        others.truncate(BROAD_DETAIL_MOST);', '        others.truncate(BROAD_DETAIL_MOST - 1);'),
     (P, 'vectors', 'the least recently active are shown in detail', '        others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));', '        others.sort_by_key(|agent| active(agent));'),
     (P, 'vectors', 'of the equally recent, the last listed', RANKED, RANKED.replace('            .collect();\n', '            .collect();\n        others.reverse();\n')),
     (P, 'vectors', 'the agent spoken to and the one open count among the twenty', RANKED, RANKED.replace('            .filter(|agent| !detailed.contains(&agent.session.as_str()))\n', '')),
-    (P, 'vectors', 'the packet of the first asking shows the twenty too', '    if shown.scope_all {\n        others = listed', '    if true {\n        others = listed'),
+    (P, 'vectors', 'the packet of the first asking shows the twenty too', '    if view.scope_all {\n        others = listed', '    if true {\n        others = listed'),
+    # The Host's side: a start it refuses, said before the apps are told; whose last words it reads.
+    (H, 'host', 'a start the Host refuses is a failure', REFUSED_START, '            Done::Broke(why.unwrap_or("the agent could not be made").to_string())'),
+    (H, 'host', 'a start the Host refuses is not said', '                    if let Some(words) = &outcome.say {', '                    if let Some(words) = outcome.say.as_ref().filter(|_| false) {'),
+    (H, 'host', 'a start the Host refuses is said after the apps are told', SAID_THEN_TOLD, TOLD_THEN_SAID),
+    (H, 'host', 'with everyone in view the Host reads only the first asking\'s words', '        scope_all: whole,', '        scope_all: false,'),
     # How an agent is doing.
     (K, 'vectors', 'the name a status is asked of is looked up as it is', '                agents_named(agents, named)\n            };', '                Vec::from_iter(lookup(agents, named))\n            };'),
     (K, 'vectors', 'of two agents of a name, the first is told of', '                [one] => valid(agents, &shown, &one.session),', '                [one, ..] => valid(agents, &shown, &one.session),'),
