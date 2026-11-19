@@ -1535,29 +1535,35 @@ def test_scheduler_ticks_do_not_duplicate_a_current_durable_wake_after_restart(t
 
 
 def test_queue_during_claim_to_spawn_window_stays_serial(tmp_path):
+    """A send queued while the first turn is between its claim and its spawn waits behind it.
+    By order: the first spawn is held on an Event until the second send is answered. The waits
+    are deadlock guards only (60 s), never the measure: at 2 s they tripped under load and it
+    was quarantined as 'load'."""
     import threading
     service, backends, _agent_id = _make_service(tmp_path)
     entered = threading.Event()
     release = threading.Event()
+    released: list[bool] = []
     original_spawn = backends.spawn_turn
 
     def blocked_spawn(*args, **kwargs):
         entered.set()
-        assert release.wait(timeout=2)
+        released.append(release.wait(timeout=60))
         return original_spawn(*args, **kwargs)
 
     backends.spawn_turn = blocked_spawn
     first = threading.Thread(target=lambda: service.dispatch(
         text="first", requested_session="mike", trace_id="t-first"))
     first.start()
-    assert entered.wait(timeout=2)
+    assert entered.wait(timeout=60)
     queued = service.dispatch(
         text="second", requested_session="mike", trace_id="t-second",
         client_msg_id="u-second-race", queue_if_busy=True)
     assert queued.queued is True
     assert backends.spawned == []
     release.set()
-    first.join(timeout=2)
+    first.join(timeout=60)
+    assert not first.is_alive() and released == [True]
     assert len(backends.spawned) == 1
 
 
