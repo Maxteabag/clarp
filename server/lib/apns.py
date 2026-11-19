@@ -2082,17 +2082,14 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
     payload = agent_ring_voip_payload(ring, server_instance_id=_server_instance_id(),
                                      show_reason=agent_rings.settings()["show_reason"])
     attempted = set()
-    targets: list[tuple[dict, str]] = []
     try:
+        transport = _DirectTransport(cfg)
         for row in tokens:
             principal = row.get("principal") or ""
             token = canonical_token(row.get("token"))
             if not token or token in attempted or not principal.startswith("device_") or not device_ok(principal):
                 continue
             attempted.add(token)
-            targets.append((row, token))
-        transport = _DirectTransport(cfg)
-        for row, token in targets:
             try:
                 status, reason, _apns_id = transport.send(
                     token, row.get("environment") or cfg.apns_environment, payload,
@@ -2110,6 +2107,9 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
                 log("apnsRingVoipReject", f"{reason or status} principal={row.get('principal')}")
     except Exception as e:  # noqa: BLE001
         log_exception("apnsRingVoipBatchFail", e, detail=f"ring={ring.get('ring_id')}")
-        failed += len(targets) - (sent + failed)    # the phones it never reached failed (R105)
+        # The phone it was on, if the raise came between choosing it and counting it (R105). An
+        # unbuildable direct transport reached no phone and reads 0/0 here: rings decide by
+        # voip.sent alone, and a count must never cost a ring, so main's order is kept.
+        failed += len(attempted) - (sent + failed)
     log("apnsAgentRingVoip", f"ring={ring.get('ring_id')} sent={sent} failed={failed}")
     return {"enabled": True, "sent": sent, "failed": failed}

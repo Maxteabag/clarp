@@ -87,8 +87,18 @@ def test_a_rings_batch_that_cannot_be_built_fails_every_row(phones, monkeypatch,
     assert "apnsRingBatchFail" in logged
 
 
-def test_a_voip_batch_whose_direct_transport_cannot_be_built_fails_every_phone_it_would_ring(
-        tmp_path, monkeypatch, logged):
+def _voip_ring(tokens):
+    return apns.send_agent_ring_voip({"ring_id": "r-2", "agent_id": "a1", "persona": "Mike",
+                                      "reason": "A question", "expires_at": 0}, tokens)
+
+
+VOIP_PHONES = [{"principal": "device_a", "token": PHONES[0]}, {"principal": "device_b", "token": PHONES[1]}]
+
+
+def test_an_unbuildable_direct_transport_rings_nobody_and_reads_nothing_sent_as_on_main(tmp_path, monkeypatch, logged):
+    """Main's order is kept: the transport first, each phone checked and rung as the loop reaches
+    it. A transport that cannot be built reached no phone; the count stays 0/0 there, and rings
+    decide by voip.sent alone."""
     from lib import agent_ring_live
     _apns_config(tmp_path)
     monkeypatch.setattr(agent_ring_live, "device_ok", lambda principal: True)
@@ -96,10 +106,32 @@ def test_a_voip_batch_whose_direct_transport_cannot_be_built_fails_every_phone_i
     def direct(cfg):
         raise ConnectionError("Apple unreachable")
     monkeypatch.setattr(apns, "_DirectTransport", direct)
-    tokens = [{"principal": "device_a", "token": PHONES[0]}, {"principal": "device_b", "token": PHONES[1]},
-              {"principal": "device_b", "token": PHONES[1]},             # the same phone twice: rung once
-              {"principal": "user_x", "token": "c" * 64}]                # not a device: never rung
-    result = apns.send_agent_ring_voip({"ring_id": "r-2", "agent_id": "a1", "persona": "Mike",
-                                        "reason": "A question", "expires_at": 0}, tokens)
-    assert result == {"enabled": True, "sent": 0, "failed": 2}
+    assert _voip_ring(VOIP_PHONES) == {"enabled": True, "sent": 0, "failed": 0}
     assert "apnsRingVoipBatchFail" in logged
+
+
+def test_a_check_that_raises_at_the_second_phone_leaves_the_first_phone_rung(tmp_path, monkeypatch, logged):
+    """A count must never cost a ring: each phone is rung as the loop reaches it."""
+    from lib import agent_ring_live
+    _apns_config(tmp_path)
+    rung = []
+
+    class Direct:
+        def __init__(self, cfg):
+            pass
+
+        def send(self, token, *args, **kwargs):
+            rung.append(token)
+            return 200, "", "apns-id"
+
+        def reset(self):
+            pass
+    monkeypatch.setattr(apns, "_DirectTransport", Direct)
+
+    def device_ok(principal):
+        if principal == "device_b":
+            raise RuntimeError("planted at the second phone")
+        return True
+    monkeypatch.setattr(agent_ring_live, "device_ok", device_ok)
+    assert _voip_ring(VOIP_PHONES) == {"enabled": True, "sent": 1, "failed": 0}
+    assert rung == [PHONES[0]] and "apnsRingVoipBatchFail" in logged
