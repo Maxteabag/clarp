@@ -243,3 +243,10 @@ ccbe384d767a  the-apps-own-ids: the row that follows, which has its turn here (s
 # says which change of the reference it is, is dated, and goes with the landing of its port; a line
 # that stands here for more than a few days is a defect of the rebuild's own.
 #
+
+# What a ring tells of its pushes (`delivery.enabled` in the answer to `POST /calls/ring`): on
+# the Python Host the developer's relay is on by default; this Host pushes nothing until it is
+# given a relay or a push file ("Pushes to phones" on the page). Seen once the mask of
+# send_delivery_state, which took every key called `delivery` out of both sides, came off.
+c7bf459ceedf  rings: a ring's pushes, off without a relay
+a15f230cf4b5  rings: the same, on the second ring

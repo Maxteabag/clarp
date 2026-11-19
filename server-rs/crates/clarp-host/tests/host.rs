@@ -589,13 +589,14 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
-/// What a user's send is shown of its delivery (send_delivery_state): handed over once its tool
-/// has it; a plain send behind a busy turn pending, and stopped once the user's Stop holds it;
-/// the same id sent again changes nothing; a resume runs it and it is handed over, its third
-/// change. The apps are told each change by the send's id alone, and the feed gives the changes
-/// from its start. A number that is not plain digits is the Python Host's 400.
+/// What a user's send is shown of its delivery (send_delivery_state), as the Python Host shows
+/// it: handed over once its tool is launched, and a plain send behind a busy turn once the queue
+/// that keeps it has it; the user's Stop changes neither, and the generation moves. The same id
+/// sent again changes nothing; a resume runs the held one. The apps are told of each launch by
+/// the send's id alone, and the feed gives the sends from its start. A number that is not plain
+/// digits is the Python Host's 400.
 #[test]
-fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
+fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
     let place = Place::new("delivery");
     let host = place.start();
     let session = host.new_agent("Deliverer");
@@ -615,9 +616,14 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         "handed_over",
         "{before}"
     );
+    let queued = delivery(&before, "u-m2");
     assert_eq!(
-        delivery(&before, "u-m2")["state"],
-        "pending_launch",
+        (
+            &queued["state"],
+            &queued["rev"],
+            &queued["for"]["client_msg_id"]
+        ),
+        (&json!("handed_over"), &json!(2), &json!("m2")),
         "{before}"
     );
     assert_eq!(
@@ -632,40 +638,28 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     host.post("/stop", json!({ "session": session }));
     wait_for("the turn to end", || host.state(&session) == "interrupted");
     let held = log("&delivery_since=0");
-    let stopped = delivery(&held, "u-m2");
-    assert_eq!(
-        (&stopped["state"], &stopped["rev"]),
-        (&json!("stopped"), &json!(2)),
-        "{held}"
-    );
+    assert_eq!(delivery(&held, "u-m2"), queued, "{held}");
     assert_eq!(held["delivery_stop_generation"], 1);
     let updates = held["delivery_updates"].as_array().unwrap();
-    assert!(
-        updates
-            .iter()
-            .any(|update| update["message_id"] == "u-m2" && update["delivery"] == stopped),
-        "{held}"
-    );
+    let ids: Vec<&str> = updates
+        .iter()
+        .map(|update| update["message_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["u-m1", "u-m2"], "{held}");
     assert_eq!(held["delivery_bootstrap"], true);
 
     // The same id again changes nothing of it.
     host.send(&session, "later", "m2");
-    assert_eq!(delivery(&log(""), "u-m2"), stopped);
+    assert_eq!(delivery(&log(""), "u-m2"), queued);
 
     host.post("/turn-queue/resume", json!({ "session": session }));
     wait_for("the held one to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
     });
-    let after = delivery(&log(""), "u-m2");
-    assert_eq!(
-        (&after["state"], &after["rev"]),
-        (&json!("handed_over"), &json!(3)),
-        "{after}"
-    );
-    assert!(after["seq"].as_u64() > stopped["seq"].as_u64());
+    assert_eq!(delivery(&log(""), "u-m2"), queued);
 
-    // Told by id alone: the first handed over, the second fenced and then handed over.
+    // Told of each launch, by id alone: the first, and the held one when it ran.
     let hints = || -> Vec<Value> {
         heard
             .lock()
@@ -675,12 +669,12 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
             .cloned()
             .collect()
     };
-    wait_for("the hints", || hints().len() >= 3);
+    wait_for("the hints", || hints().len() >= 2);
     let told: Vec<String> = hints()
         .iter()
         .map(|hint| hint["message_id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(told, ["u-m1", "u-m2", "u-m2"], "{:?}", hints());
+    assert_eq!(told, ["u-m1", "u-m2"], "{:?}", hints());
     for hint in hints() {
         assert!(
             hint.get("delivery").is_none() && hint["session"] == session,

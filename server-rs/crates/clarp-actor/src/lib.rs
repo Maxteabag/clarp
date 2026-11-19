@@ -1747,6 +1747,12 @@ impl Actor {
                 told.push(id);
             }
         }
+        // Each launch of a shown send's tool is told, as the Python Host tells it after a spawn.
+        for turn in self.recorder.take_launched() {
+            if let Some(id) = self.deliveries.message_id(turn) {
+                told.push(id);
+            }
+        }
         let waiting: Vec<u64> = self
             .recorder
             .agent()

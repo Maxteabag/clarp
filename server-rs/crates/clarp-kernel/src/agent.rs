@@ -893,6 +893,11 @@ impl Agent {
         if !matches!(change, TurnEvent::Accepted { .. }) {
             self.note = None;
         }
+        // A launch anew after a wait for an account is a launch the apps are told of.
+        let for_an_account = matches!(
+            &self.live,
+            Some(Turn::Parked(parked)) if parked.id == turn && parked.wait.is_for_an_account()
+        );
         self.move_turn(turn, change)?;
         // What a user's send is shown of its delivery (send_delivery_state): admitted with a
         // revision of this event, handed over once its tool process is being started, and over
@@ -910,6 +915,14 @@ impl Agent {
                     let stops = self.user_stop_generation;
                     self.deliveries
                         .admit(turn.0, *message_seq, stops, revision, *at_ms);
+                    // One that has to wait is handed to the queue that keeps it: the Python
+                    // Host marks it so when its durable queue takes it.
+                    let waits = self.mailbox.iter().any(|queued| queued.id == turn)
+                        && (self.live.is_some() || self.paused);
+                    if waits {
+                        let next = crate::delivery::revision(self.at, 1);
+                        self.deliveries.hand(turn.0, next, *at_ms);
+                    }
                 }
             }
             _ => {
@@ -921,6 +934,11 @@ impl Agent {
                 if handed {
                     let at_ms = change_at(change).unwrap_or_default();
                     self.deliveries.hand(turn.0, revision, at_ms);
+                    let launch = matches!(change, TurnEvent::Started { .. })
+                        || (matches!(change, TurnEvent::Retried { .. }) && for_an_account);
+                    if launch {
+                        self.deliveries.launch(turn.0);
+                    }
                 } else if !waits && self.live_id() != Some(turn) {
                     self.deliveries.over(turn.0);
                 }
