@@ -354,7 +354,11 @@ async fn pass(app: &App) {
             recovery_mode: keeper.mode(),
         };
         let notices = quota::looked(&usage, &owner, &mut windows);
-        let mut order = receipts.values().map(|receipt| receipt.order).max().unwrap_or(0);
+        let mut order = receipts
+            .values()
+            .map(|receipt| receipt.order)
+            .max()
+            .unwrap_or(0);
         let switched = switcher_tells(book, world);
         let (mut told, mut recoveries) = (0, Vec::new());
         for notice in notices {
@@ -451,7 +455,13 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
         .values()
         .filter(|receipt| receipt.delivery.is_none())
         .collect();
-    written.sort_by_key(|receipt| (receipt.order, receipt.created_at, receipt.receipt_id.clone()));
+    written.sort_by_key(|receipt| {
+        (
+            receipt.order,
+            receipt.created_at,
+            receipt.receipt_id.clone(),
+        )
+    });
     let waiting: Vec<quota::Waiting<'_>> = written
         .iter()
         .map(|receipt| {
