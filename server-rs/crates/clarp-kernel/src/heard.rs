@@ -20,6 +20,8 @@ use sha2::{Digest, Sha256};
 /// ([`clarp_speech::listen`]); they are named here with the rules they belong to.
 pub use clarp_speech::listen::{Segment, file_name, suffix, terms};
 
+pub mod duration;
+
 /// The largest clip that is taken: 64 MiB.
 pub const LARGEST_CLIP: usize = 64 * 1024 * 1024;
 
