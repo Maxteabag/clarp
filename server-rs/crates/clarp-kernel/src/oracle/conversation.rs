@@ -293,7 +293,7 @@ pub struct Conversation {
 }
 
 /// Whether sound is somebody speaking: PCM16, loud enough on the whole.
-fn audible(sound: &[u8]) -> bool {
+pub fn audible(sound: &[u8]) -> bool {
     let (samples, _) = sound.as_chunks::<2>();
     let squares = samples
         .iter()

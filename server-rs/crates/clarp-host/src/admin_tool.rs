@@ -61,7 +61,7 @@ fn not_here(what: &str) -> ToolAnswer {
 
 /// `clarp-admin prompt`: a message to an agent of this Host, from an agent (`--from`) or
 /// from something that runs by itself (`--origin`).
-async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
+pub(crate) async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
     let valued = [
         "--to", "--from", "--text", "--delay", "--origin", "--server",
     ];
