@@ -11,16 +11,52 @@
 #                                          answered, compared with nothing: for a scenario without a reference yet
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
-#   server-rs/tools/build status           who holds the queue, and the machine's load
+#   server-rs/tools/build status           who holds the queue, the machine's load and free build space
 #
 # Peter, 15 Nov 2026: Rust for the Host compiles on the XPS 15, never on elitebook or laptopstudio,
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
 # to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
 # with a target directory per checkout, so a second run is incremental.
+# The queue sources this function on the build machine with the build directory as its cwd.
+build_has_space() (
+    set -euo pipefail
+    local floor=$1 build_dir=$PWD free incremental=0 removed=0 stale exe
+    free=$(df -B1 --output=avail "$build_dir" | tail -1)
+    if (( free < floor )) && [[ ! -L target && ! -L target/debug ]]; then
+        if [[ -d target/debug/incremental && ! -L target/debug/incremental ]]; then
+            rm -rf -- target/debug/incremental
+            incremental=1
+            free=$(df -B1 --output=avail "$build_dir" | tail -1)
+        fi
+        if (( free < floor )) && [[ -d target/debug/deps && ! -L target/debug/deps ]]; then
+            cd target/debug/deps
+            # Newest first marks the one to keep per name. Remove the rest oldest first.
+            stale=$(find . -maxdepth 1 -type f -perm /111 -regextype posix-extended \
+                -regex './[A-Za-z0-9_]+-[0-9a-f]{16}' -printf '%T@ %f\n' |
+                LC_ALL=C sort -rn | awk '{name=$2; sub(/-[^-]+$/, "", name); if (seen[name]++) print $2}' | tac)
+            for exe in $stale; do
+                rm -- "$exe"
+                (( removed += 1 ))
+                free=$(df -B1 --output=avail "$build_dir" | tail -1)
+                if (( free >= floor )); then break; fi
+            done
+        fi
+    fi
+    printf 'Build disk: removed %d incremental directories and %d stale test executables; %d bytes free.\n' \
+        "$incremental" "$removed" "$free"
+    if (( free < floor )); then
+        echo "Build stopped before cargo because less than $floor bytes are free." >&2
+        exit 1
+    fi
+)
+
+# Only the queue uses the function above when it sources this file.
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then return 0; fi
 set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
 JOBS="${CLARP_BUILD_JOBS:-6}"
+floor="${CLARP_BUILD_MIN_FREE_BYTES:-21474836480}" # 20 GiB
 # Extra environment for the remote cargo, as NAME=value words. The tests that run a real tool
 # only run when asked this way, for example:
 #   CLARP_BUILD_ENV="CLARP_TEST_CLAUDE=1" server-rs/tools/build test --test host -- --ignored
@@ -39,7 +75,12 @@ ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 cmd="${1:-check}"; shift || true
 
 if [ "$cmd" = status ]; then
-    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; if [ -s /var/tmp/clarp-build/holder ] && ! flock -n /var/tmp/clarp-build/lock true 2>/dev/null; then echo "building: $(cat /var/tmp/clarp-build/holder)"; else echo "queue: free"; fi'
+    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; if [ -s /var/tmp/clarp-build/holder ] && ! flock -n /var/tmp/clarp-build/lock true 2>/dev/null; then echo "building: $(cat /var/tmp/clarp-build/holder)"; else echo "queue: free"; fi; d=/var/tmp/clarp-build; [ -d "$d" ] || d=/var/tmp; df -h --output=avail "$d" | tail -1 | xargs printf "build disk: %s free\n"'
+fi
+
+if ! [[ "$floor" =~ ^(0|[1-9][0-9]*)$ ]] || ! [ "$floor" -ge 0 ] 2>/dev/null; then
+    echo "CLARP_BUILD_MIN_FREE_BYTES must be a nonnegative byte count." >&2
+    exit 2
 fi
 
 case "$cmd" in
@@ -78,7 +119,17 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 set +e
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec flock /var/tmp/clarp-build/lock bash -c 'echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder; CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd; code=\$?; : > /var/tmp/clarp-build/holder; exit \$code'"
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec flock /var/tmp/clarp-build/lock bash -c '
+    echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder
+    source tools/build
+    build_has_space $floor
+    code=\$?
+    if [ \$code -eq 0 ]; then
+        CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd
+        code=\$?
+    fi
+    : > /var/tmp/clarp-build/holder
+    exit \$code'"
 code=$?
 set -e
 if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
