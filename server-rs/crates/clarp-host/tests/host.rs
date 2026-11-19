@@ -13593,6 +13593,13 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         "echo \"tool_token=$CLARP_TOOL_TOKEN\"\n",
         "echo \"script_url=$CLARP_SERVER_URL\"\n",
         "echo \"script_token=$CLARP_AUTH_TOKEN\"\n",
+        "echo managed=$CLARP_RUST_MANAGED_TURN session=$CLARP_SESSION pwa=$CLAUDE_PWA_SESSION\n",
+        "echo origin=${CLARP_BACKGROUND_ORIGIN+present} agy=${CLARP_AGY_MANAGED_TURN+present}\n",
+        "echo worker=${CLARP_BACKGROUND_WORKER_PID+present} claude=${CLAUDE_CODE_SESSION_ID+present} code=${CLARP_CODE_ROOT+present}\n",
+        "echo db=${CLAUDE_PWA_DB+present} logs=${CLAUDE_PWA_LOG_DIR+present} cache=${CLARP_CACHE_DIR+present} data=${CLARP_DATA_DIR+present}\n",
+        "echo config=$CLAUDE_PWA_CONFIG dir=$CLARP_CONFIG_DIR share=$CLARP_SHARE_DIR\n",
+        "echo provider_root=$CLARP_QA_PROVIDER_ROOT extra=$CLAUDE_PWA_EXTRA\n",
+        "test -n \"$CLARP_PROVIDER_TURN\" && test \"$CLARP_PROVIDER_TURN\" != foreign && echo turn=owned\n",
         &format!(
             "\"{}\" tool clarp-admin sessions > /dev/null 2>&1\n",
             env!("CARGO_BIN_EXE_clarp-host")
@@ -13608,6 +13615,24 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
         &[],
         &[
             ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_PROVIDER_TURN", "foreign"),
+            ("CLARP_SESSION", "foreign"),
+            ("CLAUDE_PWA_SESSION", "foreign"),
+            ("CLARP_BACKGROUND_ORIGIN", "foreign"),
+            ("CLARP_RUST_MANAGED_TURN", "foreign"),
+            ("CLARP_AGY_MANAGED_TURN", "foreign"),
+            ("CLARP_BACKGROUND_WORKER_PID", "1111"),
+            ("CLAUDE_CODE_SESSION_ID", "foreign"),
+            ("CLARP_CODE_ROOT", "/fixture/foreign-code"),
+            ("CLAUDE_PWA_DB", "/fixture/foreign-db"),
+            ("CLAUDE_PWA_LOG_DIR", "/fixture/foreign-logs"),
+            ("CLARP_CACHE_DIR", "/fixture/foreign-cache"),
+            ("CLARP_DATA_DIR", "/fixture/foreign-data"),
+            ("CLAUDE_PWA_CONFIG", "/fixture/host.toml"),
+            ("CLARP_CONFIG_DIR", "/fixture/config"),
+            ("CLARP_SHARE_DIR", "/fixture/share"),
+            ("CLARP_QA_PROVIDER_ROOT", "/fixture/provider"),
+            ("CLAUDE_PWA_EXTRA", "fixture-setting"),
             ("CLARP_PUSH_CREDENTIAL", "the-relays-credential"),
         ],
     );
@@ -13626,7 +13651,20 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
             .unwrap_or("not said")
             .to_string()
     };
-    // Nothing of the Host's own is in what a turn inherits.
+    // The child gets its own turn identity and keeps the provider settings.
+    assert_eq!(said("managed"), format!("1 session={agent} pwa={agent}"));
+    assert_eq!(said("origin"), " agy=");
+    assert_eq!(said("worker"), " claude= code=");
+    assert_eq!(said("db"), " logs= cache= data=");
+    assert_eq!(
+        said("config"),
+        "/fixture/host.toml dir=/fixture/config share=/fixture/share"
+    );
+    assert_eq!(
+        said("provider_root"),
+        "/fixture/provider extra=fixture-setting"
+    );
+    assert_eq!(said("turn"), "owned");
     assert_eq!(said("host_token"), "", "{seen}");
     assert_eq!(said("push_credential"), "", "{seen}");
     // What it has instead follows from the administrator's token and is not it, and the

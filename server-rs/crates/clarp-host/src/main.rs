@@ -51,6 +51,8 @@ fn blob_engine(name: &str) -> Option<Box<dyn BlobEngine>> {
 }
 
 async fn serve(config: Config) -> Result<(), String> {
+    // Capture the configured store paths before any child can be launched.
+    clarp_host::child_environment();
     let config = Arc::new(config);
     let clock: Arc<dyn Clock + Send + Sync> = Arc::new(SystemClock);
     let (engine, tables) = engines(&config.engine)

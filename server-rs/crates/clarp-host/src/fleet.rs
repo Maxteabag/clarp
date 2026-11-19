@@ -1067,7 +1067,15 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         model: non_empty(&record.model),
         effort: non_empty(&record.effort),
         told: Some(works.telling.of(record)),
-        tool_env: works.tool_env.clone(),
+        tool_env: works
+            .tool_env
+            .iter()
+            .cloned()
+            .chain(std::iter::once((
+                "CLARP_SESSION".into(),
+                record.session.clone(),
+            )))
+            .collect(),
         stop_grace_ms: STOP_GRACE_MS,
         keep_spools: works.config.keep_spools,
         accounts: works.config.accounts,
