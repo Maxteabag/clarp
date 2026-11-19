@@ -590,6 +590,33 @@ pub fn queue_updated(
 /// A background job as the apps are given it: what is kept of it, and what is read off it
 /// at this moment (how long ago it was heard from, whether that is still fresh).
 pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
+    let agent_name = if record.persona.is_empty() {
+        &record.session
+    } else {
+        &record.persona
+    };
+    owned_job(
+        &record.agent_id,
+        &record.session,
+        agent_name,
+        None,
+        job,
+        now_ms,
+    )
+}
+
+pub fn computer_job(computer_id: &str, job: &Job, now_ms: i64) -> Value {
+    owned_job("", "", "Computer", Some(computer_id), job, now_ms)
+}
+
+fn owned_job(
+    agent_id: &str,
+    session: &str,
+    agent_name: &str,
+    computer_id: Option<&str>,
+    job: &Job,
+    now_ms: i64,
+) -> Value {
     let active = job.status.is_active();
     // Lost is not failed: nobody heard from it any more, which says nothing about its work.
     let lost = job.lost();
@@ -603,15 +630,10 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
         Some(_) => "stale",
     };
     let outcome = job.outcome_state();
-    let agent_name = if record.persona.is_empty() {
-        &record.session
-    } else {
-        &record.persona
-    };
     json!({
         "job_id": job.id,
-        "agent_id": record.agent_id,
-        "session": record.session,
+        "agent_id": agent_id,
+        "session": session,
         "kind": job.kind,
         "title": job.title,
         "detail": job.detail,
@@ -628,8 +650,8 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
         "terminal_reason": job.terminal_reason,
         "revision": job.revision,
         "generation": job.generation,
-        "owner_kind": "agent",
-        "computer_id": null,
+        "owner_kind": if computer_id.is_some() { "computer" } else { "agent" },
+        "computer_id": computer_id,
         "progress_text": job.progress_text,
         "progress_at": job.progress_at_ms,
         "log_path": job.log_path,

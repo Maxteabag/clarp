@@ -280,10 +280,15 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 .await
             {
                 Err(error) => return could_not(&error),
-                Ok(Err(_)) => {
+                Ok(Err(owner)) => {
+                    let what = if owner == "Computer" {
+                        "owner"
+                    } else {
+                        "agent"
+                    };
                     return ToolAnswer::said(
                         1,
-                        format!("agent_bg: job id already belongs to another agent: {id}"),
+                        format!("agent_bg: job id already belongs to another {what}: {id}"),
                     );
                 }
                 Ok(Ok(())) => {}
@@ -298,6 +303,7 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 .and_then(|live| live.trace_id.clone())
                 .unwrap_or_default();
             let command = JobCommand::Register {
+                queued: false,
                 id,
                 kind: argv[3].to_string(),
                 title: argv[4].to_string(),

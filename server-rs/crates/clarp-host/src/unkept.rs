@@ -52,6 +52,10 @@ impl Log {
         }
     }
 
+    pub(crate) fn line(&self, line: &str) {
+        (self.say)(line);
+    }
+
     /// The one way a failed write is said: the kind and the store's words. The first is said
     /// at once; the same again only a minute after, with how often it happened since.
     pub fn unkept(&self, kind: &str, why: &str) {
@@ -326,6 +330,7 @@ mod at_the_port {
             self.inner.delete(table, key)
         }
         fn list(&self, table: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
+            self.refuses(&format!("list:{table}"))?;
             self.inner.list(table)
         }
     }
@@ -333,6 +338,7 @@ mod at_the_port {
     struct Place {
         dir: PathBuf,
         fleet: FleetHandle,
+        hub: Arc<Hub>,
         refused: Refused,
         said: Arc<Mutex<Vec<String>>>,
     }
@@ -344,6 +350,14 @@ mod at_the_port {
     }
 
     fn place(name: &str) -> Place {
+        seeded_place(name, |_| {}, None).unwrap()
+    }
+
+    fn seeded_place(
+        name: &str,
+        seed: impl FnOnce(&mut dyn KeyValue),
+        refuse: Option<String>,
+    ) -> Result<Place, String> {
         let dir = std::env::temp_dir().join(format!("clarp-unkept-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let at = dir.to_str().unwrap();
@@ -351,6 +365,7 @@ mod at_the_port {
         let config = Config::from_args(config.into_iter()).unwrap();
         let said: Arc<Mutex<Vec<String>>> = Arc::default();
         let heard = said.clone();
+        let hub = Arc::new(Hub::new(0));
         let works = fleet::Works {
             runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
@@ -359,7 +374,7 @@ mod at_the_port {
             codecs: clarp_codec::standard_set("zstd").unwrap(),
             launcher: Arc::new(Launcher::by_name("direct", dir.join("unused-shim")).unwrap()),
             clock: Arc::new(SystemClock),
-            hub: Arc::new(Hub::new(0)),
+            hub: hub.clone(),
             revisions: Arc::default(),
             tool_env: Vec::new(),
             pusher: crate::pusher::pusher().0,
@@ -375,17 +390,261 @@ mod at_the_port {
             ),
         };
         let refused: Refused = Arc::default();
-        let store = Refusing {
+        let mut store = Refusing {
             inner: MemKeyValue::new().open(Path::new(&dir)).unwrap(),
             refused: refused.clone(),
         };
-        let fleet = fleet::start(works, Box::new(store)).unwrap();
-        Place {
+        store
+            .put("setting", "server_id", b"fixture-computer")
+            .unwrap();
+        seed(&mut store);
+        *refused.lock().unwrap() = refuse;
+        let fleet = fleet::start(works, Box::new(store))?;
+        Ok(Place {
             dir,
             fleet,
+            hub,
             refused,
             said,
-        }
+        })
+    }
+
+    #[tokio::test]
+    async fn computer_job_ownership_survives_concurrent_registration_and_failed_writes() {
+        use clarp_kernel::jobs::{JobCommand, Worker};
+        let place = place("computer-job-write");
+        let register = |id: &str| JobCommand::Register {
+            id: id.into(),
+            queued: true,
+            kind: "portrait".into(),
+            title: "Portrait".into(),
+            detail: String::new(),
+            worker: Worker::none(),
+            restart_cancelled: true,
+            started_trace_id: String::new(),
+            heartbeat_timeout_ms: None,
+            metadata: serde_json::json!({}),
+        };
+        let fleet = &place.fleet;
+        let mut events = place.hub.subscribe(None).1;
+        *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
+        assert!(
+            fleet
+                .change_computer_job(register("picture"))
+                .await
+                .is_err()
+        );
+        assert!(fleet.computer_jobs().await.unwrap().is_empty());
+        assert!(events.try_recv().is_err());
+        *place.refused.lock().unwrap() = None;
+        let registered = fleet
+            .change_computer_job(register("picture"))
+            .await
+            .unwrap()
+            .job
+            .unwrap();
+        let event: serde_json::Value =
+            serde_json::from_str(&events.try_recv().unwrap().json).unwrap();
+        assert_eq!(event["type"], "background-job-updated");
+        assert_eq!(event["job_id"], "picture");
+        assert_eq!(event["job"]["computer_id"], "fixture-computer");
+        assert_eq!(event["change_revision"], registered.revision);
+        let claim = |id: &str| fleet.claim_job(id.into(), "agent-fixture".into());
+        assert_eq!(claim("picture").await.unwrap(), Err("Computer".into()));
+        assert!(claim("agent-work").await.unwrap().is_ok());
+        assert!(
+            fleet
+                .change_computer_job(register("agent-work"))
+                .await
+                .is_err()
+        );
+        let (agent, computer) = tokio::join!(
+            claim("simultaneous"),
+            fleet.change_computer_job(register("simultaneous"))
+        );
+        assert_ne!(agent.unwrap().is_ok(), computer.is_ok());
+        *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
+        let cancel = JobCommand::Cancel {
+            id: "picture".into(),
+            expected_generation: Some(1),
+            reason: "user_cancelled".into(),
+        };
+        assert!(fleet.change_computer_job(cancel.clone()).await.is_err());
+        let unchanged = fleet.computer_job("picture".into()).await.unwrap().unwrap();
+        assert_eq!(unchanged.job, registered);
+        assert_eq!(unchanged.timeline.len(), 1);
+        *place.refused.lock().unwrap() = None;
+        let ended = fleet
+            .change_computer_job(cancel)
+            .await
+            .unwrap()
+            .job
+            .unwrap();
+        assert!(ended.status.is_terminal());
+        let restarted = fleet
+            .change_computer_job(register("picture"))
+            .await
+            .unwrap()
+            .job
+            .unwrap();
+        assert_eq!(restarted.generation, 2);
+        assert_eq!(
+            fleet
+                .computer_job("picture".into())
+                .await
+                .unwrap()
+                .unwrap()
+                .timeline
+                .len(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn computer_job_corruption_preserves_originals_until_registration_succeeds() {
+        use clarp_kernel::jobs::{JobCommand, Worker};
+        let table = fleet::shelf("computer-jobs");
+        assert!(seeded_place("no-list", |_| {}, Some(format!("list:{table}"))).is_err());
+        let place = seeded_place(
+            "bad-jobs",
+            |store| {
+                for key in ["private-one", "private-two"] {
+                    store.put(&table, key, b"private-corrupt-bytes").unwrap();
+                }
+            },
+            None,
+        )
+        .unwrap();
+        let fleet = &place.fleet;
+        assert!(fleet.computer_jobs().await.unwrap().is_empty());
+        assert_eq!(
+            place.said.lock().unwrap().as_slice(),
+            ["clarp-host: skipped 2 unreadable computer job records; original bytes retained"]
+        );
+        assert!(
+            fleet
+                .claim_job("private-one".into(), "agent".into())
+                .await
+                .unwrap()
+                .is_err()
+        );
+        let register = JobCommand::Register {
+            id: "private-one".into(),
+            kind: "picture".into(),
+            title: "Picture".into(),
+            queued: true,
+            worker: Worker::none(),
+            metadata: serde_json::json!({}),
+            detail: String::new(),
+            started_trace_id: String::new(),
+            restart_cancelled: true,
+            heartbeat_timeout_ms: None,
+        };
+        *place.refused.lock().unwrap() = Some(table);
+        assert!(fleet.change_computer_job(register.clone()).await.is_err());
+        assert_eq!(place.said.lock().unwrap().len(), 1);
+        assert_eq!(
+            fleet
+                .kept("computer-jobs", "private-one".into())
+                .await
+                .unwrap()
+                .unwrap(),
+            b"private-corrupt-bytes"
+        );
+        *place.refused.lock().unwrap() = None;
+        fleet.change_computer_job(register).await.unwrap();
+        assert_eq!(
+            place.said.lock().unwrap()[1],
+            "clarp-host: registration replaced an unreadable computer job record"
+        );
+        assert_eq!(fleet.computer_jobs().await.unwrap().len(), 1);
+        assert_eq!(
+            fleet
+                .kept("computer-jobs", "private-two".into())
+                .await
+                .unwrap()
+                .unwrap(),
+            b"private-corrupt-bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn computer_job_producers_wake_only_after_their_generation_ends_on_disk() {
+        use clarp_kernel::jobs::{JobCommand, Worker};
+        use futures_util::FutureExt;
+
+        let place = place("watch-computer-job");
+        let fleet = &place.fleet;
+        let id = "watched";
+        let register = |token: &str| JobCommand::Register {
+            id: id.into(),
+            kind: "portrait".into(),
+            title: "Picture".into(),
+            queued: false,
+            worker: Worker {
+                pid: 17,
+                start_token: token.into(),
+            },
+            metadata: serde_json::json!({}),
+            detail: String::new(),
+            started_trace_id: String::new(),
+            restart_cancelled: true,
+            heartbeat_timeout_ms: None,
+        };
+        let wait = |generation| fleet.wait_computer_job_end(id.into(), generation);
+        let limit = std::time::Duration::from_secs(2);
+        tokio::time::timeout(limit, wait(1)).await.unwrap().unwrap(); // no such id
+        fleet.change_computer_job(register("first")).await.unwrap();
+        let mut old = Box::pin(wait(1));
+        let mut another = Box::pin(wait(1));
+        assert!(old.as_mut().now_or_never().is_none());
+        assert!(another.as_mut().now_or_never().is_none());
+        fleet
+            .change_computer_job(JobCommand::Progress {
+                id: id.into(),
+                generation: 1,
+                text: "working".into(),
+            })
+            .await
+            .unwrap();
+        let cancel = |generation| JobCommand::Cancel {
+            id: id.into(),
+            expected_generation: Some(generation),
+            reason: "user_cancelled".into(),
+        };
+        fleet.change_computer_job(cancel(2)).await.unwrap();
+        *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
+        assert!(fleet.change_computer_job(cancel(1)).await.is_err());
+        assert!(old.as_mut().now_or_never().is_none());
+        *place.refused.lock().unwrap() = None;
+        fleet.change_computer_job(register("second")).await.unwrap();
+        tokio::time::timeout(limit, old).await.unwrap().unwrap();
+        tokio::time::timeout(limit, another).await.unwrap().unwrap();
+        tokio::time::timeout(limit, wait(1)).await.unwrap().unwrap(); // already superseded
+        let mut current = Box::pin(wait(2));
+        assert!(current.as_mut().now_or_never().is_none());
+        fleet.change_computer_job(cancel(2)).await.unwrap();
+        tokio::time::timeout(limit, current).await.unwrap().unwrap();
+        tokio::time::timeout(limit, wait(2)).await.unwrap().unwrap(); // already terminal
+        fleet.change_computer_job(register("third")).await.unwrap();
+        let mut finished = Box::pin(wait(3));
+        assert!(finished.as_mut().now_or_never().is_none());
+        fleet
+            .change_computer_job(JobCommand::Finish {
+                id: id.into(),
+                generation: 3,
+                worker: Worker {
+                    pid: 17,
+                    start_token: "third".into(),
+                },
+                failed: None,
+            })
+            .await
+            .unwrap();
+        tokio::time::timeout(limit, finished)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     fn here(fleet: &FleetHandle, session: &str) -> bool {

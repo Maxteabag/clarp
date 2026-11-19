@@ -216,6 +216,8 @@ pub struct Beat {
 pub enum JobCommand {
     /// A worker registers a run, or says again that it has it.
     Register {
+        /// Register before a worker has adopted this generation.
+        queued: bool,
         id: String,
         kind: String,
         title: String,
@@ -274,6 +276,22 @@ pub enum JobCommand {
         reason: String,
         note: String,
     },
+}
+
+impl JobCommand {
+    pub fn id(&self) -> &str {
+        match self {
+            JobCommand::Register { id, .. }
+            | JobCommand::Start { id, .. }
+            | JobCommand::Heartbeat { id, .. }
+            | JobCommand::Finish { id, .. }
+            | JobCommand::Cancel { id, .. }
+            | JobCommand::Progress { id, .. }
+            | JobCommand::SetLog { id, .. }
+            | JobCommand::Note { id, .. }
+            | JobCommand::Lose { id, .. } => id.as_str(),
+        }
+    }
 }
 
 /// Why a command was not carried out at all.
@@ -433,22 +451,13 @@ impl JobBook {
         now_ms: i64,
         revision: u64,
     ) -> Result<JobChange, JobRefusal> {
-        let target = match &command {
-            JobCommand::Register { id, .. }
-            | JobCommand::Start { id, .. }
-            | JobCommand::Heartbeat { id, .. }
-            | JobCommand::Finish { id, .. }
-            | JobCommand::Cancel { id, .. }
-            | JobCommand::Progress { id, .. }
-            | JobCommand::SetLog { id, .. }
-            | JobCommand::Note { id, .. }
-            | JobCommand::Lose { id, .. } => id,
-        };
+        let target = command.id();
         if target.trim().starts_with(RESERVED_PREFIX) {
             return Err(JobRefusal::ReservedId);
         }
         match command {
             JobCommand::Register {
+                queued,
                 id,
                 kind,
                 title,
@@ -483,7 +492,11 @@ impl JobBook {
                     kind: clip(&kind, KIND_MAX),
                     title: clip(&title, TITLE_MAX),
                     detail: clip(&detail, TEXT_MAX),
-                    status: JobStatus::Running,
+                    status: if queued {
+                        JobStatus::Queued
+                    } else {
+                        JobStatus::Running
+                    },
                     generation: 1,
                     revision,
                     started_at_ms: now_ms,
@@ -867,6 +880,7 @@ mod tests {
 
         fn register(&mut self, id: &str, worker: &Worker) -> JobChange {
             self.run(JobCommand::Register {
+                queued: false,
                 id: id.to_string(),
                 kind: "build".to_string(),
                 title: "Build the thing".to_string(),
@@ -1072,6 +1086,7 @@ mod tests {
         assert_eq!(
             d.book.decide(
                 JobCommand::Register {
+                    queued: false,
                     id: "claude-task:7".to_string(),
                     kind: String::new(),
                     title: String::new(),
@@ -1129,6 +1144,7 @@ mod tests {
         assert_eq!(still.job.unwrap().status, JobStatus::Cancelled);
         // Until it is restarted on purpose: then it is a new run.
         let restarted = d.run(JobCommand::Register {
+            queued: false,
             id: "job".to_string(),
             kind: "build".to_string(),
             title: "Again".to_string(),
@@ -1189,6 +1205,7 @@ mod tests {
         );
         // Nobody to ask: a remark first, then lost. (Its own timeout here is longer.)
         d.run(JobCommand::Register {
+            queued: false,
             id: "slow".to_string(),
             kind: "watch".to_string(),
             title: "Slow".to_string(),

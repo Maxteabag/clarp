@@ -34,6 +34,9 @@ use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
+mod computer_jobs;
+use clarp_kernel::jobs::{Job, JobChange, JobCommand};
+pub use computer_jobs::ComputerJob;
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
@@ -546,6 +549,22 @@ enum Ask {
     },
     /// An agent registers a background job under an id. The inner error is the agent that
     /// has the id already.
+    ComputerJobs {
+        answer: Answer<Vec<Job>>,
+    },
+    ComputerJob {
+        id: String,
+        answer: Answer<Option<ComputerJob>>,
+    },
+    WatchComputerJob {
+        id: String,
+        generation: u64,
+        answer: Answer<Option<watch::Receiver<bool>>>,
+    },
+    ChangeComputerJob {
+        command: JobCommand,
+        answer: Answer<JobChange>,
+    },
     ClaimJob {
         job_id: String,
         agent_id: String,
@@ -1045,6 +1064,42 @@ impl FleetHandle {
         let _ = self.tx.send(Ask::Pushed { token, outcome });
     }
 
+    pub async fn computer_jobs(&self) -> Result<Vec<Job>, Unavailable> {
+        self.ask(|answer| Ask::ComputerJobs { answer }).await
+    }
+    pub async fn computer_job(&self, id: String) -> Result<Option<ComputerJob>, Unavailable> {
+        self.ask(|answer| Ask::ComputerJob { id, answer }).await
+    }
+    /// Completes once this generation is no longer active. An absent, terminal or
+    /// superseded run returns immediately. A closed fleet reports an error.
+    pub async fn wait_computer_job_end(
+        &self,
+        id: String,
+        generation: u64,
+    ) -> Result<(), Unavailable> {
+        if let Some(mut signal) = self
+            .ask(|answer| Ask::WatchComputerJob {
+                id,
+                generation,
+                answer,
+            })
+            .await?
+        {
+            signal
+                .wait_for(|ended| *ended)
+                .await
+                .map_err(|_| Unavailable("the fleet is closed".into()))?;
+        }
+        Ok(())
+    }
+
+    /// An internal caller registers its kind, then uses the same generation-fenced
+    /// commands as an agent worker. There is no public route to manufacture jobs.
+    pub async fn change_computer_job(&self, command: JobCommand) -> Result<JobChange, Unavailable> {
+        self.ask(|answer| Ask::ChangeComputerJob { command, answer })
+            .await
+    }
+
     /// Gives a background job's id to an agent. A job's id is one name on the whole Host:
     /// the inner error is the agent that has it already.
     pub async fn claim_job(
@@ -1076,6 +1131,7 @@ struct Fleet {
     /// Which agent each background job's id belongs to. The job itself is in that agent's
     /// log; this is only the way to it.
     jobs: HashMap<String, String>,
+    computer_jobs: computer_jobs::ComputerJobs,
     /// The register of push devices.
     push: PushBook,
     /// The other Hosts this one may write to.
@@ -1159,8 +1215,11 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     // Host keeps for itself in the same table (its id, the focus) has none. They are read
     // first: what an agent's tool is told is worked out from them.
     let mut settings = BTreeMap::new();
+    let mut computer_id = String::new();
     for (key, stored) in store.list(SETTINGS).map_err(|error| error.to_string())? {
-        if key.contains('.') {
+        if key == "server_id" {
+            computer_id = String::from_utf8(stored).map_err(|_| "invalid server id".to_owned())?;
+        } else if key.contains('.') {
             settings.insert(key, String::from_utf8_lossy(&stored).into_owned());
         }
     }
@@ -1207,6 +1266,12 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
             devices.insert(device.token_hash.clone(), Arc::new(device));
         }
     }
+    let computer_jobs = computer_jobs::ComputerJobs::open(
+        store.as_ref(),
+        computer_id,
+        &works.revisions,
+        &works.log,
+    )?;
     let mut jobs = HashMap::new();
     for (job_id, stored) in store.list(JOBS).map_err(|error| error.to_string())? {
         jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
@@ -1261,6 +1326,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         focus,
         devices,
         jobs,
+        computer_jobs,
         push,
         peers,
         settings,
@@ -1396,6 +1462,22 @@ impl Fleet {
                 Ask::Revoke { device_id, answer } => {
                     let _ = answer.send(self.revoke(&device_id));
                 }
+                Ask::ComputerJobs { answer } => {
+                    let _ = answer.send(Ok(self.computer_jobs.list()));
+                }
+                Ask::ComputerJob { id, answer } => {
+                    let _ = answer.send(Ok(self.computer_jobs.get(&id)));
+                }
+                Ask::WatchComputerJob {
+                    id,
+                    generation,
+                    answer,
+                } => {
+                    let _ = answer.send(Ok(self.computer_jobs.subscribe(id, generation)));
+                }
+                Ask::ChangeComputerJob { command, answer } => {
+                    let _ = answer.send(self.change_computer_job(command));
+                }
                 Ask::ClaimJob {
                     job_id,
                     agent_id,
@@ -1522,6 +1604,9 @@ impl Fleet {
         job_id: String,
         agent_id: String,
     ) -> Result<Result<(), String>, Unavailable> {
+        if self.computer_jobs.contains(&job_id) {
+            return Ok(Err("Computer".into()));
+        }
         match self.jobs.get(&job_id) {
             Some(owner) if *owner != agent_id => Ok(Err(owner.clone())),
             Some(_) => Ok(Ok(())),
