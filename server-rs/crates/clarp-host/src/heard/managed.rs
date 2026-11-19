@@ -44,7 +44,13 @@ impl ManagedFolder {
                 Component::RootDir => {}
                 Component::Normal(part) => {
                     let child = beneath(&parent, part.to_str().ok_or_else(unsafe_target)?);
-                    parent = open(&child, true).map_err(|_| unsafe_target())?;
+                    parent = match open(&child, true) {
+                        Ok(dir) => dir,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound && resuming => {
+                            return Ok(None);
+                        }
+                        Err(_) => return Err(unsafe_target()),
+                    };
                 }
                 _ => return Err(unsafe_target()),
             }

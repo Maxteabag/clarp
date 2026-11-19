@@ -309,6 +309,7 @@ mod at_the_port {
 
     impl KeyValue for Refusing {
         fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+            self.refuses(&format!("read:{table}"))?;
             self.inner.get(table, key)
         }
         fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError> {
@@ -386,6 +387,58 @@ mod at_the_port {
             refused,
             said,
         }
+    }
+
+    #[tokio::test]
+    async fn unreadable_inventory_requires_a_working_store_and_a_durable_backup() {
+        let place = place("transcription-backup");
+        let at = place.dir.to_str().unwrap();
+        let config = Config::from_args(
+            ["--data", at, "--run", at, "--cwd", at]
+                .map(String::from)
+                .into_iter(),
+        )
+        .unwrap();
+        let key = "transcription-models";
+        let original = vec![0xff, b'!', 0, b'}'];
+        place
+            .fleet
+            .keep(key, "records".into(), Some(original.clone()))
+            .await
+            .unwrap();
+        for refusal in [
+            "read:kept.transcription-models",
+            "kept.transcription-models",
+        ] {
+            *place.refused.lock().unwrap() = Some(refusal.to_string());
+            assert!(
+                crate::heard::Ears::new(&config, &place.fleet)
+                    .await
+                    .is_err()
+            );
+        }
+        *place.refused.lock().unwrap() = None;
+        assert_eq!(
+            place.fleet.kept(key, "records".into()).await.unwrap(),
+            Some(original.clone())
+        );
+        assert_eq!(
+            place
+                .fleet
+                .kept(key, "records.unreadable".into())
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(crate::heard::Ears::new(&config, &place.fleet).await.is_ok());
+        assert_eq!(
+            place
+                .fleet
+                .kept(key, "records.unreadable".into())
+                .await
+                .unwrap(),
+            Some(original)
+        );
     }
 
     fn here(fleet: &FleetHandle, session: &str) -> bool {
