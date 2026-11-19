@@ -2520,7 +2520,7 @@ impl Worker {
                     live: None,
                     ..status.clone()
                 };
-                if let Some(at_once) = wire::stopped(&record, &rested) {
+                if let Some(at_once) = wire::stopped(&record, &rested, self.ended.as_ref()) {
                     hub.publish(at_once, now);
                 }
                 if status.live.is_some() {
