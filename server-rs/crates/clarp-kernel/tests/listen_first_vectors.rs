@@ -109,14 +109,8 @@ fn every_claim_greeting_and_supersession_matches_the_reference() {
             json!({"reason":row["reason"],"silence_ms":row["ms"],"intent":{"cause":row["cause"]}});
         assert_eq!(json!(rules::header(&op)), row["text"]);
     }
-    for row in fixture["clips"].as_array().unwrap() {
-        let result = rules::clip(&row["op"], row["trace"].as_str().unwrap());
-        let (tag, skip) = result.unwrap_or((Value::Null, false));
-        assert_eq!(
-            (tag, json!(skip)),
-            (row["tag"].clone(), row["skip"].clone())
-        );
-    }
+    // R77 superseded trace-based clip selection. The independent binding
+    // stories now exercise the phone's tag and its output fence.
     for row in fixture["uuids"].as_array().unwrap() {
         assert_eq!(
             json!(rules::uuid(row["raw"].as_str().unwrap().as_bytes())),

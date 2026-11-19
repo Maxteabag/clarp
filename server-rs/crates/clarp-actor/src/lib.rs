@@ -1476,6 +1476,8 @@ impl Actor {
         let Some(turn) = item.turn else {
             return Ok(Value::Null);
         };
+        let raw: Value =
+            serde_json::from_slice(&item.body).map_err(|e| ActorError::Corrupt(e.to_string()))?;
         let message = self.message_at(item.seq)?;
         let foreign = !message.unminted
             || !matches!(&message.origin,Origin::Trigger{name} if name=="automation");
@@ -1489,7 +1491,7 @@ impl Actor {
             TurnFate::Gone => "withdrawn",
         };
         Ok(
-            json!({"status":status,"trace_id":message.trace_id,"foreign":foreign,"turn":turn,"claimed_at":Value::Null}),
+            json!({"reservation":raw["_call_opening"],"status":status,"trace_id":message.trace_id,"foreign":foreign,"turn":turn,"claimed_at":Value::Null}),
         )
     }
 
@@ -2063,7 +2065,19 @@ impl Actor {
         admission: Admission,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        self.take(message, admission, Vec::new(), now_ms)
+        self.take(message, admission, Vec::new(), None, now_ms)
+    }
+
+    /// File the Host's opening reservation in the same message as the
+    /// assigned turn, so a crash cannot turn a matching client id into proof.
+    pub fn send_for_opening(
+        &mut self,
+        message: &Message,
+        admission: Admission,
+        reservation: serde_json::Value,
+        now_ms: i64,
+    ) -> Result<(Sent, Outputs), ActorError> {
+        self.take(message, admission, Vec::new(), Some(reservation), now_ms)
     }
 
     /// Tells the agent something of the Host's own, and writes what belongs with it in the
@@ -2079,7 +2093,7 @@ impl Actor {
     ) -> Result<(Sent, Outputs), ActorError> {
         let mut written = self.written(kept, now_ms)?;
         let items = std::mem::take(&mut written.items);
-        let (sent, mut out) = self.take(message, admission, items, now_ms)?;
+        let (sent, mut out) = self.take(message, admission, items, None, now_ms)?;
         if sent.duplicate {
             // The message is there already; what belongs with it has still to be written.
             return Ok((sent, self.keep(kept, now_ms)?));
@@ -2094,9 +2108,18 @@ impl Actor {
         message: &Message,
         admission: Admission,
         with: Vec<NewItem>,
+        reservation: Option<serde_json::Value>,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        let body = serde_json::to_vec(message).map_err(|error| {
+        let encoded = if let Some(reservation) = reservation {
+            serde_json::to_value(message).and_then(|mut row| {
+                row["_call_opening"] = reservation;
+                serde_json::to_vec(&row)
+            })
+        } else {
+            serde_json::to_vec(message)
+        };
+        let body = encoded.map_err(|error| {
             ActorError::Corrupt(format!("a message could not be written: {error}"))
         })?;
         let accepted = self.recorder.accept_message_with(

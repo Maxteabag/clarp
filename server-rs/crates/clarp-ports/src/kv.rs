@@ -18,6 +18,9 @@ impl fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
+/// One atomic fleet-store change. None removes the key.
+pub type Write = (String, String, Option<Vec<u8>>);
+
 /// Named values in named tables. One owner writes it, which is why writing takes `&mut self`.
 pub trait KeyValue: Send {
     fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError>;
@@ -27,7 +30,7 @@ pub trait KeyValue: Send {
     fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError>;
 
     /// Commit related replacements atomically across named tables.
-    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError>;
+    fn put_together(&mut self, writes: &[Write]) -> Result<(), StoreError>;
 
     /// Removes a key. Returns whether it was there.
     fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError>;
