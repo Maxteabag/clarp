@@ -350,6 +350,7 @@ pub struct Waiting {
     /// The id an app is told it by: none for what the Host sent by itself.
     pub told_id: String,
     pub text: String,
+    pub speak: bool,
     pub accepted_at_ms: i64,
 }
 
@@ -1664,6 +1665,7 @@ impl Actor {
                 told_id: message.told_id().to_string(),
                 message_id: message.id,
                 text: message.text,
+                speak: message.speak,
                 accepted_at_ms: queued.accepted_at_ms,
             });
         }
