@@ -119,6 +119,7 @@ impl Place {
             speaks: crate::voice::mouth().0,
             telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
             tally: crate::usage::tally().0,
+            turns: std::sync::Arc::default(),
             pools: Vec::new(),
             log: crate::unkept::Log::stderr(),
         };

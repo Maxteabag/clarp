@@ -250,6 +250,7 @@ mod at_the_port {
             speaks: crate::voice::mouth().0,
             telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
             tally: crate::usage::tally().0,
+            turns: Arc::default(),
             pools: Vec::new(),
             log: Log::to(move |line| heard.lock().unwrap().push(line.to_string())),
         };

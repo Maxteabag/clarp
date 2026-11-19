@@ -50,6 +50,7 @@ use clarp_kernel::turn::{
     Activity, Admission, COMPACTION, Origin, Outcome, Parked, RunOutcome, Settled, Turn, TurnId,
     Wait, silent_when_failed,
 };
+use clarp_kernel::turn_identity::Standing;
 use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
@@ -1543,6 +1544,22 @@ impl Actor {
             TurnFate::Waits
         } else {
             TurnFate::Gone
+        })
+    }
+
+    /// Where one of the agent's turns stands, by its number: what tells whether a token given
+    /// to that turn still names the agent. Two keyed reads, never a scan: the turn that runs,
+    /// and the row that ended this one.
+    pub fn standing_of(&self, turn: u64) -> Result<Standing, ActorError> {
+        let live = self.recorder.agent().live().map(|live| live.id().0);
+        if live == Some(turn) {
+            return Ok(Standing::Live);
+        }
+        Ok(match self.turn_end(turn)? {
+            Some(end) => Standing::Ended {
+                at_ms: end.ended_at_ms,
+            },
+            None => Standing::Unknown,
         })
     }
 

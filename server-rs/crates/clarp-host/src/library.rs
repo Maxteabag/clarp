@@ -1179,17 +1179,21 @@ async fn post_decision(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
-    let as_turn = headers.contains_key("x-clarp-turn");
-    Ok(Json(decide(&app, &rest, as_turn, &object(&body)?).await?))
+    // A header that is no text is a token that names nobody.
+    let turn = headers
+        .get(crate::turn_identity::HEADER)
+        .map(|token| token.to_str().unwrap_or_default());
+    Ok(Json(decide(&app, &rest, turn, &object(&body)?).await?))
 }
 
 /// Ends a request: the user answers or discards it, the agent takes it back. `rest` is what
 /// follows `/decisions/`: the request's id and `/resolve`, `/dismiss` or `/withdraw`.
-/// `as_turn` says the caller claims to be an agent's turn. Answers the body of the answer.
+/// `turn`: the token the caller presents as an agent's turn (`X-Clarp-Turn`, or what the call
+/// of a tool carries), where it presents one. Answers the body of the answer.
 pub(crate) async fn decide(
     app: &App,
     rest: &str,
-    as_turn: bool,
+    turn: Option<&str>,
     data: &Map<String, Value>,
 ) -> Result<Value, ApiError> {
     let rest = rest.trim_matches('/');
@@ -1228,10 +1232,11 @@ pub(crate) async fn decide(
                 Some(_) => return Err(refused(StatusCode::BAD_REQUEST, "invalid decision choice")),
             };
             let expected = whole(data, "expected_revision")?;
-            // An agent's turn cannot be told from its request on this Host yet: one that
-            // says it is a turn is not taken for the user.
-            if as_turn {
-                let why = "verified turn identity required";
+            // Whose turn asks, where one says it is a turn: a token that names nobody is
+            // refused, and an agent never answers as the user.
+            let caller = crate::turn_identity::presented(app, turn).await?;
+            if caller.is_some() && on_behalf_session.is_none() {
+                let why = "agent resolution requires on_behalf_session";
                 return Err(refused(StatusCode::FORBIDDEN, why));
             }
             Want::Resolve {

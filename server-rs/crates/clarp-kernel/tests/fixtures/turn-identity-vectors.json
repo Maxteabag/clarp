@@ -1,0 +1,67 @@
+{
+ "env": "CLARP_PROVIDER_TURN",
+ "kept_ms": 604800000,
+ "now_ms": 1800000000000,
+ "cases": [
+  {
+   "what": "a turn that runs",
+   "standing": "live",
+   "ended_ago_ms": null,
+   "outcome": "identified id-desk"
+  },
+  {
+   "what": "a turn that ended a moment ago",
+   "standing": "ended",
+   "ended_ago_ms": 1,
+   "outcome": "identified id-desk"
+  },
+  {
+   "what": "a turn that ended a day ago",
+   "standing": "ended",
+   "ended_ago_ms": 86400000,
+   "outcome": "identified id-desk"
+  },
+  {
+   "what": "a turn that ended seven days ago to the millisecond",
+   "standing": "ended",
+   "ended_ago_ms": 604800000,
+   "outcome": "identified id-desk"
+  },
+  {
+   "what": "a turn that ended seven days and a millisecond ago",
+   "standing": "ended",
+   "ended_ago_ms": 604800001,
+   "outcome": "nobody"
+  },
+  {
+   "what": "a turn that ended eight days ago",
+   "standing": "ended",
+   "ended_ago_ms": 691200000,
+   "outcome": "nobody"
+  },
+  {
+   "what": "a token never given",
+   "standing": "unknown",
+   "ended_ago_ms": null,
+   "outcome": "nobody"
+  },
+  {
+   "what": "a text that is no token",
+   "standing": "no token",
+   "ended_ago_ms": null,
+   "outcome": "nobody"
+  },
+  {
+   "what": "no token at all",
+   "standing": "no token",
+   "ended_ago_ms": null,
+   "outcome": "nobody"
+  },
+  {
+   "what": "a turn that runs, when the store cannot be read",
+   "standing": "unreadable",
+   "ended_ago_ms": null,
+   "outcome": "cannot say"
+  }
+ ]
+}

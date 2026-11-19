@@ -132,15 +132,21 @@ impl Place {
             .strip_prefix("clarp-host listens on ")
             .unwrap_or_else(|| panic!("the Host did not say where it listens, it said: {first}"))
             .to_string();
-        // Whatever else it says is kept out of the way.
+        // Whatever else it says is kept out of the way, for a test that reads it.
+        let heard = Arc::new(Mutex::new(String::new()));
+        let keeping = heard.clone();
         std::thread::spawn(move || {
-            let mut rest = String::new();
-            let _ = said.read_to_string(&mut rest);
+            let mut line = String::new();
+            while said.read_line(&mut line).is_ok_and(|read| read > 0) {
+                keeping.lock().unwrap().push_str(&line);
+                line.clear();
+            }
         });
         Host {
             process,
             address,
             token: token.to_string(),
+            heard,
         }
     }
 }
@@ -182,6 +188,8 @@ struct Host {
     address: String,
     /// The token this test's own requests present, when the Host asks for one.
     token: String,
+    /// What the Host said on its standard error after where it listens.
+    heard: Arc<Mutex<String>>,
 }
 
 impl Host {
@@ -1851,6 +1859,207 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
     assert_eq!((status, &discarded["changed"]), (200, &json!(true)));
     let gone = host.ask("GET", &format!("/artifacts/{document_id}"), None);
     assert_eq!(error(&gone), (404, "artifact not found".to_string()));
+}
+
+#[test]
+fn a_turn_is_known_by_the_signed_token_it_is_given_while_it_runs_after_it_ended_and_after_a_restart()
+ {
+    use clarp_kernel::turn_identity;
+    let place = Place::new("turn-identity");
+    // A stand-in for Claude Code whose turn writes down the token it was given and, told to hold,
+    // runs on until the test lets it end.
+    let (seen, release, claude) = (
+        place.root.join("seen"),
+        place.root.join("release"),
+        place.root.join("claude"),
+    );
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+told = sys.stdin.readline()
+with open({seen}, "a") as out:
+    out.write(json.dumps({{"token": os.environ.get("CLARP_PROVIDER_TURN")}}) + "\n")
+if "HOLD" in told:
+    waited = 0
+    while not os.path.exists({release}) and waited < 600:
+        time.sleep(0.1)
+        waited += 1
+for line in [
+    {{"type": "system", "subtype": "init", "session_id": "stand-in", "model": "stand-in"}},
+    {{"type": "assistant", "session_id": "stand-in", "message": {{"id": "msg_1", "role": "assistant",
+      "model": "stand-in", "content": [{{"type": "text", "text": "done"}}]}}}},
+    {{"type": "result", "subtype": "success", "is_error": False, "session_id": "stand-in", "result": "done",
+      "num_turns": 1}},
+]:
+    print(json.dumps(line), flush=True)
+"#,
+        seen = serde_json::to_string(seen.to_str().unwrap()).unwrap(),
+        release = serde_json::to_string(release.to_str().unwrap()).unwrap(),
+    );
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    // The Host's environment carries no token of its own, so that a turn given none shows none.
+    let start = || place.start_without("", &[], &world, &["CLARP_PROVIDER_TURN"]);
+    let host = start();
+    let vera = host.new_agent("Vera");
+    for (name, session) in [("Desk", "desk"), ("Omar", "omar")] {
+        let made = host.post(
+            "/agents",
+            json!({ "name": name, "session": session, "backend": "claude" }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+    }
+    let tokens = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&seen).unwrap_or_default();
+        let records = written
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap());
+        records.map(|record| record["token"].clone()).collect()
+    };
+    let mut sent = 0;
+    // A turn of an agent begins: the token it was given.
+    let mut begin = |host: &Host, session: &str, text: &str| -> Value {
+        sent += 1;
+        let before = tokens().len();
+        host.send(session, text, &format!("t-{sent}"));
+        wait_for("the turn to write down its token", || {
+            tokens().len() > before
+        });
+        tokens()[before].clone()
+    };
+    let ask = |host: &Host| -> String {
+        let ask = json!({ "session": vera, "title": "Deploy?", "question": "Deploy version 1.3?" });
+        let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+        assert_eq!(status, 201, "{asked}");
+        asked["artifact"]["decision"]["decision_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    // What a request that presents a token is answered: whose turn it names shows in the words.
+    let present = |host: &Host, id: &str, token: &str| -> (u16, Value) {
+        let body = json!({ "choice": "accepted", "expected_revision": 1 }).to_string();
+        let path = format!("/decisions/{id}/resolve");
+        let headers = [("X-Clarp-Turn", token)];
+        let answered = fetch(host, &host.token, "POST", &path, &headers, body.as_bytes());
+        let said = serde_json::from_slice(&answered.body).unwrap_or(Value::Null);
+        (answered.status, said)
+    };
+    let identified = (
+        403,
+        json!({ "error": "agent resolution requires on_behalf_session" }),
+    );
+    let nobody = (403, json!({ "error": "verified turn identity required" }));
+    let id = ask(&host);
+
+    // The desk's turn runs: its token names the desk's turn.
+    let desk = begin(&host, "desk", "HOLD");
+    let desk = desk.as_str().unwrap().to_string();
+    assert_eq!(present(&host, &id, &desk), identified);
+    // Opaque, of signs a header carries as they are, and of nobody's but this turn: another turn's
+    // number or another agent's id under its MAC, or its MAC changed, names nobody.
+    assert!(desk.bytes().all(|sign| sign.is_ascii_graphic()), "{desk}");
+    let fields: Vec<&str> = desk.split('.').collect();
+    assert_eq!(fields.len(), 4, "{desk}");
+    let with = |at: usize, value: &str| -> String {
+        let mut changed = fields.clone();
+        changed[at] = value;
+        changed.join(".")
+    };
+    let next: u64 = fields[2].parse::<u64>().unwrap() + 1;
+    assert_eq!(present(&host, &id, &with(2, &next.to_string())), nobody);
+    let last = if fields[3].ends_with('0') { "1" } else { "0" };
+    let mac = format!("{}{last}", &fields[3][..63]);
+    assert_eq!(present(&host, &id, &with(3, &mac)), nobody);
+    // A token of the Python Host's form, a text that is no token, an empty one: nobody.
+    for token in ["0123456789abcdef01234567", "not a token", ""] {
+        assert_eq!(present(&host, &id, token), nobody, "{token:?}");
+    }
+
+    // Omar's turn has a token of its own, which names Omar: under it the desk's id names nobody.
+    std::fs::write(&release, "").unwrap();
+    wait_for("the desk's turn to end", || host.state("desk") == "done");
+    std::fs::remove_file(&release).unwrap();
+    let omar = begin(&host, "omar", "go");
+    let omar = omar.as_str().unwrap().to_string();
+    assert_ne!(omar, desk);
+    let omars: Vec<&str> = omar.split('.').collect();
+    assert_ne!(omars[1], fields[1]);
+    assert_eq!(present(&host, &id, &with(1, omars[1])), nobody);
+    wait_for("Omar's turn to end", || host.state("omar") == "done");
+    // Both turns ended a moment ago: their tokens still name them, as a worker a turn left behind
+    // presents its turn's.
+    assert_eq!(present(&host, &id, &desk), identified);
+    assert_eq!(present(&host, &id, &omar), identified);
+    // The desk's next turn has another token.
+    let again = begin(&host, "desk", "go");
+    assert!(again.as_str().is_some_and(|token| token != desk), "{again}");
+    wait_for("the desk's turn to end", || host.state("desk") == "done");
+
+    // An agent that is gone: its token names nobody.
+    let (status, removed) = host.ask("DELETE", "/agents/omar", None);
+    assert_eq!(status, 200, "{removed}");
+    assert_eq!(present(&host, &id, &omar), nobody);
+
+    // A Host started again has the same key: the desk's token still names it.
+    let heard = host.heard.lock().unwrap().clone();
+    drop(host);
+    let host = start();
+    assert_eq!(present(&host, &id, &desk), identified);
+    let heard = heard + host.heard.lock().unwrap().as_str();
+    drop(host);
+    // The key is one record kept with the fleet, 32 bytes, and the Host never says it, nor a
+    // token a request presented.
+    let kept = kept_records(&place, "turn-identity");
+    assert_eq!(kept.keys().collect::<Vec<_>>(), ["key"], "{kept:?}");
+    let key = kept["key"]["key"].as_str().unwrap().to_string();
+    assert_eq!(key.len(), 64, "{key}");
+    assert!(!heard.contains(&key), "the Host said its key: {heard}");
+    assert!(!heard.contains(&desk), "the Host said a token: {heard}");
+    // The token is the kernel's of that key, the desk and its turn.
+    let bytes = |hex: &str| -> Vec<u8> {
+        let pairs = (0..hex.len() / 2).map(|at| &hex[at * 2..at * 2 + 2]);
+        pairs
+            .map(|pair| u8::from_str_radix(pair, 16).unwrap())
+            .collect()
+    };
+    let key_bytes = bytes(&key);
+    let desk_id = String::from_utf8(bytes(fields[1])).unwrap();
+    let desk_turn: u64 = fields[2].parse().unwrap();
+    assert_eq!(turn_identity::make(&key_bytes, &desk_id, desk_turn), desk);
+
+    // A key that cannot be read: no turn is given a token, and a token presented is answered that
+    // it cannot be said whose it is, which may be asked again. The key is not made anew over it.
+    keep_record(
+        &place,
+        "turn-identity",
+        "key",
+        &json!({ "key": "not a key" }),
+    );
+    let host = start();
+    let unreadable = present(&host, &id, &desk);
+    let unavailable = json!({ "error": "turn identity unavailable", "retryable": true });
+    assert_eq!(unreadable, (503, unavailable));
+    assert_eq!(begin(&host, "desk", "go"), Value::Null);
+    wait_for("the desk's turn to end", || host.state("desk") == "done");
+    drop(host);
+    assert_eq!(
+        kept_records(&place, "turn-identity")["key"]["key"],
+        "not a key"
+    );
+    // Given its key back, it knows the desk's token again.
+    keep_record(&place, "turn-identity", "key", &json!({ "key": key }));
+    let host = start();
+    assert_eq!(present(&host, &id, &desk), identified);
+    // A token of that key for a turn of the desk its log does not know names nobody, while
+    // another turn of the desk runs too.
+    let unknown = turn_identity::make(&key_bytes, &desk_id, 99);
+    assert_eq!(present(&host, &id, &unknown), nobody);
+    let runs = begin(&host, "desk", "HOLD");
+    assert_eq!(present(&host, &id, runs.as_str().unwrap()), identified);
+    assert_eq!(present(&host, &id, &unknown), nobody);
+    std::fs::write(&release, "").unwrap();
+    wait_for("the desk's turn to end", || host.state("desk") == "done");
 }
 
 fn now_ms() -> i64 {
@@ -36983,6 +37192,7 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         process: child,
         address: local,
         token: "admin".into(),
+        heard: Arc::default(),
     };
     let (phone, _) = pair(&host, "Phone", "full");
     assert_eq!(

@@ -89,6 +89,8 @@ async fn serve(config: Config) -> Result<(), String> {
             minted
         }
     };
+    // What signs the token every turn is given: the Host's own key, kept before any turn starts.
+    let turns = Arc::new(clarp_host::turn_identity::Signer::open(store.as_mut()));
 
     let hub = Arc::new(Hub::new(clock.now_ms()));
     // The first event of a Host's life says which version it is. A client that connects while
@@ -153,6 +155,7 @@ async fn serve(config: Config) -> Result<(), String> {
         // Who speaks for an agent is in the owner's file, where the keys of speech are.
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
         tally,
+        turns: turns.clone(),
         pools: pools.clone(),
         log: clarp_host::unkept::Log::stderr(),
     };
@@ -220,6 +223,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let app = App {
+        turns,
         android_chip: Arc::default(),
         android,
         config: config.clone(),
@@ -330,6 +334,14 @@ async fn serve(config: Config) -> Result<(), String> {
     // And an idle agent's own label that outlived its time is taken back.
     clarp_host::labels::run(&app);
     eprintln!("clarp-host listens on {address}");
+    if let Some(why) = app.turns.unkept() {
+        app.fleet.unkept(clarp_host::turn_identity::KIND, why);
+    } else if !app.turns.has_key() {
+        eprintln!(
+            "clarp-host: the key of the turns' tokens cannot be read: no turn is given one, and a \
+             token presented is answered that it cannot be said whose it is"
+        );
+    }
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",
         clarp_host::VERSION,

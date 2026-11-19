@@ -70,6 +70,7 @@ pub mod told;
 pub mod tools;
 pub mod trust;
 pub mod turn;
+pub mod turn_identity;
 pub mod usage;
 pub mod usage_ask;
 pub mod vocabulary;

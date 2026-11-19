@@ -2006,6 +2006,29 @@ session and the same `stt` report returned to the client. A cached retry reuses 
 transaction before publishing its directory. Call-job fingerprints bind the validated principal,
 call ID and participant as specified for R87.
 
+**Whose turn calls** (19 Nov 2026; `clarp_kernel::turn_identity`, `clarp-host/src/turn_identity.rs`). Every
+turn's tool is given a token in `CLARP_PROVIDER_TURN`, and a Clarp tool inside the turn, or a worker it left
+behind, presents it as `X-Clarp-Turn` (the tools of this Host pass it with their call). The token says whose turn
+it is, a version, the agent's id in hex and the turn's number, and carries an HMAC-SHA256 over exactly those
+fields with a key of the Host's own (the RustCrypto `hmac` crate, checked in constant time). Nothing is written
+for a turn: its launch writes what it wrote before, and the token is made from the turn's number as it starts.
+The key is 32 random bytes from the system, made once and kept as one record with the fleet (kind
+`turn-identity`), read when the Host starts; it is never written to a log line and no route answers it. A token
+names its agent while that turn runs and for seven days after it ended, the Python Host's rule
+(`TURN_RETENTION_MS`); the agent's own log says which, asked by the turn's number (the turn that runs, and the
+row that ended it: two keyed reads, no scan). One verification reads the key from memory and asks the agent's
+actor one question. A token of another key, of a turn the log does not know, of an agent that is gone, or whose
+MAC does not verify names nobody, and the route answers 403 `verified turn identity required`; a key or a log that
+cannot be read is a 503 `turn identity unavailable` with `retryable: true`, as the Python Host answers a lookup
+that failed. A key record that is there but cannot be read is never made anew over: the tokens given with it
+would all name nobody. A key made at the start that the store does not keep is used by nobody, and
+said once in the Host's log as every failed write is (`FleetHandle::unkept`). Neither the edge nor the route writes a request's headers to a log line. The outcomes are
+held to the Python Host's `caller_agent_id` over turns that run, that ended around seven days ago, a token never
+given and a store that cannot be read (`tests/turn_identity_vectors.rs`); how a token is made is this Host's own
+(see the differences page). The one route that reads it here is the answer to a request (`POST
+/decisions/<id>/resolve`): an agent's turn never answers as the user. The goals' door (`plans.rs`) still refuses a
+turn's header, for a later piece. The wrong rules are `tools/plants/turn-identity.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

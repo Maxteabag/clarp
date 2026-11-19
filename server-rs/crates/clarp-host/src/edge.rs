@@ -278,6 +278,8 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct App {
     pub config: Arc<Config>,
+    /// What makes and reads the token each turn is given, which tells whose turn calls.
+    pub turns: Arc<crate::turn_identity::Signer>,
     pub hub: Arc<Hub>,
     pub fleet: FleetHandle,
     pub clock: Arc<dyn Clock + Send + Sync>,
@@ -418,6 +420,8 @@ pub struct ApiError {
     plain: bool,
     /// What is answered under `error` where it is more than words: a render spec's refusal.
     detail: Option<Value>,
+    /// Says to the caller that the same request may well be met when it is asked again.
+    retryable: bool,
 }
 
 impl ApiError {
@@ -427,6 +431,16 @@ impl ApiError {
             error: error.into(),
             plain: false,
             detail: None,
+            retryable: false,
+        }
+    }
+
+    /// An error the caller is told it may ask again for (`"retryable": true` beside `error`), as
+    /// the Python Host answers a turn's identity it could not look up.
+    pub(crate) fn retryable(status: StatusCode, error: impl Into<String>) -> Self {
+        Self {
+            retryable: true,
+            ..Self::new(status, error)
         }
     }
 
@@ -454,6 +468,7 @@ impl ApiError {
             error: text.into(),
             plain: true,
             detail: None,
+            retryable: false,
         }
     }
 
@@ -476,6 +491,9 @@ impl IntoResponse for ApiError {
             (self.status, kind, self.error).into_response()
         } else if let Some(detail) = self.detail {
             (self.status, Json(json!({ "error": detail }))).into_response()
+        } else if self.retryable {
+            let body = json!({ "error": self.error, "retryable": true });
+            (self.status, Json(body)).into_response()
         } else {
             (self.status, Json(json!({ "error": self.error }))).into_response()
         }

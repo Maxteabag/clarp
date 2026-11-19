@@ -651,7 +651,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
             let body = json!({ "session": rest[0] });
             let body = body.as_object().cloned().unwrap_or_default();
             let rest = format!("{}/withdraw", rest[1]);
-            match library::decide(app, &rest, false, &body).await {
+            match library::decide(app, &rest, None, &body).await {
                 Ok(done) => Ok(done["artifact"].clone()),
                 Err(error) => Err(refusal(&error)),
             }
