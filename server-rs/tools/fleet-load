@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""Manual, private fleet benchmark. tools/build runs this in a fresh loopback-only namespace.
+A mode-0600 shape.json lists synthetic agents: backend, rows, turns, artifacts, plans, janitor.
+Outputs are private JSONL. One invocation performs one move slice or a start series.
+"""
+import argparse
+import http.client
+import http.server
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import subprocess
+import threading
+import time
+from urllib.parse import parse_qs, urlsplit
+
+BINARY = Path("target/release/clarp-host").resolve()
+NOW = time.monotonic
+AUTH = "synthetic-benchmark-token"
+
+
+def write(path, obj):
+    with path.open("a") as f:
+        print(json.dumps(obj, separators=(",", ":")), file=f, flush=True)
+
+
+def records(path):
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def session(i):
+    return f"sample-{i:04d}"
+
+
+def row_id(i, k):
+    return f"sample-row-{i}-{k}"
+
+
+def source(shape, work):
+    roster = [dict(agent_id=f"bench-{i:04d}", session=session(i), persona=f"Sample {i}",
+                   backend=s["backend"], cwd=str(work), is_janitor=s.get("janitor", False),
+                   busy=False, muted=True) for i,s in enumerate(shape)]
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            path = urlsplit(self.path)
+            fields = parse_qs(path.query)
+            def field(name, default=""):
+                return fields.get(name, [default])[0]
+            if path.path == "/agents/snapshot":
+                value = {"agents":roster,"personas":[]}
+            elif path.path == "/transcription-providers":
+                value = {}
+            else:
+                i = int(field("session").split("-")[-1])
+                s = shape[i]
+                agent = roster[i]
+                if path.path == "/log":
+                    end = int(field("before").split("-")[-1]) if field("before") else s["rows"]
+                    begin = max(0,end-int(field("limit","100")))
+                    turns = max(1,s["turns"])
+                    def message(k):
+                        turn = k*turns//s["rows"]
+                        first = k == 0 or (k-1)*turns//s["rows"] != turn
+                        return dict(id=row_id(i,k), role="user" if first else "assistant",
+                                    timestamp="2025-01-01T00:00:00Z", text=f"Sample {i}, line {k}. " + "Example content. "*6,
+                                    trace_id=f"trace-{i}-{turn}",phase=None if first else "final")
+                    value = {"turns":[message(k) for k in range(begin,end)],"has_more":begin>0}
+                elif path.path == "/task-plans":
+                    value = {"plans":[dict(plan_id=f"plan-{i}-{k}",agent_id=agent["agent_id"],
+                        status="completed",title=f"Sample plan {k}",items=[],revision=1) for k in range(s["plans"])]}
+                elif path.path == "/artifacts":
+                    def artifact(k):
+                        plan=k<s["plans"]
+                        return dict(artifact_id=f"doc-{i}-{k}",session=session(i),agent_id=agent["agent_id"],
+                            type="plan" if plan else "document",reference_id=f"plan-{i}-{k}" if plan else "",
+                            title=f"Example {k}",summary="Example",status="completed",
+                            payload={} if plan else {"content":"Synthetic document."})
+                    value={"artifacts":[artifact(k) for k in range(int(field("offset","0")),
+                        min(s["artifacts"],int(field("offset","0"))+int(field("limit","500"))))]}
+                elif path.path == "/media":
+                    value = {"assets":[]}
+                elif path.path == "/agent-portraits":
+                    value = {"portraits":[]}
+                else:
+                    self.send_error(404)
+                    return
+            data=json.dumps(value,separators=(",",":")).encode()
+            self.send_response(200)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+    server=http.server.HTTPServer(("127.0.0.1",0),Handler)
+    threading.Thread(target=server.serve_forever,daemon=True).start()
+    return server
+
+
+def get(port,path):
+    start=NOW()
+    c=http.client.HTTPConnection("127.0.0.1",port,timeout=12)
+    try:
+        c.request("GET",path,headers={"Authorization":"Bearer "+AUTH})
+        r=c.getresponse()
+        data=r.read()
+        elapsed=NOW()-start
+        if r.status != 200:
+            raise ValueError(f"GET {path} returned {r.status}")
+        return json.loads(data),[round(1000*elapsed,3),len(data)]
+    finally:
+        c.close()
+
+
+def memory(pid):
+    proc=Path("/proc")/str(pid)
+    fields={}
+    for line in (proc/"status").read_text().splitlines():
+        name,_,v=line.partition(":")
+        if name in ("VmRSS","VmHWM","Threads"):
+            fields[name]=int(v.split()[0])
+    for line in (proc/"smaps_rollup").read_text().splitlines():
+        if line.startswith("Pss:"):
+            fields["Pss"]=int(line.split()[1])
+    fields["fds"]=len(list((proc/"fd").iterdir()))
+    return fields
+
+
+class Host:
+    def __init__(self,root,env,pop):
+        self.started=NOW()
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1",0))
+            self.port=sock.getsockname()[1]
+        addr=f"127.0.0.1:{self.port}"
+        self.proc=subprocess.Popen([BINARY,"--listen",addr,"--data",root/pop/"data","--run",root/pop/"run",
+            "--cwd",root/"work","--accounts","none"],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
+        self.bound=None
+        self.peak={}
+        self.stop=threading.Event()
+        def sample():
+            while not self.stop.is_set() and self.proc.poll() is None:
+                if self.bound is None:
+                    try:
+                        with socket.create_connection(("127.0.0.1",self.port),timeout=.02):
+                            self.bound=NOW()-self.started
+                    except OSError:
+                        pass
+                try:
+                    for key,num in memory(self.proc.pid).items():
+                        self.peak[key]=max(num,self.peak.get(key,0))
+                except (OSError,ValueError):
+                    pass
+                self.stop.wait(.025)
+        self.sampler=threading.Thread(target=sample,daemon=True)
+        self.sampler.start()
+        def journal():
+            for line in self.proc.stderr:
+                if line.startswith(b"clarp-host listens on "):
+                    self.ready=NOW()-self.started
+                    ready.set()
+                else:
+                    with (root/"journal").open("ab") as f:f.write(line)
+        ready=threading.Event()
+        threading.Thread(target=journal,daemon=True).start()
+        if not ready.wait(30):
+            self.close(True)
+            raise RuntimeError("Host did not announce readiness")
+        self.snapshot=get(self.port,"/agents/snapshot")[0]
+        self.http=NOW()-self.started
+
+    def close(self,kill=False):
+        if self.proc.poll() is None:
+            os.killpg(self.proc.pid,signal.SIGKILL if kill else signal.SIGTERM)
+            try:self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.proc.pid,signal.SIGKILL)
+                self.proc.wait()
+        self.stop.set()
+        self.sampler.join()
+
+
+def measure(root,shape,pop,env,deadline):
+    completed=records(root/(pop+".jsonl"))
+    kinds=["start","start","start","clean-restart","after-kill"]
+    for index in range(len(completed),len(kinds)):
+        if NOW()+55>deadline:return
+        host=Host(root,env,pop)
+        try:
+            expected={session(i):row_id(i,s["rows"]-1) for i,s in enumerate(shape) if s["rows"]} if pop=="full" else {}
+            snap=host.snapshot
+            while True:
+                ids={a["session"]:a.get("last_message_id") for a in snap["agents"]}
+                if all(ids.get(s)==marker for s,marker in expected.items()):break
+                if NOW()-host.started>30:raise RuntimeError("snapshot sentinel timeout")
+                time.sleep(.05)
+                snap=get(host.port,"/agents/snapshot")[0]
+            recovered=NOW()-host.started
+            routes={"snapshot":"/agents/snapshot","live":"/agents/snapshot?include_archived=0"}
+            if expected:
+                order=sorted(range(len(shape)),key=lambda i:shape[i]["rows"])
+                for label,i in [("largest",order[-1]),("median",order[len(order)//2])]:
+                    routes[label]="/log?session="+session(i)+"&limit=100"
+                i=order[-1]
+                rows=get(host.port,routes["largest"])[0]["turns"]
+                assert len(rows)==min(100,shape[i]["rows"])
+                routes["previous"]=routes["largest"]+"&before="+rows[0]["id"]
+            samples={}
+            for key,path in routes.items():
+                samples[key]=[]
+                for rep in range(56):
+                    answer,reading=get(host.port,path)
+                    if key in ("snapshot","live"):
+                        assert len(answer["agents"])==len(ids)
+                    else:
+                        i=order[len(order)//2] if key=="median" else order[-1]
+                        end=max(0,shape[i]["rows"]-(100 if key=="previous" else 0))
+                        assert [r["id"] for r in answer["turns"]]==[row_id(i,k) for k in range(max(0,end-100),end)]
+                    if rep==0 or rep>=6:samples[key].append(reading)
+            time.sleep(30)
+            write(root/(pop+".jsonl"),dict(kind=kinds[index],ready=host.ready,bound=host.bound,http=host.http,
+                recovered=recovered if expected else None,agents=len(ids),settled=memory(host.proc.pid),
+                peak=host.peak,samples=samples))
+        finally:host.close(kill=index==3)
+
+
+def moves(root,shape,env,deadline):
+    done=records(root/"moves.jsonl")
+    host=Host(root,env,"full")
+    source_host=source(shape,root/"work")
+    try:
+        for i in range(len(done),len(shape)):
+            if NOW()+25>deadline:break
+            start=NOW()
+            p=subprocess.run([BINARY,"import","--session",session(i),"--from","127.0.0.1:"+str(source_host.server_port),
+                              "--host",f"127.0.0.1:{host.port}"],capture_output=True,env=env,timeout=min(90,deadline-NOW()))
+            elapsed=NOW()-start
+            if p.returncode:
+                raise RuntimeError(p.stderr.decode()[:1200])
+            rows=get(host.port,"/log?session="+session(i)+"&limit=1")[0]["turns"]
+            assert rows[-1]["id"]==row_id(i,shape[i]["rows"]-1)
+            libraries=get(host.port,"/artifacts?session="+session(i)+"&limit=500")[0]["artifacts"]
+            plans=get(host.port,"/task-plans?session="+session(i))[0]["plans"]
+            assert len(plans)==shape[i]["plans"] and len(libraries)==shape[i]["artifacts"], (i,len(plans),len(libraries))
+            write(root/"moves.jsonl",dict(index=i,seconds=elapsed,rows=shape[i]["rows"],plans=len(plans),
+                artifacts=len(libraries),rss_kib=memory(host.proc.pid)["VmRSS"],receipt=p.stdout.decode()))
+    finally:
+        source_host.shutdown()
+        source_host.server_close()
+        host.close()
+
+
+def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("private_dir",type=Path)
+    parser.add_argument("phase",choices=("move","empty","full"))
+    a=parser.parse_args()
+    os.umask(0o077)
+    root=a.private_dir.resolve(strict=True)
+    if not (root/".fleet-load-private").is_file():raise ValueError("dedicated benchmark directory required")
+    if root.stat().st_mode&0o077 or (root/"shape.json").stat().st_mode&0o077:raise ValueError("private directory and manifest required")
+    if {l.split(":")[0].strip() for l in Path("/proc/net/dev").read_text().splitlines()[2:]}!={"lo"}:raise ValueError("loopback-only network namespace required")
+    shape=json.loads((root/"shape.json").read_text())
+    start=NOW()
+    # Charge an interrupted slice its full deadline, including teardown.
+    ledger=root/"budget.jsonl"
+    charges={}
+    for entry in records(ledger):
+        charges[entry["id"]]=entry["seconds"]
+    remaining=min(150,880-sum(charges.values())-20)
+    if remaining<55:raise ValueError("measurement budget reached")
+    slice_id=len(charges)
+    write(ledger,dict(id=slice_id,phase=a.phase,seconds=remaining+20))
+    for name in ("home","work","bin","tmp"):(root/name).mkdir(exist_ok=True)
+    trap=root/"bin"/"unavailable"
+    trap.write_text('#!/bin/sh\nprintf "%s\\n" "${0##*/}" >> "$HOME/attempts"\nexit 125\n')
+    trap.chmod(0o700)
+    for name in ("claude","codex","agy","grok","muse","opencode","hotseat","zoxide","git","tmux","systemctl"):
+        link=root/"bin"/name
+        if not link.exists():link.symlink_to(trap)
+    env=dict(PATH=str(root/"bin"),HOME=str(root/"home"),TMPDIR=str(root/"tmp"),LANG="C",CLARP_HOST_TOKEN=AUTH,
+             CLARP_SOURCE_TOKEN=AUTH,CLARP_HEARTBEATS_DISABLED="1")
+    try:
+        if a.phase=="move":moves(root,shape,env,start+remaining)
+        else:measure(root,shape,a.phase,env,start+remaining)
+        if (root/"home/attempts").exists():raise RuntimeError("unexpected child launch; inspect private counter")
+    finally:
+        write(ledger,dict(id=slice_id,phase=a.phase,seconds=NOW()-start+2))
+    print("Private measurement slice completed.")
+
+
+if __name__=="__main__":
+    main()
