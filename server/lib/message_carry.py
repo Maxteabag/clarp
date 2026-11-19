@@ -94,10 +94,13 @@ LIVE_ROWS = "carry_live_rows"
 # - by time, which turn was running at its timestamp: the latest turn that
 #   began up to _START_SLACK_MS after it, if the timestamp is within that
 #   turn's reach, which is settled_at + _SETTLED_REACH_MS once it has
-#   settled and started_at + _UNSETTLED_REACH_MS before. A settle moves the
-#   reach, and that is the only way it can change which turn an old row
-#   belongs to. It cannot when every old row lies within both reaches, or
-#   when the turn began after them all;
+#   settled and started_at + _UNSETTLED_REACH_MS before; and, for a prompt's
+#   copy linked to a client row by its words, whether the turn a row was
+#   sent for had ended before the copy: settled, or the next turn began
+#   (TurnIndex.ended_before). A settle moves the reach and ends the
+#   running, and those are the only ways it can change which turn an old row
+#   belongs to. It cannot when every old row lies within both reaches and
+#   before the settle, or when the turn began after them all;
 # - whether a trace is a turn at all, which a settle does not change;
 # - the outcome, when it writes a row: the unfinished tools of an
 #   interrupted turn are written as 'interrupted'. A full import writes the
@@ -323,12 +326,15 @@ def _reach_covers(row: tuple, carry) -> bool:
     boundary, the turn it was while it ran. It holds the old turns within
     its reach, and its reach moved from started_at + _UNSETTLED_REACH_MS to
     settled_at + _SETTLED_REACH_MS: no old turn gains or loses it when the
-    last of them lies within both. (A turn that began after them all, and
-    so holds none, ends after them too: the same test passes it.)"""
+    last of them lies within both. Nor does an old row it held as the turn
+    still running at its time, when it settled at or after the last of them.
+    (A turn that began after them all, and so holds none, ends after them
+    too: the same test passes it.)"""
     latest = (carry or {}).get("prefix_latest_ms")
     if latest is None or not isinstance(row[1], int):
         return False
-    return int(latest) <= min(int(row[1]) + _UNSETTLED_REACH_MS, int(row[2]) + _SETTLED_REACH_MS)
+    return int(latest) <= min(int(row[1]) + _UNSETTLED_REACH_MS, int(row[2]) + _SETTLED_REACH_MS,
+                              int(row[2]))
 
 
 def _oracle(oracle_rows) -> str:
