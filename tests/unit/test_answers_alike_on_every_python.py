@@ -1,6 +1,7 @@
 """The Host answers the same on every interpreter a Host runs or will run (R90): CPython 3.12, 3.13
-and 3.14 accept different event times and read a name ending in a dot differently. Where they
-disagree, the Host's own rule decides. This file passes alike on 3.12.14, 3.13.16 and 3.14.8."""
+and 3.14 accept different event times, read a name ending in a dot differently, and word a JSON
+error differently. Where they disagree, the Host's own rule decides. This file passes alike on
+3.12.14, 3.13.16 and 3.14.8."""
 from __future__ import annotations
 
 import copy
@@ -10,6 +11,7 @@ import pytest
 from lib import agent_ring_live as live
 from lib import media_store
 from lib.group_calls import CallError
+from lib.orchestrator_model import ModelAnswerNotJson, _extract_json
 from tests.unit.test_agent_ring_live import OPENING, _context
 
 ACCEPTED = [
@@ -73,3 +75,10 @@ def test_an_event_time_outside_the_grammar_is_refused(name):
 def test_a_name_ending_in_a_dot_has_no_extension(name, mime, expected):
     assert media_store._extension(name, mime) == expected
 
+
+@pytest.mark.parametrize("answer", ['{"kind": "agent_message", }', "no braces at all", '{"kind": '])
+def test_a_model_answer_that_is_not_json_is_told_in_the_hosts_own_words(answer, capfd):
+    with pytest.raises(ModelAnswerNotJson) as refused:
+        _extract_json(answer)
+    assert str(refused.value) == "the model's answer was not JSON (JSONDecodeError)"
+    assert "orchestratorAnswerNotJson" in capfd.readouterr().err      # the interpreter's words: the log line only

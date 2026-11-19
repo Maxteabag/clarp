@@ -76,7 +76,8 @@ def test_openai_router_preserves_http_status_and_provider_error(openai_transport
 @pytest.mark.parametrize("content, message", [
     ("", "empty model response"),
     ("[]", "orchestrator response must be a JSON object"),
-    ("no decision here", "Expecting value"),
+    # The Host's own words, the same on every interpreter (R90); CPython's go to the log line.
+    ("no decision here", r"^the model's answer was not JSON \(JSONDecodeError\)$"),
 ])
 def test_openai_router_rejects_unusable_decision_text(openai_transport, content, message):
     _, reply = openai_transport
