@@ -54,7 +54,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import CODEX
-from .base import CatalogueDefault, BackendBrand, CompactionStrategy, resolve
+from .base import CatalogueDefault, BackendBrand, CliMissing, CompactionStrategy, resolve
 from .stream_json import StreamJsonBackend, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv
 
@@ -287,7 +287,7 @@ class CodexBackend(StreamJsonBackend):
         """
         codex_bin = self.required_binary
         if shutil.which(codex_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{codex_bin}` not on PATH — install the Codex CLI "
                 f"(npm i -g @openai/codex) to run Codex-backed agents"
             )

@@ -39,6 +39,21 @@ class Unsupported(Exception):
     """
 
 
+class LaunchRefused(Exception):
+    """``spawn_turn`` refused the turn before anything was sent: no process
+    started, no request written (R121).
+
+    The dispatcher reads it as proof that the turn never launched, so the
+    queue item reads 'unstarted' and is retried or ended, never left
+    'unknown'. Raise it (or a subclass) only from a point that provably comes
+    before the provider can have seen the prompt."""
+
+
+class CliMissing(LaunchRefused, FileNotFoundError):
+    """The backend's CLI is not on PATH: nothing was started. Still a
+    FileNotFoundError, so every handler of a missing binary keeps working."""
+
+
 @dataclass(frozen=True)
 class CompactionStrategy:
     """How the host drives a CLI to compact one session.

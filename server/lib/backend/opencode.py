@@ -24,7 +24,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import OPENCODE
-from .base import CatalogueDefault, BackendBrand
+from .base import CatalogueDefault, BackendBrand, CliMissing
 from . import opencode_serve
 from .opencode_serve import OpenCodeTurnHandle, ServeClient, ServeError
 from .stream_json import StreamJsonBackend, iter_json_dicts, popen_turn, stop_after_drain_failure
@@ -295,7 +295,7 @@ class OpenCodeBackend(StreamJsonBackend):
     ) -> TurnHandle:
         opencode_bin = self.required_binary
         if shutil.which(opencode_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{opencode_bin}` not on PATH — install OpenCode "
                 f"(https://opencode.ai) to run OpenCode-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))

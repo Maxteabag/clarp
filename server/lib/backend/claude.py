@@ -53,7 +53,7 @@ from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
 from ..voice_preamble import persona_identity_instruction
 from ..backend_catalogue import CLAUDE
-from .base import CatalogueDefault, BackendBrand, Backend, CompactionStrategy, resolve
+from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, CompactionStrategy, resolve
 from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
@@ -477,7 +477,7 @@ class ClaudeBackend(Backend):
                 if cli_bin == self.required_binary
                 else "install with `npm i -g clarp-cli` or rebuild from ~/GIT/clarp"
             )
-            raise FileNotFoundError(f"`{cli_bin}` not on PATH — {hint}")
+            raise CliMissing(f"`{cli_bin}` not on PATH — {hint}")
         # `--input-format stream-json` makes the CLI read the turn's user message
         # from stdin as a JSON line; a positional prompt is ignored in this mode.
         # (clarp used to accept the positional form, hence the historical bug:
