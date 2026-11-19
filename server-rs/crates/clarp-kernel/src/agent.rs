@@ -337,7 +337,9 @@ impl Agent {
 
     // Old events remain readable. A refused binding leaves the next launch fresh.
     fn bind_session(&mut self, name: Option<&str>) {
-        self.backend_session = name.filter(|id| crate::native_session_name(id)).map(str::to_owned);
+        self.backend_session = name
+            .filter(|id| crate::native_session_name(id))
+            .map(str::to_owned);
     }
 
     /// Whether the agent came from another Host, where it had worked. One that has run no

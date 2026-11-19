@@ -6,5 +6,7 @@ pub fn native_session_name(name: &str) -> bool {
     let bytes = name.as_bytes();
     bytes.len() <= 128
         && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
-        && bytes.iter().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
