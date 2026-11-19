@@ -95,7 +95,7 @@ impl Sources {
             .filter(|s| !s.is_empty())
             .map(|s| {
                 let mut t = term(s, "agents");
-                t.rarity = t.rarity.max(0.9);
+                t.rarity = 0.9;
                 t
             })
             .collect();
@@ -201,4 +201,29 @@ pub fn identifiers(paths: &[String]) -> Vec<String> {
     let mut ranked: Vec<_> = counts.into_values().collect();
     ranked.sort_by_key(|r| std::cmp::Reverse(r.0));
     ranked.into_iter().take(400).map(|(_, s)| s).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Sources;
+    use crate::vocabulary::rank;
+    use serde_json::{Value, json};
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn ranked_personas_have_the_reference_score_regardless_of_spelling() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/vocabulary-packs-vectors.json"
+        ))
+        .unwrap();
+        let story = &fixture["ranked_names"];
+        let sources = Sources {
+            agent_names: serde_json::from_value(story["route"].clone()).unwrap(),
+            ..Sources::default()
+        };
+        let packs = sources.packs();
+        let pack = packs.iter().find(|pack| pack.name == "agents").unwrap();
+        let scores: Vec<_> = pack.terms.iter().map(|term| rank(term, pack)).collect();
+        assert_eq!(json!(scores), story["scores"]);
+    }
 }
