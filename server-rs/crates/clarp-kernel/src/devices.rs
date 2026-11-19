@@ -573,8 +573,10 @@ pub fn limited_refused(method: &str, path: &str) -> bool {
     if FULL_ONLY.iter().any(closed) {
         return true;
     }
-    if matches!(path, "/dirs" | "/past-sessions")
-        || (path.starts_with("/terminal/") && method == "GET")
+    if matches!(
+        path,
+        "/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"
+    ) || (path.starts_with("/terminal/") && method == "GET")
     {
         return true;
     }

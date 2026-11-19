@@ -33,6 +33,7 @@ def paths(handler) -> list:
         out.update({bare, bare + '/', bare + '/x', bare + 'x', bare[:-1]})
     for exact in handler._LIMITED_DEVICE_POST_EXACT:
         out.update({exact, exact + '/', exact + '/x', exact + 'x'})
+    out.update({'/launch-directories', '/launch-directories/x', '/favorite-paths', '/favorite-paths/x'})
     out.update({'/dirs', '/dirs/x', '/past-sessions', '/past-sessions/x', '/terminal', '/terminal/', '/terminal/echo',
                 '/terminal/echo/x', '/controller-actions', '/controller-actions/', '/controller-actions/a',
                 '/controller-actions/a/invoke', '/controller-actions/a%2Fb/invoke', '/controller-actions//invoke',
