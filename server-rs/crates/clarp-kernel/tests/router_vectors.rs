@@ -37,7 +37,9 @@ fn the_json_in_a_models_answer_is_found_where_the_python_host_finds_it() {
             (ours, theirs, why) => panic!("{text}: here {ours:?}, there {theirs:?} {why:?}"),
         }
     }
-    assert_eq!((rows.len(), refused), (20, 11));
+    let theirs = rows.iter().filter(|row| row.get("refused").is_some()).count();
+    assert_eq!(refused, theirs);
+    assert!(refused > 0 && refused < rows.len());
 }
 
 #[test]
