@@ -8,10 +8,13 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import time
 
 QUEUE = Path('/var/tmp/clarp-build')
 LOCK = QUEUE / 'lock'
 HOLDER = QUEUE / 'holder'
+STALE_SECONDS = 15 * 60
+RETRY_SECONDS = 0.2
 CHILDREN = Path(f'/proc/self/task/{os.getpid()}/children')
 
 
@@ -47,7 +50,56 @@ def locked_by(lock):
     return None
 
 
+def process_start(pid):
+    try:
+        # Field 22 begins after the parenthesized comm and 19 other fields.
+        return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def waiting_landings():
+    waiting = []
+    for marker in sorted(QUEUE.glob('first-*-*')):
+        _, pid, start = marker.name.split('-', 2)
+        try:
+            age = time.time() - marker.stat().st_mtime
+            if age > STALE_SECONDS and process_start(pid) != start:
+                marker.unlink(missing_ok=True)
+            else:
+                waiting.append(marker.read_text().strip())
+        except FileNotFoundError:
+            continue
+    return waiting
+
+
+def take_slot(lock, landing, description):
+    if landing:
+        pid = os.getpid()
+        marker = QUEUE / f'first-{pid}-{process_start(pid)}'
+        try:
+            marker.write_text(description + '\n')
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        finally:
+            marker.unlink(missing_ok=True)
+        return
+    while True:
+        if not waiting_landings():
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                pass
+            else:
+                # A landing may have registered while we were acquiring.
+                if not waiting_landings():
+                    return
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        time.sleep(RETRY_SECONDS)
+
+
 def status(lock):
+    for waiting in waiting_landings():
+        print(f'landing waiting: {waiting}')
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -78,10 +130,13 @@ def run(lock, who, command):
         raise OSError(ctypes.get_errno(), 'cannot supervise build children')
     for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, cancelled)
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    landing = os.environ.get('CLARP_BUILD_FIRST') == '1'
+    since = datetime.datetime.now().strftime('%H:%M:%S')
+    take_slot(lock, landing, f'{who} since {since}')
     try:
+        prefix = 'landing ' if landing else ''
         since = datetime.datetime.now().strftime('%H:%M:%S')
-        HOLDER.write_text(f'{os.getpid()} {who} since {since}\n')
+        HOLDER.write_text(f'{os.getpid()} {prefix}{who} since {since}\n')
         child = subprocess.Popen(command)
         result = child.wait()
         return result if result >= 0 else 128 - result

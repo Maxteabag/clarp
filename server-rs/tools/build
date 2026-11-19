@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Compile and test server-rs on the build machine, one job at a time.
+# Set CLARP_BUILD_FIRST=1 for a landing that needs the next available build slot.
 #
 #   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
 #   server-rs/tools/build test [args...]   cargo test --workspace [args...]
@@ -120,7 +121,7 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 set +e
-printf -v queued '%q ' python3 tools/build-queue.py "$who" bash -c "
+printf -v queued '%q ' env "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$who" bash -c "
     source tools/build
     build_has_space $floor || exit \$?
     CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
