@@ -109,8 +109,8 @@ def resolve_for_hook(*, backend_session_id: str | None,
     A hook that reached its agent only through the inherited variable while its
     own session id is another one (a claude started inside a dispatched turn's
     shell with the plugin) is FOREIGN: it binds nothing, makes no transition,
-    opens and settles no row, writes no flag. One eventlog line, and None. The
-    rule is applied here once, for every hook (R96)."""
+    opens and settles no row, writes no flag. One record (_record_foreign_hook), and None.
+    The rule is applied here once, for every hook (R96)."""
     if backend_session_id:
         a = get_by_backend_session(backend_session_id)
         if a:
@@ -122,16 +122,36 @@ def resolve_for_hook(*, backend_session_id: str | None,
         return a
     live = live_backend_session(a["agent_id"])
     if live and live != backend_session_id:
-        try:
-            from .eventlog import emit
-            emit("hook", "foreignSession", detail={
-                "hook": hook or "?", "agent": str(a["agent_id"])[:8],
-                "session_id": str(backend_session_id)[:8]})
-        except Exception as exc:  # noqa: BLE001 - a hook never fails over its report
-            from .log import log_exception
-            log_exception("hookForeignReportFail", exc, detail=str(a["agent_id"])[:8])
+        _record_foreign_hook(hook, str(a["agent_id"]), str(backend_session_id))
         return None
     return a
+
+
+def _record_foreign_hook(hook: str, agent_id: str, session_id: str) -> None:
+    """One record of a foreign hook (R96), on paths that need no switch: the hooks' own log
+    file every Host keeps (<cache>/hook.log, beside the tool hook's lines) and the process's
+    log line; the eventlog line too when diagnostics capture is on. The ids cut to 8; no content.
+    A hook never fails over its report: a failed write is logged and the hook goes on."""
+    import os
+    import pathlib
+    import time
+    from .log import log, log_exception
+    from .paths import RuntimePaths
+    detail = f"hook={hook or '?'} agent={agent_id[:8]} session_id={session_id[:8]}"
+    try:
+        path = RuntimePaths.from_home(pathlib.Path.home()).hook_log
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{time.strftime('%H:%M:%S')} {'foreign':<8} {os.getpid()} hookForeignSession {detail}\n")
+    except Exception as exc:  # noqa: BLE001 - a hook never fails over its report
+        log_exception("hookForeignReportFail", exc, detail=agent_id[:8])
+    try:
+        log("hookForeignSession", detail)
+        from .eventlog import emit
+        emit("hook", "foreignSession", detail={"hook": hook or "?", "agent": agent_id[:8],
+                                               "session_id": session_id[:8]})
+    except Exception as exc:  # noqa: BLE001 - a hook never fails over its report
+        log_exception("hookForeignReportFail", exc, detail=agent_id[:8])
 
 
 def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
