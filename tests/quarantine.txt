@@ -24,4 +24,3 @@ tests/integration/test_versioned_installer.py::test_macos_installer_writes_and_b
 tests/integration/test_server_di.py::test_server_home_terminal_runs_shell_in_home_without_resuming_an_agent  # env: shell rc execs wezterm
 
 # load: timing-sensitive under xdist on a busy host; pass when run alone
-tests/integration/test_task_goal_recovery.py::test_detached_job_wakes_its_owner_through_every_failure[finishes]  # load
