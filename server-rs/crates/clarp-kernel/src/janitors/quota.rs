@@ -498,6 +498,8 @@ pub fn after_push(payload: &mut Value, delivery: Value, now_ms: i64) -> Option<V
         delivery["attempts"] = json!(attempts + 1);
     }
     Some(delivery)
+}
+
 /// What a recovery that is asked of nothing answers, in the Python Host's words.
 pub fn refused(asked: Asked) -> Option<Value> {
     match asked {
