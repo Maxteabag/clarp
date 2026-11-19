@@ -9,7 +9,9 @@ import os
 from pathlib import Path
 import select
 import shlex
+import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -201,7 +203,9 @@ def reserve(description):
         while not try_lock(serial):
             if select.select([sys.stdin], [], [], RETRY_SECONDS)[0]:
                 return
-        publish_marker(marker, 'lease ' + description)
+        with (QUEUE / 'eviction-lock').open('a') as guard:
+            fcntl.flock(guard, fcntl.LOCK_EX)
+            publish_marker(marker, 'lease ' + description)
         print(marker.name.removeprefix('first-'), flush=True)
         sys.stdin.buffer.read()
 
@@ -258,7 +262,129 @@ def cancelled(signum, frame):
     raise SystemExit(128 + signum)
 
 
-def run(lock, who, command):
+# All removal is relative to open directories. Never resolve a checkout, its
+# workspace or its target through a symlink.
+DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+STAMP = '.clarp-last-build'
+
+
+@contextmanager
+def directory(name, parent=None):
+    fd = os.open(name, DIRECTORY, dir_fd=parent)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def regular_file(parent, name):
+    return stat.S_ISREG(os.stat(name, dir_fd=parent, follow_symlinks=False).st_mode)
+
+
+def last_build(name, copy, workspace):
+    # Earlier dedicated build copies predate the stamp. Verify the copy
+    # layout even when a stamp is present; a timestamp alone grants nothing.
+    if name.endswith('-repo'):
+        return None
+    with directory('contract', copy) as contract, directory('schemas', contract) as schemas:
+        if not regular_file(schemas, 'server-info.json'):
+            return None
+    with directory('scripts', copy) as scripts:
+        if not regular_file(scripts, 'clarp-media-publish.py'):
+            return None
+    with directory('crates', workspace) as crates:
+        for crate in ('clarp-host', 'clarp-kernel', 'clarp-shim'):
+            with directory(crate, crates) as package:
+                if not regular_file(package, 'Cargo.toml'):
+                    return None
+    try:
+        stamp = os.stat(STAMP, dir_fd=copy, follow_symlinks=False)
+        return stamp.st_mtime_ns if stat.S_ISREG(stamp.st_mode) else None
+    except FileNotFoundError:
+        pass
+    # Cargo's latest compiler-info update is the initial age of an old copy.
+    with directory('target', workspace) as target:
+        try:
+            info = os.stat('.rustc_info.json', dir_fd=target, follow_symlinks=False)
+        except FileNotFoundError:
+            info = os.fstat(target)
+        return info.st_mtime_ns
+
+
+def make_room(root, current, floor):
+    free = shutil.disk_usage('.').free
+    removed = []
+    if free < floor:
+        # Serialize this scan with publication of a new lease. A keeper may
+        # release its lease during cleanup; retaining its copy is safe.
+        with (QUEUE / 'eviction-lock').open('a') as guard:
+            fcntl.flock(guard, fcntl.LOCK_EX)
+            leases = [description.rsplit(' since ', 1)[0] for description in waiting_landings().values()
+                      if description.startswith('lease ')]
+            candidates = []
+            for name in os.listdir(root):
+                if name == current or any(lease.endswith(' ' + name) for lease in leases):
+                    continue
+                try:
+                    with directory(name, root) as copy, directory('server-rs', copy) as workspace:
+                        with directory('target', workspace) as target:
+                            identity = os.fstat(target)
+                        age = last_build(name, copy, workspace)
+                        if age is not None:
+                            candidates.append((age, name, identity))
+                except (FileNotFoundError, NotADirectoryError, PermissionError):
+                    continue
+            for _, name, identity in sorted(candidates):
+                try:
+                    with directory(name, root) as copy, directory('server-rs', copy) as workspace:
+                        with directory('target', workspace) as target:
+                            if not os.path.samestat(os.fstat(target), identity):
+                                continue
+                        shutil.rmtree('target', dir_fd=workspace)
+                except (FileNotFoundError, NotADirectoryError):
+                    continue
+                removed.append(quote(name, safe=''))
+                free = shutil.disk_usage('.').free
+                if free < floor:
+                    # A CoW filesystem can defer releasing extents until its transaction commits.
+                    # Count those bytes before sacrificing another checkout.
+                    subprocess.run(['sync', '-f', '.'], check=True)
+                    free = shutil.disk_usage('.').free
+                if free >= floor:
+                    break
+    print(f"Build disk: for {quote(current, safe='')}, removed targets={','.join(removed) or 'none'}, free={free} bytes.", flush=True)
+    if free < floor:
+        print(f'Build stopped before cargo because less than {floor} bytes are free; {floor - free} more bytes needed.', file=sys.stderr)
+    return free >= floor
+
+
+@contextmanager
+def build_space(floor):
+    if floor is None:  # repo-gates does not produce a Cargo target
+        yield True
+        return
+    cwd = Path.cwd()
+    if cwd.name != 'server-rs' or cwd.parent.parent != QUEUE:
+        raise SystemExit('Build workspace is outside the managed build directory.')
+    with directory(QUEUE) as root, directory(cwd.parent.name, root) as copy:
+        with directory('server-rs', copy) as workspace:
+            if not os.path.samestat(os.fstat(workspace), os.stat('.')):
+                raise SystemExit('Build workspace changed during admission.')
+        if not make_room(root, cwd.parent.name, floor):
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            # Replace rather than touch an existing name: even an unexpected
+            # hard link must not change another file's timestamp.
+            temp = f'{STAMP}.{os.getpid()}'
+            fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=copy)
+            os.close(fd)
+            os.replace(temp, STAMP, src_dir_fd=copy, dst_dir_fd=copy)
+
+
+def run(lock, who, command, floor=None):
     # PR_SET_CHILD_SUBREAPER adopts orphaned descendants, including children
     # which start their own process group or session.
     libc = ctypes.CDLL(None, use_errno=True)
@@ -274,8 +400,11 @@ def run(lock, who, command):
         since = datetime.datetime.now().strftime('%H:%M:%S')
         identity = f'{os.getpid()}:{process_start(os.getpid())}:{lock}'
         HOLDER.write_text(f'{identity} {prefix}{who} since {since}\n')
-        child = subprocess.Popen(command)
-        result = child.wait()
+        with build_space(floor) as ready:
+            if not ready:
+                return 1
+            child = subprocess.Popen(command)
+            result = child.wait()
         return result if result >= 0 else 128 - result
     finally:
         for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
@@ -297,5 +426,7 @@ if __name__ == '__main__':
     with LOCK.open('a') as slot:
         if sys.argv[1] == 'status':
             status(slot.fileno())
+        elif sys.argv[1] == '--build':
+            sys.exit(run(slot.fileno(), sys.argv[3], sys.argv[4:], int(sys.argv[2])))
         else:
             sys.exit(run(slot.fileno(), sys.argv[1], sys.argv[2:]))
