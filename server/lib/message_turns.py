@@ -92,6 +92,15 @@ class TurnIndex:
         ms = iso_ms(timestamp)
         return span is not None and ms is not None and span[1] is not None and ms > span[1]
 
+    def began_after(self, trace: str, timestamp: Any) -> bool:
+        """Whether the first turn of ``trace`` began more than _START_SLACK_MS
+        after ``timestamp``; False for a trace with no turn or a time not known."""
+        if self._spans is None:
+            self._spans = self._turn_spans()
+        span = self._spans.get(trace)
+        ms = iso_ms(timestamp)
+        return span is not None and ms is not None and span[0] > ms + _START_SLACK_MS
+
     def _turn_spans(self) -> dict[str, tuple[int, int | None]]:
         first: dict[str, int] = {}
         last: dict[str, int] = {}

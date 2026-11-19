@@ -415,4 +415,5 @@ def test_a_copy_no_turn_covers_is_held_to_the_same_two_exclusions(sent, chosen):
     copy_at = clock.iso_from_ms(BASE + 41_000)
     assert message_import_rows._own_turns_row(
         None, rows, "", None, trace_ids=traces, written_at=copy_at,
-        ended_before=lambda trace: index.ended_before(trace, copy_at)) == chosen
+        ended_before=lambda trace: index.ended_before(trace, copy_at),
+        began_after=lambda trace: index.began_after(trace, copy_at)) == chosen
