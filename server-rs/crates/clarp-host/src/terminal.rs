@@ -140,7 +140,7 @@ fn started(program: &Program) -> Option<(pty_process::Pty, tokio::process::Child
         .resize(pty_process::Size::new(SIZE.1, SIZE.0))
         .ok()?;
     let (name, said) = program.argv.split_first()?;
-    let mut command = pty_process::Command::new(name)
+    let mut command = crate::child::terminal(name)
         .args(said)
         .current_dir(&program.cwd)
         .env("TERM", "xterm-256color")
@@ -148,15 +148,6 @@ fn started(program: &Program) -> Option<(pty_process::Pty, tokio::process::Child
     // A machine that names no language is one where a terminal speaks UTF-8.
     if std::env::var_os("LANG").is_none() {
         command = command.env("LANG", "en_US.UTF-8");
-    }
-    for name in crate::OWN_SECRETS {
-        command = command.env_remove(name);
-    }
-    for (name, value) in crate::child_environment() {
-        command = match value {
-            Some(value) => command.env(name, value),
-            None => command.env_remove(name),
-        };
     }
     for (name, value) in &program.env {
         command = command.env(name, value);

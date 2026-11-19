@@ -14,7 +14,7 @@
 
 use std::io::{Read as _, Write as _};
 use std::os::unix::process::CommandExt as _;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -322,7 +322,7 @@ fn selected(command: &[String], models: &[String], most: Duration) -> Verdict {
         return Verdict::Failed;
     };
     // In a group of its own, so that what it started goes with it when it takes too long.
-    let started = Command::new(program)
+    let started = crate::child::command(program)
         .args(arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -351,7 +351,9 @@ fn selected(command: &[String], models: &[String], most: Duration) -> Verdict {
             _ => {
                 // Too long, or it cannot be waited for: it is ended, with what it started.
                 let group = format!("-{}", selector.id());
-                let _ = Command::new("kill").args(["-KILL", "--", &group]).status();
+                let _ = crate::child::command("kill")
+                    .args(["-KILL", "--", &group])
+                    .status();
                 let _ = selector.kill();
                 let _ = selector.wait();
                 break None;
