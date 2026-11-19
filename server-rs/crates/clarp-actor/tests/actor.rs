@@ -2477,3 +2477,185 @@ fn a_legacy_goal_gets_only_its_surviving_history_and_one_status_baseline() {
         assert_eq!(plan["goal"]["history_offset"], 300);
     }
 }
+
+/// A log that counts every item it hands out: what reading the delivery of sends costs.
+struct Counted {
+    inner: Box<dyn clarp_ports::log::AgentLog>,
+    read: Arc<AtomicU64>,
+}
+
+impl clarp_ports::log::AgentLog for Counted {
+    fn append(
+        &mut self,
+        items: &[clarp_ports::log::NewItem],
+    ) -> Result<u64, clarp_ports::log::LogError> {
+        self.inner.append(items)
+    }
+    fn last_seq(&self) -> Result<u64, clarp_ports::log::LogError> {
+        self.inner.last_seq()
+    }
+    fn read_after(
+        &self,
+        after: u64,
+        kinds: clarp_ports::log::Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        let items = self.inner.read_after(after, kinds, limit)?;
+        self.read
+            .fetch_add(items.len() as u64 + 1, Ordering::SeqCst);
+        Ok(items)
+    }
+    fn read_before(
+        &self,
+        before: u64,
+        kinds: clarp_ports::log::Kinds,
+        limit: usize,
+    ) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        let items = self.inner.read_before(before, kinds, limit)?;
+        self.read
+            .fetch_add(items.len() as u64 + 1, Ordering::SeqCst);
+        Ok(items)
+    }
+    fn find(
+        &self,
+        key: &str,
+    ) -> Result<Option<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.read.fetch_add(1, Ordering::SeqCst);
+        self.inner.find(key)
+    }
+}
+
+/// An agent of ten thousand turns: what a page of the feed, a bootstrap of it and a page's
+/// rows are given of their sends' delivery is read from what the actor holds, and nothing of the
+/// log; and what it holds after a restart is the send that can still change, not the history.
+#[test]
+fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
+    use clarp_kernel::agent::Command;
+    use clarp_kernel::delivery::{Query, Scope};
+    use clarp_kernel::journal::{Incoming, Recorder};
+    use clarp_kernel::turn::RunOutcome;
+
+    let mut world = World::new("deliveries");
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mut recorder = Recorder::open(log).unwrap();
+    let message = |n: u64| {
+        let said = Message {
+            id: format!("u-m{n}"),
+            text: format!("message {n}"),
+            origin: Origin::User,
+            trace_id: Some(format!("t{n}")),
+            ..Message::default()
+        };
+        Incoming {
+            key: Some(said.id.clone()),
+            body: serde_json::to_vec(&said).unwrap(),
+            origin: Origin::User,
+            admission: Admission::Queue,
+        }
+    };
+    let ended = |recorder: &mut Recorder, turn: TurnId, now: i64| {
+        let outcome = RunOutcome::Completed;
+        recorder
+            .handle(Command::TurnEnded { turn, outcome }, now)
+            .unwrap();
+    };
+    for n in 1..=10_000 {
+        let now = world.tick();
+        let turn = recorder
+            .accept_message(message(n), now)
+            .unwrap()
+            .turn
+            .unwrap();
+        ended(&mut recorder, turn, world.tick());
+    }
+    // One more runs, the next waits behind it, and the user stops the agent: the one that
+    // waits is held, and fenced.
+    let running = recorder
+        .accept_message(message(10_001), world.tick())
+        .unwrap();
+    recorder
+        .accept_message(message(10_002), world.tick())
+        .unwrap();
+    let stop = Command::Stop {
+        by: "user".to_string(),
+    };
+    recorder.handle(stop, world.tick()).unwrap();
+    let stopped = RunOutcome::Stopped {
+        by: "user".to_string(),
+    };
+    let turn = running.turn.unwrap();
+    recorder
+        .handle(
+            Command::TurnEnded {
+                turn,
+                outcome: stopped,
+            },
+            world.tick(),
+        )
+        .unwrap();
+    drop(recorder);
+
+    let read = Arc::new(AtomicU64::new(0));
+    let log = Counted {
+        inner: world
+            .engine
+            .open(&world.profile.dir, standard_set("zstd").unwrap())
+            .unwrap(),
+        read: read.clone(),
+    };
+    let now = world.tick();
+    let (mut actor, _) = Actor::open(
+        world.profile.clone(),
+        world.backend.clone(),
+        Box::new(log),
+        now,
+    )
+    .unwrap();
+    let scope = Scope {
+        server_id: "host".into(),
+        agent_id: "a1".into(),
+        release: "in-process".into(),
+        instance: "i".into(),
+    };
+    let row =
+        |n: u64| json!({"role": "user", "id": format!("u-m{n}"), "trace_id": format!("t{n}")});
+    read.store(0, Ordering::SeqCst);
+    // What changed before the Host started is not told again.
+    assert!(actor.take_deliveries(world.tick()).unwrap().is_empty());
+    // A page's rows: the old send is not held, and shows nothing; the held one is stopped.
+    let mut rows = vec![row(5), row(10_001), row(10_002)];
+    let top = actor.delivery(&mut rows, &Query::default(), &scope);
+    assert!(
+        rows[0].get("delivery").is_none() && rows[1].get("delivery").is_none(),
+        "{rows:?}"
+    );
+    assert_eq!(rows[2]["delivery"]["state"], "stopped", "{rows:?}");
+    assert_eq!(rows[2]["delivery"]["rev"], 2);
+    assert_eq!(top["delivery_stop_generation"], 1);
+    // A bootstrap of the feed, and a page of it from its start, of the generation it has.
+    let bootstrap = Query {
+        since: Some(0),
+        ..Query::default()
+    };
+    let first = actor.delivery(&mut Vec::new(), &bootstrap, &scope);
+    let updates = first["delivery_updates"].as_array().unwrap();
+    assert_eq!(updates.len(), 1, "{first:?}");
+    assert_eq!(updates[0]["message_id"], "u-m10002");
+    let page = Query {
+        since: Some(0),
+        generation: Some(1),
+        carried: ("in-process".into(), "i".into()),
+        ..Query::default()
+    };
+    let paged = actor.delivery(&mut Vec::new(), &page, &scope);
+    assert_eq!(paged["delivery_cursor_expired"], false, "{paged:?}");
+    assert_eq!(read.load(Ordering::SeqCst), 0, "nothing of the log is read");
+    assert_eq!(
+        actor.held_deliveries(),
+        1,
+        "only the send that can still change is held"
+    );
+}

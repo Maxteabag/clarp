@@ -445,11 +445,6 @@ pub fn revision(position: u64, place: u64) -> u64 {
     (position << 20) | (place & 0xF_FFFF)
 }
 
-/// The newest revision there is in a log whose newest item is at `position`.
-pub fn head(position: u64) -> u64 {
-    revision(position, 0xF_FFFF)
-}
-
 /// A user send whose delivery is shown, as the agent's events moved it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Send {
@@ -595,7 +590,7 @@ mod tests {
     use super::*;
 
     use crate::agent::{Agent, AgentEvent};
-    use crate::turn::{Admission, Origin, Outcome, TurnEvent, TurnId};
+    use crate::turn::{Activity, Admission, Origin, Outcome, TurnEvent, TurnId};
 
     fn turn(agent: &mut Agent, at: u64, id: u64, change: TurnEvent) {
         agent.at(at);
@@ -693,19 +688,24 @@ mod tests {
                 at_ms: 3_000,
             })
             .unwrap();
+        let running = TurnEvent::Moved {
+            activity: Activity::Thinking,
+            at_ms: 3_050,
+        };
+        turn(&mut agent, 13, 1, running);
         let ended = TurnEvent::Settled {
             outcome: Outcome::Completed,
             at_ms: 3_100,
         };
-        turn(&mut agent, 13, 1, ended);
-        turn(&mut agent, 14, 2, TurnEvent::Started { at_ms: 3_200 });
+        turn(&mut agent, 14, 1, ended);
+        turn(&mut agent, 15, 2, TurnEvent::Started { at_ms: 3_200 });
         let handed = agent.deliveries_mut().take();
         assert_eq!(
             handed
                 .iter()
                 .map(|s| (s.turn, s.handed, s.rev, s.seq))
                 .collect::<Vec<_>>(),
-            [(2, true, 3, revision(14, 0))]
+            [(2, true, 3, revision(15, 0))]
         );
         assert_eq!(
             project(&handed[0].receipt("ag", "m2", "t2"), "ag", 2, None, None).unwrap()["state"],

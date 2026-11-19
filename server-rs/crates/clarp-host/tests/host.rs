@@ -589,6 +589,116 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
+/// What a user's send is shown of its delivery (send_delivery_state): handed over once its tool
+/// has it; a plain send behind a busy turn pending, and stopped once the user's Stop holds it;
+/// the same id sent again changes nothing; a resume runs it and it is handed over, its third
+/// change. The apps are told each change by the send's id alone, and the feed gives the changes
+/// from its start. A number that is not plain digits is the Python Host's 400.
+#[test]
+fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
+    let place = Place::new("delivery");
+    let host = place.start();
+    let session = host.new_agent("Deliverer");
+    let heard = host.listen();
+    host.send(&session, "sleep 60", "m1");
+    wait_for("the turn to run", || host.state(&session) == "thinking");
+    host.send(&session, "later", "m2");
+    let log = |query: &str| host.get(&format!("/log?session={session}{query}"));
+    let delivery = |log: &Value, id: &str| {
+        let turns = log["turns"].as_array().unwrap();
+        let row = turns.iter().find(|turn| turn["id"] == id);
+        row.map_or(Value::Null, |row| row["delivery"].clone())
+    };
+    let before = log("");
+    assert_eq!(
+        delivery(&before, "u-m1")["state"],
+        "handed_over",
+        "{before}"
+    );
+    assert_eq!(
+        delivery(&before, "u-m2")["state"],
+        "pending_launch",
+        "{before}"
+    );
+    assert_eq!(
+        (
+            &before["delivery_stop_generation"],
+            &before["delivery_scope"]["runtime_release"],
+        ),
+        (&json!(0), &json!("in-process"))
+    );
+    assert_ne!(before["delivery_scope"]["agent_id"], "");
+
+    host.post("/stop", json!({ "session": session }));
+    wait_for("the turn to end", || host.state(&session) == "interrupted");
+    let held = log("&delivery_since=0");
+    let stopped = delivery(&held, "u-m2");
+    assert_eq!(
+        (&stopped["state"], &stopped["rev"]),
+        (&json!("stopped"), &json!(2)),
+        "{held}"
+    );
+    assert_eq!(held["delivery_stop_generation"], 1);
+    let updates = held["delivery_updates"].as_array().unwrap();
+    assert!(
+        updates
+            .iter()
+            .any(|update| update["message_id"] == "u-m2" && update["delivery"] == stopped),
+        "{held}"
+    );
+    assert_eq!(held["delivery_bootstrap"], true);
+
+    // The same id again changes nothing of it.
+    host.send(&session, "later", "m2");
+    assert_eq!(delivery(&log(""), "u-m2"), stopped);
+
+    host.post("/turn-queue/resume", json!({ "session": session }));
+    wait_for("the held one to be answered", || {
+        host.conversation(&session)
+            .contains(&said("assistant", "later"))
+    });
+    let after = delivery(&log(""), "u-m2");
+    assert_eq!(
+        (&after["state"], &after["rev"]),
+        (&json!("handed_over"), &json!(3)),
+        "{after}"
+    );
+    assert!(after["seq"].as_u64() > stopped["seq"].as_u64());
+
+    // Told by id alone: the first handed over, the second fenced and then handed over.
+    let hints = || -> Vec<Value> {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "delivery-updated")
+            .cloned()
+            .collect()
+    };
+    wait_for("the hints", || hints().len() >= 3);
+    let told: Vec<String> = hints()
+        .iter()
+        .map(|hint| hint["message_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(told, ["u-m1", "u-m2", "u-m2"], "{:?}", hints());
+    for hint in hints() {
+        assert!(
+            hint.get("delivery").is_none() && hint["session"] == session,
+            "{hint}"
+        );
+    }
+
+    let (status, refused) = host.ask(
+        "GET",
+        &format!("/log?session={session}&delivery_since=x"),
+        None,
+    );
+    assert_eq!(
+        (status, &refused["error"]),
+        (400, &json!("bad delivery_since"))
+    );
+}
+
 /// A Stop while another message waits (R92, the Python Host's PR 451): the turn that ran is
 /// the one that ends, and says so by its own trace; what waits stays waiting, its own.
 #[test]
