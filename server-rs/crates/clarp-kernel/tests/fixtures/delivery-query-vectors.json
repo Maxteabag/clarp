@@ -7147,6 +7147,101 @@
   },
   {
    "answer": {
+    "delivery_bootstrap": true,
+    "delivery_cursor": 4,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_until": 4,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "1",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
     "delivery_scope": {
      "agent_id": "ag",
      "runtime_instance": "instance-1",
@@ -7414,6 +7509,101 @@
    },
    "query": {
     "delivery_bootstrap": "true",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
+    "delivery_bootstrap": true,
+    "delivery_cursor": 4,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_until": 4,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "true",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
     "delivery_since": "2",
     "delivery_stop_generation": "1",
     "delivery_until": "4"
@@ -7699,6 +7889,123 @@
   },
   {
    "answer": {
+    "delivery_cursor": 6,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 1,
+       "seq": 6,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m4"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "TRUE",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
     "delivery_scope": {
      "agent_id": "ag",
      "runtime_instance": "instance-1",
@@ -7966,6 +8273,123 @@
    },
    "query": {
     "delivery_bootstrap": "yes",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
+    "delivery_cursor": 6,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 1,
+       "seq": 6,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m4"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "yes",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
     "delivery_since": "2",
     "delivery_stop_generation": "1",
     "delivery_until": "4"
@@ -8251,6 +8675,123 @@
   },
   {
    "answer": {
+    "delivery_cursor": 6,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 1,
+       "seq": 6,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m4"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "0",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
     "delivery_scope": {
      "agent_id": "ag",
      "runtime_instance": "instance-1",
@@ -8518,6 +9059,123 @@
    },
    "query": {
     "delivery_bootstrap": "",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
+    "delivery_cursor": 6,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 1,
+       "seq": 6,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m4"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
     "delivery_since": "2",
     "delivery_stop_generation": "1",
     "delivery_until": "4"
@@ -8803,6 +9461,101 @@
   },
   {
    "answer": {
+    "delivery_bootstrap": true,
+    "delivery_cursor": 4,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_until": 4,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": " 1 ",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
     "delivery_scope": {
      "agent_id": "ag",
      "runtime_instance": "instance-1",
@@ -9070,6 +9823,123 @@
    },
    "query": {
     "delivery_bootstrap": "false",
+    "delivery_since": "2",
+    "delivery_stop_generation": "1",
+    "delivery_until": "4"
+   },
+   "said": "",
+   "session": "s"
+  },
+  {
+   "answer": {
+    "delivery_cursor": 6,
+    "delivery_cursor_expired": false,
+    "delivery_more": false,
+    "delivery_scope": {
+     "agent_id": "ag",
+     "runtime_instance": "instance-1",
+     "runtime_release": "in-process",
+     "server_id": "host-1"
+    },
+    "delivery_stop_generation": 1,
+    "delivery_updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 1,
+       "seq": 6,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m4"
+     }
+    ],
+    "session": "s",
+    "turns": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 2,
+       "state": "handed_over"
+      },
+      "id": "u-m1",
+      "role": "user",
+      "trace_id": "t1"
+     },
+     {
+      "id": "r-1",
+      "role": "assistant",
+      "trace_id": "t1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 4,
+       "state": "stopped"
+      },
+      "id": "u-m2",
+      "role": "user",
+      "trace_id": "t2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 5,
+       "state": "pending_launch"
+      },
+      "id": "u-m3",
+      "role": "user",
+      "trace_id": "t3"
+     },
+     {
+      "id": "u-m9",
+      "role": "user",
+      "trace_id": "t9"
+     }
+    ]
+   },
+   "query": {
+    "delivery_bootstrap": "false",
+    "delivery_runtime_instance": "instance-1",
+    "delivery_runtime_release": "in-process",
     "delivery_since": "2",
     "delivery_stop_generation": "1",
     "delivery_until": "4"
