@@ -3,7 +3,7 @@
 //! `fixtures/live-call-vectors.json` is written by `server-rs/tools/live-call-vectors.py` from
 //! `server/lib/agent_ring_live.py`, `agent_live_settings.py` and
 //! `agent_ring_live_socket.instructions`: how a call is asked to be held, what names a
-//! request, the one form of a value, whether a text is a moment with a zone, what a
+//! request, the one form of a value, whether a text is an event's time, what a
 //! producer says of its event, the tools a profile opts into, the snapshot of a ring and
 //! what its voice is told, the context of a call the user starts, and which agents take
 //! one. The same must come out here.
@@ -105,22 +105,20 @@ fn the_names_and_bounds_are_the_python_hosts() {
 }
 
 #[test]
-fn a_text_is_a_moment_with_a_zone_exactly_when_python_reads_one() {
+fn a_text_is_an_events_time_exactly_when_the_python_host_takes_one() {
+    // Since its PR 449 (R90): one stated grammar, the same on every interpreter, then the day
+    // and the zone. The Python Host's own check decided each text of the table.
     let vectors = vectors();
     let mut counted = Vec::new();
-    for (kind, read) in [
-        ("not one", None),
-        ("without a zone", Some(false)),
-        ("with a zone", Some(true)),
-    ] {
+    for (kind, taken) in [("refused", false), ("taken", true)] {
         let texts = vectors["moments"][kind].as_array().unwrap();
         for text in texts {
             let text = text.as_str().unwrap();
-            assert_eq!(live::zoned(text), read, "{text:?}");
+            assert_eq!(live::event_time(text), taken, "{text:?}");
         }
         counted.push(texts.len());
     }
-    assert_eq!(counted, [3959, 213, 1126]);
+    assert_eq!(counted, [5242, 56]);
 }
 
 #[test]

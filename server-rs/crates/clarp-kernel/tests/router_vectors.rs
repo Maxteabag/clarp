@@ -25,11 +25,13 @@ fn the_json_in_a_models_answer_is_found_where_the_python_host_finds_it() {
         ) {
             (Ok(ours), Some(theirs), _) => assert_eq!(&Value::Object(ours), theirs, "{text}"),
             (Err(ours), _, Some(theirs)) => {
-                // Where the Python Host has words of its own for it, they are these; where
-                // its JSON reader speaks, this Host says it its own way.
-                if theirs[0] == "ValueError" {
-                    assert_eq!(ours, theirs[1], "{text}");
-                }
+                // The Python Host's own words, also where its JSON reader found nothing (its
+                // sentence since its PR 449, R90): the same here.
+                assert!(
+                    ["ValueError", "ModelAnswerNotJson"].contains(&theirs[0].as_str().unwrap()),
+                    "{text}: {theirs}"
+                );
+                assert_eq!(ours, theirs[1], "{text}");
                 refused += 1;
             }
             (ours, theirs, why) => panic!("{text}: here {ours:?}, there {theirs:?} {why:?}"),

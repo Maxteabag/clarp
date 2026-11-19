@@ -599,16 +599,13 @@ fn answered_row(outcome: Option<&Outcome>, theirs: &Value) -> Value {
     })
 }
 
-/// What the Python Host did with a message, but for the one place where only the words of an
-/// error are another's.
+/// What the Python Host did with a message: an answer of the model that holds no JSON is told
+/// in that Host's own sentence since its PR 449 (R90), as here, on every interpreter.
 fn expected(message: &Value) -> Value {
-    let mut want = message.clone();
+    let want = message.clone();
     if message["id"] == "w-1" {
-        // The Python Host says it in the words of its JSON reader.
         for place in ["/answered/error", "/decisions/0/error"] {
-            let place = want.pointer_mut(place).unwrap();
-            assert_eq!(*place, "Expecting value: line 1 column 1 (char 0)");
-            *place = json!("the model's answer is no JSON");
+            assert_eq!(want.pointer(place).unwrap(), clarp_kernel::router::NOT_JSON);
         }
     }
     want

@@ -263,6 +263,10 @@ impl Decision {
     }
 }
 
+/// What a model's answer that holds no JSON is told as (the Python Host's
+/// `orchestrator_model.ModelAnswerNotJson`, since its PR 449).
+pub const NOT_JSON: &str = "the model's answer was not JSON (JSONDecodeError)";
+
 /// The JSON object in what a model answered: the answer itself, with or without a fence of
 /// three backticks around it, or what stands between its first and its last brace. `Err`:
 /// why there is none, in the Python Host's words where it has words of its own.
@@ -289,7 +293,9 @@ pub fn extract_json(text: &str) -> Result<Map<String, Value>, String> {
             let inner = braces.filter(|(first, last)| first < last);
             let inner = inner.map(|(first, last)| &text[first..=last]);
             let read = inner.and_then(|inner| serde_json::from_str::<Value>(inner).ok());
-            read.ok_or_else(|| "the model's answer is no JSON".to_string())?
+            // The Python Host's own sentence since its PR 449 (R90), the same on every
+            // interpreter: what its JSON reader said is in its log, and in no answer.
+            read.ok_or_else(|| NOT_JSON.to_string())?
         }
     };
     match read {

@@ -1244,6 +1244,351 @@
    "extension": ".d",
    "mime": "video/webm",
    "name": "a.b.c.d"
+  },
+  {
+   "extension": ".img",
+   "mime": "",
+   "name": "a.png."
+  },
+  {
+   "extension": ".json",
+   "mime": "application/json",
+   "name": "a.png."
+  },
+  {
+   "extension": ".bin",
+   "mime": "application/octet-stream",
+   "name": "a.png."
+  },
+  {
+   "extension": ".pdf",
+   "mime": "application/pdf",
+   "name": "a.png."
+  },
+  {
+   "extension": ".m4a",
+   "mime": "audio/mp4",
+   "name": "a.png."
+  },
+  {
+   "extension": ".mp3",
+   "mime": "audio/mpeg",
+   "name": "a.png."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/wav",
+   "name": "a.png."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/x-m4a",
+   "name": "a.png."
+  },
+  {
+   "extension": ".wav",
+   "mime": "audio/x-wav",
+   "name": "a.png."
+  },
+  {
+   "extension": ".gif",
+   "mime": "image/gif",
+   "name": "a.png."
+  },
+  {
+   "extension": ".heic",
+   "mime": "image/heic",
+   "name": "a.png."
+  },
+  {
+   "extension": ".heif",
+   "mime": "image/heif",
+   "name": "a.png."
+  },
+  {
+   "extension": ".jpg",
+   "mime": "image/jpeg",
+   "name": "a.png."
+  },
+  {
+   "extension": ".png",
+   "mime": "image/png",
+   "name": "a.png."
+  },
+  {
+   "extension": ".svg",
+   "mime": "image/svg+xml",
+   "name": "a.png."
+  },
+  {
+   "extension": ".webp",
+   "mime": "image/webp",
+   "name": "a.png."
+  },
+  {
+   "extension": ".csv",
+   "mime": "text/csv",
+   "name": "a.png."
+  },
+  {
+   "extension": ".html",
+   "mime": "text/html",
+   "name": "a.png."
+  },
+  {
+   "extension": ".md",
+   "mime": "text/markdown",
+   "name": "a.png."
+  },
+  {
+   "extension": ".txt",
+   "mime": "text/plain",
+   "name": "a.png."
+  },
+  {
+   "extension": ".mp4",
+   "mime": "video/mp4",
+   "name": "a.png."
+  },
+  {
+   "extension": ".mov",
+   "mime": "video/quicktime",
+   "name": "a.png."
+  },
+  {
+   "extension": ".webm",
+   "mime": "video/webm",
+   "name": "a.png."
+  },
+  {
+   "extension": ".img",
+   "mime": "",
+   "name": "a.."
+  },
+  {
+   "extension": ".json",
+   "mime": "application/json",
+   "name": "a.."
+  },
+  {
+   "extension": ".bin",
+   "mime": "application/octet-stream",
+   "name": "a.."
+  },
+  {
+   "extension": ".pdf",
+   "mime": "application/pdf",
+   "name": "a.."
+  },
+  {
+   "extension": ".m4a",
+   "mime": "audio/mp4",
+   "name": "a.."
+  },
+  {
+   "extension": ".mp3",
+   "mime": "audio/mpeg",
+   "name": "a.."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/wav",
+   "name": "a.."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/x-m4a",
+   "name": "a.."
+  },
+  {
+   "extension": ".wav",
+   "mime": "audio/x-wav",
+   "name": "a.."
+  },
+  {
+   "extension": ".gif",
+   "mime": "image/gif",
+   "name": "a.."
+  },
+  {
+   "extension": ".heic",
+   "mime": "image/heic",
+   "name": "a.."
+  },
+  {
+   "extension": ".heif",
+   "mime": "image/heif",
+   "name": "a.."
+  },
+  {
+   "extension": ".jpg",
+   "mime": "image/jpeg",
+   "name": "a.."
+  },
+  {
+   "extension": ".png",
+   "mime": "image/png",
+   "name": "a.."
+  },
+  {
+   "extension": ".svg",
+   "mime": "image/svg+xml",
+   "name": "a.."
+  },
+  {
+   "extension": ".webp",
+   "mime": "image/webp",
+   "name": "a.."
+  },
+  {
+   "extension": ".csv",
+   "mime": "text/csv",
+   "name": "a.."
+  },
+  {
+   "extension": ".html",
+   "mime": "text/html",
+   "name": "a.."
+  },
+  {
+   "extension": ".md",
+   "mime": "text/markdown",
+   "name": "a.."
+  },
+  {
+   "extension": ".txt",
+   "mime": "text/plain",
+   "name": "a.."
+  },
+  {
+   "extension": ".mp4",
+   "mime": "video/mp4",
+   "name": "a.."
+  },
+  {
+   "extension": ".mov",
+   "mime": "video/quicktime",
+   "name": "a.."
+  },
+  {
+   "extension": ".webm",
+   "mime": "video/webm",
+   "name": "a.."
+  },
+  {
+   "extension": ".img",
+   "mime": "",
+   "name": "a.b."
+  },
+  {
+   "extension": ".json",
+   "mime": "application/json",
+   "name": "a.b."
+  },
+  {
+   "extension": ".bin",
+   "mime": "application/octet-stream",
+   "name": "a.b."
+  },
+  {
+   "extension": ".pdf",
+   "mime": "application/pdf",
+   "name": "a.b."
+  },
+  {
+   "extension": ".m4a",
+   "mime": "audio/mp4",
+   "name": "a.b."
+  },
+  {
+   "extension": ".mp3",
+   "mime": "audio/mpeg",
+   "name": "a.b."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/wav",
+   "name": "a.b."
+  },
+  {
+   "extension": ".img",
+   "mime": "audio/x-m4a",
+   "name": "a.b."
+  },
+  {
+   "extension": ".wav",
+   "mime": "audio/x-wav",
+   "name": "a.b."
+  },
+  {
+   "extension": ".gif",
+   "mime": "image/gif",
+   "name": "a.b."
+  },
+  {
+   "extension": ".heic",
+   "mime": "image/heic",
+   "name": "a.b."
+  },
+  {
+   "extension": ".heif",
+   "mime": "image/heif",
+   "name": "a.b."
+  },
+  {
+   "extension": ".jpg",
+   "mime": "image/jpeg",
+   "name": "a.b."
+  },
+  {
+   "extension": ".png",
+   "mime": "image/png",
+   "name": "a.b."
+  },
+  {
+   "extension": ".svg",
+   "mime": "image/svg+xml",
+   "name": "a.b."
+  },
+  {
+   "extension": ".webp",
+   "mime": "image/webp",
+   "name": "a.b."
+  },
+  {
+   "extension": ".csv",
+   "mime": "text/csv",
+   "name": "a.b."
+  },
+  {
+   "extension": ".html",
+   "mime": "text/html",
+   "name": "a.b."
+  },
+  {
+   "extension": ".md",
+   "mime": "text/markdown",
+   "name": "a.b."
+  },
+  {
+   "extension": ".txt",
+   "mime": "text/plain",
+   "name": "a.b."
+  },
+  {
+   "extension": ".mp4",
+   "mime": "video/mp4",
+   "name": "a.b."
+  },
+  {
+   "extension": ".mov",
+   "mime": "video/quicktime",
+   "name": "a.b."
+  },
+  {
+   "extension": ".webm",
+   "mime": "video/webm",
+   "name": "a.b."
   }
  ],
  "files": [

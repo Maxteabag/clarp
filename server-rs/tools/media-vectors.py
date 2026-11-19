@@ -192,7 +192,9 @@ def main() -> int:
     # What a name's ending alone makes of a file whose bytes say nothing and that was declared as nothing.
     by_ending = {ext: store._detect_mime(b'\x00\x01\x02', '', 'x' + ext) for ext in endings}
     extensions = [{'name': name, 'mime': mime, 'extension': store._extension(name, mime)}
-                  for name in ['', 'a.png', 'a.JPEG', 'a.tar.gz', 'a', '.hidden', 'a.', 'a.p-g', 'a.verylongextensionhere', 'a.b.c.d']
+                  # A name ending in a dot has no extension, on every interpreter (the Python Host's PR 449, R90).
+                  for name in ['', 'a.png', 'a.JPEG', 'a.tar.gz', 'a', '.hidden', 'a.', 'a.p-g', 'a.verylongextensionhere', 'a.b.c.d',
+                               'a.png.', 'a..', 'a.b.']
                   for mime in sorted(store.SAFE_MEDIA_MIME | {'application/octet-stream', 'image/svg+xml', 'text/html', ''})]
     alts = [{'text': text, 'alt': store._markdown_alt(text)} for text in ALTS]
     rows = []

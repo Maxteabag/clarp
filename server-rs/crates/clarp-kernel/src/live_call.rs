@@ -161,11 +161,6 @@ pub fn moment(now_ms: i64) -> String {
     )
 }
 
-fn before_year(year: i64) -> i64 {
-    let past = year - 1;
-    past * 365 + past / 4 - past / 100 + past / 400
-}
-
 fn leap(year: i64) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
@@ -179,234 +174,55 @@ fn days_in(year: i64, month: i64) -> i64 {
     }
 }
 
-/// The last day there is: 31 December 9999, counted from 1 January of the year 1.
-const LAST_DAY: i64 = 3_652_059;
-
-/// A text as bytes that end in nothing, as the reading below was written for.
-#[derive(Clone, Copy)]
-struct Read<'a>(&'a [u8]);
-
-impl Read<'_> {
-    fn at(self, place: usize) -> u8 {
-        self.0.get(place).copied().unwrap_or(0)
-    }
-
-    /// `count` digits from `place` on, as a number.
-    fn digits(self, place: usize, count: usize) -> Option<i64> {
-        let mut number = 0;
-        for at in place..place + count {
-            let sign = self.at(at);
-            if !sign.is_ascii_digit() {
-                return None;
-            }
-            number = number * 10 + i64::from(sign - b'0');
-        }
-        Some(number)
-    }
-}
-
-/// Where the date of a moment ends: by its fifth and sixth sign, since anything may stand
-/// between a date and a time.
-fn date_ends(read: Read) -> Option<usize> {
-    let len = read.0.len();
-    if len == 7 {
-        return Some(7);
-    }
-    if read.at(4) == b'-' {
-        if read.at(5) != b'W' {
-            return Some(10);
-        }
-        if len > 8 && read.at(8) == b'-' {
-            if len == 9 {
-                return None;
-            }
-            // A year, a week and a dash: a day follows, or the dash stands before the time.
-            return Some(if len > 10 && read.at(10).is_ascii_digit() {
-                8
-            } else {
-                10
-            });
-        }
-        return Some(8);
-    }
-    if read.at(4) == b'W' {
-        let mut place = 7;
-        while place < len && read.at(place).is_ascii_digit() {
-            place += 1;
-        }
-        if place < 9 {
-            return Some(place);
-        }
-        // Hours, minutes and seconds come in pairs: an odd count of digits has a day first.
-        return Some(if place.is_multiple_of(2) { 7 } else { 8 });
-    }
-    Some(8)
-}
-
-/// Whether the date in the first `ends` bytes is a day there is.
-fn date(read: Read, ends: usize) -> bool {
-    let Some(year) = read.digits(0, 4) else {
+/// Whether a text is an event's time as the Python Host takes one since its PR 449 (R90),
+/// the same on every interpreter: RFC 3339's date-time and nothing else (its
+/// `agent_ring_live._EVENT_TIME`, then `datetime.fromisoformat` for the day and the zone):
+/// `YYYY-MM-DD`, a capital `T`, `HH:MM:SS`, a point and one to nine digits or not, and `Z` or a
+/// sign with `HH:MM`. ASCII digits only; the year 0001 to 9999; a day there is in its month;
+/// the hour 00 to 23, minutes and seconds 00 to 59; the zone's hours 00 to 23 and minutes 00
+/// to 59.
+pub fn event_time(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let number = |from: usize, to: usize| -> Option<i64> {
+        let digits = bytes.get(from..to)?;
+        digits.iter().all(u8::is_ascii_digit).then(|| {
+            digits
+                .iter()
+                .fold(0, |sum, digit| sum * 10 + i64::from(digit - b'0'))
+        })
+    };
+    let at = |place: usize, sign: u8| bytes.get(place) == Some(&sign);
+    let fixed = at(4, b'-') && at(7, b'-') && at(10, b'T') && at(13, b':') && at(16, b':');
+    let (Some(year), Some(month), Some(day)) = (number(0, 4), number(5, 7), number(8, 10)) else {
         return false;
     };
-    let dashed = read.at(4) == b'-';
-    let mut place = 4 + usize::from(dashed);
-    if read.at(place) == b'W' {
-        place += 1;
-        let Some(week) = read.digits(place, 2) else {
+    let (Some(hour), Some(minute), Some(second)) = (number(11, 13), number(14, 16), number(17, 19))
+    else {
+        return false;
+    };
+    let date = year >= 1 && (1..=12).contains(&month) && (1..=days_in(year, month)).contains(&day);
+    if !fixed || !date || hour > 23 || minute > 59 || second > 59 {
+        return false;
+    }
+    let mut rest = &bytes[19..];
+    if let Some(after) = rest.strip_prefix(b".") {
+        let digits = after.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        if !(1..=9).contains(&digits) {
             return false;
-        };
-        place += 2;
-        let mut day = 1;
-        if place < ends {
-            if dashed {
-                if read.at(place) != b'-' {
-                    return false;
-                }
-                place += 1;
-            }
-            let Some(named) = read.digits(place, 1) else {
-                return false;
+        }
+        rest = &after[digits..];
+    }
+    match rest {
+        [b'Z'] => true,
+        [b'+' | b'-', h1, h2, b':', m1, m2] => {
+            let pair = |a: u8, b: u8| {
+                (a.is_ascii_digit() && b.is_ascii_digit())
+                    .then(|| i64::from(a - b'0') * 10 + i64::from(b - b'0'))
             };
-            day = named;
+            matches!((pair(*h1, *h2), pair(*m1, *m2)), (Some(h), Some(m)) if h <= 23 && m <= 59)
         }
-        if !(1..=9999).contains(&year) {
-            return false;
-        }
-        // The weekday of 1 January, Monday being nought.
-        let first_day = before_year(year) + 1;
-        let first_weekday = (first_day + 6) % 7;
-        let has_53 = first_weekday == 3 || (first_weekday == 2 && leap(year));
-        if !((1..=52).contains(&week) || (week == 53 && has_53)) || !(1..=7).contains(&day) {
-            return false;
-        }
-        let mut monday = first_day - first_weekday;
-        if first_weekday > 3 {
-            monday += 7;
-        }
-        let counted = monday + (week - 1) * 7 + day - 1;
-        return (1..=LAST_DAY).contains(&counted);
+        _ => false,
     }
-    let Some(month) = read.digits(place, 2) else {
-        return false;
-    };
-    place += 2;
-    if dashed {
-        if read.at(place) != b'-' {
-            return false;
-        }
-        place += 1;
-    }
-    let Some(day) = read.digits(place, 2) else {
-        return false;
-    };
-    (1..=9999).contains(&year)
-        && (1..=12).contains(&month)
-        && (1..=days_in(year, month)).contains(&day)
-}
-
-/// Hours, minutes, seconds and a fraction between `from` and `to`: with colons between them
-/// or without, the fraction after a point or a comma. `Err`: none can be read. `Ok` with the
-/// four numbers (the fraction in millionths) and whether something stands after them. This
-/// is the reading of CPython 3.13 with what it lets pass: a colon with nothing after it, a
-/// fourth pair after a third colon taken for the fraction, a sign that is no part of a time
-/// before the zone.
-fn hours(read: Read, from: usize, to: usize) -> Result<([i64; 4], bool), ()> {
-    let mut parts = [0i64; 4];
-    let mut place = from;
-    let mut colons = true;
-    for (part, slot) in parts.iter_mut().take(3).enumerate() {
-        *slot = read.digits(place, 2).ok_or(())?;
-        place += 2;
-        let sign = read.at(place);
-        place += 1;
-        if part == 0 {
-            colons = sign == b':';
-        }
-        // A point or a comma begins the fraction, wherever it stands.
-        if sign == b'.' || sign == b',' {
-            break;
-        }
-        if place >= to {
-            return Ok((parts, sign != 0));
-        }
-        if colons && sign == b':' {
-            continue;
-        }
-        if colons {
-            return Err(());
-        }
-        place -= 1;
-    }
-    // And a fraction is at least one digit.
-    let left = to.saturating_sub(place);
-    if left == 0 {
-        return Err(());
-    }
-    let taken = left.min(6);
-    parts[3] = read.digits(place, taken).ok_or(())?;
-    for _ in taken..6 {
-        parts[3] *= 10;
-    }
-    place += taken;
-    while read.at(place).is_ascii_digit() {
-        place += 1;
-    }
-    Ok((parts, read.at(place) != 0))
-}
-
-/// Whether the time from `from` on is one, and whether it names its zone.
-fn time(read: Read, from: usize) -> Option<bool> {
-    let end = read.0.len();
-    // The zone begins at the first of these signs. Of a time that is empty the search
-    // overshoots, and no time is read at all.
-    let mut zone = from;
-    loop {
-        if matches!(read.at(zone), b'Z' | b'+' | b'-') {
-            break;
-        }
-        zone += 1;
-        if zone >= end {
-            break;
-        }
-    }
-    let (parts, more) = hours(read, from, zone).ok()?;
-    let in_a_day = parts[0] <= 23 && parts[1] <= 59 && parts[2] <= 59;
-    if zone >= end {
-        return (!more && in_a_day).then_some(false);
-    }
-    if read.at(zone) == b'Z' {
-        return (zone + 1 == end && in_a_day).then_some(true);
-    }
-    let (off, more) = hours(read, zone + 1, end).ok()?;
-    // An offset is less than a day, either way.
-    let millionths = ((off[0] * 3600 + off[1] * 60 + off[2]) * 1_000_000) + off[3];
-    (!more && in_a_day && millionths < 86_400_000_000).then_some(true)
-}
-
-/// Whether a text is a moment as Python reads one (`datetime.fromisoformat`, Python 3.13):
-/// `None` when it is none, else whether it names its zone. A date as a calendar or a week
-/// has it, any one sign, and a time with or without colons; the zone is `Z` or an offset.
-pub fn zoned(text: &str) -> Option<bool> {
-    let read = Read(text.as_bytes());
-    let len = read.0.len();
-    if len < 7 {
-        return None;
-    }
-    let ends = date_ends(read)?;
-    if !date(read, ends) {
-        return None;
-    }
-    if len <= ends {
-        return Some(false);
-    }
-    // What stands between is one sign, of however many bytes.
-    let between = match read.at(ends) {
-        sign if sign & 0x80 == 0 => 1,
-        sign if sign & 0xf0 == 0xe0 => 3,
-        sign if sign & 0xf0 == 0xf0 => 4,
-        _ => 2,
-    };
-    time(read, ends + between)
 }
 
 // ---- what a producer says of its event -------------------------------------------------
@@ -502,7 +318,7 @@ pub fn context(told: &Value, opening_line: &str) -> Result<Value, Refused> {
     for (name, most, required) in EVENT_TEXTS {
         text_of(&event[name], most, required)?;
     }
-    if zoned(event["time"].as_str().unwrap_or("")) != Some(true) {
+    if !event_time(event["time"].as_str().unwrap_or("")) {
         return Err(invalid());
     }
     let Value::Array(log) = &event["log"] else {

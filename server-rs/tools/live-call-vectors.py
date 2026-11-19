@@ -575,16 +575,16 @@ def run() -> dict:
         except CallError as error:
             return None, {'status': error.status, 'error': error.error}
 
-    def moment(text):
-        try:
-            read = datetimes.datetime.fromisoformat(text)
-        except ValueError:
-            return 0
-        return 1 if read.tzinfo is None else 2
+    def taken(text):
+        """Whether the Host takes this for an event's time: the usual context with it, through its own check
+        (validate_context, since its PR 449 one stated grammar, then the calendar day and the zone)."""
+        context = json.loads(json.dumps(CONTEXT))
+        context['event']['time'] = text
+        return tried(lambda: live.validate_context(context, LINE))[1] is None
 
-    times = {'not one': [], 'without a zone': [], 'with a zone': []}
+    times = {'refused': [], 'taken': []}
     for text in moments():
-        times[('not one', 'without a zone', 'with a zone')[moment(text)]].append(text)
+        times['taken' if taken(text) else 'refused'].append(text)
 
     modes = []
     for value in MODES:
@@ -797,7 +797,7 @@ def main() -> int:
     built = sum(1 for row in said['snapshots'] if row['snapshot'])
     opted_in = sum(1 for row in said['tools'] if row['config'])
     print(f'{OUT.relative_to(REPO)}: {sum(len(texts) for texts in moments_.values())} moments '
-          f'({len(moments_["with a zone"])} with a zone, {len(moments_["without a zone"])} without), {len(said["modes"])} modes, '
+          f'({len(moments_["taken"])} taken), {len(said["modes"])} modes, '
           f'{len(said["forms"])} forms, {len(said["contexts"])} contexts ({refused} refused), {len(said["tools"])} profiles of tools '
           f'({opted_in} opt in), {len(said["snapshots"])} snapshots ({built} built), {len(said["user_calls"])} calls of the user, '
           f'{len(said["registry"])} registries')
