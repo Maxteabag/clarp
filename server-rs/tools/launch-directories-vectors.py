@@ -40,7 +40,7 @@ def capture(place):
         owners[session]=[path,bool(janitor)]
 
     favored=[]
-    for limit in ["", "bad","0","-2","1","2","5","19","20","21","1_0",str(10**50),"  +2 "]:
+    for limit in ["", "bad","0","-2","1","2","5","19","20","21","1_0",str(10**50),"  +2 ",chr(0x0662),chr(0x0967)+"_"+chr(0x0966),"9"*4301]:
         dest=[]
         handler=SimpleNamespace(_query=lambda:{"limit":[limit]},_json_ok=dest.append)
         SettingsRoutes._handle_favorite_paths(handler)
@@ -75,6 +75,48 @@ def capture(place):
     # No query candidate is required to match zoxide's successful output.
     one("no-such-name",0,["~/project",str(home/"project"),str(home/"./pr"),str(home)+"/project//inner/"])
     existing=[str(home),str(place/"homesibling"),str(home/"project/inner"),str(home/"link"),str(home/"link/inner"),*paths]
+    # Observe the ranked candidates before existence checks and the 16-result limit.
+    # No recent rows, explicit directories or home candidate can obscure a cutoff.
+    ranked_cases=[]
+    for fallback in (False,True):
+        for size in [0,1,99,100,101,999,1000,1001]:
+            raw=[f"/synthetic/{i}" for i in range(size)]
+            if fallback: raw=[p+("-Az" if i%11==9 or i>=998 else "") for i,p in enumerate(raw)]
+            q="A Z"
+            def answer(args,**kwargs):
+                if fallback and "--" in args:return SimpleNamespace(returncode=1,stdout="")
+                return SimpleNamespace(returncode=1 if fallback else 0,stdout="\n".join(raw))
+            seen=[]
+            def expanded(p):
+                seen.append(str(p))
+                return p
+            with patch.object(launch_directories.db,"conn",return_value=SimpleNamespace(execute=lambda *args:[])), patch.object(Path,"expanduser",expanded), patch.object(Path,"is_dir",return_value=False), patch.object(Path,"iterdir",return_value=iter(())), patch.object(launch_directories.subprocess,"run",side_effect=answer):
+                launch_directories.lookup(q,home=home,zoxide="fake")
+            ranked_cases.append(dict(fallback=fallback,size=size,q=q,seen=seen))
+    # Nonmatching subsequences can contain all the requested letters in the wrong order.
+    q="ZA"
+    ranked_cases.append(dict(fallback=True,size=0,q=q,raw=["/synthetic/az","/synthetic/z","/synthetic/zA"],seen=[]))
+    raw=ranked_cases[-1]["raw"]
+    def ordered(args,**kwargs):
+        return SimpleNamespace(returncode=1,stdout="\n".join(raw) if "--" not in args else "")
+    def observed(p):
+        ranked_cases[-1]["seen"].append(str(p))
+        return p
+    with patch.object(launch_directories.db,"conn",return_value=SimpleNamespace(execute=lambda *args:[])), patch.object(Path,"expanduser",observed), patch.object(Path,"is_dir",return_value=False), patch.object(Path,"iterdir",return_value=iter(())), patch.object(launch_directories.subprocess,"run",side_effect=ordered):
+        launch_directories.lookup(q,home=home,zoxide="fake")
+    # All children are considered for their lexical/prefix ordering before truncation.
+    # Returning no candidate as a directory on the second pass exposes the explicit list.
+    completions=[]
+    for count in (0,1,29,30,31,40):
+        for prefix in ("p","P","strasse"):
+            names=[f"p{i:02d}" for i in reversed(range(count))]+["Stra"+chr(223)+"e",".private"]
+            seen=[]
+            def expand(p):
+                seen.append(p.name)
+                return p
+            with patch.object(launch_directories.db,"conn",return_value=SimpleNamespace(execute=lambda *args:[])), patch.object(Path,"expanduser",expand), patch.object(Path,"is_dir",side_effect=[False]+[True]*len(names)+[False]*len(names)), patch.object(Path,"iterdir",return_value=[home/n for n in names]), patch.object(launch_directories.subprocess,"run",return_value=SimpleNamespace(returncode=0,stdout="")):
+                launch_directories.lookup(prefix,home=home,zoxide="fake")
+            completions.append(dict(names=names,prefix=prefix,seen=seen))
     probes=[]
     def absent(path):
         probes.append(str(path))
@@ -82,7 +124,8 @@ def capture(place):
     with patch.object(Path,"is_dir",absent), patch.object(launch_directories.subprocess,"run",return_value=SimpleNamespace(returncode=1,stdout="")):
         launch_directories.lookup("",home=home,zoxide="fake")
     assert probes[0]==str(home)
-    fixture=dict(recent=probes[1:],home=str(home),existing=existing,launches=launches,owners=owners,favorites=favored,cases=cases)
+    spellings=[dict(value=v,expected=str(Path(v))) for v in ("", ".", "./.", "./abc/", "//", "///", "//server//path", "a/./../b", "../../../.", "/.", "~example/a/.", "a/ /b")]
+    fixture=dict(spellings=spellings,ranked=ranked_cases,completions=completions,recent=probes[1:],home=str(home),existing=existing,launches=launches,owners=owners,favorites=favored,cases=cases)
     return json.loads(json.dumps(fixture,ensure_ascii=True).replace(str(place),"/fixture"))
 
 
@@ -96,4 +139,7 @@ if __name__=="__main__":
         replay.loopback_only()
         sys.path.insert(0,str(ROOT/"server"))
         data=capture(place)
+        from unicodedata import decimal
+        zeroes=[n for n in range(sys.maxunicode+1) if decimal(chr(n),None)==0]
+        (ROOT/"server-rs/crates/clarp-kernel/src/launch-decimal-zeroes.json").write_text(json.dumps(zeroes)+"\n")
         DEST.write_text(json.dumps(data,ensure_ascii=True,separators=(",",":"))+"\n",encoding="ascii")
