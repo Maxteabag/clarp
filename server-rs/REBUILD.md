@@ -1474,8 +1474,8 @@ of the owner. The other account modes leave the login where it is.
 **Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
 zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
 and starts it without a shell. Each invocation has half a second. If it is absent,
-recent and explicit paths can still answer. Absolute path lookup requires full
-access. Favorites are launch counts and are readable by a limited paired device.
+recent and explicit paths can still answer. Both the directory lookup and the launch frequencies shown as favorites require
+full access, as does browsing directories through `/dirs`.
 
 The fleet loads one kept record per distinct launch directory at startup. The
 storage port accepts text keys with no separate key-length limit in either engine.
