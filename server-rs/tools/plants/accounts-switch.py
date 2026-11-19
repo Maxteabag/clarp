@@ -123,12 +123,15 @@ for effect, result in [("report the automatic switcher enabled","return false;")
 
 qual = "clarp_kernel::recovery::Accounts::"
 select = f"app.config.accounts == {qual}Select"
-for file, effect, test in [
-        ("clarp-host/src/edge.rs","advertise seat actions", select+" && app.seats.told()"),
-        ("clarp-host/src/janitors.rs","allow enabling a Hotseat Janitor",select+"\n                && app.seats.told()")]:
+# Where the features are decided, the desk's own reading (`seats`: a tool told, and the desk
+# not turned off by the owner) stands beside the account mode since differences-truth part 2;
+# without a seats tool is the mode alone with the owner's switch.
+for file, effect, test, toolless in [
+        ("clarp-host/src/edge.rs","advertise seat actions", select+" && seats", select+" && !crate::seats::turned_off(app)"),
+        ("clarp-host/src/janitors.rs","allow enabling a Hotseat Janitor",select+"\n                && app.seats.told()",select)]:
     for extra, other in [("follow","None"),("none","Follow")]:
         PLANTS.append((file,"desk",f"{effect} under {extra}",test,test.replace(select,f"app.config.accounts != {qual}{other}")))
-    PLANTS.append((file,"desk",f"{effect} without a seats tool",test,select))
+    PLANTS.append((file,"desk",f"{effect} without a seats tool",test,toolless))
 
 guard = "if app.config.accounts == Accounts::Select {\n        return switching::manual"
 for extra, other in [("follow","None"),("none","Follow")]:

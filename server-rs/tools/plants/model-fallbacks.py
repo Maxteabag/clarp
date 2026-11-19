@@ -150,8 +150,10 @@ for why,method,allow in [
     ("let a limited device set the Janitor policy", "POST", "false"),
     ("deny a limited device the Janitor policy", "GET", "true"),
 ]:
+    # The rule for a limited device is the kernel's since differences-truth part 1: the
+    # policy let through among its sends, or closed to its reading, is planted there.
     where = '    let closed = |prefix: &&str|'
-    plant("clarp-host/src/edge.rs","host",why,where,
-          f'    if path=="/janitor-policy" && method==Method::{method} {{return {allow};}}\n'+where)
+    plant("clarp-kernel/src/devices.rs","host",why,where,
+          f'    if path=="/janitor-policy" && method=="{method}" {{return {allow};}}\n'+where)
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
