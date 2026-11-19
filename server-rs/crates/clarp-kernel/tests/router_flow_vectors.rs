@@ -345,6 +345,9 @@ impl Stage {
                     let name = start.name.as_deref();
                     done = match (name, &start.again) {
                         (Some("Broken"), _) => Done::Broke("no tool to run it with".to_string()),
+                        (Some("Refused"), _) => Done::Refused {
+                            code: "session in use".to_string(),
+                        },
                         (_, Some(again)) => Done::Started {
                             session: again.clone(),
                         },
@@ -455,6 +458,11 @@ impl Stage {
             .as_ref()
             .and_then(|outcome| outcome.told.clone());
         seen.told.extend(told);
+        let still = seen
+            .answered
+            .as_ref()
+            .and_then(|outcome| outcome.say.as_ref());
+        seen.said.extend(still.map(said_row));
         seen
     }
 
@@ -660,7 +668,7 @@ fn a_messages_way_is_the_python_hosts_message_by_message() {
     }
     // Every message of the stories, and what the stories are there to show: a model asked
     // once and twice, messages given, and words aloud.
-    assert_eq!((messages, asked, given, said), (101, 162, 11, 53));
+    assert_eq!((messages, asked, given, said), (107, 170, 11, 57));
 }
 
 /// Plays the stories up to the one named, and answers its messages by their ids.
