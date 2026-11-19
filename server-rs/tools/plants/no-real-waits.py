@@ -4,7 +4,9 @@
 The products' own times a test may make shorter (no test waits one out in real time): the hold of the Oracle's
 second voice after it failed (`--second-voice-hold-ms`), how long a silent phone keeps a live call
 (`--phone-idle-ms`), and how long the explainer's model is given (`--explain-within-ms`): each read, defaulted to the
-product's time, refused in words when it is no number, and used where the time was written before.
+product's time, refused in words when it is no number, and used where the time was written before. And a race a test
+met once (seats::tests::an_asking_of_the_tool_is_read_to_its_end_or_ended_at_its_time): a tool whose file is still
+open for writing is tried again.
 """
 import runner
 
@@ -13,6 +15,7 @@ RUNS = {
     'voice': ['test', '--test', 'host', '--', 'a_call_of_the_oracle_uses_its_second_voice'],
     'phone': ['test', '--test', 'host', '--',
               'a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it_only_asks'],
+    'seats': ['test', '-p', 'clarp-host', '--lib', 'seats::tests'],
     'explain': ['test', '--test', 'host', '--',
                 'inherited_models_retry_only_the_isolated_question_and_record_the_actual_model'],
 }
@@ -21,6 +24,7 @@ G = 'clarp-kernel/src/oracle/gemini.rs'
 U = 'clarp-host/src/oracle/upstream.rs'
 L = 'clarp-host/src/calls/live.rs'
 E = 'clarp-host/src/explain.rs'
+S = 'clarp-host/src/seats.rs'
 # The rule of the hold itself (`healthy_for`, and that a held voice is passed over) is planted in oracle-gemini.py.
 PLANTS = [
     # ---- the hold of the second voice
@@ -51,6 +55,10 @@ PLANTS = [
     (E, 'explain', "the Host's explainer time is the product's whatever it was told",
      '            let within = Duration::from_millis(app.config.explain_within_ms);',
      '            let within = Duration::from_millis(crate::config::EXPLAIN_WITHIN_MS);'),
+    # ---- a tool whose file is still open for writing
+    (S, 'seats', 'a busy tool is not tried again', '                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy',
+     '                    if error.kind() == std::io::ErrorKind::NotFound'),
+    (S, 'seats', 'a busy tool is tried again once', 'const BUSY_TRIES: u32 = 10;', 'const BUSY_TRIES: u32 = 1;'),
 ]
 
 
