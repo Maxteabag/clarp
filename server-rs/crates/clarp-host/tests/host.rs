@@ -23675,6 +23675,135 @@ say(type="turn.completed", usage=usage)
 }
 
 #[test]
+fn session_ids_are_checked_before_creation_and_a_restored_agent_runs_fresh() {
+    use clarp_kernel::{agent::AgentEvent, journal::kind};
+    use clarp_ports::log::{LogEngine, NewItem};
+
+    let place = Place::new("session-ids");
+    let codex = place.root.join("codex-stand-in");
+    let args = place.root.join("arguments");
+    program(
+        &codex,
+        r#"#!/bin/sh
+[ "$1" = exec ] || exit 0
+printf '%s\n' "$@" > "$SESSION_ARGS"
+cat >/dev/null
+echo '{"type":"thread.started","thread_id":"fresh-id"}'
+echo '{"type":"turn.started"}'
+echo '{"type":"item.completed","item":{"id":"r","type":"agent_message","text":"Fresh answer"}}'
+echo '{"type":"turn.completed","usage":{}}'
+"#,
+    );
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("SESSION_ARGS", args.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let bad = (
+        400,
+        json!({"error":"invalid session id","message":"invalid session id"}),
+    );
+    for key in ["fork_session_id", "resume_session_id"] {
+        for id in [
+            json!(" "),
+            json!("_first"),
+            json!("two/names"),
+            json!("x".repeat(129)),
+            json!(false),
+            json!(0),
+            json!([]),
+            json!({}),
+        ] {
+            let request =
+                json!({"name":"Refused", "backend":"codex", key:id, "open_existing":true});
+            assert_eq!(
+                host.ask("POST", "/agents", Some(&request)),
+                bad,
+                "{request}"
+            );
+        }
+    }
+    assert_eq!(host.get("/agents/snapshot")["agents"], json!([]));
+    let made = host.post("/agents", json!({"name":"Restored", "backend":"codex", "resume_session_id":null, "fork_session_id":""}));
+    let session = made["session"].as_str().unwrap();
+    let replaced = json!({"name":"Replacement", "replace_sid":session, "fork_session_id":"."});
+    assert_eq!(host.ask("POST", "/agents", Some(&replaced)), bad);
+    let trimmed = json!({"name":"Absent", "backend":"codex", "resume_session_id":"  thread-123  "});
+    assert_eq!(host.ask("POST", "/agents", Some(&trimmed)).0, 404);
+
+    // An otherwise valid id never permits a fork into or out of another directory.
+    let projects = place.root.join(".claude/projects");
+    let cwd = place.root.join("work");
+    let project = projects.join(clarp_backend::past::claude_project(cwd.to_str().unwrap()));
+    let other = place.root.join("other");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("outside.jsonl"), "{}\n").unwrap();
+    std::os::unix::fs::symlink(other.join("outside.jsonl"), project.join("outside.jsonl")).unwrap();
+    let refusal = (
+        400,
+        json!({"error":"cannot fork that session","message":"cannot fork that session"}),
+    );
+    let fork = |id: &str| {
+        host.ask(
+            "POST",
+            "/agents",
+            Some(&json!({"name":"Copy","cwd":cwd,"fork_session_id":id})),
+        )
+    };
+    assert_eq!(fork("outside"), refusal);
+    std::fs::remove_file(project.join("outside.jsonl")).unwrap();
+    std::fs::remove_dir(&project).unwrap();
+    std::os::unix::fs::symlink(&other, &project).unwrap();
+    std::fs::create_dir_all(projects.join("original")).unwrap();
+    std::fs::write(projects.join("original/source.jsonl"), "{}\n").unwrap();
+    assert_eq!(fork("source"), refusal);
+    assert_eq!(std::fs::read_dir(&other).unwrap().count(), 1);
+
+    host.kill();
+    // Write an event as an older Host could have kept it, through the log port.
+    let dir = place
+        .root
+        .join("data/agents")
+        .join(made["agent"]["agent_id"].as_str().unwrap());
+    let event = AgentEvent::TookUp {
+        backend_session: "_legacy".into(),
+        at_ms: 1,
+    };
+    clarp_store_sqlite::SqliteEngine
+        .open(&dir, clarp_codec::standard_set("none").unwrap())
+        .unwrap()
+        .append(&[NewItem::new(
+            kind::AGENT_EVENT,
+            1,
+            serde_json::to_vec(&event).unwrap(),
+        )])
+        .unwrap();
+    let host = place.start_in("", &[], &world);
+    assert_ne!(
+        host.get("/agents/snapshot")["agents"][0]["backend_session_id"],
+        "_legacy"
+    );
+    host.send(session, "a fresh turn", "after-restore");
+    wait_for("the fresh Codex turn finishes", || {
+        host.state(session) == "done"
+    });
+    let handed = std::fs::read_to_string(&args).unwrap();
+    assert_eq!(handed.lines().next(), Some("exec"));
+    assert!(
+        !handed
+            .lines()
+            .any(|arg| matches!(arg, "resume" | "_legacy"))
+    );
+    assert_eq!(host.conversation(session).last().unwrap().1, "Fresh answer");
+    assert_eq!(
+        host.get("/agents/snapshot")["agents"][0]["backend_session_id"],
+        "fresh-id"
+    );
+}
+
+#[test]
 fn an_agent_takes_up_a_session_codex_kept() {
     let place = Place::new("codex-past");
     let started = place.root.join("started");
