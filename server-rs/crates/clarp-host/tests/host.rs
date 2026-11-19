@@ -2062,6 +2062,241 @@ for line in [
     wait_for("the desk's turn to end", || host.state("desk") == "done");
 }
 
+#[test]
+fn a_session_the_owner_names_answers_a_request_in_his_place_in_its_own_turn() {
+    let place = Place::new("on-behalf");
+    // The owner names his front desk in his own file.
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[agents]\ndecision_on_behalf_sessions = [\" desk \", \"\"]\n",
+    )
+    .unwrap();
+    // A stand-in for Claude Code whose turn writes down the token it was given and, told to answer a
+    // request for someone, does so with the agent's own tool, the way the front desk does
+    // (`clarp-agent-artifacts answer-on-behalf`). Then it answers.
+    let (seen, claude) = (place.root.join("seen"), place.root.join("claude"));
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, re, subprocess, sys
+told = sys.stdin.readline()
+record = {{"token": os.environ.get("CLARP_PROVIDER_TURN", "")}}
+asked = re.search(r"ANSWER-ON-BEHALF (\S+) (\S+) (\d+)", told)
+if asked:
+    done = subprocess.run([{tool}, "tool", "clarp-agent-artifacts", "answer-on-behalf", asked.group(1),
+                           asked.group(2), asked.group(3), '{{"choice": "accepted"}}'],
+                          capture_output=True, text=True)
+    record.update(exit=done.returncode, stdout=done.stdout, stderr=done.stderr)
+with open({seen}, "a") as out:
+    out.write(json.dumps(record) + "\n")
+for line in [
+    {{"type": "system", "subtype": "init", "session_id": "stand-in", "model": "stand-in"}},
+    {{"type": "assistant", "session_id": "stand-in", "message": {{"id": "msg_1", "role": "assistant",
+      "model": "stand-in", "content": [{{"type": "text", "text": "on it"}}]}}}},
+    {{"type": "result", "subtype": "success", "is_error": False, "session_id": "stand-in", "result": "on it",
+      "num_turns": 1}},
+]:
+    print(json.dumps(line), flush=True)
+"#,
+        tool = serde_json::to_string(env!("CARGO_BIN_EXE_clarp-host")).unwrap(),
+        seen = serde_json::to_string(seen.to_str().unwrap()).unwrap(),
+    );
+    program(&claude, &script);
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &args, &world);
+    let vera = host.new_agent("Vera");
+    for (name, session) in [("Desk", "desk"), ("Omar", "omar")] {
+        let made = host.post(
+            "/agents",
+            json!({ "name": name, "session": session, "backend": "claude" }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+    }
+    let records = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&seen).unwrap_or_default();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+    let mut sent = 0;
+    // A turn of an agent, told what to answer; what its turn wrote down.
+    let mut turn = |session: &str, text: &str| -> Value {
+        sent += 1;
+        let before = records().len();
+        host.send(session, text, &format!("t-{sent}"));
+        wait_for("the turn to write down what it did", || {
+            records().len() > before
+        });
+        records()[before].clone()
+    };
+    let ask = |question: &str| -> (String, String) {
+        let ask = json!({ "session": vera, "title": "Deploy?", "question": question });
+        let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+        assert_eq!(status, 201, "{asked}");
+        let artifact = &asked["artifact"];
+        let id = artifact["decision"]["decision_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        (id, artifact["artifact_id"].as_str().unwrap().to_string())
+    };
+    let resolved_by = |artifact_id: &str| {
+        host.get(&format!("/artifacts/{artifact_id}"))["artifact"]["decision"]["resolved_by"]
+            .clone()
+    };
+    let resolve = |id: &str, token: Option<&str>, body: Value| -> (u16, String) {
+        let headers: Vec<(&str, &str)> = token
+            .into_iter()
+            .map(|token| ("X-Clarp-Turn", token))
+            .collect();
+        let body = body.to_string();
+        let path = format!("/decisions/{id}/resolve");
+        let answered = fetch(&host, &host.token, "POST", &path, &headers, body.as_bytes());
+        (answered.status, answered.text())
+    };
+    let (first, first_artifact) = ask("Deploy version 1.3?");
+
+    // Over HTTP, with no turn: the front desk is named, but nothing shows that its turn asks.
+    let for_desk =
+        json!({ "choice": "accepted", "expected_revision": 1, "on_behalf_session": "desk" });
+    let (status, why) = resolve(&first, None, for_desk.clone());
+    assert_eq!(status, 403, "{why}");
+    assert!(
+        why.contains("on-behalf answer requires the designated agent's verified turn identity"),
+        "{why}"
+    );
+    // A token this Host did not give names nobody, and is refused as such.
+    let (status, why) = resolve(&first, Some("0123456789abcdef01234567"), for_desk.clone());
+    assert_eq!(status, 403, "{why}");
+    assert!(why.contains("verified turn identity required"), "{why}");
+    let (status, why) = resolve(
+        &first,
+        Some("not a token"),
+        json!({ "choice": "accepted", "expected_revision": 1 }),
+    );
+    assert_eq!(status, 403, "{why}");
+    assert!(why.contains("verified turn identity required"), "{why}");
+
+    // Omar's turn answers for the front desk: its token is Omar's, not the desk's.
+    let omar = turn("omar", &format!("ANSWER-ON-BEHALF desk {first} 1"));
+    assert_eq!(omar["exit"], 1, "{omar}");
+    let stderr = omar["stderr"].as_str().unwrap();
+    assert!(stderr.contains("HTTP Error 403"), "{stderr}");
+    assert!(
+        stderr.contains("on-behalf answer requires the designated agent's verified turn identity"),
+        "{stderr}"
+    );
+    // And for itself: the owner did not name Omar.
+    let again = turn("omar", &format!("ANSWER-ON-BEHALF omar {first} 1"));
+    let stderr = again["stderr"].as_str().unwrap();
+    assert!(
+        stderr.contains("session is not designated to answer on the user's behalf"),
+        "{stderr}"
+    );
+    // Nobody has answered it.
+    assert_eq!(resolved_by(&first_artifact), "");
+
+    // The front desk answers, in its own turn: the request is answered, by the desk.
+    let desk = turn("desk", &format!("ANSWER-ON-BEHALF desk {first} 1"));
+    assert_eq!(desk["exit"], 0, "{desk}");
+    let answered: Value = serde_json::from_str(desk["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        answered["decision"]["resolved_by"], "agent:desk",
+        "{answered}"
+    );
+    assert_eq!(answered["decision"]["status"], "accepted", "{answered}");
+    assert_eq!(resolved_by(&first_artifact), "agent:desk");
+    // Every turn was given a token of its own.
+    let tokens: Vec<String> = records()
+        .iter()
+        .map(|record| record["token"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tokens.len(), 3);
+    assert!(tokens[0] != tokens[1] && tokens[1] != tokens[2] && tokens[0] != tokens[2]);
+    let desk_token = tokens[2].clone();
+
+    // The desk's token after its turn, as a worker it left behind presents it: an agent never
+    // answers as the user, and answers for the desk.
+    let (second, second_artifact) = ask("Deploy version 1.4?");
+    let (status, why) = resolve(
+        &second,
+        Some(&desk_token),
+        json!({ "choice": "rejected", "expected_revision": 1 }),
+    );
+    assert_eq!(status, 403, "{why}");
+    assert!(
+        why.contains("agent resolution requires on_behalf_session"),
+        "{why}"
+    );
+    let (status, why) = resolve(
+        &second,
+        omar["token"].as_str(),
+        json!({
+            "choice": "rejected", "expected_revision": 1, "on_behalf_session": "desk",
+        }),
+    );
+    assert_eq!(status, 403, "{why}");
+    let (status, answered) = resolve(
+        &second,
+        Some(&desk_token),
+        json!({
+            "choice": "rejected", "expected_revision": 1, "on_behalf_session": "desk",
+        }),
+    );
+    assert_eq!(status, 200, "{answered}");
+    assert_eq!(resolved_by(&second_artifact), "agent:desk");
+    // The desk never answers a request it asked itself, though the owner named it.
+    let own = json!({ "session": "desk", "title": "Mine?", "question": "Shall I?" });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&own));
+    assert_eq!(status, 201, "{asked}");
+    let own = asked["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, why) = resolve(
+        &own,
+        Some(&desk_token),
+        json!({
+            "choice": "accepted", "expected_revision": 1, "on_behalf_session": "desk",
+        }),
+    );
+    assert_eq!(status, 403, "{why}");
+    assert!(
+        why.contains("the asking agent may not answer its own request"),
+        "{why}"
+    );
+
+    // A Host started again still knows whose turn the token was.
+    drop(host);
+    let host = place.start_in("", &args, &world);
+    let ask = json!({ "session": vera, "title": "Deploy?", "question": "Deploy version 1.5?" });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 201, "{asked}");
+    let third = asked["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let body = json!({ "choice": "accepted", "expected_revision": 1, "on_behalf_session": "desk" })
+        .to_string();
+    let path = format!("/decisions/{third}/resolve");
+    let answered = fetch(
+        &host,
+        &host.token,
+        "POST",
+        &path,
+        &[("X-Clarp-Turn", &desk_token)],
+        body.as_bytes(),
+    );
+    assert_eq!(answered.status, 200, "{}", answered.text());
+    let answered: Value = serde_json::from_slice(&answered.body).unwrap();
+    assert_eq!(
+        answered["artifact"]["decision"]["resolved_by"], "agent:desk",
+        "{answered}"
+    );
+}
+
 fn now_ms() -> i64 {
     let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
     i64::try_from(since.unwrap().as_millis()).unwrap()

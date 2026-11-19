@@ -658,7 +658,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         }
         ("answer-on-behalf", _) => {
             let names = ["session", "decision_id", "expected_revision", "body_json"];
-            parse(rest, &[], &[], &names).and_then(|parsed| {
+            let asked = parse(rest, &[], &[], &names).and_then(|parsed| {
                 let revision: i64 = parsed.positional[2].trim().parse().map_err(|_| {
                     let given = &parsed.positional[2];
                     format!("argument expected_revision: invalid int value: '{given}'")
@@ -672,12 +672,30 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 if revision < 1 {
                     return Err("expected_revision must be positive".to_string());
                 }
-                Err(
-                    "this Host does not support answering on the user's behalf; relay the \
-                     answer and let the asking agent withdraw its card instead"
-                        .to_string(),
-                )
-            })
+                let mut sent = Map::new();
+                for key in ["choice", "answer"] {
+                    if let Some(given) = body.get(key) {
+                        sent.insert(key.to_string(), given.clone());
+                    }
+                }
+                sent.insert("expected_revision".to_string(), json!(revision));
+                let session = parsed.positional[0].clone();
+                sent.insert("on_behalf_session".to_string(), json!(session));
+                Ok((parsed.positional[1].clone(), sent))
+            });
+            match asked {
+                Err(why) => Err(why),
+                // Answered in the turn's own name: the token its Host gave it, as the Python
+                // Host's tool sends it (`X-Clarp-Turn`).
+                Ok((decision_id, sent)) => {
+                    let turn = call.env.get(crate::turn_identity::TURN_ENV);
+                    let rest = format!("{decision_id}/resolve");
+                    match library::decide(app, &rest, turn.map(String::as_str), &sent).await {
+                        Ok(done) => Ok(done["artifact"].clone()),
+                        Err(error) => Err(refusal(&error)),
+                    }
+                }
+            }
         }
         ("update", 2..=3) => {
             let payload = match rest.get(2) {

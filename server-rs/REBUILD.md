@@ -2029,6 +2029,18 @@ given and a store that cannot be read (`tests/turn_identity_vectors.rs`); how a 
 /decisions/<id>/resolve`): an agent's turn never answers as the user. The goals' door (`plans.rs`) still refuses a
 turn's header, for a later piece. The wrong rules are `tools/plants/turn-identity.py`.
 
+**A request answered in the owner's place** (19 Nov 2026; Host feature `decision_on_behalf`, 79). The owner names
+the sessions that may answer his requests for him in his own file, `[agents] decision_on_behalf_sessions` (the
+file `--speech-keys` names), read as the Python Host's `config.load` reads it: a list of texts, blanks trimmed,
+empty ones and repeats left out. `POST /decisions/<id>/resolve` with `on_behalf_session` hands the kernel's rule
+that list and the session of the turn that asks, known by its token (above): a session the owner did not name, a
+turn of another session, a request without a turn, and the asker answering its own request are refused 403 in the
+Python Host's words, and the answer is recorded as `agent:<session>`. The janitors and the agents put away count
+among the agents whose session may answer, as there. The agents' tool `clarp-agent-artifacts answer-on-behalf`
+answers so with the token of the turn it is called in. Held by the Python Host's `artifacts.resolve` over every
+refusal and two answers (the last scenario of `artifact-vectors.json`) and its `config.load` over nine owner's
+files (`decision-on-behalf-vectors.json`); the wrong rules are `tools/plants/decision-on-behalf.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

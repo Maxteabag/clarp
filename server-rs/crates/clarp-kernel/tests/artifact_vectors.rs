@@ -538,6 +538,24 @@ impl Fleet {
                 self.expire(now);
                 let id = text(args, "decision_id");
                 let sessions: Vec<String> = self.agents.iter().map(|a| a.session.clone()).collect();
+                // Who answers in the user's place, as the Python Host's `resolve` is told: the
+                // sessions the owner names (what is no text among them passed over), and the
+                // session of the turn that asks.
+                let designated: Vec<String> = args["designated_sessions"]
+                    .as_array()
+                    .map(|listed| {
+                        listed
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let by = OnBehalf {
+                    session: args["on_behalf_session"].as_str(),
+                    designated: &designated,
+                    verified: args["verified_session"].as_str().unwrap_or_default(),
+                };
                 self.change(self.asked(&id), "decision not found", now, |book| {
                     let given = Given {
                         expected_revision: expected,
@@ -545,7 +563,7 @@ impl Fleet {
                         answer: args.get("answer"),
                     };
                     let known = |session: &str| sessions.iter().any(|known| known == session);
-                    book.resolve(&id, &given, &OnBehalf::default(), &known, now)
+                    book.resolve(&id, &given, &by, &known, now)
                 })
             }
             "dismiss" => {

@@ -75,6 +75,12 @@ pub enum Want {
         choice: Option<Value>,
         answer: Option<Value>,
         on_behalf_session: Option<String>,
+        /// The sessions the owner lets answer in his place.
+        designated: Vec<String>,
+        /// The session of the turn that asks, where it is one; empty otherwise.
+        verified: String,
+        /// An agent has the session that answers in the user's place.
+        known: bool,
     },
     Dismiss {
         decision_id: String,
@@ -287,18 +293,21 @@ pub fn carry_out(
                 choice,
                 answer,
                 on_behalf_session,
+                designated,
+                verified,
+                known,
             } => {
                 let given = Given {
                     expected_revision: *expected_revision,
                     choice: choice.as_ref(),
                     answer: answer.as_ref(),
                 };
-                // Nobody is designated to answer for the user on this Host yet.
                 let by = OnBehalf {
                     session: on_behalf_session.as_deref(),
-                    ..OnBehalf::default()
+                    designated,
+                    verified,
                 };
-                changed(book.resolve(decision_id, &given, &by, &|_| false, now))
+                changed(book.resolve(decision_id, &given, &by, &|_| *known, now))
             }
             Want::Dismiss {
                 decision_id,
@@ -1239,6 +1248,25 @@ pub(crate) async fn decide(
                 let why = "agent resolution requires on_behalf_session";
                 return Err(refused(StatusCode::FORBIDDEN, why));
             }
+            // In the user's place: those the owner names, the session of the turn that asks, and
+            // whether an agent has the session that answers (every agent counts, the janitors
+            // and those put away too, as on the Python Host).
+            let (designated, verified, known) = match &on_behalf_session {
+                None => (Vec::new(), String::new(), false),
+                Some(acting) => {
+                    let owners = crate::owner::OwnerFile::new(app.config.speech_keys.clone());
+                    let designated = owners.read().as_ref().map(crate::owner::on_behalf_sessions);
+                    let verified = caller.as_ref().map(|member| member.record.session.clone());
+                    let directory = app.fleet.directory();
+                    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+                    let known = everyone.any(|member| member.record.session == acting.trim());
+                    (
+                        designated.unwrap_or_default(),
+                        verified.unwrap_or_default(),
+                        known,
+                    )
+                }
+            };
             Want::Resolve {
                 expected_revision: decisions::integer(&expected, "expected_revision", 1)
                     .map_err(conflict)?,
@@ -1246,6 +1274,9 @@ pub(crate) async fn decide(
                 choice,
                 answer: answer.cloned(),
                 on_behalf_session,
+                designated,
+                verified,
+                known,
             }
         }
         "dismiss" => {
