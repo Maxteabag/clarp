@@ -217,6 +217,18 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("tool_explanation_sources", 10),
     ("tool_explanation_stats", 20),
     ("tool_explanation_setting", 43),
+    // How speech in is set from an app (`/transcription-providers`): the Host's language,
+    // an agent's own language or set of up to three, an agent's own engines in the order
+    // they are tried, Google's Chirp 3 among them; and the chat a recording is for, the one
+    // its client names (`X-Transcription-Session`), else the one it last opened. Another
+    // engine for long recordings is not built here (docs/differences.md).
+    ("transcription_language", 31),
+    ("transcription_agent_language", 32),
+    ("transcription_agent_language_set", 53),
+    ("transcription_session_header", 33),
+    ("transcription_agent_engine", 34),
+    ("transcription_agent_engine_fallback", 37),
+    ("transcription_google_chirp", 35),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
@@ -662,6 +674,62 @@ pub enum Principal {
     },
     /// One of an agent's own tools, with the token its turn was given, from this machine.
     Tools,
+}
+
+/// Who a request comes from, as the chat a client last opened is kept under: a device by
+/// its id, the administrator by that word on a Host that has a token; nobody else (the
+/// Python Host's `_request_principal`).
+pub(crate) fn principal_name(app: &App, principal: &Principal) -> String {
+    match principal {
+        Principal::Administrator if !app.config.auth_token.is_empty() => "administrator".into(),
+        Principal::Device { device_id, .. } => device_id.clone(),
+        _ => String::new(),
+    }
+}
+
+/// The kind of record the chat each client last opened is kept as: the Host's own note
+/// about one client, read by that client's next recording and by nothing else. No setting:
+/// it is published to nobody.
+pub(crate) const OPENED: &str = "client-chat";
+
+/// Keeps the chat a client opened, for the recordings it makes (`clarp_kernel::heard`
+/// `client_chat`), under the digest of who it is. What cannot be kept loses nothing but
+/// this, and is said.
+pub(crate) async fn opened_by(app: &App, principal: &Principal, session: &str) {
+    let who = principal_name(app, principal);
+    if who.is_empty() || session.is_empty() {
+        return;
+    }
+    let kept = clarp_kernel::heard::client_chat_kept(session, app.clock.now_ms());
+    let key = clarp_kernel::heard::client_chat_key(&who);
+    if let Err(why) = app.fleet.keep(OPENED, key, Some(kept.into_bytes())).await {
+        eprintln!(
+            "clarp-host: the chat a client opened could not be kept: {}",
+            why.0
+        );
+    }
+}
+
+/// The chat a client last opened, as it was kept: nothing where it opened none, or where
+/// what was kept cannot be read (and that is said).
+pub(crate) async fn last_opened(app: &App, who: &str) -> String {
+    if who.is_empty() {
+        return String::new();
+    }
+    let key = clarp_kernel::heard::client_chat_key(who);
+    match app.fleet.kept(OPENED, key).await {
+        Ok(kept) => {
+            let text = kept.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
+            clarp_kernel::heard::client_chat(text.as_deref(), app.clock.now_ms())
+        }
+        Err(why) => {
+            eprintln!(
+                "clarp-host: the chat a client opened could not be read: {}",
+                why.0
+            );
+            String::new()
+        }
+    }
 }
 
 /// The only route a caller without a token may use: a device that has a code has no token yet.
@@ -2234,10 +2302,13 @@ async fn stop(
 
 async fn select(
     State(app): State<App>,
+    Extension(principal): Extension<Principal>,
     Json(request): Json<SessionRequest>,
 ) -> Result<Json<SelectResponse>, ApiError> {
     match app.fleet.select(request.session.clone()).await? {
         Some(record) => {
+            // The chat this client opened, for what it records next.
+            opened_by(&app, &principal, request.session.trim()).await;
             // The user turned to this agent: what the herald held of it is played.
             app.mouth.opened(&record.session).await;
             Ok(Json(SelectResponse {

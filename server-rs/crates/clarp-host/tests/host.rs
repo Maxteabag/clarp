@@ -17047,6 +17047,81 @@ fn answers(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mu
 }
 
 #[test]
+fn a_recording_is_for_the_chat_its_phone_names_else_the_one_it_last_opened() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("speech-own-chat");
+    // A stand-in for ElevenLabs that hears every clip the same and keeps what it was asked.
+    let heard = json!({ "text": "Hei.", "language_code": "no" }).to_string();
+    let (eleven, to_eleven) = answers(vec![("/", "200 OK", heard)]);
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[elevenlabs]\napi_key = \"key-in-the-owners-file\"\n",
+    )
+    .unwrap();
+    let eleven_at = format!("{eleven}/v1/speech-to-text");
+    let world = [
+        ("CLARP_SCRIBE_ENDPOINT", eleven_at.as_str()),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let host = place.start_in(ADMIN, &["--speech-keys", owners.to_str().unwrap()], &world);
+    let (koko, echo) = (host.new_agent("Koko"), host.new_agent("Echo"));
+    // Koko is spoken to in Norwegian, everyone else in the Host's English.
+    let (status, told) = host.ask(
+        "POST",
+        "/transcription-providers",
+        Some(&json!({ "engine": "elevenlabs:scribe_v2", "agent_languages": { "Koko": "no" } })),
+    );
+    assert_eq!(status, 200, "{told}");
+    let (phone, _) = pair(&host, "A phone", "full");
+    let select = |token: &str, session: &str| {
+        let (status, said) = host.ask_as(
+            token,
+            "POST",
+            "/select",
+            Some(&json!({ "session": session })),
+        );
+        assert_eq!(status, 200, "{said}");
+    };
+    let language = |token: &str, named: Option<&str>| -> String {
+        let mut headers = vec![("Content-Type", "audio/mp4")];
+        if let Some(named) = named {
+            headers.push(("X-Transcription-Session", named));
+        }
+        let answer = fetch(
+            &host,
+            token,
+            "POST",
+            "/transcribe",
+            &headers,
+            b"made-up sound",
+        );
+        assert_eq!(answer.status, 200, "{}", answer.text());
+        let asked = to_eleven.lock().unwrap().last().cloned().unwrap();
+        let field = "name=\"language_code\"\r\n\r\n";
+        let at = asked.find(field).map(|at| at + field.len()).unwrap();
+        asked[at..].split("\r\n").next().unwrap().to_string()
+    };
+    // The phone opens Koko; then the desk opens Echo, and the focus every client shares is
+    // Echo's. What the phone records without naming a chat is still for Koko.
+    select(&phone, &koko);
+    select(ADMIN, &echo);
+    assert_eq!(language(&phone, None), "no");
+    // What a client names is what it records for; a name the Host has not is passed over.
+    assert_eq!(language(&phone, Some(&echo)), "en");
+    let padded = format!(" {koko} ");
+    assert_eq!(language(&phone, Some(&padded)), "no");
+    assert_eq!(language(&phone, Some("nobody-here")), "no");
+    // The desk records for what it opened, whatever the phone opened since (the shared
+    // focus is Koko's again), and a focus from an app (`/focus`) is kept too.
+    select(&phone, &koko);
+    assert_eq!(language(ADMIN, None), "en");
+    let (status, _) = host.ask_as(&phone, "POST", "/focus", Some(&json!({ "session": echo })));
+    assert_eq!(status, 200);
+    assert_eq!(language(&phone, None), "en");
+}
+
+#[test]
 fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_when_the_first_fails()
 {
     let place = Place::new("speech-own-engines");

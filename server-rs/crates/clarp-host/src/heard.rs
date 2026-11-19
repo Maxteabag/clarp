@@ -423,6 +423,9 @@ async fn transcribe(State(app): State<App>, request: Request) -> Response {
     }
 }
 
+/// The chat a client says a recording is for.
+const NAMED_CHAT: &str = "x-transcription-session";
+
 async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let (parts, body) = request.into_parts();
     let headers = &parts.headers;
@@ -516,16 +519,39 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let trace = ids::hex(8);
     let began = std::time::Instant::now();
     let directory = app.fleet.directory();
+    // The chat a recording is for: the one the client names, else the one it last opened,
+    // else the focus every client shares (`clarp_kernel::heard::transcription_session`). A
+    // call's clip is its call's; what a client opened is read only for a clip that names no
+    // chat the Host has.
+    let known = |name: &str| directory.named(name).is_some();
+    let target = if scope.is_some() {
+        String::new()
+    } else {
+        let named = header_text(headers, NAMED_CHAT);
+        match heard::transcription_session(&named, "", known) {
+            none if none.is_empty() => {
+                let who = parts
+                    .extensions
+                    .get::<crate::edge::Principal>()
+                    .map(|principal| crate::edge::principal_name(app, principal))
+                    .unwrap_or_default();
+                let last = crate::edge::last_opened(app, &who).await;
+                heard::transcription_session("", &last, known)
+            }
+            named => named,
+        }
+    };
+    let recorded_for = match target.as_str() {
+        "" => directory
+            .focus
+            .as_deref()
+            .and_then(|id| directory.named(id)),
+        target => directory.named(target),
+    };
     let session = scope
         .as_ref()
         .map(|s| s.session.as_str())
-        .or_else(|| {
-            directory
-                .focus
-                .as_deref()
-                .and_then(|id| directory.named(id))
-                .map(|m| m.record.session.as_str())
-        })
+        .or_else(|| recorded_for.map(|m| m.record.session.as_str()))
         .unwrap_or("");
     let (said, report, run_id) = if scope.is_some() {
         let (said, report, id) = call::hear(
@@ -539,7 +565,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         .await?;
         (said, Some(report), id)
     } else {
-        let (own, language) = spoken_to(&directory, &ears.language);
+        let (own, language) = spoken_to(&directory, recorded_for, &ears.language);
         let order = ears.order(&requested, &own, &ears.default_engine(&directory));
         let selected = order.first().map_or(requested.as_str(), String::as_str);
         let (audit, id) =
@@ -719,11 +745,11 @@ fn cloud_models(ears: &Ears) -> Vec<Value> {
 /// at. Its own engines, in the order they are tried (none: it is heard like every agent),
 /// and its own language, else the Host's: what the owner set from an app, else what the
 /// Host was started with.
-fn spoken_to(directory: &Directory, started_with: &str) -> (Vec<String>, String) {
-    let looked_at = directory.focus.as_deref().and_then(|agent_id| {
-        let mut members = directory.members.iter();
-        members.find(|member| member.record.agent_id == agent_id)
-    });
+fn spoken_to(
+    directory: &Directory,
+    looked_at: Option<&Arc<crate::fleet::Member>>,
+    started_with: &str,
+) -> (Vec<String>, String) {
     let who = looked_at.map(|member| Who {
         name: &member.record.persona,
         persona: &member.record.persona,
