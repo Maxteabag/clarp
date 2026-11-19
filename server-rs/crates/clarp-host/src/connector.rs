@@ -404,7 +404,7 @@ pub fn run(app: &App, router: Router) {
                     session += 1;
                     let up_since = Instant::now();
                     connector.is("connected");
-                    capture.mark("relay", true, clock.now_ms());
+                    capture.mark(crate::diagnostics::Subsystem::Relay, true, clock.now_ms());
                     capture.emit(
                         "network",
                         clock.now_ms(),
@@ -418,7 +418,7 @@ pub fn run(app: &App, router: Router) {
                 Ok(Err(error)) => (Lost::dial(&error), None, (0, 0)),
                 Err(_) => (Lost::of_kind("TimeoutError"), None, (0, 0)),
             };
-            capture.mark("relay", false, clock.now_ms());
+            capture.mark(crate::diagnostics::Subsystem::Relay, false, clock.now_ms());
             capture.emit("network",clock.now_ms(),||json!({"kind":"relay_lost","connected":up.is_some(),"http_count":torn.0,"socket_count":torn.1}));
             without_since = Instant::now();
             connector.lost(&lost, up, torn);

@@ -132,6 +132,7 @@ pub(super) async fn hear(
             .ears
             .heard_by(model, lang, listen_for, clip, &mut handed)
             .await;
+        app.capture.transcription(app.clock.now_ms(),result.is_ok(),clip.0.len(),Some(began));
         let elapsed = began.elapsed().as_millis() as u64;
         match result {
             Ok(said) => {

@@ -707,7 +707,7 @@ async fn hear_chat(
 ) -> Result<Heard, Told> {
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
-        let started = std::time::Instant::now();
+        let started=app.capture.settings().allows("transcript").then(std::time::Instant::now);
         let heard = ears
             .heard_by(
                 model,
@@ -718,8 +718,7 @@ async fn hear_chat(
             )
             .await;
         let at = app.clock.now_ms();
-        app.capture.mark("stt", heard.is_ok(), at);
-        app.capture.emit("transcript",at,||json!({"kind":"transcription","size":audio.len(),"duration_ms":started.elapsed().as_millis(),"ok":heard.is_ok()}));
+        app.capture.transcription(at,heard.is_ok(),audio.len(),started);
         match heard {
             Ok(heard) => {
                 said = Some(heard);

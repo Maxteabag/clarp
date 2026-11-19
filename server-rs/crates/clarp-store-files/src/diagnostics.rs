@@ -74,6 +74,26 @@ impl DiagnosticStore for HourFiles {
     }
 }
 
+impl clarp_ports::diagnostics::DiagnosticUsage for HourFiles {
+    fn usage(&self) -> io::Result<(usize, u64)> {
+        let items = match fs::read_dir(&self.directory) {
+            Ok(items) => items,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((0, 0)),
+            Err(e) => return Err(e),
+        };
+        let mut n = 0;
+        let mut bytes = 0;
+        for item in items {
+            let item = item?;
+            if item.file_type()?.is_file() {
+                n += 1;
+                bytes += item.metadata()?.len();
+            }
+        }
+        Ok((n, bytes))
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -87,9 +107,10 @@ mod tests {
         let mut store = HourFiles::new(path.clone(), 10);
         assert_eq!(store.append(clock.now_ms(), &[]).unwrap(), 0);
         assert!(!path.exists());
-        let records = vec![(0, b"1234".to_vec()); 100];
+        assert_eq!(store.append(0,&[(0,b"1234".to_vec())]).unwrap(),0);
+        let records = vec![(0, b"5678".to_vec()); 99];
         assert_eq!(store.append(0, &records).unwrap(), 98);
-        assert_eq!(fs::read(path.join("0.jsonl")).unwrap(), b"1234\n1234\n");
+        assert_eq!(fs::read(path.join("0.jsonl")).unwrap(), b"1234\n5678\n");
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o700
@@ -120,25 +141,5 @@ mod tests {
             1
         );
         fs::remove_dir_all(path).unwrap();
-    }
-}
-
-impl clarp_ports::diagnostics::DiagnosticUsage for HourFiles {
-    fn usage(&self) -> io::Result<(usize, u64)> {
-        let items = match fs::read_dir(&self.directory) {
-            Ok(items) => items,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((0, 0)),
-            Err(e) => return Err(e),
-        };
-        let mut n = 0;
-        let mut bytes = 0;
-        for item in items {
-            let item = item?;
-            if item.file_type()?.is_file() {
-                n += 1;
-                bytes += item.metadata()?.len();
-            }
-        }
-        Ok((n, bytes))
     }
 }
