@@ -44,7 +44,7 @@ fn replay_and_late_evidence_match_the_state_and_event_of_each_write() {
             let request = &step[0];
             let now = request["now"].as_i64().unwrap();
             let changed = match request["op"].as_str().unwrap() {
-                "action" => native::observe(&mut job, SESSION, NOW - 1, &request["action"], now),
+                "action" => serde_json::from_value(request["action"].clone()).ok().is_some_and(|evidence|native::observe(&mut job, SESSION, NOW - 1, &evidence, now)),
                 "exit" => job.as_mut().is_some_and(|t| t.close_turn(TURN, now)),
                 "expire" => job
                     .as_mut()
