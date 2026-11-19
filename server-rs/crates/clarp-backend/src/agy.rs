@@ -233,7 +233,7 @@ impl Backend for Agy {
             .iter()
             .map(|arg| (*arg).to_string())
             .collect();
-        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.is_empty());
         match (given(&question.model), given(&question.effort)) {
             (Some(model), _) => {
                 args.push("--model".to_string());

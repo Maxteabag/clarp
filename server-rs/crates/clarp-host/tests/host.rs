@@ -11359,6 +11359,187 @@ else:
 }
 
 #[test]
+fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
+    let place = Place::new("router-tools");
+    let (agy, asked) = (place.root.join("agy-routes"), place.root.join("asked"));
+    let quoted = |path: &PathBuf| serde_json::to_string(path.to_str().unwrap()).unwrap();
+    // A stand-in for Antigravity asked one question: it reads the question where agy takes it (the value of
+    // `--print=`), writes down how it was started and in which home, and answers as one JSON object that says
+    // how it ended. Asked of the notes, the message is for Anna; asked of something broken, it ends in error.
+    let script = format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+question = next(arg[len("--print="):] for arg in args if arg.startswith("--print="))
+packet = json.loads(question.split("INPUT:\n", 1)[1])
+home = os.environ.get("HOME", "")
+login = os.path.join(home, ".gemini", "oauth_creds.json")
+shown = {{"args": [arg for arg in args if not arg.startswith("--print=")], "utterance": packet["utterance"],
+         "home": home, "login_linked": os.path.islink(login), "stdin": sys.stdin.read()}}
+with open({asked}, "a") as out:
+    out.write(json.dumps(shown) + "\n")
+print("Warming up...")
+if "broken" in packet["utterance"]:
+    print(json.dumps({{"status": "ERROR", "error": "out of quota"}}))
+else:
+    said = {{"kind": "agent_message", "target_session": "anna", "confidence": 0.95, "addressing": True}}
+    print(json.dumps({{"conversation_id": "c-routes", "status": "SUCCESS", "response": json.dumps(said)}}))
+"#,
+        asked = quoted(&asked),
+    );
+    program(&agy, &script);
+    let gemini = place.root.join(".gemini");
+    std::fs::create_dir_all(&gemini).unwrap();
+    std::fs::write(gemini.join("oauth_creds.json"), "{}").unwrap();
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &world);
+    let (mike, anna) = (host.new_agent("Mike"), host.new_agent("Anna"));
+    let set = |settings: Value| host.ask("POST", "/orchestrator/settings", Some(&settings));
+    let questions = || -> Vec<Value> {
+        let written = std::fs::read_to_string(&asked).unwrap_or_default();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    };
+
+    // The tools it can be set to are the Python Host's, in its order and words (the fixture of its own
+    // `provider_options`), but for the two that are no tool, which this Host does not offer.
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/router-tools-vectors.json"
+    ))
+    .unwrap();
+    let theirs = vectors["providers"].as_array().unwrap().iter();
+    let theirs: Vec<Value> = theirs
+        .filter(|row| row["kind"] == "backend")
+        .cloned()
+        .collect();
+    let screen = host.get("/orchestrator/settings");
+    let ours: Vec<Value> = screen["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let mut row = row.clone();
+            row.as_object_mut().unwrap().remove("installed");
+            row
+        })
+        .collect();
+    assert_eq!(ours, theirs, "{screen}");
+    assert_eq!(ours.len(), 7);
+    let tool = |id: &str| {
+        screen["providers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .cloned()
+    };
+    assert_eq!(tool("agy").unwrap()["installed"], true);
+
+    // Set to what is no tool here, it is refused in words, and stays as it was.
+    for (named, word) in [
+        ("openai", "openai"),
+        ("Jev", "typesafe"),
+        ("gemini", "gemini"),
+    ] {
+        let (status, why) = set(json!({ "provider": named }));
+        let words = why["error"].as_str().unwrap_or_default();
+        assert_eq!(status, 400, "{named}: {why}");
+        assert!(
+            words.starts_with(&format!("unsupported orchestrator provider: {word}")),
+            "{why}"
+        );
+        assert!(!words.contains("codex or claude"), "{why}");
+    }
+    assert_eq!(
+        host.get("/orchestrator/settings")["settings"]["provider"],
+        "codex"
+    );
+
+    // Set to Antigravity by another name it goes by, on for every dictated message; then a model and an
+    // effort for it.
+    let antigravity = json!({ "enabled": true, "fallback_only": false, "provider": "Antigravity" });
+    let (status, on) = set(antigravity);
+    assert_eq!(
+        (status, &on["settings"]["provider"]),
+        (200, &json!("agy")),
+        "{on}"
+    );
+    let (status, chosen) = set(json!({ "model": "gemini-3-flash", "effort": "high" }));
+    assert_eq!(status, 200, "{chosen}");
+    let settings = host.get("/orchestrator/settings")["settings"].clone();
+    assert_eq!(
+        (&settings["provider"], &settings["model"]),
+        (&json!("agy"), &json!("gemini-3-flash"))
+    );
+
+    // A message said to Mike is asked of Antigravity, and given to Anna, as it says.
+    let message = json!({
+        "session": mike, "text": "the notes, please", "hands_free": true, "client_msg_id": "t-1",
+    });
+    let (status, sent) = host.ask("POST", "/send", Some(&message));
+    assert_eq!(
+        (status, &sent["session"], &sent["orchestrator"]["action"]),
+        (200, &json!(anna), &json!("route")),
+        "{sent}"
+    );
+    // Asked twice, as a message for another agent than the one it was said to is: the second time with every
+    // agent in view.
+    let askings = questions();
+    assert_eq!(askings.len(), 2, "{askings:?}");
+    for first in &askings {
+        // Started as the Python Host starts it for one question, but asked for one JSON object that says how
+        // it ended, and with the model alone (a model's name carries its effort); the question is its
+        // `--print=` and nothing is on its standard input.
+        assert_eq!(
+            first["args"],
+            json!([
+                "--dangerously-skip-permissions",
+                "--output-format",
+                "json",
+                "--model",
+                "gemini-3-flash"
+            ])
+        );
+        assert_eq!(
+            (&first["utterance"], &first["stdin"]),
+            (&json!("the notes, please"), &json!(""))
+        );
+        // In a home of its own, where its login is linked, taken away afterwards.
+        let home = PathBuf::from(first["home"].as_str().unwrap());
+        assert_ne!(home, place.root);
+        assert_eq!(first["login_linked"], true);
+        assert!(!home.exists(), "{home:?} is still there");
+    }
+    assert_ne!(
+        askings[0]["home"], askings[1]["home"],
+        "a home for each question"
+    );
+
+    // An answer that says it ended in error is no answer: the message goes on as any other, to the agent
+    // that is open (Anna, who was last given one).
+    let broken = json!({
+        "session": mike, "text": "the broken one", "hands_free": true, "client_msg_id": "t-2",
+    });
+    let (status, sent) = host.ask("POST", "/send", Some(&broken));
+    assert_eq!((status, &sent["session"]), (200, &json!(anna)), "{sent}");
+    assert!(sent.get("orchestrator").is_none(), "{sent}");
+    assert_eq!(questions().len(), 3);
+    let decisions = host.get("/orchestrator/decisions?limit=1");
+    let newest = &decisions["decisions"][0];
+    assert_eq!(
+        (&newest["provider"], &newest["final_action"]),
+        (&json!("agy"), &json!("fallback"))
+    );
+    let error = newest["error"].as_str().unwrap_or_default();
+    assert!(error.contains("out of quota"), "{newest}");
+}
+
+#[test]
 fn an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew() {
     let place = Place::new("started-again");
     let host = place.start();
