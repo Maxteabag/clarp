@@ -46,6 +46,30 @@ pub const OTHER_CONTACT: &str = "Oracle contact changed; start a new conversatio
 pub const NOT_ITS_OWN: &str = "Oracle conversation ownership changed";
 pub const TOO_MUCH: &str = "Oracle checkpoint exceeded its bound";
 pub const STALE: &str = "Stale Oracle connection cannot replace current context";
+/// Why a Host's store did not take what a call was to keep.
+pub const STORE_FAILED: &str = "the store could not take it";
+
+/// What a call does when the talk it was to keep was not kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotKept {
+    /// Its thread is another call's now: the call is over.
+    Ends,
+    /// Too much to keep, or the store failed: the call goes on, and a call that goes on in
+    /// its place reads what was kept last. `say`: what the Host says of it, once a call and
+    /// without what was said.
+    GoesOn { say: Option<String> },
+}
+
+/// What a call does when the talk it was to keep was not kept, for `why` (the words of the
+/// refusal). `said`: that it was said already in this call; it is said once.
+pub fn not_kept(why: &str, said: &mut bool) -> NotKept {
+    if why == STALE {
+        return NotKept::Ends;
+    }
+    let first = !std::mem::replace(said, true);
+    let say = first.then(|| format!("a call of the Oracle could not keep its talk: {why}"));
+    NotKept::GoesOn { say }
+}
 pub const CONFLICT: &str = "A voice request cannot acquire a second conflicting action";
 pub const NOT_THEIR_WORK: &str = "Oracle work ownership mismatch";
 pub const NO_ID: &str = "decision_id is required";
@@ -379,9 +403,20 @@ impl Memory {
     }
 
     /// Keeps the talk of a thread as it is now: by the connection that has the thread, and
-    /// within a bound.
+    /// within its bound.
     pub fn save(&mut self, opened: Opened, state: &Value, now_ms: i64) -> Result<(), &'static str> {
-        if python::canonical(state).len() > STATE_BYTES {
+        self.save_within(opened, state, now_ms, STATE_BYTES)
+    }
+
+    /// [`Self::save`], within `most` bytes.
+    pub fn save_within(
+        &mut self,
+        opened: Opened,
+        state: &Value,
+        now_ms: i64,
+        most: usize,
+    ) -> Result<(), &'static str> {
+        if python::canonical(state).len() > most {
             return Err(TOO_MUCH);
         }
         let has = |thread: &&mut Thread| {
