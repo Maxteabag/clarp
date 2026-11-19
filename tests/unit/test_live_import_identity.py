@@ -1096,3 +1096,24 @@ def test_untraced_reply_can_veto_a_match_but_cannot_take_the_live_id(
     assert live['id'] not in {row['message_id'] for row in rows}
     assert db.conn().execute("SELECT trace_id FROM messages WHERE message_id=?",
                              (live['id'],)).fetchone()[0] == 'turn-1'
+
+
+@pytest.mark.parametrize('configuration', CONFIGURATIONS)
+def test_a_steered_input_whose_row_is_written_after_its_copy_links_by_its_turns_trace(tmp_path, monkeypatch, configuration):
+    """The own turn's row, found by its trace, comes first and is not held to the 2 s bound: an
+    input steered into turn-1 while it runs is copied by the CLI before its row is persisted, as a
+    new Codex session's row is written only when its session binds. The copy still takes that row,
+    so no second copy of the input shows (R89, third part: the strict rule leans on this; the
+    case above, beyond every turn's reach, has no running turn whose trace could be preferred)."""
+    aid, path, now = _opened_case(tmp_path, monkeypatch, configuration)
+    _record(path, 'assistant', 'Working on it.', 200)
+    _record(path, 'user', 'A later steered input', 2000)                    # the CLI's copy first
+    now[0] = BASE + 5000                                                      # its row 3 s later
+    message_store.record_user_message(agent_id=aid, backend_session_id='native-session',
+        client_msg_id='steered-late-row', text='A later steered input', trace_id='turn-1')
+    _record(path, 'assistant', 'Both done.', 6000)
+    now[0] = BASE + 7000
+    _import(aid, path)
+    users = [r for r in message_store.list_messages(agent_id=aid, backend_session_id='native-session')
+             if r['role'] == 'user' and r['text'] == 'A later steered input']
+    assert [r['id'] for r in users] == ['u-steered-late-row']

@@ -576,7 +576,7 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
             return False
         return not (sent[index] and ended_before is not None and ended_before(sent[index]))
     free = [index for index in range(len(rows)) if could_be(index)]
-    if trace and began is not None:
+    if began is not None:           # running_at gives no begin when no turn was running
         for index in free:
             sent_at = iso_ms(rows[index][3])
             if sent_at is not None and sent_at > began:
