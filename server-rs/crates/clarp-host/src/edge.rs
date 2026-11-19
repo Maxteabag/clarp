@@ -2517,19 +2517,29 @@ async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<To
 }
 
 /// Every job the Host knows that is worth showing, with the agent it belongs to.
-fn shown_jobs(app: &App) -> Vec<(Arc<Member>, Job)> {
+async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job)>, ApiError> {
     let directory = app.fleet.directory();
-    let mut jobs: Vec<(Arc<Member>, Job)> = directory
+    let mut jobs: Vec<(Option<Arc<Member>>, Job)> = directory
         .members
         .iter()
         .flat_map(|member| {
             let view = member.agent.view();
             view.jobs
                 .iter()
-                .map(|job| (member.clone(), job.clone()))
+                .map(|job| (Some(member.clone()), job.clone()))
                 .collect::<Vec<_>>()
         })
         .collect();
+    jobs.extend(
+        app.fleet
+            .computer_jobs()
+            .await?
+            .into_iter()
+            .filter(|job| {
+                job.status.is_active() || job.updated_at_ms >= now - crate::agent::JOB_SHOWN_FOR_MS
+            })
+            .map(|job| (None, job)),
+    );
     // What runs first, then what ended; within each, the last changed first.
     jobs.sort_by_key(|(_, job)| {
         (
@@ -2537,25 +2547,32 @@ fn shown_jobs(app: &App) -> Vec<(Arc<Member>, Job)> {
             std::cmp::Reverse(job.updated_at_ms),
         )
     });
-    jobs
+    Ok(jobs)
 }
 
 /// `GET /background-jobs`: what runs, and what ended within a day.
-async fn background_jobs(State(app): State<App>) -> Json<Value> {
+async fn background_jobs(State(app): State<App>) -> Result<Json<Value>, ApiError> {
     let now = app.clock.now_ms();
-    let jobs = shown_jobs(&app);
+    let jobs = shown_jobs(&app, now).await?;
     let (active, ended): (Vec<_>, Vec<_>) =
         jobs.iter().partition(|(_, job)| job.status.is_active());
     let listed: Vec<Value> = active
         .iter()
         .chain(ended.iter().take(100))
-        .map(|(member, job)| wire::job(&member.record, job, now))
+        .map(|(member, job)| project_job(member.as_deref(), &app.server_id, job, now))
         .collect();
-    Json(json!({
+    Ok(Json(json!({
         "jobs": listed,
         "snapshot_revision": app.revisions.latest(),
         "observed_at": now,
-    }))
+    })))
+}
+
+fn project_job(member: Option<&Member>, computer_id: &str, job: &Job, now: i64) -> Value {
+    match member {
+        Some(member) => wire::job(&member.record, job, now),
+        None => wire::computer_job(computer_id, job, now),
+    }
 }
 
 /// The agent a job belongs to, with the job as it stands.
@@ -2585,11 +2602,16 @@ async fn background_job(
     Path(job_id): Path<String>,
     Extension(principal): Extension<Principal>,
 ) -> Result<Json<Value>, ApiError> {
-    let Some((member, job)) = job_and_owner(&app, &job_id).await? else {
+    let (member, job, timeline) = if let Some((member, job)) = job_and_owner(&app, &job_id).await? {
+        let timeline = member.agent.job_timeline(job.id.clone(), 200).await?;
+        (Some(member), job, timeline)
+    } else if let Some(row) = app.fleet.computer_job(job_id).await? {
+        (None, row.job, row.timeline)
+    } else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
     };
     let now = app.clock.now_ms();
-    let timeline = member.agent.job_timeline(job.id.clone(), 200).await?;
+    let owner = member.as_ref().map(|m| &m.record);
     // A log may hold anything its worker printed: a device with limited scope is shown the
     // timeline and the progress, not the file.
     let limited = matches!(
@@ -2602,15 +2624,15 @@ async fn background_job(
     let log = if limited {
         joblog::forbidden()
     } else {
-        let roots = joblog::roots(&job.worker_cwd, &member.record.cwd);
+        let roots = joblog::roots(&job.worker_cwd, owner.map_or("", |r| &r.cwd));
         joblog::tail(&job.log_path, &roots, joblog::TAIL_BYTES)
     };
     Ok(Json(json!({
-        "job": wire::job(&member.record, &job, now),
+        "job": project_job(member.as_deref(), &app.server_id, &job, now),
         "handle": job.handle(),
         "is_process": true,
-        "owner_session": member.record.session,
-        "owner_agent_id": member.record.agent_id,
+        "owner_session": owner.map_or("", |r| r.session.as_str()),
+        "owner_agent_id": owner.map_or("", |r| r.agent_id.as_str()),
         "started_trace_id": job.started_trace_id,
         "helper_session": "",
         "progress": { "text": job.progress_text, "at": job.progress_at_ms },
@@ -2667,19 +2689,20 @@ async fn cancel_background_job(
         let refused = json!({ "ok": false, "error": "invalid expected_generation" });
         return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
     };
-    let Some((member, _)) = job_and_owner(&app, &job_id).await? else {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
-    };
+    let member = job_and_owner(&app, &job_id).await?.map(|(m, _)| m);
     let command = JobCommand::Cancel {
         id: job_id.clone(),
         expected_generation: expected,
         reason: "user_cancelled".to_string(),
     };
-    let change = member
-        .agent
-        .job(command)
-        .await?
-        .map_err(|refusal| ApiError::new(StatusCode::BAD_REQUEST, refusal.to_string()))?;
+    let change = match &member {
+        Some(member) => member
+            .agent
+            .job(command)
+            .await?
+            .map_err(|refusal| ApiError::new(StatusCode::BAD_REQUEST, refusal.to_string()))?,
+        None => app.fleet.change_computer_job(command).await?,
+    };
     let Some(job) = change.job else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
     };
@@ -2687,7 +2710,7 @@ async fn cancel_background_job(
     let now = app.clock.now_ms();
     let mut receipt = json!({
         "changed": changed,
-        "job": wire::job(&member.record, &job, now),
+        "job": project_job(member.as_deref(), &app.server_id, &job, now),
         "job_handle": job.handle(),
     });
     let conflict = |receipt: &mut Value, error: String| {
@@ -2704,7 +2727,7 @@ async fn cancel_background_job(
         let error = format!("job already {}", job.status.as_str());
         return Ok(conflict(&mut receipt, error));
     }
-    if changed {
+    if changed && let Some(member) = member {
         // The job is closed for its worker from this moment. The owner is told, so that it
         // can clean up what the worker left; nothing depends on that message arriving.
         let worker_pid = match job.worker.pid {
