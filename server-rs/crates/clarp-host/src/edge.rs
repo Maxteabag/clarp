@@ -104,6 +104,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_form_reply_audio", 50),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
+    ("diagnostics", 1),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
     // Calls: the Host's record of who is in a phone's call, on hold and on the floor
@@ -289,6 +290,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 /// Everything a handler can reach.
 #[derive(Clone)]
 pub struct App {
+    pub capture:Arc<crate::diagnostics::Capture>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
@@ -600,6 +602,7 @@ pub fn router(app: App) -> Router {
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .layer(middleware::from_fn(declared_framing))
+        .layer(middleware::from_fn_with_state(app.clone(),crate::diagnostics::request))
         .with_state(app)
 }
 

@@ -90,12 +90,21 @@ pub(crate) const BUILT: [&str; 5] = [
 ];
 
 /// The way to the one that speaks. Telling it never waits.
+type QueueCounts=Arc<Mutex<HashMap<String,(usize,usize)>>>;
 #[derive(Clone)]
 pub struct Speaks {
+    counts:QueueCounts,
     tx: mpsc::UnboundedSender<String>,
 }
 
 impl Speaks {
+    pub(crate) fn counted(&self,agent:&str,lines:&[Line]){
+        use clarp_kernel::spoken::LineState;
+        let n=lines.iter().filter(|l|l.state==LineState::Queued).count();
+        let active=lines.iter().filter(|l|l.state==LineState::Speaking).count();
+        let mut counts=self.counts.lock().unwrap_or_else(PoisonError::into_inner);
+        if n+active==0{counts.remove(agent);}else{counts.insert(agent.into(),(n,active));}
+    }
     /// An agent has something to say, or may have.
     pub fn wake(&self, agent_id: &str) {
         let _ = self.tx.send(agent_id.to_string());
@@ -104,13 +113,15 @@ impl Speaks {
 
 /// Who was told to speak before the one that speaks runs: kept, and spoken once it does.
 pub struct Waiting {
+    counts:QueueCounts,
     rx: mpsc::UnboundedReceiver<String>,
 }
 
 /// The way to the one that speaks, and what waits for it.
 pub fn mouth() -> (Speaks, Waiting) {
     let (tx, rx) = mpsc::unbounded_channel();
-    (Speaks { tx }, Waiting { rx })
+    let counts=QueueCounts::default();
+    (Speaks { tx, counts:counts.clone() }, Waiting { rx,counts })
 }
 
 /// Everything the one that speaks is given.
@@ -167,6 +178,7 @@ const HERALD_FILE: &str = "herald-internal-";
 
 /// The one that speaks, and where its clips are.
 pub struct Mouth {
+    counts:QueueCounts,
     pub bindings_ready: tokio::sync::Notify,
     pub(crate) binding_admission: tokio::sync::RwLock<()>,
     /// Where the owner's choices and keys are read.
@@ -207,6 +219,7 @@ pub struct Mouth {
 const LIST_KEPT: Duration = Duration::from_secs(15 * 60);
 
 impl Mouth {
+    pub(crate) fn queue_counts(&self)->(usize,usize){self.counts.lock().unwrap_or_else(PoisonError::into_inner).values().fold((0,0),|(n,a),(p,f)|(n+p,a+f))}
     /// The owner's file as it is now. Nothing named, or nothing readable: an empty one.
     pub(crate) fn owners(&self) -> Table {
         let mut file = self.owner.read().unwrap_or_default();
@@ -605,6 +618,7 @@ impl Waiting {
     pub fn run(mut self, works: Works) -> Arc<Mouth> {
         let audio = works.config.data_dir.join("audio");
         let mouth = Arc::new(Mouth {
+            counts:self.counts.clone(),
             bindings_ready: Default::default(),
             binding_admission: Default::default(),
             owner: OwnerFile::new(works.config.speech_keys.clone()),
@@ -1093,6 +1107,7 @@ impl Mouth {
             tokio::spawn(self.clone().raise(attempt, member.clone()));
         }
         let sink = growing.clone();
+        let started=std::time::Instant::now();
         let made = tokio::task::spawn_blocking(move || {
             if let Some(why) = unavailable {
                 return (Err(why), 0);
@@ -1129,6 +1144,10 @@ impl Mouth {
             Ok(made) => made,
             Err(_) => (Err("the engine's thread ended".to_string()), 0),
         };
+        if let Some(c)=&self.hub.capture{
+            c.mark("tts_worker",spoke.is_ok(),self.now_ms());
+            c.emit("voice",self.now_ms(),||json!({"kind":"synthesis","bytes":written,"duration_ms":started.elapsed().as_millis(),"ok":spoke.is_ok()}));
+        }
         // Whoever plays the clip as it grows hears at once that it grows no more.
         growing.progress.send_replace(Progress {
             bytes: written,

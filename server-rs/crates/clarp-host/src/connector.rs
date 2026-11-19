@@ -376,6 +376,8 @@ pub fn run(app: &App, router: Router) {
         settings.connect_url_at(&connector.stand_in)
     };
     // A request that came down the socket is handed to the Host as one for its own door.
+    let capture=app.capture.clone();
+    let clock=app.clock.clone();
     let local = format!("127.0.0.1:{}", app.config.listen.port());
     eprintln!(
         "clarp-host: the relay is {} and this Host is {} there",
@@ -402,6 +404,8 @@ pub fn run(app: &App, router: Router) {
                     session += 1;
                     let up_since = Instant::now();
                     connector.is("connected");
+                    capture.mark("relay",true,clock.now_ms());
+                    capture.emit("network",clock.now_ms(),||json!({"kind":"relay_connected","session":session}));
                     connector.opened(session, (up_since - without_since).as_millis());
                     let (lost, torn) = serve(&router, socket, &local).await;
                     let age = up_since.elapsed().as_secs_f64();
@@ -410,6 +414,8 @@ pub fn run(app: &App, router: Router) {
                 Ok(Err(error)) => (Lost::dial(&error), None, (0, 0)),
                 Err(_) => (Lost::of_kind("TimeoutError"), None, (0, 0)),
             };
+            capture.mark("relay",false,clock.now_ms());
+            capture.emit("network",clock.now_ms(),||json!({"kind":"relay_lost","connected":up.is_some(),"http_count":torn.0,"socket_count":torn.1}));
             without_since = Instant::now();
             connector.lost(&lost, up, torn);
             let wait = rules::redial_after(waited, up.is_some(), lost.received());

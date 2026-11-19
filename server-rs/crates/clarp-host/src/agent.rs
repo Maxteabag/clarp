@@ -1714,6 +1714,7 @@ impl Worker {
     fn read_speech(&mut self) -> bool {
         match &self.actor {
             Some(actor) if *self.speech != *actor.speech() => {
+                self.setup.speaks.counted(&self.setup.record.agent_id,actor.speech().lines());
                 self.speech = Arc::new(actor.speech().clone());
                 true
             }
@@ -2135,6 +2136,9 @@ impl Worker {
                     Some(proof) => actor.send_for_opening(&message, admission, proof, now),
                     None => actor.send(&message, admission, now),
                 };
+                if let Ok((sent,_))=&sent && !sent.duplicate && let Some(turn)=sent.turn && let Some(c)=&self.setup.hub.capture{
+                    c.emit("agents",now,||json!({"kind":"accepted","turn":turn.0,"agent_id":self.setup.record.agent_id}));
+                }
                 answered(sent, answer)?
             }
             Ask::Stop { by, answer } => {
@@ -3018,6 +3022,10 @@ impl Worker {
             .as_ref()
             .filter(|live| Some(live.turn) != was_live.map(|was| was.turn));
         let ended = status.last.as_ref().filter(|_| turn_ended);
+        if let Some(c)=&self.setup.hub.capture{
+            if let Some(live)=began{c.emit("agents",now,||json!({"kind":"started","turn":live.turn.0,"agent_id":self.setup.record.agent_id}));}
+            if let Some(last)=ended{c.emit("agents",now,||json!({"kind":"settled","turn":last.id.0,"agent_id":self.setup.record.agent_id}));}
+        }
         if let Some(last) = ended
             && matches!(
                 last.outcome,

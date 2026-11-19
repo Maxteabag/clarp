@@ -94,7 +94,15 @@ async fn serve(config: Config) -> Result<(), String> {
     // What signs the token every turn is given: the Host's own key, kept before any turn starts.
     let turns = Arc::new(clarp_host::turn_identity::Signer::open(store.as_mut()));
 
-    let hub = Arc::new(Hub::new(clock.now_ms()));
+    use clarp_kernel::diagnostics::{Settings,KEY};
+    use clarp_ports::diagnostics::DiagnosticStore;
+    let setting=store.get("setting",KEY).ok().flatten().and_then(|v|String::from_utf8(v).ok()).map_or_else(Settings::default,|s|Settings::decode(&s));
+    let mut files=clarp_store_files::diagnostics::HourFiles::new(config.data_dir.join("diagnostics"),clarp_host::diagnostics::CAP);
+    files.append(clock.now_ms(),&[]).map_err(|e|e.to_string())?;
+    let capture=clarp_host::diagnostics::Capture::start(Box::new(files),clock.clone(),setting,config.data_dir.clone());
+    let mut hub=Hub::new(clock.now_ms());
+    hub.capture=Some(capture.clone());
+    let hub=Arc::new(hub);
     // The first event of a Host's life says which version it is. A client that connects while
     // the hub still keeps it learns that the Host was started again, and with what.
     hub.publish(
@@ -226,6 +234,7 @@ async fn serve(config: Config) -> Result<(), String> {
         clock: clock.clone(),
     });
     let app = App {
+        capture,
         turns,
         form_event_writer: Arc::default(),
         android_chip: Arc::default(),

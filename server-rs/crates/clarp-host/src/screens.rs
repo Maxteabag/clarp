@@ -130,14 +130,6 @@ async fn no_pictures() -> ApiError {
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
 
-async fn diagnostics() -> Json<Value> {
-    Json(kept("/diagnostics/settings"))
-}
-
-async fn no_diagnostics() -> ApiError {
-    not_built("Diagnostics of this kind are")
-}
-
 /// `GET /hotseat/status`: how the account seats stand, as they were last read. Nothing is
 /// read for it (`crate::seats`).
 async fn hotseat_status(State(app): State<App>) -> Json<Value> {
@@ -368,8 +360,9 @@ pub fn routes() -> Router<App> {
         .route("/avatar-settings", get(avatar_settings).post(no_pictures))
         .route(
             "/diagnostics/settings",
-            get(diagnostics).post(no_diagnostics),
+            get(crate::diagnostics::settings).post(crate::diagnostics::update),
         )
+        .route("/diagnostics/health",get(crate::diagnostics::health))
         .route("/hotseat/status", get(hotseat_status))
         .route("/hotseat/desk", get(hotseat_desk))
         .route("/hotseat/resume", post(hotseat_resume))
