@@ -158,9 +158,9 @@ SCENARIOS = [
     },
     {
         'id': 'delivery-of-a-held-send',
-        'what': "what a user's plain send to a busy agent is shown of its delivery (send_delivery_state): handed "
-                "over once the queue keeps it, and the user's Stop holds it; the feed of the sends, from the start. "
-                '(A resume is not walked here: the Python Host does not run a held plain send again)',
+        'what': "what a user's plain send to a busy agent is shown of its delivery (send_delivery_state, the "
+                "Python Host's PR 462): pending until its tool is launched, the user's Stop holds it and fences it, "
+                'a resume runs it and it is handed over; the feed of the sends, from the start',
         'steps': [
             send(SLOW + 'synthetic task to stop', 'papa'),
             {'op': 'wait_busy', 'busy': True},
@@ -168,6 +168,10 @@ SCENARIOS = [
             post('/stop', {'session': AGENT}),
             {'op': 'wait_busy', 'busy': False},
             {'op': 'quiesce', 'held': True},
+            get(f'/log?session={AGENT}&delivery_since=0'),
+            post('/turn-queue/resume', {'session': AGENT}),
+            {'op': 'wait_reply', 'after': 'u-quebec'},
+            {'op': 'quiesce'},
             get(f'/log?session={AGENT}&delivery_since=0'),
             QUEUE,
         ],

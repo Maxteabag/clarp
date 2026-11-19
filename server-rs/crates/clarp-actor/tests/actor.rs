@@ -2599,7 +2599,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
             world.tick(),
         )
         .unwrap();
-    // How the held send stands before the Host goes: handed to the queue that keeps it.
+    // How the held send stands before the Host goes: fenced by the user's Stop.
     let before = recorder
         .agent()
         .deliveries()
@@ -2639,14 +2639,15 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     // over is held as it was.
     assert!(actor.take_deliveries(world.tick()).unwrap().is_empty());
     assert_eq!(actor.held_deliveries(), 1);
-    // A page's rows: an old send shows nothing; the held one is shown as it was before.
+    // A page's rows: an old send shows nothing; the held one is shown as it was before:
+    // stopped.
     let mut rows = vec![row(5), row(10_002)];
     let top = actor.delivery(&mut rows, &Query::default(), &scope);
     assert!(rows[0].get("delivery").is_none(), "{rows:?}");
     let shown = &rows[1]["delivery"];
     assert_eq!(
         (&shown["state"], &shown["rev"], &shown["seq"]),
-        (&json!("handed_over"), &json!(held.rev), &json!(held.seq)),
+        (&json!("stopped"), &json!(held.rev), &json!(held.seq)),
         "{rows:?}"
     );
     assert_eq!(top["delivery_stop_generation"], 1);
@@ -2671,8 +2672,8 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     // The resume runs the held one: its launch is told, as before the restart.
     actor.resume("user", world.tick()).unwrap();
     assert_eq!(actor.take_deliveries(world.tick()).unwrap(), ["u-m10002"]);
-    // One more behind it: admitted and handed to the queue in one breath, its names read once
-    // (one call, one item), and no launch to tell yet.
+    // One more behind it: admitted and pending, its names read once (one call, one item), and
+    // nothing to tell yet.
     let behind = Message {
         id: "u-m10003".into(),
         text: "message 10003".into(),
