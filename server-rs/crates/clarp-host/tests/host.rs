@@ -23285,7 +23285,8 @@ import json, os, sys
 with open({asked}, "a") as out:
     out.write(json.dumps(shown) + "\n")
 if os.path.exists({fails}):
-    sys.stderr.write("the model is not logged in\n")
+    # It fails, and repeats what it was asked as it does.
+    sys.stderr.write("the model is not logged in: " + read + "\n")
     sys.exit(3)
 steps = {{name: {{"status": "pending", "evidence": "", "note": ""}} for name in schema["properties"]["steps"]["required"]}}
 if "probe" in steps:
@@ -23723,8 +23724,9 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     );
     assert_eq!(status_of(&get(), "build"), json!("in_progress"));
 
-    // The model fails. The goal says so by a short word, and when it is tried again; the
-    // run failed, and nothing of the goal was touched.
+    // The model fails, repeating what it was asked. The goal says so by a short word (the
+    // tool and its exit, never its words), and when it is tried again; the run failed, and
+    // nothing of the goal was touched.
     std::fs::write(place.root.join("keeper-fails"), "").unwrap();
     let before = get()["goal"]["updater"].clone();
     host.send(&session, "Built.", "u-3");
@@ -23732,7 +23734,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         questions().len() == 3
     });
     wait_for("the goal to say that its update failed", || {
-        get()["updater"]["goal_error"] == "tool_failed"
+        get()["updater"]["goal_error"] == "agy_exit_3"
     });
     let plan = get();
     assert_eq!(plan["goal"]["updater"], before);
@@ -23743,8 +23745,25 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
             &told["last_receipt"]["outcome"],
             &told["last_receipt"]["error"]
         ),
-        (&json!("failed"), &json!("tool_failed")),
+        (&json!("failed"), &json!("agy_exit_3")),
         "{told}"
+    );
+    // Nothing of what it was asked is where a failure is told: the goal's errors, and each
+    // receipt's error and reason.
+    let asked_last = questions().last().unwrap()["read"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let receipts = goal(&host, &dir, &["receipts", &plan_id]);
+    let mut told_of = vec![told["goal_error"].clone(), told["last_error"].clone()];
+    for receipt in receipts.as_array().unwrap() {
+        told_of.push(receipt["error"].clone());
+        told_of.push(receipt["reason"].clone());
+    }
+    let told_of = Value::Array(told_of).to_string();
+    assert!(
+        !clarp_kernel::failures::echoes(&told_of, &asked_last),
+        "{told_of}"
     );
     wait_for("the failed run to be over", || {
         let runs = host.get("/janitors/clarp-goal-keeper/runs");
@@ -23776,7 +23795,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     host.kill();
     let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
     let after = goal(&host, &dir, &["get", &plan_id]);
-    assert_eq!(after["updater"]["goal_error"], "tool_failed");
+    assert_eq!(after["updater"]["goal_error"], "agy_exit_3");
     assert_eq!(after["updater"]["retry_at"], told["retry_at"]);
     assert_eq!(after["updater"]["last_receipt"], told["last_receipt"]);
     assert_eq!(
@@ -26454,6 +26473,137 @@ else:sys.exit(2)
     assert!(calls.contains(r#"["codex", "--no-quota", "--json"]"#));
     assert!(calls.contains(r#"["codex", "--json"]"#));
     assert!(!calls.contains("reset"));
+}
+
+#[test]
+fn a_routing_tool_that_fails_is_told_by_its_facts_and_never_by_the_question_it_repeats() {
+    let place = Place::new("routing-failure");
+    // Stand-ins for Codex and Claude Code, each asked one routing question on its standard
+    // input. What each does is in a file: repeat the question and fail, say words of its own
+    // and fail, refuse while repeating it, fail in a way no reading knows, or answer.
+    let script = r#"#!/usr/bin/env python3
+import json, pathlib, sys
+root = pathlib.Path(__file__).parent
+provider = pathlib.Path(__file__).name
+asked = sys.stdin.read()
+with (root / "asked").open("a") as out:
+    out.write(json.dumps([provider, asked]) + "\n")
+mode = (root / f"{provider}-mode").read_text()
+if mode == "echo":
+    print("could not route: " + asked, file=sys.stderr)
+    sys.exit(2)
+if mode == "own":
+    print("unknown model gpt-9" if provider == "codex" else "rate limit reached", file=sys.stderr)
+    sys.exit(2 if provider == "codex" else 1)
+if mode == "refuse":
+    print("permission denied: " + asked, file=sys.stderr)
+    sys.exit(1)
+if mode == "odd":
+    print("something unexpected happened", file=sys.stderr)
+    sys.exit(3)
+decision = {"kind": "agent_message", "target_session": "anna", "confidence": 0.99,
+            "addressing": True, "reason": "a synthetic routing"}
+if provider == "claude":
+    print(json.dumps(decision))
+else:
+    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(decision)}}))
+"#;
+    for tool in ["codex", "claude"] {
+        program(&place.root.join(tool), script);
+    }
+    let (codex, claude) = (place.root.join("codex"), place.root.join("claude"));
+    let world = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+    ];
+    let h = place.start_in("private", &[], &world);
+    let anna = h.new_agent("Anna");
+    let mike = h.new_agent("Mike");
+    // The router asks Codex first and Claude Code after it.
+    let chain =
+        json!([{"provider":"codex","model":"primary"},{"provider":"claude","model":"alternate"}]);
+    let update = json!({"expected_revision":0,"configuration":{"model_chain":chain,
+        "inherit_sessions":["clarp-message-delegator"]}});
+    assert_eq!(h.ask("POST", "/janitor-policy", Some(&update)).0, 200);
+    h.post(
+        "/orchestrator/settings",
+        json!({"enabled":true,"fallback_only":false}),
+    );
+    let modes = |codex: &str, claude: &str| {
+        std::fs::write(place.root.join("codex-mode"), codex).unwrap();
+        std::fs::write(place.root.join("claude-mode"), claude).unwrap();
+    };
+    let asked = || -> Vec<(String, String)> {
+        let written = std::fs::read_to_string(place.root.join("asked")).unwrap_or_default();
+        let lines = written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap());
+        lines.collect()
+    };
+    let dictate = |id: &str| {
+        let body = json!({"session":mike,"text":format!("please take a note for the harbour team {id}"),
+            "hands_free":true,"client_msg_id":id,"orchestrator_fallback":true});
+        h.ask("POST", "/send", Some(&body))
+    };
+    let newest = || h.get("/orchestrator/decisions?limit=1")["decisions"][0].clone();
+    let question = |from: usize| {
+        asked()[from..]
+            .iter()
+            .map(|(_, q)| q.clone())
+            .collect::<Vec<_>>()
+    };
+
+    // Both repeat the question as they fail: what the router keeps is each tool and its exit,
+    // and the chain moved on from the first (no known failure: runner_exit).
+    modes("echo", "echo");
+    let before = asked().len();
+    let (status, _) = dictate("one");
+    assert_eq!(status, 200);
+    let tools: Vec<String> = asked()[before..].iter().map(|(t, _)| t.clone()).collect();
+    assert_eq!(&tools[..2], ["codex", "claude"]);
+    let decided = newest();
+    assert_eq!(
+        decided["error"], "claude exited with status 2 (runner_exit)",
+        "{decided}"
+    );
+    let kept = json!([
+        h.get("/orchestrator/decisions?limit=30"),
+        kept_records(&place, "model-fallback-attempt")
+    ])
+    .to_string();
+    for question in question(before) {
+        assert!(!clarp_kernel::failures::echoes(&kept, &question), "{kept}");
+    }
+
+    // A tool with words of its own keeps them.
+    modes("own", "own");
+    dictate("two");
+    assert_eq!(newest()["error"], "rate limit reached");
+
+    // A refusal is never moved on from, also where its words were replaced (they held the
+    // question): Claude Code is not asked.
+    modes("refuse", "answer");
+    let before = asked().len();
+    dictate("three");
+    let tools: Vec<String> = asked()[before..].iter().map(|(t, _)| t.clone()).collect();
+    assert!(tools.iter().all(|tool| tool == "codex"), "{tools:?}");
+    let decided = newest();
+    let line = decided["error"].as_str().unwrap();
+    assert!(
+        line.starts_with("codex exited with status 1 ("),
+        "{decided}"
+    );
+
+    // A failure no reading knows moves the chain on: Claude Code answers, and the message
+    // goes where it says.
+    modes("odd", "answer");
+    let before = asked().len();
+    let (status, sent) = dictate("four");
+    assert_eq!(status, 200, "{sent}");
+    let tools: Vec<String> = asked()[before..].iter().map(|(t, _)| t.clone()).collect();
+    assert_eq!(&tools[..2], ["codex", "claude"]);
+    assert_eq!(sent["session"], anna, "{sent}");
 }
 
 #[test]

@@ -29,6 +29,7 @@
 //! receipt is kept after the write it tells of, in another store: a Host that dies between
 //! the two has the write and no receipt of it.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -606,14 +607,14 @@ enum Ended {
     /// The owner changed the plan since it was read.
     Conflict,
     /// By a short code, never by what a model or a tool said.
-    Failed(&'static str),
+    Failed(Cow<'static, str>),
 }
 
 /// What the run is told of one goal.
 struct Done {
     plan_id: String,
     outcome: &'static str,
-    error: &'static str,
+    error: Cow<'static, str>,
     changed: usize,
 }
 
@@ -641,13 +642,13 @@ async fn write(
     };
     let said = match owner.agent.goal(ask).await {
         Ok(said) => said,
-        Err(_) => return Ended::Failed("owner_unavailable"),
+        Err(_) => return Ended::Failed(Cow::Borrowed("owner_unavailable")),
     };
     match said.exit {
         0 => {}
         goaltool::OWNER_AHEAD => return Ended::Conflict,
-        goaltool::CLOSED => return Ended::Failed("goal_closed"),
-        _ => return Ended::Failed("invalid_update"),
+        goaltool::CLOSED => return Ended::Failed(Cow::Borrowed("goal_closed")),
+        _ => return Ended::Failed(Cow::Borrowed("invalid_update")),
     }
     let result: Value = serde_json::from_str(said.stdout.trim()).unwrap_or_default();
     let changed = result["changed_steps"]
@@ -796,7 +797,14 @@ async fn keep(
     let ((steps, progress, next_work), actual) = match answer {
         Ok(value) => value,
         Err(error) if error.code == "cancelled" => return Ended::Cancelled,
-        Err(error) => return Ended::Failed(error.code),
+        // The facts name a failed tool's exit (`<backend>_exit_<N>`), never its words.
+        Err(error) => {
+            let named = error
+                .facts
+                .as_deref()
+                .and_then(clarp_kernel::failures::keeper_code);
+            return Ended::Failed(named.map_or(Cow::Borrowed(error.code), Cow::Owned));
+        }
     };
     receipt["model"] = json!(actual.model);
     let progress = if line.is_empty() || progress.starts_with(&line) {
@@ -828,25 +836,25 @@ async fn update(app: &App, run: &Run, plan_id: &str, at: (i64, bool)) -> Done {
     });
     let ended = keep(app, run, plan_id, at, &mut receipt).await;
     let (outcome, error, changed) = match ended {
-        Ended::Updated(changed) => ("updated", "", changed),
+        Ended::Updated(changed) => ("updated", Cow::Borrowed(""), changed),
         Ended::Skipped(why) => {
             receipt["outcome"] = json!("skipped");
             receipt["reason"] = json!(why);
-            ("skipped", "", 0)
+            ("skipped", Cow::Borrowed(""), 0)
         }
         Ended::Cancelled => {
             receipt["outcome"] = json!("cancelled");
             receipt["reason"] = json!("configuration changed");
-            ("cancelled", "", 0)
+            ("cancelled", Cow::Borrowed(""), 0)
         }
         Ended::Conflict => {
             receipt["outcome"] = json!("refused_owner_changed");
             receipt["error"] = json!("owner_changed_plan");
-            ("conflict", "owner_changed_plan", 0)
+            ("conflict", Cow::Borrowed("owner_changed_plan"), 0)
         }
         Ended::Failed(code) => {
             receipt["outcome"] = json!("failed");
-            receipt["error"] = json!(code);
+            receipt["error"] = json!(code.as_ref());
             ("failed", code, 0)
         }
     };
@@ -1021,7 +1029,7 @@ async fn keep_goals(app: &App, janitor: &str, config: &Value, scope: &Map<String
             &goal.plan_id,
             goal.outcome,
             settled,
-            goal.error,
+            &goal.error,
         );
     }
     app.keeper.keep_progress(app, attachment, progress).await;
