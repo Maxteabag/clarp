@@ -43241,6 +43241,7 @@ print(home/"Project one")
     let refused = host.ask_as(&limited, "GET", "/dirs", None);
     assert_eq!(refused.0, 403);
     assert_eq!(host.ask_as(&limited, "GET", lookup, None), refused);
+    assert_eq!(host.ask_as(&limited, "GET", fav, None), refused);
     assert_eq!(host.ask_as(&limited, "POST", fav, Some(&json!({}))).0, 403);
     let refusal = fetch(&host, &full, "POST", fav, &[], b"{}");
     assert_eq!(
@@ -43270,7 +43271,7 @@ print(home/"Project one")
     assert_eq!(favorite["paths"][0]["use_count"], 2);
     assert_eq!(favorite["paths"][1], first);
     assert_eq!(
-        host.ask_as(&limited, "GET", fav, None),
+        host.ask_as(&full, "GET", fav, None),
         (200, favorite.clone())
     );
     assert_eq!(

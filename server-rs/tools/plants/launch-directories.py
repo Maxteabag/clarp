@@ -64,9 +64,10 @@ for why,a,b in [
     ('misname result label','"label":label','"name":label')]:
     plant(K,'vectors',why,a,b)
 for why,a,b in [
-    ('let a limited device enumerate directories','|| path == "/launch-directories"','|| path == "/not-a-route"'),
-    ('close descendants too','path == "/launch-directories"','path.starts_with("/launch-directories")'),
-    ('close limited favorite reads','path == "/launch-directories"','matches!(path, "/launch-directories" | "/favorite-paths")')]:
+    ('let a limited device enumerate directories','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/favorite-paths"'),
+    ('let a limited device read project paths','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/launch-directories"'),
+    ('close launch directory descendants too','matches!(path, "/launch-directories" | "/favorite-paths")','path.starts_with("/launch-directories") || path == "/favorite-paths"'),
+    ('close favorite path descendants too','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/launch-directories" || path.starts_with("/favorite-paths")')]:
     plant(D,'scope',why,a,b)
 for why,a,b in [
     ('keep zoxide alive past the timeout','.kill_on_drop(true)','.kill_on_drop(false)'),
