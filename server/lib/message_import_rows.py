@@ -10,7 +10,7 @@ import os
 from typing import Any, NamedTuple
 
 from .clock import now_ms
-from .message_text import (_related, _strip_voice_markup, strip_injected_blocks,
+from .message_text import (_related, _strip_voice_markup, live_message_id, strip_injected_blocks,
                            strip_delivery_context, CALL_OPENING_OPEN)  # noqa: F401 - _related is used from here too
 from .message_turns import _START_SLACK_MS, iso_ms
 from .message_import_common import (
@@ -388,7 +388,8 @@ class _FinalRows:
 
 def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
                    *, exclude: set[str], trace: str, final_rows: _FinalRows,
-                   seq: int, visible: str | None = None, occupied: bool = False) -> str:
+                   seq: int, visible: str | None = None, occupied: bool = False,
+                   provider_id: str = "") -> str:
     """The still-live streamed row of this reply's own turn that it completes.
 
     Kept rows of several turns can coexist, so only a row of the reply's turn
@@ -408,12 +409,19 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
         # Replacing that earlier placeholder would lend its position to a
         # row the live writer is still changing. Only a final exact match
         # can replace an occupied slot, and neither side may be ambiguous.
+        # The live row streamed under this message's own provider id is its stream: never
+        # declined, so the import's cleanup retracts it with replace_revision in the same commit.
+        # A live row of another id is another message, kept as R19 rules; with no id on either
+        # side, the rule below is unchanged (R107).
+        own = live_message_id(agent_id, backend_session_id, trace, provider_id) if provider_id else ""
         matches = []
         for row in candidates:
             if not _related(visible, row["visible"]):
                 continue
             if row["kind"] is None and row["visible"] == visible:
                 matches.append(row)
+            elif own and row["message_id"] == own:
+                continue
             else:
                 final_rows.decline_live(row, trace, seq)
         if len(matches) != 1:
@@ -642,7 +650,8 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
                       source_file: str, seq: int, msg_id: str, text: str,
                       timestamp: Any, request_trace: str, reply_trace: str,
                       final_rows: "_FinalRows", adopted_final_ids: set[str],
-                      placed_ids: set[str], visible: str | None = None) -> tuple[str, bool]:
+                      placed_ids: set[str], visible: str | None = None,
+                      provider_id: str = "") -> tuple[str, bool]:
     """The row a transcript reply without its own id lands on (S5 step 4).
 
     In order: the slot's occupant, unless another request's adopted reply
@@ -718,7 +727,8 @@ def _resolve_reply_id(database, *, agent_id: str, backend_session_id: str,
         streamed = _streamed_twin(database, agent_id, backend_session_id,
                                   text, exclude=adopted_final_ids | placed_ids,
                                   trace=reply_trace, visible=visible,
-                                  final_rows=final_rows, seq=seq, occupied=bool(slot))
+                                  final_rows=final_rows, seq=seq, occupied=bool(slot),
+                                  provider_id=provider_id)
         if streamed:
             if slot:
                 # This slot was already read: do not add a second point read.
