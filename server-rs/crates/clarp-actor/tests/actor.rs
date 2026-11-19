@@ -2073,4 +2073,41 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
         assert!(kept.get("actions").is_none());
         assert!(kept["session"]["cursor"].is_object() && kept["records"].is_array());
     }
+    // The final byte boundary is durable while more than 64 tasks await
+    // reconciliation. The successor cannot inherit any of those tasks.
+    let archive="crowded";
+    let successor=Attempt{turn:2,attempt:1};
+    actor.provider_boundary(archive,Some(owner),(0,0,0),300).unwrap();
+    let drain=|actor:&mut Actor,at|{
+        let mut v=actor.provider_session(archive).unwrap().visit(archive.into());
+        v.eof=true;
+        actor.apply_provider_visit(v,at,next).unwrap();
+    };
+    drain(&mut actor,300);
+    for group in [0..64,64..65]{
+        let mut v=actor.provider_session(archive).unwrap().visit(archive.into());
+        for n in group {
+            v.actions.push(serde_json::from_value(json!({"tool":format!("tool-{n}"),"state":"launching","at":301,"title":"Fixture"})).unwrap());
+        }
+        v.cursor.offset+=1;v.cursor.device=1;v.cursor.inode=3;v.eof=true;
+        actor.apply_provider_visit(v,301,next).unwrap();
+    }
+    actor.provider_boundary(archive,Some(successor),(1,3,2),400).unwrap();
+    drain(&mut actor,400);
+    assert_eq!(actor.jobs().active().filter(|j|j.metadata["native_session_id"]==archive).count(),1);
+    drop(actor);
+    let mut actor=world.open();
+    assert_eq!(actor.provider_session(archive).unwrap().owner,Some(owner));
+    drain(&mut actor,401);
+    assert_eq!(actor.provider_session(archive).unwrap().owner,Some(successor));
+    assert!(actor.provider_session(archive).unwrap().final_read.is_none());
+    assert_eq!(actor.jobs().active().filter(|j|j.metadata["native_session_id"]==archive).count(),0);
+    // The original exit time survives recovery. Its links are still
+    // actionable at the retention boundary and removed one millisecond later.
+    let week=7*86_400_000;
+    assert!(!actor.expire_provider_links(archive,400+week).unwrap());
+    assert_eq!(actor.provider_session(archive).unwrap().links.len(),65);
+    assert!(actor.expire_provider_links(archive,401+week).unwrap());
+    assert!(actor.provider_session(archive).unwrap().links.is_empty());
+
 }

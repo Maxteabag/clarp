@@ -66,7 +66,42 @@ def record(directory):
                 actual.clear()
                 observer.poll_once()
                 cases.append([rows,after,list(actual)])
-    return cases
+    # Observe the actual files through the reference's cursor transaction.
+    # Keep the bytes as strings so offsets can be compared directly in Rust.
+    native = 'parent'
+    parent = directory / 'project' / (native + '.jsonl')
+    parent.parent.mkdir(exist_ok=True)
+    stamp = '2027-01-15T08:00:00Z'
+    def launches(start, count):
+        content = [dict(type='tool_use', name='Bash', id='call-' + str(i),
+                        input=dict(run_in_background=True)) for i in range(start,start+count)]
+        return json.dumps(dict(type='assistant',timestamp=stamp,message=dict(content=content))) + '\n'
+    first = launches(0,1)
+    middle = launches(1,1)
+    blocks = launches(2,130)
+    writes = [('replace','bad JSON\n'+first), ('append',middle[:-1]), ('append',''),
+              ('append','\n'), ('append',blocks), ('append',''), ('append',''),
+              ('truncate',launches(200,1)), ('replace',launches(201,1)),
+              ('append','null\n'), ('append','')]
+    reads = []
+    owner = dict(agent_id=owners[0],session=owners[0],bound_at=NOW)
+    with patch.object(provider.time,'monotonic',return_value=1), \
+         patch.object(provider,'apply_actions',wraps=provider.apply_actions) as apply:
+        for operation, data in writes:
+            if operation=='replace':
+                fresh = parent.with_suffix('.new')
+                fresh.write_bytes(data.encode())
+                fresh.replace(parent)
+            else:
+                with parent.open('ab' if operation=='append' else 'wb') as f:
+                    f.write(data.encode())
+            apply.reset_mock()
+            provider.observe(owner,native,parent)
+            cursor=c.execute('select position,action_offset,discarding from provider_job_cursors where agent_id=? and native_id=?',
+                             (owners[0],native)).fetchone()
+            actions=[a['tool'] for call in apply.call_args_list for a in call.args[3]]
+            reads.append(dict(operation=operation,data=data,cursor=list(cursor),tools=actions))
+    return cases, reads
 
 
 if __name__ == '__main__':
@@ -76,5 +111,7 @@ if __name__ == '__main__':
     else:
         data = json.loads(subprocess.check_output(
             [sys.executable,'-I',__file__,'--record'], env={'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'}))
-        OUT.write_text('[\n'+',\n'.join(json.dumps(row) for row in data)+'\n]\n',encoding='ascii')
-        print(len(data), 'binding selections')
+        cases, reads = data
+        for path, rows in [(OUT,cases),(OUT.with_name('provider-reader.json'),reads)]:
+            path.write_text('[\n'+',\n'.join(json.dumps(row) for row in rows)+'\n]\n',encoding='ascii')
+        print(len(cases), 'binding selections and', len(reads), 'file visits')

@@ -1297,7 +1297,13 @@ impl Worker {
         let due=if saved.is_some_and(|s|s.final_read.is_some()) || self.provider_requested {now}else{helper_due?};
         if due>now{return Some(due)}
         let mut visit=saved.map_or_else(||clarp_kernel::provider_tasks::Session::default().visit(session.clone()),|s|s.visit(session.clone()));
-        if visit.bound_at==0{visit.bound_at=self.setup.record.created_at_ms;}
+        if visit.bound_at==0{
+            visit.bound_at=match actor.first_provider_binding(&session){
+                Ok(Some(time))=>time,
+                Ok(None)=>now_ms,
+                Err(_)=>return Some(now+Duration::from_secs(1)),
+            };
+        }
         let helpers=helper_due.is_some_and(|t|t<=now) && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
         if helper_due.is_some_and(|t|t<=now){self.helper_clock.started(now);}
         self.provider_requested=false;

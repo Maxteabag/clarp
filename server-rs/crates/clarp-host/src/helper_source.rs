@@ -5,7 +5,7 @@ use clarp_kernel::helper_cells::{self, Children};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, Metadata};
-use std::io::{self, BufRead, Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
@@ -115,18 +115,12 @@ impl Parent {
             }
         });
     }
-    fn consume(&mut self, mut input: impl BufRead) -> io::Result<usize> {
+    fn consume(&mut self,bytes:&[u8])->usize{
         let mut lines=std::mem::take(&mut self.lines);
-        let mut total=0;
-        loop {
-            let bytes=input.fill_buf()?;
-            if bytes.is_empty(){break;}
-            let n=lines.feed(bytes,self.offset,usize::MAX,|record,_|{self.record(record);true});
-            total+=n;self.offset+=n as u64;
-            input.consume(n);
-        }
+        let used=lines.feed(bytes,self.offset,usize::MAX,|record,_|{self.record(record);true});
+        self.offset+=used as u64;
         self.lines=lines;
-        Ok(total)
+        used
     }
 }
 #[derive(Default)]
@@ -146,7 +140,7 @@ pub struct HelperSource {
 impl HelperSource {
     pub(crate) fn seed(&mut self, file: &File, text: &str) -> io::Result<()> {
         let stamp = Stamp::from(&file.metadata()?);
-        self.parent.consume(text.as_bytes())?;
+        self.parent.consume(text.as_bytes());
         self.parent.stamp = Some(stamp);
         self.available = true;
         Ok(())
@@ -351,6 +345,35 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn provider_refresh_follows_the_recorded_python_file_visits(){
+        let steps:Vec<Value>=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/provider-reader.json")).unwrap();
+        let f=Fixture::new();
+        let mut source=HelperSource::default();
+        let mut read=ProviderRead{helpers:false,parent:false,
+            visit:clarp_kernel::provider_tasks::Session::default().visit("parent".into())};
+        let mut count=0;
+        for step in steps{
+            let bytes=step["data"].as_str().unwrap().as_bytes();
+            match step["operation"].as_str().unwrap(){
+                "replace"=>{
+                    let fresh=f.parent.with_extension("new");
+                    fs::write(&fresh,bytes).unwrap();fs::rename(fresh,&f.parent).unwrap();
+                }
+                "truncate"=>fs::write(&f.parent,bytes).unwrap(),
+                "append"=>fs::OpenOptions::new().append(true).open(&f.parent).unwrap().write_all(bytes).unwrap(),
+                other=>panic!("unexpected fixture operation {other}"),
+            }
+            read.visit.actions.clear();
+            source.read_visit(&f.root,"/fixture",&mut read,1_800_000_000_000).unwrap();
+            let c=&read.visit.cursor;
+            assert_eq!(json!([c.offset,c.action_offset,u8::from(c.discarding)]),step["cursor"],"visit {count}");
+            assert_eq!(json!(read.visit.actions.iter().map(|e|&e.tool).collect::<Vec<_>>()),step["tools"]);
+            count+=1;
+        }
+        assert_eq!(count,11);
     }
 
     #[test]
@@ -678,7 +701,7 @@ impl HelperSource{
         self.parent.changed=false;
         if request.parent && self.parent.offset>=start && self.parent.offset<start+bytes.len() as u64{
             let at=(self.parent.offset-start) as usize;
-            let _consumed=self.parent.consume(&bytes[at..])?;
+            let _consumed=self.parent.consume(&bytes[at..]);
             #[cfg(test)] {self.counts[2]+=_consumed;}
             self.parent.stamp=Some(stamp);
         }
