@@ -18,12 +18,12 @@ plain lambdas.
 from __future__ import annotations
 
 import base64
+import re
 import secrets
 from dataclasses import dataclass, field
 from typing import Callable, Collection, Mapping, Sequence
 
 from .. import roster as contact_roster
-from .. import transcript_paths
 from ..voice import CARTESIA, resolve_voice
 from . import helper_state as helper_policy
 
@@ -39,6 +39,14 @@ def _no_row(_session: str) -> Mapping:
 
 
 @dataclass(frozen=True)
+class NeedsContact:
+    """The request takes a newly minted Contact for ``backend``: the service mints one (IO) and
+    calls parse again with it as ``RosterView.minted_contact``. Returned only after every option
+    check passed, so nothing is minted for a request that is refused."""
+    backend: str
+
+
+@dataclass(frozen=True)
 class RosterView:
     """The live roster and launch environment as values and lookups."""
     agents: Mapping[str, Mapping] = field(default_factory=dict)  # persisted roster file
@@ -46,7 +54,13 @@ class RosterView:
     existing_agent: Callable[[str], Mapping] = _no_row  # session -> agents row or {}
     session_exists: Callable[[str], bool] = lambda _session: False
     contact_pool: Callable[[str], Sequence[str]] = lambda _backend: ()
-    mint_contact: Callable[[str], str | None] = lambda _backend: None
+    # A Contact the service minted after parse asked for one (NeedsContact): a value, never a
+    # capability (rule 6). None: none minted yet; "": minting found none.
+    minted_contact: str | None = None
+    # The native session-id grammar (R70) as a value: transcript_paths.SESSION_ID's pattern, which
+    # the service passes; this default is that pattern (tests/unit/test_policies_agent_spec.py pins
+    # them identical). The policy may not import transcript_paths, which reads the filesystem.
+    session_id_rule: str = r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
     resume_owner: Callable[[str], Mapping | None] = lambda _sid: None
     resume_listed: Callable[[str, str, str], bool] = lambda _backend, _cwd, _sid: False
     existing_cwd: Callable[[object], str] = lambda raw: str(raw or "")
@@ -98,13 +112,13 @@ class AgentSpec:
 
     @staticmethod
     def parse(data: Mapping, *, backends, roster: RosterView, personas,
-              janitor: bool = False) -> "AgentSpec | SpecError":
+              janitor: bool = False) -> "AgentSpec | SpecError | NeedsContact":
         return _parse(dict(data), backends=backends, roster=roster,
                       personas=personas, janitor=janitor)
 
 
 def _parse(data: dict, *, backends, roster: RosterView, personas,
-           janitor: bool) -> AgentSpec | SpecError:
+           janitor: bool) -> "AgentSpec | SpecError | NeedsContact":
     replace_sid = (data.get("replace_sid") or "").strip()
     current = roster.agents.get(replace_sid) if replace_sid else None
     # A relaunch inherits the backend the way it inherits voice and cwd.
@@ -115,7 +129,7 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     for key in ("resume_session_id", "fork_session_id"):
         value = data.get(key)
         if value not in (None, "") and not (isinstance(value, str)
-                                             and transcript_paths.session_id_ok(value.strip())):
+                                             and re.fullmatch(roster.session_id_rule, value.strip())):
             return SpecError(400, "invalid session id")
 
     if data.get("open_existing") is True and data.get("resume_session_id") and not janitor:
@@ -134,20 +148,14 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
             return SpecError(400, "conflicting launch options")
         if data.get("mint_contact") is True and data.get("auto_contact") is True:
             return SpecError(400, "conflicting launch options")
-        if data.get("mint_contact") is True:
-            minted = roster.mint_contact(backend)
-            if not minted:
+        if data.get("mint_contact") is True or not roster.contact_pool(backend):
+            if roster.minted_contact is None:
+                return NeedsContact(backend)        # the service mints it and parses again
+            if not roster.minted_contact:
                 return SpecError(409, "contact_pool_empty")
-            data["name"] = minted
+            data["name"] = roster.minted_contact
         else:
-            choices = roster.contact_pool(backend)
-            if choices:
-                data["name"] = choices[0]
-            else:
-                minted = roster.mint_contact(backend)
-                if not minted:
-                    return SpecError(409, "contact_pool_empty")
-                data["name"] = minted
+            data["name"] = roster.contact_pool(backend)[0]
         data.pop("session", None)
 
     if data.get("anonymous") is True and not janitor:
