@@ -32939,6 +32939,98 @@ fn a_stream_of_speech_is_carried_through_the_relay_as_it_is_at_the_door() {
 }
 
 #[test]
+fn the_controller_speaks_a_short_line_and_keeps_only_its_primary_voice() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let place = Place::new("controller-narration");
+    let sound = b"press".repeat(300);
+    let primary = cartesia_stand_in(sound.clone());
+    let (fallback, calls) = answers(vec![("/v2/speak?", "200 OK", "second voice".into())]);
+    let owners = place.root.join("speech.toml");
+    let settings = |voice: &str, model: &str, key: &str, other: &str| {
+        std::fs::write(&owners, format!("[tts]\nprovider='none'\nfallback='{other}'\n[cartesia]\napi_key='{key}'\nmodel='{model}'\n[cartesia.voices]\nRachel='{voice}'\n[deepgram]\napi_key='test-dg'\nmodel='flux-haley-en'\n")).unwrap();
+    };
+    settings("tutorial", "model-a", "fixture", "deepgram");
+    let host = place.start_in("admin", &["--speech-keys", owners.to_str().unwrap()], &[
+        ("CLARP_CARTESIA_ENDPOINT", primary.address.as_str()),
+        ("CLARP_DEEPGRAM_VOICE_ENDPOINT", fallback.as_str()),
+        ("CARTESIA_API_KEY", ""),
+    ]);
+    assert_eq!(host.get("/server-info")["contract"]["features"]["controller_narration"], 8);
+    let (phone, _) = pair(&host, "Tutorial device", "limited");
+    let get = |query: &str, headers: &[(&str,&str)]| fetch(&host, &phone, "GET", &format!("/controller-narration?{query}"), headers, b"");
+    let refusal = |query: &str, status: u16, words: &str| {
+        let response = get(query, &[]);
+        assert_eq!((response.status,response.text()),(status,String::from(words)));
+        assert_eq!(response.header("content-type"),"text/plain");
+    };
+    refusal("",400,"text required (at most 240 characters)");
+    let too_long = format!("text={}", "a".repeat(241));
+    refusal(&too_long,400,"text required (at most 240 characters)");
+    let query = "text=%20Press+once%09%20%20now%20";
+    let cache = place.root.join("data/voice-previews");
+    let outside = place.root.join("outside");
+    symlink(&outside,&cache).unwrap();
+    refusal(query,500,"narration cache unavailable");
+    std::fs::create_dir(&outside).unwrap();
+    refusal(query,500,"narration cache unavailable");
+    std::fs::remove_file(&cache).unwrap();
+    assert!(primary.asked().is_empty());
+    let full = get(query,&[]);
+    assert_eq!((full.status,&full.body),(200,&sound));
+    assert_eq!(full.header("content-type"),"audio/mpeg");
+    assert_eq!(full.header("content-length"),"1500");
+    assert_eq!(full.header("cache-control"),"no-store");
+    assert_eq!(full.header("accept-ranges"),"bytes");
+    let first = primary.asked();
+    assert_eq!(first.len(),1);
+    assert_eq!(first[0]["transcript"],"Press+once now");
+    assert_eq!(first[0]["voice"]["id"],"tutorial");
+    assert_eq!(first[0]["model_id"],"model-a");
+    let digest = clarp_kernel::controller_narration::cache_key("Press+once now","tutorial","model-a");
+    let file = cache.join(format!("narration-{digest}.mp3"));
+    assert_eq!(std::fs::metadata(&cache).unwrap().permissions().mode() & 0o777,0o700);
+    assert_eq!(std::fs::read(&file).unwrap(),sound);
+    let range = get("text=Press%2Bonce%20now",&[("Range","bytes=1-3")]);
+    assert_eq!((range.status,range.text()),(206,"res".into()));
+    assert_eq!(range.header("content-range"),"bytes 1-3/1500");
+    assert_eq!(get(query,&[("Range","bytes=1500-")]).status,416);
+    assert_eq!(primary.asked().len(),1);
+    settings("tutorial", "model-a", "", "deepgram");
+    refusal(query,503,"narration voice unavailable");
+    settings("", "model-a", "fixture", "deepgram");
+    refusal(query,503,"narration voice unavailable");
+    assert_eq!(primary.asked().len(),1);
+    settings("tutorial", "model-a", "fixture", "deepgram");
+    std::fs::remove_file(&file).unwrap();
+    let target = outside.join("unchanged");
+    std::fs::write(&target,b"private").unwrap();
+    symlink(&target,&file).unwrap();
+    assert_eq!(get(query,&[]).body,sound);
+    assert_eq!(std::fs::read(target).unwrap(),b"private");
+    assert_eq!(primary.asked().len(),2);
+    settings("tutorial-b", "model-b", "fixture", "deepgram");
+    primary.down.store(true,Ordering::SeqCst);
+    let range = get(query,&[("Range","bytes=0-5")]);
+    assert_eq!((range.status,range.text()),(206,"second".into()));
+    assert_eq!(get(query,&[]).text(),"second voice");
+    assert_eq!(std::fs::read_dir(&cache).unwrap().count(),1);
+    assert_eq!(calls.lock().unwrap().len(),2);
+    settings("tutorial-b","model-b","fixture","unbuilt-adapter");
+    refusal(query,502,"narration unavailable");
+    settings("tutorial-b","model-b","fixture","none");
+    refusal(query,502,"narration unavailable");
+    assert_eq!(calls.lock().unwrap().len(),2);
+    primary.down.store(false,Ordering::SeqCst);
+    let maximum = format!("text={}", "%C3%A9".repeat(240));
+    assert_eq!(get(&maximum,&[]).status,200);
+    let requests = primary.asked();
+    let last = requests.last().unwrap();
+    assert_eq!(last["voice"]["id"],"tutorial-b");
+    assert_eq!(last["model_id"],"model-b");
+    assert_eq!(last["transcript"],"é".repeat(240));
+}
+
+#[test]
 fn the_other_speech_engines_answer_the_apps() {
     let place = Place::new("speech-engines");
     let (http, requests) = answers(vec![

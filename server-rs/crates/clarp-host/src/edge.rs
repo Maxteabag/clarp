@@ -219,6 +219,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // voices and its refusal of an old adapter that took its id. Custom speech adapters are
     // not run here (docs/differences.md).
     ("tts", 1),
+    ("controller_narration", 8),
     ("tts_provider_google", 69),
     ("tts_google_id_guard", 70),
     // The clips of a reply, to play it again (`GET /clips/message`).

@@ -171,7 +171,7 @@ static UNPRINTED: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[\p{C}\p{Z}]$").expect("a pattern of this module compiles")
 });
 
-fn printed(sign: char) -> bool {
+pub(crate) fn printed(sign: char) -> bool {
     let mut buffer = [0u8; 4];
     sign == ' ' || !UNPRINTED.is_match(sign.encode_utf8(&mut buffer))
 }

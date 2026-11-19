@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, FileExt};
 use std::path::{Path as FilePath, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -344,20 +344,30 @@ impl Mouth {
         text: &str,
         audition: Audition<'_>,
     ) -> Result<Preview, String> {
+        self.preview_with(&self.owners(), provider, voice, text, audition).await
+    }
+
+    pub(crate) async fn preview_with(
+        &self, owners: &Table, provider: &str, voice: &str, text: &str, audition: Audition<'_>,
+    ) -> Result<Preview, String> {
         let (name, session) = match audition {
-            Audition::Catalogue(key) => (Some(key), ""),
+            Audition::Catalogue(key) | Audition::Narration(key) => (Some(key), ""),
             Audition::Text(session) => (None, session),
         };
 
-        if name.is_some()
-            && self
-                .previews
-                .symlink_metadata()
-                .is_ok_and(|m| m.is_symlink())
-        {
-            return Err("preview cache unavailable".into());
-        }
-        let file = name.map(|n| self.previews.join(format!("{n}.mp3")));
+        let directory_handle = if name.is_some() {
+            std::fs::DirBuilder::new().recursive(true).mode(0o700)
+                .create(&self.previews).map_err(|e| {
+                    if self.previews.is_symlink() { "preview cache unavailable".to_string() } else { e.to_string() }
+                })?;
+            Some(crate::files::open(&self.previews, true)
+                .map_err(|_| "preview cache unavailable".to_string())?)
+        } else {
+            None
+        };
+        let prefix = if matches!(audition, Audition::Narration(_)) { "narration-" } else { "" };
+        let file = name.zip(directory_handle.as_ref()).map(|(key, dir)|
+            crate::files::beneath(dir, &format!("{prefix}{key}.mp3")));
         let _lock = if let Some(name) = name {
             let bucket =
                 name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
@@ -366,14 +376,13 @@ impl Mouth {
             None
         };
         if let Some(file) = &file
-            && file.symlink_metadata().is_ok_and(|m| m.is_file())
+            && let Some(hit) = preview_hit(file, nix::unistd::geteuid().as_raw())
         {
-            return Ok(Preview::Cached(file.clone()));
+            return Ok(hit);
         }
-        let owners = self.owners();
         let primary = self
             .engine(
-                &owners,
+                owners,
                 provider,
                 if name.is_none() {
                     SpeechUse::TextPreview
@@ -382,16 +391,16 @@ impl Mouth {
                 },
             )
             .ok_or_else(|| format!("no engine named {provider} is built"))?;
-        let voices = owner::voices(&owners);
+        let voices = owner::voices(owners);
         let route = said::Route {
             provider: provider.into(),
             voice: (name.is_some() || provider == "google").then(|| voice.to_string()),
             fallback: voices.fallback.clone(),
         };
         let directory = self.fleet.directory();
-        let persona = directory
+        let persona = if matches!(audition, Audition::Narration(_)) { clarp_kernel::controller_narration::PERSONA } else { directory
             .named(session)
-            .map_or("", |m| m.record.persona.as_str());
+            .map_or("", |m| m.record.persona.as_str()) };
         let clip = voices.for_clip(
             Some(voice),
             Who {
@@ -402,16 +411,16 @@ impl Mouth {
             &route,
         );
         let resolve =
-            |engine: &str| resolved_voice(&owners, &voices, &clip, Some(voice), &route, engine);
+            |engine: &str| resolved_voice(owners, &voices, &clip, Some(voice), &route, engine);
         let fallback = route.fallback.as_str();
         let fallback = if fallback != provider
             && fallback != "none"
             && !fallback.is_empty()
-            && self.has_key(fallback, &owners)
+            && self.has_key(fallback, owners)
         {
             let chosen = resolve(fallback);
             self.engine(
-                &owners,
+                owners,
                 fallback,
                 if name.is_none() && matches!(provider, "cartesia" | "elevenlabs") {
                     SpeechUse::TextPreview
@@ -426,7 +435,6 @@ impl Mouth {
         let voice = resolve(provider).unwrap_or_default();
         let direct = name.is_some();
         let text = text.to_string();
-        let dir = self.previews.clone();
         let _slot = self.at_once.acquire().await;
         tokio::task::spawn_blocking(move || {
             let mut bytes = Vec::new();
@@ -468,11 +476,8 @@ impl Mouth {
             let Some(file) = file else {
                 return Ok(Preview::Temporary(Bytes::from(bytes)));
             };
-            std::fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(&dir)
-                .map_err(|e| e.to_string())?;
+            // The file and its staging name are relative to the directory opened for this fill.
+            let _directory = directory_handle;
             let part = file.with_extension(format!("{}.part", crate::ids::hex(4)));
             let mut made = std::fs::OpenOptions::new()
                 .mode(0o600)
@@ -487,7 +492,7 @@ impl Mouth {
                 let _ = std::fs::remove_file(part);
                 return Err(e.to_string());
             }
-            Ok(Preview::Cached(file))
+            Ok(Preview::Temporary(Bytes::from(bytes)))
         })
         .await
         .map_err(|_| "speech engine thread ended".to_string())?
@@ -503,18 +508,38 @@ enum SpeechUse {
 
 pub(crate) enum Audition<'a> {
     Catalogue(&'a str),
+    Narration(&'a str),
     Text(&'a str),
 }
 
 pub(crate) enum Preview {
-    Cached(PathBuf),
+    Cached(std::fs::File, u64),
     Temporary(Bytes),
+}
+
+// Keep the checked file open until the response is read, even if its name is replaced.
+fn preview_hit(path: &FilePath, owner: u32) -> Option<Preview> {
+    let file = crate::files::open(path, false).ok()?;
+    let meta = file.metadata().ok()?;
+    (meta.is_file() && meta.uid() == owner).then(|| Preview::Cached(file, meta.len()))
 }
 
 impl Preview {
     pub fn send(self, range: &str) -> Response {
         match self {
-            Self::Cached(path) => send_file(path, range),
+            Self::Cached(file, total) => {
+                let part = media::byte_range(range, total);
+                if matches!(part, Part::Missing) { return no_such_part(&total.to_string(), true); }
+                let file = Arc::new(file);
+                part_of("audio/mpeg", part, total, &total.to_string(), |first, length| {
+                    chunked_body(first, length, move |at, most| {
+                        let mut bytes = vec![0; most];
+                        let read = file.read_at(&mut bytes, at)?;
+                        bytes.truncate(read);
+                        Ok(bytes)
+                    })
+                })
+            },
             Self::Temporary(bytes) => {
                 let total = bytes.len() as u64;
                 let part = media::byte_range(range, total);
@@ -1397,14 +1422,18 @@ fn read_at(path: &FilePath, at: u64, most: usize) -> std::io::Result<Vec<u8>> {
 
 /// A file's bytes from `first` on, `length` of them, read and sent a part at a time.
 fn file_body(path: PathBuf, first: u64, length: u64) -> Body {
+    chunked_body(first, length, move |at, most| read_at(&path, at, most))
+}
+
+fn chunked_body(first: u64, length: u64, read: impl Fn(u64, usize) -> std::io::Result<Vec<u8>> + Clone + Send + Sync + 'static) -> Body {
     let parts = stream::unfold((first, length), move |(at, left)| {
-        let path = path.clone();
+        let read = read.clone();
         async move {
             if left == 0 {
                 return None;
             }
             let most = usize::try_from(left).map_or(CHUNK, |left| left.min(CHUNK));
-            let read = tokio::task::spawn_blocking(move || read_at(&path, at, most)).await;
+            let read = tokio::task::spawn_blocking(move || read(at, most)).await;
             match read {
                 Ok(Ok(part)) if !part.is_empty() => {
                     let sent = part.len() as u64;
@@ -1438,13 +1467,17 @@ fn answer(status: StatusCode, said: Vec<(header::HeaderName, String)>, body: Bod
 /// Some bytes of a clip's file, or all of them, with what a player needs to know of them.
 /// `of` is the whole clip's length as it is told: a number, or `*` while it still grows.
 fn part_of_file(path: PathBuf, part: Part, there: u64, of: &str) -> Response {
+    part_of(kind_of(&path), part, there, of, |first, length| file_body(path, first, length))
+}
+
+fn part_of(kind: &str, part: Part, there: u64, of: &str, body: impl FnOnce(u64, u64) -> Body) -> Response {
     let (status, first, length) = match part {
         Part::Whole => (StatusCode::OK, 0, there),
         Part::Bytes { first, last } => (StatusCode::PARTIAL_CONTENT, first, last - first + 1),
         Part::Missing => return no_such_part(of, false),
     };
     let mut said = vec![
-        (header::CONTENT_TYPE, kind_of(&path).to_string()),
+        (header::CONTENT_TYPE, kind.to_string()),
         (header::CONTENT_LENGTH, length.to_string()),
         (header::ACCEPT_RANGES, "bytes".to_string()),
     ];
@@ -1452,7 +1485,7 @@ fn part_of_file(path: PathBuf, part: Part, there: u64, of: &str) -> Response {
         let last = first + length - 1;
         said.push((header::CONTENT_RANGE, format!("bytes {first}-{last}/{of}")));
     }
-    answer(status, said, file_body(path, first, length))
+    answer(status, said, body(first, length))
 }
 
 /// The part that was asked for begins where the clip has no byte. `as_a_file`: answered
@@ -1820,6 +1853,28 @@ async fn of_message(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_preview_store_serves_only_the_opened_regular_file_of_its_owner() {
+        let dir = std::env::temp_dir().join(format!("clarp-preview-hit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("clip.mp3");
+        std::fs::write(&path, b"original").unwrap();
+        let owner = std::fs::metadata(&path).unwrap().uid();
+        assert!(preview_hit(&dir, owner).is_none());
+        assert!(preview_hit(&path, owner.wrapping_add(1)).is_none());
+        let Preview::Cached(mut opened, size) = preview_hit(&path, owner).unwrap() else { unreachable!() };
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, b"replacement").unwrap();
+        let link = dir.join("link.mp3");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(preview_hit(&link, owner).is_none());
+        let mut original = String::new();
+        opened.read_to_string(&mut original).unwrap();
+        assert_eq!((size, original.as_str()), (8, "original"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
 
     fn record(persona: &str, voice_id: &str) -> AgentRecord {
         AgentRecord {

@@ -38,7 +38,7 @@ one of these:
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
-| `managed_skills`, `agent_portraits`, `auto_contact_minting`, `backend_auth`, `controller_actions`, `controller_narration`, `diagnostics`, `goal_ledger`, `harness_model_providers`, `launch_directories`, `provider_background_tasks`, `remote_action`, `transcription` | to be built |
+| `managed_skills`, `agent_portraits`, `auto_contact_minting`, `backend_auth`, `controller_actions`, `diagnostics`, `goal_ledger`, `harness_model_providers`, `launch_directories`, `provider_background_tasks`, `remote_action`, `transcription` | to be built |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -305,7 +305,8 @@ with its port (19 Nov 2026).
 | Configurable model judgments | Several decision sites and a shared judgment history | The junk-transcript and working-label sites can be enabled. Enabling another site is refused | The other sites and the decision-history screen are separate work |
 | The record of each thing said (`/voice-events`) | Kept | Not kept | Separate from opt-in retained transcription audio |
 | The number of a clip of what an agent says aloud (`clip_id`) | counted from one | the moment the clip was begun, in milliseconds: also the first part of its file's name, and never given twice, across restarts too | A clip is found by its number without a table of clips. No clip is compared by the corpus: the reference says nothing aloud in the harness |
-| Installed custom speech adapters | Used for synthesis and previews | The Host offers the five built-in cloud engines and disabled audio | `tts` names the built-in engines, the voices and the clips, all built here, and is listed (the lead's word of 19 Nov 2026). A custom speech adapter is a facility of its own, a piece of its own |
+| Controller narration cache | Primary clips live in the runtime cache under `controller-narration/<digest>.mp3` | Primary clips live in `data/voice-previews/narration-<digest>.mp3` beside catalogue previews | Both retain clips without expiry. At Cartesia's 128 kbit/s a second of audio weighs about 16 kB. Fallback audio is served for that request only |
+| Installed custom speech adapters | Used for synthesis, previews and a configured narration fallback | The Host offers the five built-in cloud engines and disabled audio | `tts` names the built-in engines, the voices and the clips, all built here, and is listed (the lead's word of 19 Nov 2026). A custom speech adapter is a facility of its own, a piece of its own |
 | What an app said of a clip, when a late app says less (`queued` after `play-ok`) | the last word stands, so a clip that was played is offered again | a clip an app played to its end, or could not play, is not said to be waiting again; playing it once more is taken | A clip that was heard is not played a second time to whoever asks what it missed |
 | A line that waited for a Host that was away | spoken when the Host is back, however long it was away | spoken when it waited half an hour at most; after that it is over, unspoken | What was said before a long silence is no news to the ear |
 | How a clip is delivered other than as a growing file (`raw-pcm`, HLS) | there, where configured | not there: every clip is an MP3 that grows, announced as it is begun or when its agent's turn has come | Not built. The growing file is what the owner's Host is set to |
