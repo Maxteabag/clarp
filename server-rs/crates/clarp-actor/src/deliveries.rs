@@ -72,14 +72,22 @@ impl Deliveries {
         told
     }
 
-    /// Lets go of the sends that can change no more and last changed before `before_ms`.
-    pub fn forget_before(&mut self, before_ms: i64, waiting: &[u64]) {
-        let old: Vec<u64> = self
-            .sends
-            .values()
-            .filter(|kept| kept.send.at_ms < before_ms && !waiting.contains(&kept.send.turn))
-            .map(|kept| kept.send.turn)
-            .collect();
+    /// Lets go of the sends whose turn is over and that last changed before `before_ms`: from
+    /// the oldest revision on, up to the first that is younger (those whose turn is not over,
+    /// `open`, are passed over and kept). Nothing younger is looked at.
+    pub fn forget_before(&mut self, before_ms: i64, open: impl Fn(u64) -> bool) {
+        let mut old = Vec::new();
+        for turn in self.by_seq.values() {
+            let Some(kept) = self.sends.get(turn) else {
+                continue;
+            };
+            if kept.send.at_ms >= before_ms {
+                break;
+            }
+            if !open(*turn) {
+                old.push(*turn);
+            }
+        }
         for turn in old {
             if let Some(kept) = self.sends.remove(&turn) {
                 self.by_seq.remove(&kept.send.seq);
@@ -199,7 +207,7 @@ mod tests {
         assert_eq!(feed.current(), 12);
         assert_eq!(feed.pointers(0, 20, 5).len(), 1);
         assert!(feed.pointers(12, 20, 5).is_empty());
-        held.forget_before(2_000, &[]);
+        held.forget_before(2_000, |_| false);
         assert!(held.is_empty());
         assert_eq!(held.watermark, 12);
     }

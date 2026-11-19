@@ -564,8 +564,6 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
     activity
 }
 
-/// The queue changed. `message_id` names the message the change is about, when it is about
-/// one: a message that joined the queue, or one that left it to run (`started`).
 /// That a user send's delivery may have changed (`delivery-updated`): its identity, and no
 /// state; a client reads the state from `GET /log`.
 pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
@@ -577,6 +575,8 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
     })
 }
 
+/// The queue changed. `message_id` names the message the change is about, when it is about
+/// one: a message that joined the queue, or one that left it to run (`started`).
 pub fn queue_updated(
     record: &AgentRecord,
     status: &Status,
