@@ -37856,7 +37856,9 @@ def invoke(data):
     assert result.returncode==0
     return result.stdout
 payload={'session_id':'a10bafe2-20cd-4d3e-b884-8dacf57c5aa4','tool_use_id':'managed','tool_name':'Bash','tool_input':{'run_in_background':True,'command':'fixture'}}
-for invalid in (b'{',b' '*65537,json.dumps(dict(payload,tool_name='Read')).encode()):
+encoded=json.dumps(payload).encode()
+assert json.loads(invoke(encoded.ljust(65536)))['hookSpecificOutput']['updatedInput']['run_in_background'] is True
+for invalid in (b'{',encoded.ljust(65537),json.dumps(dict(payload,tool_name='Read')).encode()):
     assert invoke(invalid)==b''
 reply=json.loads(invoke(json.dumps(payload).encode()))['hookSpecificOutput']
 assert set(reply)=={'updatedInput','additionalContext','hookEventName'}
@@ -37971,6 +37973,9 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let mirrored=kept.iter().position(|e|e["job_id"]==event_id && e["status"]=="superseded").unwrap();
     let explicit=kept.iter().position(|e|e["job_id"]=="linked-worker" && e["job"]["metadata"]["tool_use_id"]=="managed").unwrap();
     assert!(mirrored<explicit);
+    let native_revision=kept[mirrored]["change_revision"].as_u64().unwrap();
+    let reg_revision=kept[explicit]["change_revision"].as_u64().unwrap();
+    assert!(shown["revision"].as_u64().unwrap()<native_revision && native_revision<reg_revision);
     assert_eq!(kept[mirrored]["job"]["projection_only"],true);
     assert_eq!(kept[mirrored]["job"]["replaced_by_job_id"],"linked-worker");
     drop(kept);
@@ -38034,7 +38039,11 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let bin=place.root.join("commands");
     std::fs::create_dir(&bin).unwrap();
     for name in ["clarp-agent-bg","clarp-goal"] {
-        program(&bin.join(name),&format!("#!/bin/sh\nexec '{}' tool {name} \"$@\"\n",env!("CARGO_BIN_EXE_clarp-host")));
+        let cli=env!("CARGO_BIN_EXE_clarp-host");
+        let stale=if name=="clarp-goal"{
+            format!("if [ \"$1\" = checkpoint ] && [ \"$FIXTURE_STALE_REVISION\" = yes ]; then exec '{cli}' tool clarp-goal checkpoint \"$2\" 999999 \"$4\"; fi\n")
+        }else{String::new()};
+        program(&bin.join(name),&format!("#!/bin/sh\n{stale}exec '{cli}' tool {name} \"$@\"\n"));
     }
     // No user service manager is needed for this local launch.
     program(&bin.join("systemctl"),"#!/bin/sh\nexit 1\n");
@@ -38046,6 +38055,7 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
                 "printf 'started' > \"$1\"; while [ -d \"$3\" ] && [ ! -f \"$2\" ]; do sleep 0.05; done; printf 'done\\n'","fixture"])
             .arg(cwd.join(format!("{key}.started"))).arg(cwd.join("allow-end")).arg(&cwd)
             .env_clear().env("PATH",format!("{}:/usr/bin:/bin",bin.display()))
+            .env("FIXTURE_STALE_REVISION",if key=="refused-write"{"yes"}else{"no"}).env("CLARP_SESSION",&keeper).env("CLAUDE_PWA_SESSION",&keeper)
             .env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
             .env("CLARP_HOST_TOKEN",&host.token).current_dir(&cwd).ended()
     };
@@ -38053,6 +38063,12 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     assert_eq!(denied.status.code(),Some(4));
     assert!(!cwd.join("unstarted.started").exists());
     assert_eq!(host.ask("GET","/background-jobs/unstarted",None).0,404);
+    // The real goal store refuses this stale checkpoint after the worker
+    // registered. The launcher must not release the underlying command.
+    let refused=run(plan_id,"refused-write");
+    assert_eq!(refused.status.code(),Some(3),"{}",String::from_utf8_lossy(&refused.stderr));
+    wait_for("the refused launch closes its registered job",||host.get("/background-jobs/refused-write")["job"]["status"]=="failed");
+    assert!(!cwd.join("refused-write.started").exists());
     let started=run(plan_id,"held-command");
     assert_eq!(started.status.code(),Some(0),"{}",String::from_utf8_lossy(&started.stderr));
     let handle=String::from_utf8(started.stdout).unwrap();
