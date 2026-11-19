@@ -23713,6 +23713,41 @@ say(type="turn.completed", usage=usage)
 }
 
 #[test]
+fn a_refused_live_binding_is_reported_once_for_each_agent() {
+    let place = Place::new("live-binding");
+    let host = place.start();
+    let first = host.new_agent("First");
+    let second = host.new_agent("Second");
+    let report = "transcriptSessionIdRefused backend=scripted";
+    let notices = |host: &Host| {
+        host.heard.lock().unwrap().lines()
+            .filter(|line| line.starts_with("transcriptSessionIdRefused"))
+            .map(str::to_owned).collect::<Vec<_>>()
+    };
+    let bind = |host: &Host, who: &str, name: &str, message: &str| {
+        host.send(who, &json!({"session":name,"reply":message}).to_string(), message);
+        wait_for("the tool to finish its binding turn", || {
+            host.conversation(who).last() == Some(&("assistant".to_string(), message.to_string()))
+        });
+    };
+    bind(&host, &first, "valid-1", "valid");
+    assert!(notices(&host).is_empty());
+    bind(&host, &first, "_private-first", "one");
+    wait_for("the first refusal", || !notices(&host).is_empty());
+    bind(&host, &first, "_private-repeat", "two");
+    bind(&host, &second, "_private-second", "three");
+    wait_for("the second agent's refusal", || notices(&host).len() >= 2);
+    assert_eq!(notices(&host), [report, report]);
+    host.kill();
+    let host = place.start();
+    bind(&host, &first, "_private-restored", "four");
+    let third = host.new_agent("Third");
+    bind(&host, &third, "_private-third", "five");
+    wait_for("the new agent's refusal", || !notices(&host).is_empty());
+    assert_eq!(notices(&host), [report]);
+}
+
+#[test]
 fn session_ids_are_checked_before_creation_and_a_restored_agent_runs_fresh() {
     use clarp_kernel::{agent::AgentEvent, journal::kind};
     use clarp_ports::log::{LogEngine, NewItem};

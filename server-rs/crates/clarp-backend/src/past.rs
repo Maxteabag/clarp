@@ -877,7 +877,8 @@ fn native_file(tool: clarp_kernel::grok_muse::Tool) -> &'static str {
     }
 }
 
-fn refused(backend: &str) {
+/// Report a refused transcript binding without disclosing its name.
+pub fn report_refused_session(backend: &str) {
     eprintln!("transcriptSessionIdRefused backend={backend}");
 }
 
@@ -886,7 +887,7 @@ fn checked_id(backend: &str, id: &str) -> bool {
         return true;
     }
     if !id.is_empty() {
-        refused(backend);
+        report_refused_session(backend);
     }
     false
 }
@@ -894,7 +895,7 @@ fn checked_id(backend: &str, id: &str) -> bool {
 fn confined(backend: &str, base: &Path, file: &Path) -> Option<PathBuf> {
     let path = file.canonicalize().ok()?;
     if !path.starts_with(base) {
-        refused(backend);
+        report_refused_session(backend);
         return None;
     }
     path.is_file().then_some(path)
@@ -921,7 +922,7 @@ fn native_transcript_in(
         && (!(8..=64).contains(&id.len())
             || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'))
     {
-        refused(tool.id());
+        report_refused_session(tool.id());
         return None;
     }
     let base = sessions.canonicalize().ok()?;
