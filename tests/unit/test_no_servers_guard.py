@@ -10,6 +10,8 @@ import pytest
 
 from tests import no_servers_guard as guard
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 SENTINEL = "import pathlib, sys; pathlib.Path(sys.argv[0]).with_suffix('.ran').write_text('ran')\n"
 
 

@@ -10,9 +10,22 @@ test-critical:
 # The structural guards, also before pushing: caught exceptions that are not
 # logged, import layers and cycles, module state, backend capabilities. New
 # code trips them more often than it trips the critical list. Serial.
+# Every structural test file (pytest.mark.structural); tests/unit/test_guards_list.py fails when
+# one is missing here, so 'make test-critical && make test-guards' green means every structural
+# check is green (G2). The route goldens stay in their own stage.
 GUARDS = tests/unit/test_swallowed_excepts.py tests/unit/test_import_layers.py \
          tests/unit/test_module_import_cycles.py tests/unit/test_module_state_guard.py \
-         tests/unit/test_backend_capabilities.py
+         tests/unit/test_backend_capabilities.py tests/unit/test_table_writers.py \
+         tests/unit/test_lifecycle_guards.py tests/unit/test_backend_identity_guard.py \
+         tests/unit/test_backend_cli_guard.py tests/unit/test_codex_start_guardrails.py \
+         tests/unit/test_dashboard_cache_guards.py tests/unit/test_ghost_session_guard.py \
+         tests/unit/test_message_seq_two_writers.py tests/unit/test_no_servers_guard.py \
+         tests/unit/test_provider_capabilities.py tests/unit/test_schema_guard_install.py \
+         tests/unit/test_service_action_guard.py tests/unit/test_live_capability.py \
+         tests/unit/test_handler_boundary.py tests/unit/test_hook_silent_excepts.py \
+         tests/unit/test_policies_pure.py tests/unit/test_policies_take_values.py \
+         tests/unit/test_lazy_imports_resolve.py tests/unit/test_only_services_migrate.py \
+         tests/integration/test_route_registry.py tests/unit/test_guards_list.py
 test-guards:
 	uv run --frozen --group dev python -m pytest -n0 $(GUARDS)
 

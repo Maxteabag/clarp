@@ -17,6 +17,8 @@ import pytest
 
 from tests.patching import logical_split_trees
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "server"
 _WRITE = re.compile(
     r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)\b")

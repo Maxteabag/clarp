@@ -35,6 +35,8 @@ import tomllib
 
 import pytest
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 LAYERS = ("persistence", "core", "features", "http")
 

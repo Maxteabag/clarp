@@ -29,6 +29,8 @@ from lib import db, db_schema, diagnostics_settings, eventlog, schema_guard
 from lib.log import log, log_exception
 from tests.unit.test_db_migrations import _shape_as_v61
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVER = ROOT / "server"
 CODE = db_schema._SCHEMA_VERSION

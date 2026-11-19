@@ -20,6 +20,8 @@ from lib import eventlog, turn_lifecycle
 from lib import agents as agents_db
 from lib.paths import RuntimePaths
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 HOOKS = pathlib.Path(__file__).resolve().parents[2] / "plugin" / "hooks"
 _RULE = pathlib.Path(__file__).resolve().parent / "test_swallowed_excepts.py"
 _spec = importlib.util.spec_from_file_location("swallowed_rule_for_hooks", _RULE)

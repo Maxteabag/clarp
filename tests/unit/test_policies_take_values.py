@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import pytest
+
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 SERVER_LIB = pathlib.Path(__file__).resolve().parents[2] / "server" / "lib"
 POLICIES = SERVER_LIB / "policies"

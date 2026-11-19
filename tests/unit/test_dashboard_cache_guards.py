@@ -21,6 +21,8 @@ from lib import db, message_previews as previews
 from lib import log as log_module
 from test_snapshot_n2 import seed, watch
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 
 # Every writer of a message raises its conversation's head to the revision it
 # gives the row, in the row's own transaction, and the cache keys are read

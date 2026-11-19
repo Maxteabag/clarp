@@ -20,6 +20,9 @@ from __future__ import annotations
 import ast
 import collections
 import pathlib
+import pytest
+
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 LIB = pathlib.Path(__file__).resolve().parents[2] / "server" / "lib"
 EXEMPT_FILES = {"lib/http_utils.py"}  # builds Principal and Responder from the handler
