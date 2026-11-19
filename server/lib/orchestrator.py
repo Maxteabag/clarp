@@ -536,20 +536,33 @@ class OrchestratorService:
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
         receipt = {"summary": f"Message routing finished: {result.action}",
                    "status": result.action,
-                   "target_agent_id": (recipient or {}).get("agent_id", ""),
-                   # What the first answer said: a replay answers exactly this.
-                   "answer_session": result.session, "answer_dispatch": result.dispatch,
-                   "answer_status": result.status}
+                   "target_agent_id": (recipient or {}).get("agent_id", "")}
         if result.action == FINAL_ERROR and result.status != 500:
             receipt["http_status"] = result.status
         if result.retry_dispatch:
             # The decision stands; a same-id retry sends it again (RTO-07).
             receipt.update(reason=DISPATCH_RETRYABLE, decision_id=result.decision_id)
-        janitor_builtins.complete_run(
-            run_id, outcome="failed" if failed else "completed",
-            result=receipt,
-            error="Message routing failed" if failed else "",
-        )
+        # What the first answer said, so a replay answers exactly this; all three or none, never
+        # cut: a value the demand history's bound refuses is left out and the receipt replays as
+        # main does (a cut session name is a wrong name).
+        said = {"answer_session": result.session, "answer_dispatch": result.dispatch,
+                "answer_status": result.status}
+        if janitor_builtins.fits_metadata({**receipt, **said}):
+            receipt.update(said)
+        outcome = "failed" if failed else "completed"
+        error = "Message routing failed" if failed else ""
+        try:
+            janitor_builtins.complete_run(run_id, outcome=outcome, result=receipt, error=error)
+        except Exception as exc:  # noqa: BLE001 - the receipt never costs the answer
+            log_exception("orchestratorReceiptFail", exc, detail=f"run={run_id}")
+            least = {key: receipt[key] for key in ("status", "target_agent_id", "http_status")
+                     if key in receipt}
+            if not janitor_builtins.fits_metadata(least):
+                least = {"status": result.action}
+            try:        # never leave the run claimed: close it with its least receipt (replays as main)
+                janitor_builtins.complete_run(run_id, outcome=outcome, result=least, error=error)
+            except Exception as again:  # noqa: BLE001
+                log_exception("orchestratorReceiptCloseFail", again, detail=f"run={run_id}")
         return result
 
     def _retry_routed_dispatch(self, receipt, *, requested_session, trace_id,
@@ -668,10 +681,14 @@ class OrchestratorService:
                   else 200)
         # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
         # A receipt written before it kept that answers as main did, by its recipient.
-        if not pending and "answer_session" in receipt:
-            session = str(receipt.get("answer_session") or "")
-            dispatched = str(receipt.get("answer_dispatch") or "")
-            status = int(receipt.get("answer_status") or status)
+        # A stored answer is read defensively: a session that is not a non-empty text or a status
+        # that is not an integer is an older receipt, replayed as main does.
+        said_session, said_status = receipt.get("answer_session"), receipt.get("answer_status")
+        if (not pending and isinstance(said_session, str) and said_session
+                and type(said_status) is int):
+            session = said_session
+            dispatched = receipt.get("answer_dispatch") if isinstance(receipt.get("answer_dispatch"), str) else ""
+            status = said_status
         elif pending:
             session, dispatched = requested_session, ""
         else:

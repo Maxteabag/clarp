@@ -387,7 +387,7 @@ def _service(model, effects):
         model_call=lambda packet, *_: model(packet) if callable(model) else {"reason": "case", **model})
 
 
-def _sender(service, *, app, dispatch=None, client="request-replayed"):
+def _sender(service, *, app, dispatch=None, client="request-replayed", requested="mike"):
     from lib import prompt_admissions
     admission = prompt_admissions.create(
         authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
@@ -398,7 +398,7 @@ def _sender(service, *, app, dispatch=None, client="request-replayed"):
         return SimpleNamespace(session=kwargs["forced_session"], backend="claude")
 
     def send():
-        return service.handle_send(text="the request", requested_session="mike", trace_id="route-r",
+        return service.handle_send(text="the request", requested_session=requested, trace_id="route-r",
                                    prompt_admission=admission, hands_free=True, synthesize_audio=False,
                                    dispatch=dispatch or delivered, fallback_request=app)
     return send
@@ -448,3 +448,94 @@ def test_a_receipt_written_before_the_answer_was_kept_replays_as_main_did(effect
     db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?",
                       (json.dumps(older), row["rowid"]))
     assert _said(send()) == _said(first) == (200, "route", "antoni", "claude")
+
+
+# ---- the hold of 05:09: the receipt never costs the answer ----
+
+def _stored_receipt():
+    row = db.conn().execute("SELECT rowid, result_json FROM janitor_demand_results"
+                            " ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
+    return row["rowid"], json.loads(row["result_json"])
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["voice", "app"])
+@pytest.mark.parametrize("length", [500, 501, 600])
+def test_a_requested_session_past_the_receipts_bound_is_still_answered_and_replays_alike(
+        effects, length, app):
+    """A clarify answers the requested session; one of 501 or 600 characters no longer fits the
+    demand history's bound (500): the answer keys are left out of the receipt, the run completes,
+    and the first answer and every retry agree, as on main (no answer at all and 202 pending
+    before)."""
+    service = _service(_message("antoni", 0.4), effects)
+    send = _sender(service, app=app, requested="s" * length)
+    first = send()
+    assert _said(first) == (200, "clarify", "s" * length, "")
+    second, third = _said(send()), _said(send())
+    assert second == third
+    _rowid, receipt = _stored_receipt()
+    if length <= 500:
+        assert "answer_session" in receipt and second == _said(first)
+    else:
+        # Left out of the receipt, so the replay is main's: the recipient the receipt names (the
+        # clarify's resolved target), not the first answer's session (ruling 1 of 05:09).
+        assert "answer_session" not in receipt and second == (200, "clarify", "antoni", "")
+
+
+def test_a_failed_completion_is_logged_and_the_answer_still_sent_and_the_run_closed(effects, monkeypatch, capfd):
+    service = _service(_message("antoni"), effects)
+    real = orchestrator.janitor_builtins.complete_run
+    calls = []
+
+    def refuses_first(run_id, *args, **kwargs):
+        calls.append(kwargs.get("result"))
+        if len(calls) == 1:
+            raise orchestrator.janitors.JanitorError("Demand history accepts bounded metadata only")
+        return real(run_id, *args, **kwargs)
+    monkeypatch.setattr(orchestrator.janitor_builtins, "complete_run", refuses_first)
+    send = _sender(service, app=False)
+    first = send()
+    assert _said(first) == (200, "route", "antoni", "claude")
+    assert calls[1] == {"status": "route", "target_agent_id": _agent_id("antoni")}     # its least receipt
+    assert "orchestratorReceiptFail" in capfd.readouterr().err
+    assert _said(send()) == (200, "route", "antoni", "claude")      # not pending: the run is closed
+
+
+# an odd stored receipt -> it replays as main: the recipient, its backend, the recomputed status
+ODD = {
+    "answer_status a word": {"answer_status": "x"},
+    "answer_status null": {"answer_status": None},
+    "answer_status missing": {"answer_status": "<drop>"},
+    "answer_status true": {"answer_status": True},
+    "answer_session null": {"answer_session": None},
+    "answer_session missing": {"answer_session": "<drop>"},
+    "answer_session empty": {"answer_session": ""},
+    "answer_dispatch a number": {"answer_dispatch": 7},
+}
+
+
+@pytest.mark.parametrize("case", sorted(ODD))
+def test_an_odd_stored_receipt_replays_as_main_never_an_error(effects, case):
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False)
+    first = send()
+    rowid, receipt = _stored_receipt()
+    for key, value in ODD[case].items():
+        if value == "<drop>":
+            receipt.pop(key, None)
+        else:
+            receipt[key] = value
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
+    expected = (200, "route", "antoni", "" if case == "answer_dispatch a number" else "claude")
+    assert _said(send()) == expected and _said(first) == (200, "route", "antoni", "claude")
+
+
+def test_a_replay_answers_the_stored_status_not_one_recomputed(effects):
+    """The receipt's answer_status is what a replay answers, even where the rest would give another."""
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False)
+    first = send()
+    rowid, receipt = _stored_receipt()
+    assert receipt["answer_status"] == first.status == 200          # the first answer's, stored
+    receipt["answer_status"] = 299
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
+    assert _said(send()) == (299, "route", "antoni", "claude")
