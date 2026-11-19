@@ -6,7 +6,7 @@ use crate::{
 use clarp_ports::{
     blobs::BlobEngine,
     clock::SystemClock,
-    kv::{KeyValue, KeyValueEngine, StoreError},
+    kv::{KeyValue, KeyValueEngine, StoreError, Write},
 };
 use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 use std::{path::Path, sync::Mutex};
@@ -45,15 +45,15 @@ impl KeyValue for Counted {
         }
         self.inner.put(table, key, value)
     }
-    fn put_together(
-        &mut self,
-        writes: &[(String, String, Vec<u8>)],
-    ) -> std::result::Result<(), StoreError> {
+    fn put_together(&mut self, writes: &[Write]) -> std::result::Result<(), StoreError> {
         let mut counts = self.counts.lock().unwrap();
         counts.ops.push(Op::Batch(
             writes
                 .iter()
-                .map(|(table, key, _)| Op::Write(table.clone(), key.clone()))
+                .map(|(table, key, value)| match value {
+                    Some(_) => Op::Write(table.clone(), key.clone()),
+                    None => Op::Delete(table.clone(), key.clone()),
+                })
                 .collect(),
         ));
         if writes
