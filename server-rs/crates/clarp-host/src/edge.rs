@@ -171,6 +171,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("agent_live_fcm", 94),
     ("live_activity_fcm", 95),
     ("decision_lifecycle", 28),
+    // A session the owner names (`[agents] decision_on_behalf_sessions`) answers a request in his
+    // place, in its own turn: the Host knows the turn by the token it gave it (`turn_identity.rs`).
+    ("decision_on_behalf", 79),
     ("text_input_requests", 29),
     ("artifact_pins", 38),
     // `POST /devices` takes a phone's own grant, and the Host pushes by it.

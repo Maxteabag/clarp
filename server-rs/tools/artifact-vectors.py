@@ -899,10 +899,46 @@ def what_the_user_is_shown_in_updates(w: World) -> None:
     w.call('inbox', note='thrown away, it is gone')
 
 
+
+def a_request_answered_on_the_users_behalf(w: World) -> None:
+    """The owner named a session that may answer for him (`designated_sessions`, his `[agents]
+    decision_on_behalf_sessions`), and the Host knows which agent's turn asks (`verified_session`): Omar is
+    the owner's front desk, Vera asks, and nobody has the session `ghost`."""
+    asked = w.call('create_decision', session=w.vera, title='Deploy?', question='Deploy version 1.3?',
+                   reference_id='deploy-1.3')
+    decision_id = asked['decision']['decision_id']
+    answer = lambda note, **more: w.call('resolve', decision_id=decision_id, expected_revision=1,  # noqa: E731
+                                         choice='accepted', note=note, **more)
+    answer('named by nobody', on_behalf_session=w.omar)
+    answer('named, but its turn is not known', on_behalf_session=w.omar, designated_sessions=[w.omar])
+    answer('named, and another agent\'s turn', on_behalf_session=w.omar, designated_sessions=[w.omar],
+           verified_session=w.vera)
+    answer('an agent\'s turn that says for whom it answers nothing', verified_session=w.omar)
+    answer('a blank session', on_behalf_session='  ', designated_sessions=[w.omar], verified_session=w.omar)
+    answer('the asking agent for itself', on_behalf_session=w.vera, designated_sessions=[w.vera],
+           verified_session=w.vera)
+    answer('a session nobody has', on_behalf_session='ghost', designated_sessions=['ghost'],
+           verified_session='ghost')
+    answer('the front desk, in its own turn, with blanks around the names', on_behalf_session=f' {w.omar} ',
+           designated_sessions=[f' {w.omar} ', 7, ''], verified_session=f'{w.omar} ')
+    answer('again, the same: nothing changes', on_behalf_session=w.omar, designated_sessions=[w.omar],
+           verified_session=w.omar)
+    answer('again, by the user: answered by another', )
+    w.call('get', artifact_id=asked['artifact_id'])
+    w.call('pending_deliveries')
+    options = [{'id': 'a', 'label': 'The first'}, {'id': 'b', 'label': 'The second'}]
+    asked = w.call('create_decision', session=w.vera, title='Which?', question='Which way?',
+                   response_type='single_choice', options=options)
+    w.call('resolve', decision_id=asked['decision']['decision_id'], expected_revision=1, answer={'option_id': 'b'},
+           on_behalf_session=w.omar, designated_sessions=[w.omar], verified_session=w.omar)
+    w.call('pending_deliveries')
+    w.call('list', type='decision')
+
 SCENARIOS = [plain_kinds, what_an_artifact_refuses, a_plan_is_an_artifact, an_approval_is_asked_and_answered,
              a_question_with_options_and_typed_answers, what_becomes_of_a_request_nobody_answers,
              the_inbox_and_what_a_user_does_with_an_artifact, what_names_a_published_file,
-             a_report_and_its_revisions, a_form_and_its_answers, what_the_user_is_shown_in_updates]
+             a_report_and_its_revisions, a_form_and_its_answers, what_the_user_is_shown_in_updates,
+             a_request_answered_on_the_users_behalf]
 
 
 def main(argv: list[str]) -> int:
