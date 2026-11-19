@@ -96,6 +96,8 @@ pub struct Spoke {
 
 /// What an agent's thread is asked.
 pub enum Ask {
+    VisitProvider(String),
+    HistoricalRead { source: Box<crate::helper_source::HelperSource>, visit:Option<clarp_kernel::provider_tasks::Visit>, generation:u64 },
     HelperRead {
         source: Box<crate::helper_source::HelperSource>,
         session: String,
@@ -375,6 +377,8 @@ pub struct View {
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
+    /// Idle native bindings and the last known runtime end, for the shared runner.
+    pub provider_bindings: Vec<(String,Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
     pub books: Arc<Books>,
     /// What the agent says aloud, and the clips it became: where a clip is looked for.
@@ -442,6 +446,10 @@ pub struct AgentHandle {
 }
 
 impl AgentHandle {
+    pub(crate) fn visit_provider(&self,native:&str){
+        let _=self.tx.send(Ask::VisitProvider(native.to_owned()));
+    }
+
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
         let (answer, reply) = oneshot::channel();
         self.tx
@@ -865,6 +873,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         finished: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
+        provider_bindings:Vec::new(),
         books: Arc::default(),
         speech: Arc::default(),
         broken: Some(OPENING.to_string()),
@@ -893,7 +902,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         helper_rows: Default::default(),
         helper_source: Some(Default::default()),
         helper_clock: Default::default(),
-        provider_due:Instant::now(),
+        provider_requested:false, historical_reading:false, historical_sources:BTreeMap::new(),
         helper_generation: 0,
         helper_owner: None,
         jobs_checked: Instant::now(),
@@ -957,7 +966,9 @@ struct Worker {
     helper_rows: clarp_actor::helper_cells::HelperRows,
     helper_source: Option<Box<crate::helper_source::HelperSource>>,
     helper_clock: crate::helper_source::RefreshClock,
-    provider_due:Instant,
+    provider_requested:bool,
+    historical_reading:bool,
+    historical_sources:BTreeMap<String,Box<crate::helper_source::HelperSource>>,
     helper_generation: u64,
     helper_owner: Option<(String, String)>,
     /// When the goals were last looked at, on the Host's clock. A goal that was due then and
@@ -1255,21 +1266,27 @@ impl Worker {
         if self.setup.record.backend != "claude" {
             return None;
         }
-        let actor = self.actor.as_ref()?;
+        let now_ms=self.now_ms();
+        let actor = self.actor.as_mut()?;
         let (live, session) = actor.helper_context();
         let now = Instant::now();
         let helper_due = self.helper_clock.due(live, now);
         self.helper_source.as_ref()?;
-        let session = session?;
+        let session=session?.to_owned();
         let attempt=actor.provider_attempt();
-        let saved=actor.provider_session(session).cloned().unwrap_or_default();
-        let closing=saved.owner.filter(|previous|Some(*previous)!=attempt);
-        let due=if closing.is_some()||saved.final_read.is_some(){now}
-            else{helper_due.map_or(self.provider_due,|due|due.min(self.provider_due))};
+        let mut saved=actor.provider_session(&session).cloned().unwrap_or_default();
+        if saved.newest_owner().is_some() && saved.newest_owner()!=attempt {
+            let root=crate::past::projects(&crate::config::home());
+            if let Ok(identity)=crate::helper_source::boundary(&root,&self.setup.record.cwd,&session){
+                if actor.provider_boundary(&session,None,identity,now_ms).is_err(){return Some(now+Duration::from_secs(1));}
+                saved=actor.provider_session(&session)?.clone();
+            }
+        }
+        let due=if saved.final_read.is_some() || self.provider_requested {now}else{helper_due?};
         if due>now{return Some(due)}
-        let helpers=helper_due.is_some() && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
-        self.helper_clock.started(now);
-        self.provider_due=now+Duration::from_secs(5);
+        let helpers=helper_due.is_some_and(|t|t<=now) && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
+        if helper_due.is_some_and(|t|t<=now){self.helper_clock.started(now);}
+        self.provider_requested=false;
         let session=session.to_owned();
         let cwd = self.setup.record.cwd.clone();
         let owner = (cwd.clone(), session.clone());
@@ -1283,10 +1300,10 @@ impl Worker {
         } else {
             None
         };
-        let at=self.now_ms();
-        let owner=saved.final_read.as_ref().map(|end|end.attempt).or(closing).or(attempt);
+        let at=now_ms;
+        let owner=saved.owner;
         let mut request=crate::helper_source::ProviderRead{helpers,parent:helpers && (self.helper_rows.has_imported || missed.is_some()),
-            closing:closing.map(|turn|(turn,at)),visit:clarp_kernel::provider_tasks::Visit {
+            visit:clarp_kernel::provider_tasks::Visit {
             native:session.clone(),expected:saved.revision,cursor:saved.cursor,bound_at:self.setup.record.created_at_ms,
             owner,final_read:saved.final_read,actions:Vec::new(),eof:false
         }};
@@ -1309,6 +1326,30 @@ impl Worker {
             });
         });
         None
+    }
+
+    /// A runner hint never interrupts an active read of the same transcript.
+    fn visit_idle_provider(&mut self,native:String){
+        let Some(actor)=self.actor.as_ref() else{return;};
+        let (live,current)=actor.helper_context();
+        if self.setup.record.backend=="claude" && current==Some(&native){
+            if !live { self.provider_requested=true; }
+            return;
+        }
+        let Some(binding)=actor.provider_session(&native) else{return;};
+        if self.historical_reading {return;}
+        self.historical_reading=true;
+        let mut source=self.historical_sources.remove(&native).unwrap_or_default();
+        let mut request=crate::helper_source::ProviderRead{helpers:false,parent:false,visit:binding.visit(native)};
+        let cwd=if binding.cwd.is_empty(){self.setup.record.cwd.clone()}else{binding.cwd.clone()};
+        let generation=self.helper_generation;
+        let tx=self.tx.clone();
+        let now=self.now_ms();
+        self.setup.runtime.spawn_blocking(move ||{
+            let root=crate::past::projects(&crate::config::home());
+            let visit=source.read_visit(&root,&cwd,&mut request,now).ok().map(|_|request.visit);
+            let _=tx.send(Ask::HistoricalRead{source,visit,generation});
+        });
     }
 
     fn now_ms(&self) -> i64 {
@@ -1354,6 +1395,9 @@ impl Worker {
         self.helper_rows = Default::default();
         self.helper_source = Some(Default::default());
         self.helper_clock = Default::default();
+        self.provider_requested=false;
+        self.historical_reading=false;
+        self.historical_sources.clear();
         self.helper_owner = None;
         self.helper_generation += 1;
         self.helper_change_session = None;
@@ -1373,21 +1417,23 @@ impl Worker {
             // No jobs view escapes this rejoin until every ended attempt's
             // final byte boundary has been consumed and its tasks reconciled.
             let current=actor.provider_attempt();
-            let recovering:Vec<_>=actor.provider_sessions().filter(|(_,s)|s.final_read.is_some() || s.owner.is_some() && s.owner!=current).map(|(id,_)|id.clone()).collect();
+            let recovering:Vec<_>=actor.provider_sessions().filter(|(_,s)|s.final_read.is_some() || s.newest_owner().is_some() && s.newest_owner()!=current).map(|(id,_)|id.clone()).collect();
             let root=crate::past::projects(&crate::config::home());
             for session in recovering{
                 let mut source=crate::helper_source::HelperSource::default();
-                loop{
-                    let Some(saved)=actor.provider_session(&session)else{break};
-                    let Some(attempt)=saved.final_read.as_ref().map(|e|e.attempt).or(saved.owner)else{break};
+                if actor.provider_session(&session).and_then(|s|s.newest_owner()).is_some_and(|t|Some(t)!=current){
+                    let boundary=crate::helper_source::boundary(&root,&self.setup.record.cwd,&session).map_err(|e|e.to_string())?;
+                    actor.provider_boundary(&session,None,boundary,self.now_ms()).map_err(|e|e.to_string())?;
+                }
+                while let Some(saved)=actor.provider_session(&session).filter(|s|s.final_read.is_some()){
                     let now=self.now_ms();
-                    let mut read=crate::helper_source::ProviderRead{helpers:false,parent:false,closing:Some((attempt,now)),
-                        visit:clarp_kernel::provider_tasks::Visit{native:session.clone(),expected:saved.revision,cursor:saved.cursor.clone(),bound_at:saved.bound_at,owner:Some(attempt),final_read:saved.final_read.clone(),actions:Vec::new(),eof:false}};
+                    let mut read=crate::helper_source::ProviderRead{helpers:false,parent:false,
+                        visit:clarp_kernel::provider_tasks::Visit{native:session.clone(),expected:saved.revision,cursor:saved.cursor.clone(),bound_at:saved.bound_at,owner:saved.owner,final_read:saved.final_read.clone(),actions:Vec::new(),eof:false}};
                     source.read_visit(&root,&self.setup.record.cwd,&mut read,now).map_err(|e|e.to_string())?;
-                    let eof=read.visit.eof;
+
                     let changes=actor.apply_provider_visit(read.visit,now,||self.setup.revisions.next(now)).map_err(|e|e.to_string())?;
                     out.changed.jobs |= changes.changed.jobs;
-                    if eof{break;}
+
                 }
             }
         }
@@ -1743,6 +1789,10 @@ impl Worker {
                 let _ = taken.send(());
                 return Ok(());
             }
+            Ask::VisitProvider(native) => {
+                self.visit_idle_provider(native);
+                return Ok(());
+            }
             Ask::Terminal { open } => {
                 self.terminal(open);
                 return Ok(());
@@ -1903,6 +1953,19 @@ impl Worker {
                 }
                 answered(result, answer)?
             }
+            Ask::HistoricalRead{source,visit,generation}=>{
+                if generation!=self.helper_generation{return Ok(());}
+                self.historical_reading=false;
+                if let Some(visit)=visit{
+                    if source.has_uncommitted_bytes(&visit.cursor){
+                        self.historical_sources.insert(visit.native.clone(),source);
+                    }
+                    let revisions=&self.setup.revisions;
+                    let out=actor.apply_provider_visit(visit,now,||revisions.next(now))?;
+                    self.after(out);
+                }
+                return Ok(());
+            }
             Ask::HelperRead {
                 source,provider,
                 cwd,
@@ -1921,7 +1984,7 @@ impl Worker {
                                 let revisions=&self.setup.revisions;
                                 let applied=actor.apply_provider_visit(visit,now,||revisions.next(now))?;
                                 jobs_changed=applied.changed.jobs;
-                                if more{self.provider_due=Instant::now();}
+                                if more && actor.helper_context().0 {self.provider_requested=true;}
                             }
                             actor.track_helpers(&mut self.helper_rows)?;
                             let mut out = actor.refresh_helpers(
@@ -2000,6 +2063,7 @@ impl Worker {
             | Ask::Goal { .. }
             | Ask::Amended { .. }
             | Ask::Terminal { .. }
+            | Ask::VisitProvider(_)
             | Ask::TakeLibrary { .. }
             | Ask::TakePlans { .. }
             | Ask::ClaimLine { .. }
@@ -2252,6 +2316,20 @@ impl Worker {
         let tx = self.tx.clone();
         let spawned = match action {
             Action::Launch(mut order) => {
+                if self.setup.record.backend=="claude" {
+                    let at=self.now_ms();
+                    if let Some(actor)=self.actor.as_mut(){
+                        let native=actor.helper_context().1.unwrap_or(&self.setup.profile.conversation_id).to_owned();
+                        let root=crate::past::projects(&crate::config::home());
+                        let mark=crate::helper_source::boundary(&root,&self.setup.record.cwd,&native)
+                            .map_err(|e|e.to_string()).and_then(|identity|actor.provider_boundary(&native,
+                                Some(clarp_kernel::provider_tasks::Attempt{turn:order.turn.0,attempt:order.attempt}),identity,at).map_err(|e|e.to_string()));
+                        if let Err(why)=mark{
+                            tell(&tx,order.turn,order.attempt,Told::Failed(format!("could not record provider turn boundary: {why}")));
+                            return;
+                        }
+                    }
+                }
                 if let Some(pool) = self.setup.pool() {
                     pool.guard_turn(&mut order);
                 }
@@ -2511,6 +2589,7 @@ impl Worker {
             ended: self.ended.clone(),
             finished: self.finished.clone(),
             backend: actor.backend_id(),
+            provider_bindings:actor.provider_sessions().map(|(id,s)|(id.clone(),s.ended_at)).collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -2965,6 +3044,7 @@ fn refuse_for(
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
                 | Ask::HelperRead { .. }
+                | Ask::VisitProvider(_) | Ask::HistoricalRead{..}
                 | Ask::Terminal { .. }
                 | Ask::AccountStop
                 | Ask::AccountBack

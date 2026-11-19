@@ -2252,6 +2252,19 @@ impl Actor {
             return Ok((Err(refusal), Outputs::default()));
         }
         let count = rows.len();
+        // The adopted runtime starts here. Older launches in its existing
+        // transcript cannot create new jobs for this agent.
+        let binding = if self.backend_id()=="claude" {
+            match &how {
+                Command::TakeUp{backend_session} | Command::Adopt{backend_session:Some(backend_session),..} =>
+                    Some(clarp_kernel::provider_tasks::JournalEntry{
+                        native:backend_session.clone(),
+                        session:clarp_kernel::provider_tasks::Session{revision:1,bound_at:now_ms,cwd:self.profile.cwd.to_string_lossy().into_owned(),..Default::default()},
+                        records:Vec::new(),
+                    }),
+                _=>None,
+            }
+        }else{None};
         let mut batch = self.recorder.batch();
         for row in rows {
             let ts_ms = row.ts_ms;
@@ -2264,7 +2277,11 @@ impl Actor {
         if let Err(refusal) = batch.command(how, now_ms) {
             return Ok((Err(refusal.to_string()), Outputs::default()));
         }
+        if let Some(entry)=&binding{
+            batch.item(NewItem::new(kind::PROVIDER_JOBS,now_ms,serde_json::to_vec(entry).map_err(|e|ActorError::Corrupt(e.to_string()))?));
+        }
         batch.commit()?;
+        if let Some(entry)=binding{self.provider_sessions.insert(entry.native,entry.session);}
         self.unstored_changes = 0;
         let out = Outputs {
             changed: Changed {

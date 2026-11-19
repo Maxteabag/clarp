@@ -95,3 +95,18 @@ fn only_exact_registrations_supersede_display_and_provider_cancellation_is_refus
     assert_eq!(f["mirrors"].as_array().unwrap().len(), 36);
     assert_eq!(f["retention"].as_array().unwrap().len(), 3);
 }
+
+#[test]
+fn visits_rotate_across_eligible_runtime_bindings() {
+    type Case=(Vec<(String,String,Option<i64>,bool)>,(String,String),Vec<(String,String)>);
+    let cases:Vec<Case>=serde_json::from_str(include_str!("fixtures/provider-observer.json")).unwrap();
+    let mut count=0;
+    for (bindings,after,selected) in cases {
+        let eligible=bindings.into_iter().filter_map(|(agent,native,ended,unfinished)|{
+            native::visit_binding(ended,unfinished,NOW).then_some((agent,native))
+        }).collect();
+        assert_eq!(native::rotate_idle(eligible,&after),selected);
+        count+=1;
+    }
+    assert_eq!(count,320);
+}

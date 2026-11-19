@@ -595,13 +595,47 @@ async fn look(app: &App) -> Result<(), Unavailable> {
     Ok(())
 }
 
+/// Only bound runtimes enter the rotation. A live turn shares its own
+/// incremental read with helper cells. Idle hints are delivered by mailbox.
+fn visit_idle_bindings(app:&App,after:&mut (String,String)){
+    use clarp_kernel::provider_tasks::{rotate_idle,visit_binding};
+    let directory=app.fleet.directory();
+    let now=app.clock.now_ms();
+    let mut bindings=Vec::new();
+    let mut agents=std::collections::BTreeMap::new();
+    for member in directory.members.iter().chain(&directory.janitors){
+        let view=member.agent.view();
+        if view.broken.is_some(){continue;}
+        let current=view.status.backend_session.as_deref();
+        let unfinished=view.jobs.iter().any(|job|job.provider_owned() && job.status.is_active());
+        for (native,ended) in &view.provider_bindings{
+            if (view.status.live.is_none() || current!=Some(native.as_str())) && visit_binding(*ended,unfinished,now){
+                bindings.push((member.record.agent_id.clone(),native.clone()));
+            }
+        }
+        // Existing bindings that predate the observer have no cursor yet.
+        if member.record.backend=="claude" && view.status.live.is_none() && let Some(native)=current
+            && !view.provider_bindings.iter().any(|(id,_)|id==native)
+            && visit_binding(view.status.last.as_ref().map(|turn|turn.ended_at_ms),unfinished,now){
+            bindings.push((member.record.agent_id.clone(),native.to_owned()));
+        }
+        agents.insert(member.record.agent_id.as_str(),&member.agent);
+    }
+    for binding in rotate_idle(bindings,after){
+        if let Some(agent)=agents.get(binding.0.as_str()){agent.visit_provider(&binding.1);}
+        *after=binding;
+    }
+}
+
 /// Starts the runner: it looks for what is due every so often.
 pub fn run(app: &App) {
     let app = app.clone();
     let every = Duration::from_millis(app.config.janitors_checked_every_ms.max(50));
     tokio::spawn(async move {
+        let mut after=Default::default();
         loop {
             tokio::time::sleep(every).await;
+            visit_idle_bindings(&app,&mut after);
             if let Err(why) = look(&app).await {
                 eprintln!("clarp-host: the janitors were not looked at: {}", why.0);
             }

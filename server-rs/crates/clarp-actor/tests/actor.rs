@@ -2019,7 +2019,7 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Running);
     assert_eq!(actor.job_timeline(&id,10).unwrap().len(),2);
     // A stale read cannot advance the file position or retire this attempt.
-    visit.final_read=Some(FinalRead{attempt:owner,exited_at:200,device:1,inode:2,end:900});
+    visit.final_read=Some(FinalRead{attempt:Some(owner),successor:None,exited_at:200,device:1,inode:2,end:900});
     visit.cursor.offset=500;visit.actions.clear();visit.eof=false;
     actor.apply_provider_visit(visit.clone(),200,next).unwrap();
     assert_eq!(actor.provider_session("fixture").unwrap().cursor.offset,256);

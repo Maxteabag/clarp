@@ -135,10 +135,13 @@ pub struct HelperSource {
     pub(crate) children: Children,
     parent: Parent,
     provider: ProviderReader,
+    parent_path:Option<std::path::PathBuf>,
     available: bool,
     pub(crate) recovered_through: Option<u64>,
     #[cfg(test)]
     counts: [usize; 3],
+    #[cfg(test)]
+    io_counts:[usize;2],
 }
 impl HelperSource {
     pub(crate) fn seed(&mut self, file: &File, text: &str) -> io::Result<()> {
@@ -233,71 +236,14 @@ impl HelperSource {
         changed
     }
     #[cfg(test)]
-    fn read_parent(&mut self, root: &Path, path: &Path) -> io::Result<bool> {
-        // An unchanged imported transcript needs only a stat; no parent
-        // handle is opened on this path. Recheck identity on the opened file.
-        let seen = Stamp::from(&std::fs::symlink_metadata(path)?);
-        if self.parent.stamp == Some(seen) && self.parent.offset == seen.bytes {
-            return Ok(false);
-        }
-        let relative = path
-            .strip_prefix(root)
-            .ok()
-            .and_then(|p| p.to_str())
-            .ok_or_else(|| io::Error::other("invalid parent path"))?;
-        let (_, mut file) = open_beneath(root, relative, false)
-            .map_err(|_| io::Error::other("parent unavailable"))?;
-        let meta = file.metadata()?;
-        if !meta.is_file() {
-            return Err(io::Error::other("parent is not a file"));
-        }
-        let stamp = Stamp::from(&meta);
-        if self.parent.stamp == Some(stamp) && self.parent.offset == stamp.bytes {
-            return Ok(false);
-        }
-        self.parent.changed = false;
-        if !self.parent.stamp.is_some_and(|old| {
-            old.device == stamp.device
-                && old.inode == stamp.inode
-                && (stamp.bytes > old.bytes || old == stamp)
-                && self.parent.offset <= stamp.bytes
-        }) {
-            self.parent = Parent {
-                changed: !self.parent.cells.is_empty(),
-                ..Default::default()
-            };
-        }
-        file.seek(SeekFrom::Start(self.parent.offset))?;
-        let data = file.take(stamp.bytes - self.parent.offset);
-        let _bytes = match self.parent.consume(std::io::BufReader::new(data)) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                self.parent.stamp = None;
-                return Err(error);
-            }
-        };
-        #[cfg(test)]
-        {
-            self.counts[2] += _bytes;
-        }
-        self.parent.stamp = Some(stamp);
-        Ok(self.parent.changed)
-    }
-    #[cfg(test)]
-    pub(crate) fn scan(&mut self, root: &Path, cwd: &str, session: &str, imported: bool) -> bool {
-        let Some((root, path)) = root.canonicalize().ok().and_then(|r| {
-            clarp_backend::past::claude_transcript(&r, cwd, session, false).map(|p| (r, p))
-        }) else {
-            let changed = !self.children.is_empty() || self.available;
-            self.children.clear();
-            self.metas.clear();
-            self.available = false;
-            return changed;
-        };
-        let changed = self.discover(&root, &path) || !self.available;
-        self.available = true;
-        let parsed = imported && self.read_parent(&root, &path).unwrap_or(false);
-        changed || parsed
+    fn scan(&mut self,root:&Path,cwd:&str,session:&str,imported:bool)->bool{
+        // These tests exercise the helper cursor. The native consumer is
+        // already at its own committed position, as after a caught-up visit.
+        let (dev,ino,end)=boundary(root,cwd,session).unwrap_or_default();
+        let mut request=ProviderRead{helpers:true,parent:imported,visit:Visit{
+            native:session.into(),expected:0,bound_at:0,owner:None,final_read:None,actions:Vec::new(),eof:false,
+            cursor:Cursor{device:dev,inode:ino,offset:end,..Default::default()}}};
+        self.read_visit(root,cwd,&mut request,0).unwrap_or(false)
     }
     pub(crate) fn apply(&self, cell: &mut Value, imported: bool, turn: Option<u64>) {
         let id = cell["id"].as_str().unwrap_or("").to_owned();
@@ -404,6 +350,76 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn provider_refresh_resumes_at_the_first_uncommitted_action_and_byte() {
+        let f=Fixture::new();
+        let mut source=HelperSource::default();
+        let mut read=ProviderRead{helpers:false,parent:false,
+            visit:clarp_kernel::provider_tasks::Session::default().visit("parent".into())};
+        let record=|range:std::ops::Range<usize>|{
+            let blocks:Vec<_>=range.map(|i|json!({"type":"tool_use","name":"Bash","id":format!("tool-{i}"),
+                "input":{"run_in_background":true}})).collect();
+            json!({"type":"assistant","timestamp":"2027-01-15T08:00:00Z","message":{"content":blocks}}).to_string()
+        };
+        let now=1_800_000_000_000;
+        // The newline counts toward the record ceiling. An exact record
+        // survives; one byte over is skipped even across a reader restart.
+        let mut exact=record(0..1);
+        exact.push_str(&" ".repeat(RECORD_LIMIT-exact.len()-1));
+        exact.push('\n');
+        let mut oversized=record(1000..1001);
+        oversized.push_str(&" ".repeat(RECORD_LIMIT-oversized.len()+1));
+        std::fs::write(&f.parent,format!("{exact}{oversized}")).unwrap();
+        let mut seen=Vec::new();
+        for _ in 0..(2*RECORD_LIMIT/(VISIT_BYTES as usize)+1){
+            let before=source.io_counts[1];
+            source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+            assert!(source.io_counts[1]-before<=VISIT_BYTES as usize);
+            seen.extend(read.visit.actions.drain(..).map(|a|a.tool));
+        }
+        assert_eq!(seen,["tool-0"]);
+        assert!(read.visit.cursor.discarding);
+        let mut file=fs::OpenOptions::new().append(true).open(&f.parent).unwrap();
+        writeln!(file).unwrap();
+        let start=file.metadata().unwrap().len();
+        let many=record(1..131);
+        writeln!(file,"{many}").unwrap();
+        source=HelperSource::default();
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        assert_eq!(read.visit.actions.len(),64);
+        assert_eq!(read.visit.cursor.offset,start);
+        assert_eq!(read.visit.cursor.action_offset,64);
+        seen.extend(read.visit.actions.drain(..).map(|a|a.tool));
+        // Reopen at the saved action offset. The last two actions are
+        // already in memory for the following visit and cost no file read.
+        source=HelperSource::default();
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        assert_eq!(read.visit.actions.len(),64);
+        assert_eq!(read.visit.cursor.action_offset,128);
+        seen.extend(read.visit.actions.drain(..).map(|a|a.tool));
+        let bytes=source.io_counts[1];
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        seen.extend(read.visit.actions.drain(..).map(|a|a.tool));
+        assert_eq!(seen,(0..131).map(|i|format!("tool-{i}")).collect::<Vec<_>>());
+        assert!(read.visit.eof);
+        assert_eq!(read.visit.cursor.offset,file.metadata().unwrap().len());
+        let stats=source.io_counts[0];
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        assert_eq!(source.io_counts,[stats+1,bytes]);
+        assert!(read.visit.actions.is_empty());
+        // The final record remains incomplete across a visit. Only the
+        // appended newline is read to finish it by the same reader.
+        let partial=record(131..132);
+        write!(file,"{partial}").unwrap();
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        assert!(read.visit.actions.is_empty());
+        let bytes=source.io_counts[1];
+        writeln!(file).unwrap();
+        source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
+        assert_eq!(read.visit.actions[0].tool,"tool-131");
+        assert_eq!(source.io_counts[1]-bytes,1);
     }
 
     #[test]
@@ -549,10 +565,10 @@ mod tests {
     }
 }
 
-use clarp_kernel::provider_tasks::{Attempt,Cursor,Evidence,FinalRead,Visit,RECORD_LIMIT};
+use clarp_kernel::provider_tasks::{Cursor,Evidence,Visit,RECORD_LIMIT};
 
 const VISIT_BYTES:u64=256*1024;
-const VISIT_ACTIONS:usize=64;
+use clarp_kernel::provider_tasks::MAX_ACTIONS as VISIT_ACTIONS;
 #[derive(Default)]
 struct ProviderReader{
     lines:crate::native_lines::Lines,
@@ -579,16 +595,15 @@ impl ProviderReader{
         }
         if self.pending.is_none() && visit.actions.len()<VISIT_ACTIONS && self.consumed>=start{
             let from=(self.consumed-start).min(bytes.len() as u64) as usize;
-            let mut line_start=visit.cursor.offset;
             let used=self.lines.feed(&bytes[from..],start+from as u64,RECORD_LIMIT,|line,end|{
                 let actions=serde_json::from_slice(line).ok().map_or_else(Vec::new,|value|clarp_kernel::provider_tasks::parse_actions(&visit.native,project,&value,now));
                 let n=visit.cursor.action_offset.min(actions.len());
                 let take=(actions.len()-n).min(VISIT_ACTIONS-visit.actions.len());
                 visit.actions.extend(actions.iter().skip(n).take(take).cloned());
                 if n+take<actions.len(){
-                    self.pending=Some((end,actions));visit.cursor.action_offset=n+take;visit.cursor.offset=line_start;return false
+                    self.pending=Some((end,actions));visit.cursor.action_offset=n+take;visit.cursor.offset=end - line.len() as u64;return false
                 }
-                visit.cursor.offset=end;visit.cursor.action_offset=0;line_start=end;
+                visit.cursor.offset=end;visit.cursor.action_offset=0;
                 visit.actions.len()<VISIT_ACTIONS
             });
             self.consumed+=used as u64;
@@ -600,26 +615,32 @@ impl ProviderReader{
 }
 pub(crate) struct ProviderRead {
     pub visit:Visit,
-    pub closing:Option<(Attempt,i64)>,
+
     pub helpers:bool,
     pub parent:bool,
 }
 impl HelperSource{
+    pub(crate) fn has_uncommitted_bytes(&self,cursor:&Cursor)->bool{
+        self.provider.consumed>cursor.offset || self.provider.pending.is_some()
+    }
+
     /// The on-disk position may lag the in-memory reader by a partial line.
     /// Read only the missing window and hand its shared slice to each cursor.
     pub(crate) fn read_visit(&mut self,root:&Path,cwd:&str,request:&mut ProviderRead,now:i64)->io::Result<bool>{
         let v=&mut request.visit;
-        let Some(path)=clarp_backend::past::claude_transcript(root,cwd,&v.native,false)else{
-            v.eof=true;
-            if let Some((attempt,exited_at))=request.closing{v.final_read=Some(FinalRead{attempt,device:v.cursor.device,inode:v.cursor.inode,end:v.cursor.offset,exited_at});}
-            let changed=self.available;self.available=false;self.children.clear();self.metas.clear();return Ok(changed);
+        if !clarp_kernel::native_session_name(&v.native){return Err(io::Error::other("invalid native session"));}
+        let path=self.parent_path.get_or_insert_with(||root.join(clarp_backend::past::claude_project(cwd)).join(format!("{}.jsonl",v.native))).clone();
+        #[cfg(test)] {self.io_counts[0]+=1;}
+        let meta=match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_file()=>meta,
+            Ok(_)=>return Err(io::Error::other("provider transcript is not a regular file")),
+            Err(e) if e.kind()==io::ErrorKind::NotFound=>{
+                v.eof=true;let changed=self.available;self.available=false;self.children.clear();self.metas.clear();return Ok(changed);
+            }
+            Err(e)=>return Err(e),
         };
-        let root=root.canonicalize()?;
-        let stamp=Stamp::from(&std::fs::symlink_metadata(&path)?);
-        let changed=request.helpers && (self.discover(&root,&path)||!self.available);self.available=true;
-        if let Some((attempt,exited_at))=request.closing && v.final_read.is_none(){
-            v.final_read=Some(FinalRead{attempt,device:stamp.device,inode:stamp.inode,end:stamp.bytes,exited_at});
-        }
+        let stamp=Stamp::from(&meta);
+        let changed=request.helpers && (self.discover(root,&path)||!self.available);self.available=true;
         if v.final_read.as_ref().is_some_and(|end|end.device!=stamp.device || end.inode!=stamp.inode){
             v.eof=true;return Ok(changed)
         }
@@ -635,24 +656,45 @@ impl HelperSource{
         let start=if request.parent {next.min(self.parent.offset)}else{next};
         let mut bytes=Vec::new();
         if start<end {
-            let relative=path.strip_prefix(&root).ok().and_then(|p|p.to_str()).ok_or_else(||io::Error::other("invalid provider path"))?;
-            let (_,mut file)=open_beneath(&root,relative,false).map_err(|_|io::Error::other("provider parent unavailable"))?;
+            let relative=path.strip_prefix(root).ok().and_then(|p|p.to_str()).ok_or_else(||io::Error::other("invalid provider path"))?;
+            let (_,mut file)=open_beneath(root,relative,false).map_err(|_|io::Error::other("provider parent unavailable"))?;
             let m=file.metadata()?;
             if !m.is_file() || m.dev()!=stamp.device || m.ino()!=stamp.inode {return Err(io::Error::other("provider parent changed"))}
             file.seek(SeekFrom::Start(start))?;file.take((end-start).min(VISIT_BYTES)).read_to_end(&mut bytes)?;
+            // Replacement or truncation during the read invalidates the evidence.
+            let latest=std::fs::symlink_metadata(&path)?;
+            if latest.dev()!=stamp.device || latest.ino()!=stamp.inode || latest.len()<start+bytes.len() as u64 {
+                return Err(io::Error::other("provider parent changed while read"));
+            }
+            #[cfg(test)] {self.io_counts[1]+=bytes.len();}
         }
         self.parent.changed=false;
         if request.parent && self.parent.offset>=start && self.parent.offset<start+bytes.len() as u64{
             let at=(self.parent.offset-start) as usize;
-            self.parent.consume(&bytes[at..])?;
+            let _consumed=self.parent.consume(&bytes[at..])?;
+            #[cfg(test)] {self.counts[2]+=_consumed;}
             self.parent.stamp=Some(stamp);
         }
         let project=path.parent().and_then(Path::file_name).and_then(|s|s.to_str()).unwrap_or("");
         // If the helper reader trails the durable job cursor by a full
         // window, it alone consumes this window; don't move the job cursor.
-        if next<=start+bytes.len() as u64 {self.provider.read(&bytes,start,project,v,now);}
+        if next<=start+bytes.len() as u64 {
+            self.provider.read(&bytes,start,project,v,now);
+            if !clarp_kernel::provider_tasks::valid_id(&v.native){v.actions.clear();}
+        }
         v.eof=self.provider.pending.is_none() && self.provider.consumed>=end && (!request.parent||self.parent.offset>=end);
         if v.final_read.is_some() && v.eof {v.cursor.offset=end;v.cursor.action_offset=0;}
         Ok(changed||self.parent.changed)
+    }
+}
+
+pub(crate) fn boundary(root:&Path,cwd:&str,session:&str)->io::Result<(u64,u64,u64)>{
+    if !clarp_kernel::native_session_name(session){return Err(io::Error::other("invalid native session"));}
+    let path=root.join(clarp_backend::past::claude_project(cwd)).join(format!("{session}.jsonl"));
+    match std::fs::symlink_metadata(path){
+        Ok(m) if m.is_file()=>Ok((m.dev(),m.ino(),m.len())),
+        Ok(_)=>Err(io::Error::other("provider parent is not a file")),
+        Err(e) if e.kind()==io::ErrorKind::NotFound => Ok((0,0,0)),
+        Err(e)=>Err(e),
     }
 }
