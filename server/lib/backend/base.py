@@ -522,6 +522,8 @@ class Backend:
               synthesize_audio: bool = False) -> bool:
         """Inject ``text`` into the agent's in-flight turn; True when the
         runner accepted it. Raises ``Unsupported`` when the CLI cannot be
-        steered mid-turn.
+        steered mid-turn. False means NOTHING was sent: a steer that may have
+        reached the provider either returns True or raises (the dispatcher
+        returns a False steer's launch receipt to PENDING, R120).
         """
         raise Unsupported(f"{self.id} cannot be steered mid-turn")

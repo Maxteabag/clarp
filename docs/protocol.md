@@ -339,7 +339,10 @@ Rules:
   trace_id}}` with `state` one of `pending_launch` (saved, waiting for
   handoff; a display hint, never permission to retry), `stopped` (withdrawn
   by the user's Stop before handoff) or `handed_over` (handoff recorded,
-  outcome unconfirmed; not "started"). Absent means unknown, and the whole
+  outcome unconfirmed; not "started"). `handed_over` is recorded only once
+  the prompt can have left: a steer the backend refused before sending
+  anything leaves or puts the receipt back at `pending_launch` (new `rev`),
+  and the send then runs from the queue (Host contract 103). Absent means unknown, and the whole
   block is omitted when the Host cannot observe the same F4-capable runtime
   process before and after its read. Every response carries
   `delivery_stop_generation` (the page's projection epoch) and

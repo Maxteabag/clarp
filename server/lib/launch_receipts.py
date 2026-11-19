@@ -409,6 +409,24 @@ def mark_attempted(trace_id: str, *, override_fence: bool = False) -> str:
     return outcome
 
 
+def withdraw_attempt(trace_id: str) -> bool:
+    """ATTEMPTED back to PENDING, for an attempt proven to have sent nothing (R120).
+
+    A receipt says ATTEMPTED only from the moment the prompt can have left. The
+    one caller is a steer that its backend answered False without an exception:
+    ``Backend.steer`` returns False only before anything is sent (Codex: no
+    active turn, or one not yet started). It moves only a receipt that is
+    ATTEMPTED now; the client sees the new state with a new rev and seq."""
+    if not trace_id:
+        return False
+    with db.busy_timeout(SQLITE_CRITICAL_BUSY_TIMEOUT_MS), _write():
+        receipt = get(trace_id)
+        if receipt is None or receipt.get("state") != ATTEMPTED:
+            return False
+        _move(trace_id, receipt, PENDING)
+    return True
+
+
 def note_stop(agent_id: str) -> None:
     """Stop, in this process, before its fence write: a resend or handoff
     here never treats an earlier admission as unsent, even if that write fails."""

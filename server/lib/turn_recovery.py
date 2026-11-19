@@ -13,7 +13,7 @@ from . import events
 from .turn_lifecycle import TurnEvent
 from .log import log, log_exception
 from .turn_dispatch_state import _TURN_LOCK, _SLOTS, account_failover, _INFLIGHT, _RECOVERY_LOCK, _RECOVERY_BACKOFF, _NO_LOCK, LEAKED_SLOT_GRACE_MS, ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launch_running
-from .turn_command import _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable
+from .turn_command import _can_steer, _TurnSpec, JanitorDispatchError, GoalWakeDispatchError, _validate_goal_dispatch, _recovered_janitor_run, _REGENERATED_ORIGINS, _remove_queued_run, DispatchCommand, _preinvoke_failure, _QueuedReceiptUnavailable
 
 
 class RecoveryMixin:
@@ -77,6 +77,31 @@ class RecoveryMixin:
             log("turnSlotsRehydrated",
                 f"adopted={len(result['adopted'])} "
                 f"requeued_parked={result['requeued_parked']}")
+        self._settle_unsent_held_sends()
+
+    def _settle_unsent_held_sends(self) -> None:
+        """Once per runtime start: the held sends R120's defect left (turn_queue)."""
+        try:
+            done = turn_queue.settle_unsent_held_sends(
+                can_steer=lambda backend: _can_steer(self.backends, backend))
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("heldSendPassFail", exc)
+            return
+        if not any(done.values()):
+            return
+        log("heldSendPass", " ".join(f"{key}={len(ids)}" for key, ids in done.items()))
+        if getattr(self.ctx, "stream", None) is None:
+            return
+        for queue_id in done["failed"]:
+            row = db.conn().execute("SELECT agent_id, session, client_msg_id FROM queued_turns WHERE queue_id=?",
+                                    (queue_id,)).fetchone()
+            if row is None:
+                continue
+            state = turn_queue.state(row["agent_id"])
+            events.broadcast(self.ctx.stream, events.queue_updated(
+                session=row["session"], agent_id=row["agent_id"], client_msg_id=row["client_msg_id"],
+                queue_depth=state["count"], queue_paused=state["paused"], queue_started=False,
+                queue_revision=state["revision"]))
 
     def _recover_queued_locked(self) -> int:
         from . import task_goal_recovery

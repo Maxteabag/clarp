@@ -11,7 +11,7 @@ from typing import Callable
 from . import db, prompt_admissions
 from . import lifecycle as lk
 from .lifecycle import Deadline, Edge, Lifecycle, WaitForever
-from .log import log
+from .log import log, log_exception
 
 
 def _receipt_failure(event: str, queue_ids, exc: BaseException, *, agents=None) -> None:
@@ -184,6 +184,8 @@ QUEUE_RECEIPT = Lifecycle(
         Edge("withdraw", frozenset({"queued", "parked"}), "withdrawn"),
         Edge("withdraw_claimed", frozenset({"claimed"}), "withdrawn"),
         Edge("mark_unknown", frozenset({"queued", "claimed", "parked"}), "unknown"),
+        # A held send that never ran and will not be run late (R120's pass).
+        Edge("fail_unrun", frozenset({"queued"}), "failed"),
         Edge("call_open_unknown", frozenset({"claimed", "started"}), "unknown"),
         # A turn settles its receipt; the newest settlement wins (resettle).
         *(Edge(f"settle_{s}", frozenset({"started"}), s) for s in _SETTLED),
@@ -885,6 +887,67 @@ def mark_started(queue_id: str) -> None:
                 # which item ended it: a peer message or goal wake can do so.
                 log("queuePauseEndedByDrain",
                     f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
+
+
+# R120: a plain send that met a busy agent of a backend that cannot be steered
+# had its launch attempt recorded before the steer was refused, and waited for
+# good. The repair stops that; this pass settles the rows it left, once per
+# runtime start.
+HELD_SEND_GRACE_MS = 10 * 60_000
+HELD_SEND_NOT_RUN = "held_send_not_run"
+HELD_SEND_NOTICE = ("A message you sent while this agent was busy was never run, and it will not "
+                    "be run late. Send it again if you still want it.")
+
+
+def settle_unsent_held_sends(*, can_steer: Callable[[str], bool],
+                             now_ms: int | None = None) -> dict[str, list[str]]:
+    """Rows the R120 defect left: queued, origin user, launch receipt ATTEMPTED,
+    no turn ever for their trace, on a backend that cannot be steered (so the
+    refused steer provably sent nothing). Younger than HELD_SEND_GRACE_MS: the
+    receipt goes back to PENDING and the row runs with the queue. Older: the
+    row ends ``failed`` (reason held_send_not_run) and its sender is told in
+    the chat. The same shape on a steerable backend may have been sent: left,
+    and logged. Returns the queue ids per outcome."""
+    from . import agents, launch_receipts, message_store
+    now = db.now_ms() if now_ms is None else now_ms
+    done: dict[str, list[str]] = {"released": [], "failed": [], "left": []}
+    rows = db.conn().execute(
+        """SELECT * FROM queued_turns q
+            WHERE q.status = 'queued' AND q.origin = 'user'
+              AND NOT EXISTS (SELECT 1 FROM turns t
+                               WHERE t.agent_id = q.agent_id AND t.trace_id = q.trace_id)
+            ORDER BY q.queue_seq""").fetchall()
+    for row in rows:
+        receipt = launch_receipts.get(str(row["trace_id"]))
+        if (receipt or {}).get("state") != launch_receipts.ATTEMPTED:
+            continue
+        queue_id, agent_id = str(row["queue_id"]), str(row["agent_id"])
+        agent = agents.get_by_agent_id(agent_id) or {}
+        if can_steer(str(agent.get("backend") or "")):
+            done["left"].append(queue_id)
+            log("heldSendLeft", f"agent={agent_id} queue={queue_id} — a steer may have reached it")
+            continue
+        if now - int(row["enqueued_at"] or 0) < HELD_SEND_GRACE_MS:
+            if launch_receipts.withdraw_attempt(str(row["trace_id"])):
+                done["released"].append(queue_id)
+                log("heldSendReleased", f"agent={agent_id} queue={queue_id}")
+            continue
+        with _receipt_write("fail_unrun", (queue_id,), agent_ids={queue_id: agent_id}):
+            moved = _cas("fail_unrun", "queue_id = ?", (queue_id,),
+                         values={"text": "", "sender_agent_id": "", "prompt_admission_id": ""})
+            if moved:
+                _bump_revision(agent_id)
+        if not moved:
+            continue
+        done["failed"].append(queue_id)
+        log("heldSendFailed", f"agent={agent_id} queue={queue_id} reason={HELD_SEND_NOT_RUN}")
+        try:
+            message_store.record_system_notice(
+                agent_id=agent_id, backend_session_id=agents.live_backend_session(agent_id) or "",
+                notice_id=f"{HELD_SEND_NOT_RUN}:{queue_id}", text=HELD_SEND_NOTICE)
+        except Exception as exc:  # noqa: BLE001 - the row is settled; the notice is told next time
+            log_exception("heldSendNoticeFail", exc, detail=agent_id)
+    return done
 
 
 def remove(queue_id: str) -> bool:

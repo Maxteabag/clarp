@@ -1216,6 +1216,8 @@ class _Client:
 
     def steer(self, text: str, client_msg_id: str = "",
               synthesize_audio: bool = False, agent_id: str = "") -> bool:
+        """False only before turn/steer is written (Backend.steer's contract);
+        after it, True, or the request's exception."""
         active = self._actives.get(agent_id) if agent_id else self.active
         if active is None or not active.handle.is_alive():
             return False
