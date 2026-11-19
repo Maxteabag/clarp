@@ -954,6 +954,7 @@ mod tests {
     fn a_goal_that_waits_for_a_job_is_woken_when_the_job_ends() {
         let mut d = Driven::new();
         let register = JobCommand::Register {
+            queued: false,
             id: "build-1".to_string(),
             kind: "build".to_string(),
             title: "The build".to_string(),

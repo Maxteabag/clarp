@@ -34,6 +34,11 @@ impl Revisions {
         }
     }
 
+    /// A durable change can predate this process even if its clock went backwards.
+    pub fn observe(&self, revision: u64) {
+        self.last.fetch_max(revision, Ordering::Relaxed);
+    }
+
     /// The newest number given out: 0 when none was.
     pub fn latest(&self) -> u64 {
         self.last.load(Ordering::Relaxed)

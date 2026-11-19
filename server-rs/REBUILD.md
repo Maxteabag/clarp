@@ -2304,6 +2304,22 @@ The additional process holds its model and inference buffers. A published CPU sm
 
 Removing an external model forgets its record. Removing a managed model deletes only its own directory under the Host’s models root. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
 
+**The computer’s background jobs.** A Host operation can register a queued or running job through
+the fleet and use its generation to start, report progress, finish or cancel it. The computer owns
+these jobs even when the fleet has no agents. Each registration names the kind. A second caller,
+such as portrait generation, uses the same registration and transition API with its own kind and
+stable job ID. The fleet arbitrates agent and computer claims within one actor turn. The storage
+port writes a single record with the current job and up to 200 timeline entries before the fleet
+publishes a change. The regular list, detail, event and cancellation routes show the computer as
+owner; cancelling a computer job sends no cleanup prompt to an agent. A producer waits on
+`FleetHandle::wait_computer_job_end(id, generation)`. The fleet subscribes it in the same actor
+turn that checks the generation. A durable cancellation, finish or replacement wakes every producer
+waiting on the old generation; a failed store write leaves the wait pending. At open the fleet
+counts unreadable job records, logs one line, and preserves their bytes and their ids. A successful
+computer registration under the same id replaces the unreadable record and logs the repair. The reference cases for
+generation receipts are in `computer-jobs-vectors.json`, and the wrong rules in
+`tools/plants/computer-jobs.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
