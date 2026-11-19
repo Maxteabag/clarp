@@ -173,32 +173,36 @@ mod tests {
     #[test]
     fn a_provider_log_comes_only_from_the_receipted_task_and_secrets_are_redacted(){
         let place=scratch("provider-output");
-        let base=place.join("claude-fixture");
-        let dir=base.join("project/native/tasks");
+        let store=place.join("claude-fixture");
+        let dir=store.join("project/native/tasks");
         std::fs::create_dir_all(&dir).unwrap();
-        let meta=json!({"provider_project":"project","native_session_id":"native","provider_task_id":"task-1","log_path":"/somewhere/else"});
-        let path=dir.join("task-1.output");
-        assert_eq!(provider_output_in(&base,&meta)["reason"],"missing");
-        for field in ["provider_project","native_session_id","provider_task_id"]{
-            for value in [json!(""),json!("../foreign"),json!("x".repeat(161)),json!(1)] {
-                let mut invalid=meta.clone();invalid[field]=value;
-                assert_eq!(provider_output_in(&base,&invalid),withheld("","no_log"));
+        let path=dir.join("job.output");
+        let fixtures:Vec<(String,Value,Value)>=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/provider-output.json")).unwrap();
+        let mut count=0;
+        for (case,metadata,mut expected) in fixtures{
+            match case.as_str(){
+                "invalid"|"missing"=>{}
+                "directory"=>std::fs::create_dir(&path).unwrap(),
+                "small"=>{std::fs::remove_dir(&path).unwrap();std::fs::write(&path,"first\npassword=fixture\n").unwrap();}
+                "truncated"=>std::fs::write(&path,format!("{}\ntoken=fixture\nend\n","x".repeat(65536))).unwrap(),
+                "outside-file"=>{
+                    let outside=place.join("outside");
+                    std::fs::write(&outside,"outside fixture").unwrap();
+                    std::fs::remove_file(&path).unwrap();
+                    std::os::unix::fs::symlink(outside,&path).unwrap();
+                }
+                "linked-root"=>{
+                    let moved=store.join("moved");
+                    std::fs::rename(&dir,&moved).unwrap();
+                    std::os::unix::fs::symlink(moved,&dir).unwrap();
+                }
+                other=>panic!("unknown output case {other}"),
             }
+            expected["path"]=json!(expected["path"].as_str().unwrap().replace("STORE",store.to_str().unwrap()));
+            assert_eq!(provider_output_in(&store,&metadata),expected,"{case}");
+            count+=1;
         }
-        let bytes=format!("{}\npassword=fixture\ndone\n","x".repeat(TAIL_BYTES as usize));
-        std::fs::write(&path,&bytes).unwrap();
-        let shown=provider_output_in(&base,&meta);
-        assert_eq!(shown["text"],"password=[redacted]\ndone\n");
-        assert_eq!(shown["truncated"],true);
-        assert_eq!(shown["size"],bytes.len());
-        let outside=place.join("outside");
-        std::fs::write(&outside,"foreign fixture").unwrap();
-        std::fs::remove_file(&path).unwrap();
-        std::os::unix::fs::symlink(&outside,&path).unwrap();
-        assert_eq!(provider_output_in(&base,&meta)["reason"],"outside_allowed_roots");
-        std::fs::rename(&dir,base.join("other")).unwrap();
-        std::os::unix::fs::symlink(base.join("other"),&dir).unwrap();
-        assert_eq!(provider_output_in(&base,&meta),withheld("","outside_allowed_roots"));
+        assert_eq!(count,24);
         std::fs::remove_dir_all(place).unwrap();
     }
 

@@ -445,8 +445,29 @@ impl Task {
         true
     }
 }
+/// Provenance from a Bash invocation is descriptive. Only the actor that
+/// still owns the native runtime can attach it to a worker registration.
+#[derive(Clone,Debug,Deserialize)]
+pub struct RegistrationOrigin {
+    pub agent_id:String,
+    pub provider:String,
+    pub native_session_id:String,
+    pub tool_use_id:String,
+}
+impl RegistrationOrigin {
+    pub fn parse(raw:&str)->Option<Self>{
+        if raw.chars().take(2001).count()>2000{return None;}
+        let origin:Self=serde_json::from_str(raw).ok()?;
+        [&origin.provider,&origin.native_session_id,&origin.tool_use_id].into_iter()
+            .all(|id|!id.is_empty() && id.chars().take(161).count()<=160).then_some(origin)
+    }
+    pub fn metadata(&self,agent:&str,backend:&str,bound:Option<&str>)->Option<Value>{
+        (agent==self.agent_id && backend==self.provider && bound==Some(self.native_session_id.as_str())).then(||
+            json!({"provider":self.provider,"native_session_id":self.native_session_id,"tool_use_id":self.tool_use_id}))
+    }
+}
+
 pub fn mirror(job: &Value, registered: &[Value], at: i64) -> Value {
-    let mut shown = job.clone();
     let m = &job["metadata"];
     if job["heartbeat_source"] == "provider_event"
         && python::truthy(&m["provider"])
@@ -459,9 +480,17 @@ pub fn mirror(job: &Value, registered: &[Value], at: i64) -> Value {
                     .all(|k| r["metadata"][*k] == m[*k])
         })
     {
+        return projected_event(job,other["job_id"].as_str(),at);
+    }
+    job.clone()
+}
+
+pub fn projected_event(job:&Value,replacement:Option<&str>,at:i64)->Value{
+    let mut shown=job.clone();
+    if let Some(id)=replacement{
         shown["status"] = json!("superseded");
         shown["projection_only"] = json!(true);
-        shown["replaced_by_job_id"] = other["job_id"].clone();
+        shown["replaced_by_job_id"] = json!(id);
         shown["can_cancel"] = json!(false);
         shown["updated_at"] = json!(at.max(job["updated_at"].as_i64().unwrap_or(0)));
     }
