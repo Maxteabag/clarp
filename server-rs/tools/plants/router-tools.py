@@ -47,6 +47,27 @@ CODEX_EFFORT = '''        if let Some(effort) = given(&question.effort) {
             args.push(setting("model_reasoning_effort", &effort));
         }
         args.push("-".to_string());'''
+CODEX_CHOICE = '''        if let Some(model) = given(&question.model) {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        if let Some(effort) = given(&question.effort) {
+            args.push("-c".to_string());
+            args.push(setting("model_reasoning_effort", &effort));
+        }
+        args.push("-".to_string());'''
+CODEX_SWAPPED = '''        if let Some(effort) = given(&question.effort) {
+            args.push("-c".to_string());
+            args.push(setting("model_reasoning_effort", &effort));
+        }
+        if let Some(model) = given(&question.model) {
+            args.push("--model".to_string());
+            args.push(model);
+        }
+        args.push("-".to_string());'''
+CODEX_HEAD = '''            "exec",
+            "--json",
+            "--sandbox",'''
 AGY_ONCE = '''        let mut args: Vec<String> = ["--dangerously-skip-permissions", "--output-format", "json"]'''
 AGY_CHOICE = '''        match (given(&question.model), given(&question.effort)) {
             (Some(model), _) => {
@@ -93,6 +114,12 @@ PLANTS = [
     (CODEX, 'vectors', 'a model of blanks alone is not given to Codex', CODEX_FLAGS, CODEX_FLAGS.replace('.filter(|value| !value.is_empty())', '.filter(|value| !value.trim().is_empty())')),
     (CLAUDE, 'vectors', 'a model of blanks alone is not given to Claude Code', '        for (flag, value) in [("--model", &question.model), ("--effort", &question.effort)] {\n            if let Some(value) = value.as_ref().filter(|value| !value.is_empty()) {', '        for (flag, value) in [("--model", &question.model), ("--effort", &question.effort)] {\n            if let Some(value) = value.as_ref().filter(|value| !value.trim().is_empty()) {'),
     (CODEX, 'vectors', "Codex's effort is given bare", CODEX_EFFORT, CODEX_EFFORT.replace('setting("model_reasoning_effort", &effort)', 'format!("model_reasoning_effort={effort}")')),
+    (CODEX, 'vectors', "Codex's model is given by its short flag", CODEX_CHOICE, CODEX_CHOICE.replace('"--model".to_string()', '"-m".to_string()')),
+    (CODEX, 'vectors', "Codex's model is given without its blanks", CODEX_CHOICE, CODEX_CHOICE.replace('args.push(model);', 'args.push(model.trim().to_string());')),
+    (CODEX, 'vectors', "Codex is given its effort before its model", CODEX_CHOICE, CODEX_SWAPPED),
+    (CODEX, 'vectors', "Codex's effort is set under another key", CODEX_CHOICE, CODEX_CHOICE.replace('setting("model_reasoning_effort", &effort)', 'setting("reasoning_effort", &effort)')),
+    (CODEX, 'vectors', "Codex's effort is given without its -c", CODEX_CHOICE, CODEX_CHOICE.replace('            args.push("-c".to_string());\n            args.push(setting', '            args.push(setting')),
+    (CODEX, 'vectors', 'Codex prints no events', CODEX_HEAD, CODEX_HEAD.replace('            "--json",\n', '')),
     (CODEX, 'vectors', 'the first message of Codex is its answer', '        messages\n            .next_back()', '        messages\n            .next()'),
     (CODEX, 'vectors', 'a blank message of Codex is its answer', '            let text = item["text"].as_str().filter(|text| !text.trim().is_empty());\n            text.filter(|_| is_message).map(str::to_string)', '            let text = item["text"].as_str();\n            text.filter(|_| is_message).map(str::to_string)'),
     (CODEX, 'vectors', 'a message of Codex that is not over is its answer', '            let is_message = event["type"] == "item.completed" && item["type"] == "agent_message";\n            let text = item["text"].as_str().filter', '            let is_message = item["type"] == "agent_message";\n            let text = item["text"].as_str().filter'),
@@ -114,6 +141,14 @@ PLANTS = [
                 args.push(effort.trim().to_lowercase());
             }
             (None, None) => {}''', '''            (None, _) => {}''')),
+    (AGY, 'vectors', 'Antigravity asks before it acts', AGY_ONCE, AGY_ONCE.replace('"--dangerously-skip-permissions", ', '')),
+    (AGY, 'vectors', 'Antigravity prints a stream of events', AGY_ONCE, AGY_ONCE.replace('"--output-format", "json"', '"--output-format", "stream-json"')),
+    (AGY, 'vectors', "Antigravity's model is given by its short flag", AGY_CHOICE, AGY_CHOICE.replace('args.push("--model".to_string());', 'args.push("-m".to_string());')),
+    (AGY, 'vectors', "Antigravity's model is given without its blanks", AGY_CHOICE, AGY_CHOICE.replace('args.push(model);', 'args.push(model.trim().to_string());')),
+    (AGY, 'vectors', "Antigravity's effort is given by another flag", AGY_CHOICE, AGY_CHOICE.replace('args.push("--effort".to_string());', 'args.push("--reasoning-effort".to_string());')),
+    (AGY, 'vectors', 'the question is given to Antigravity by another flag', AGY_CHOICE, AGY_CHOICE.replace('format!("--print={}", question.prompt)', 'format!("--prompt={}", question.prompt)')),
+    (AGY, 'vectors', "Antigravity's answer is read from another field", '        match text_of(&said["response"]).trim() {', '        match text_of(&said["result"]).trim() {'),
+    (AGY, 'vectors', 'what Antigravity prints before its answer is read as the answer', "        let from = printed.find('{');", "        let from = Some(0usize).filter(|_| printed.contains('{'));"),
     (AGY, 'vectors', 'what is copied into its home is linked', '''    copied: &[
         ".gemini/antigravity-cli/settings.json",''', '''    copied: &[
         ".gemini/antigravity-cli/settings-copy.json",'''),
