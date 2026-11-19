@@ -767,6 +767,59 @@ def names_no_row(core: dict) -> bool:
     return False
 
 
+def named_complete(core: dict, before: int, conversation, row_id, words):
+    """The cursor at which a snapshot read before exchange `before` named this row as its agent's
+    last message, complete with these words (its place among the capture's cursors, as the core
+    view ranks a head); None where none did."""
+    for exchange in (core.get('http') or [])[:before]:
+        body = exchange.get('body')
+        rows = body.get('agents') if isinstance(body, dict) else None
+        for agent in rows if isinstance(rows, list) else ():
+            if (isinstance(agent, dict) and agent.get('conversation_id') == conversation
+                    and agent.get('last_message_id') == row_id and agent.get('last_completed_message') == words
+                    and isinstance(agent.get('head_revision'), int)):
+                return agent['head_revision']
+    return None
+
+
+def stamped_late(core: dict, exchange: int, row: dict) -> bool:
+    """Whether a row a read of its conversation shows (exchange `exchange`) is newer than a cursor
+    at which a snapshot of the same capture had already named it its agent's last message, with
+    the same words: the row was stamped again after that cursor though what a client saw of its
+    words had not changed. A client holding that cursor is told the row changed."""
+    body = (core.get('http') or [])[exchange].get('body') if exchange < len(core.get('http') or []) else None
+    words, revision = row.get('text'), row.get('revision')
+    if not isinstance(body, dict) or not words or row.get('role') != 'assistant' or not isinstance(revision, int):
+        return False
+    named = named_complete(core, exchange, body.get('conversation_id'), row.get('id'), words)
+    # A row's revision is how many of the capture's cursors it is newer than; the head it was
+    # named at is its place among them, from one: newer than that head is at least that many.
+    return named is not None and revision >= named
+
+
+def stamped_again(core: dict) -> bool:
+    """Whether a recording carries the mark of the reference's late stamp: an answer a snapshot named
+    complete at a cursor is shown newer than that cursor by a later read of the conversation, with
+    the same words (server-rs/docs/reference-defects.md, "the late stamp"). The reference does it in
+    some runs (the-queue-by-hand: 9 of 268 recordings), stamping the earlier answer again beside a
+    later one. It is a fact about one recording alone: no other Host is looked at to tell it. A
+    row that really changed after the snapshot (its turn settled later) is marked too, and costs a
+    recording more: the mark only asks for another recording, and excuses nothing."""
+    for exchange, answered in enumerate(core.get('http') or ()):
+        body = answered.get('body')
+        turns = body.get('turns') if isinstance(body, dict) else None
+        for row in turns if isinstance(turns, list) else ():
+            if isinstance(row, dict) and stamped_late(core, exchange, row):
+                return True
+    return False
+
+
+def carries_a_mark(core: dict) -> bool:
+    """Whether a recording says of itself that it carries a defect of the reference that comes and
+    goes from run to run: R19, or the late stamp."""
+    return names_no_row(core) or stamped_again(core)
+
+
 def renamed(value, names: dict):
     if isinstance(value, list):
         return [renamed(item, names) for item in value]
@@ -1196,20 +1249,21 @@ def both_registers(intended: set, awaited: dict) -> None:
                          f'{", ".join(both)}: take it out of one of intended.txt and awaited.txt')
 
 
-# How often a scenario is recorded again when both of its recordings carry the mark of the
-# reference's defect R19 (`names_no_row`).
+# How often a scenario is recorded again when both of its recordings carry the mark of a defect
+# of the reference that comes and goes (`carries_a_mark`: R19, the late stamp).
 MORE_TRIES = 3
 
 
 def recorded_again(recordings: list, chosen, again) -> tuple:
     """The recordings, with a third where one could be made, and what the report says of it.
 
-    A scenario whose every recording carries the mark of the reference's defect R19 is recorded
-    again (`again(scenarios, attempt)` answers scenario id -> its two views), up to `MORE_TRIES`
-    times; the first answer that ran to its end without the mark is kept. The third recording
+    A scenario whose every recording carries the mark of a defect of the reference that comes and
+    goes (R19, the late stamp: `carries_a_mark`) is recorded again (`again(scenarios, attempt)`
+    answers scenario id -> its two views), up to `MORE_TRIES` times; the first answer that ran to
+    its end without any mark is kept. The third recording
     is the second with those answers in their places, so that it has the whole corpus."""
     marked = [scenario for scenario in steady(chosen)
-              if all(names_no_row(recording[scenario['id']]['core']) for recording in recordings)]
+              if all(carries_a_mark(recording[scenario['id']]['core']) for recording in recordings)]
     if not marked:
         return recordings, []
     without: dict = {}
@@ -1222,10 +1276,11 @@ def recorded_again(recordings: list, chosen, again) -> tuple:
         for scenario in left:
             views = more[scenario['id']]
             tries[scenario['id']] = attempt
-            if not views['full']['error'] and not names_no_row(views['core']):
+            if not views['full']['error'] and not carries_a_mark(views['core']):
                 without[scenario['id']] = views
-    lines = ['', "# The reference's defect R19 in every recording of a scenario (a notification names a row the "
-             'conversation does not have)']
+    lines = ['', "# A defect of the reference in every recording of a scenario: R19 (a notification names a row the "
+             'conversation does not have) or the late stamp (an answer shown as changed after a cursor at which it '
+             'was complete)']
     for scenario in marked:
         name = scenario['id']
         lines.append(f'{name}: recorded again, and its answer without it (try {tries[name]}) is kept as one more '
@@ -1317,6 +1372,30 @@ def selftest() -> list:
     # A scenario the reference is known to waver in is not counted, and not recorded again.
     kept, lines = recorded_again([{'s': marked}, {'s': marked}], [{'id': 's', 'unsteady': True}], again([sound]))
     assert len(kept) == 2 and not asked, 'a scenario that is not counted was recorded again'
+    # The late stamp: an answer a snapshot named complete at its cursor, read later as newer.
+    def stamped(revision, words='The answer', named='The answer', snapshot_first=True, error=None):
+        snapshot = {'path': '/agents/snapshot', 'body': {'agents': [{
+            'conversation_id': 'c', 'last_message_id': '<row:1>', 'last_completed_message': named,
+            'head_revision': 1}]}}
+        read = {'path': '/log', 'body': {'conversation_id': 'c', 'turns': [
+            {'id': 'u-one', 'role': 'user', 'revision': 0, 'text': 'A question'},
+            {'id': '<row:1>', 'role': 'assistant', 'revision': revision, 'text': words}]}}
+        http = [snapshot, read] if snapshot_first else [read, snapshot]
+        return {'full': {'error': error}, 'core': {'http': http, 'sse': []}}
+    late, on_time = stamped(1), stamped(0)
+    assert stamped_again(late['core']) and carries_a_mark(late['core']), 'an answer stamped late was not marked'
+    assert not stamped_again(on_time['core']), 'an answer not newer than its cursor was marked'
+    assert not stamped_again(stamped(1, words='Other words')['core']), 'an answer whose words changed was marked'
+    assert not stamped_again(stamped(1, named='')['core']), 'a snapshot that named nothing complete marked a row'
+    assert not stamped_again(stamped(1, snapshot_first=False)['core']), \
+        'a row read before any snapshot named it was marked: no cursor of it was handed out yet'
+    asked.clear()
+    kept, lines = recorded_again([{'s': late}, {'s': late}], scenario, again([late, on_time]))
+    assert len(kept) == 3 and kept[2]['s'] is on_time and asked == [1, 2] and 'late stamp' in lines[1], (asked, lines)
+    # One recording late and one marked for R19: both carry a mark, and the sound answer is kept.
+    asked.clear()
+    kept, lines = recorded_again([{'s': late}, {'s': marked}], scenario, again([on_time]))
+    assert len(kept) == 3 and kept[2]['s'] is on_time and asked == [1], asked
     # The other rule: a scenario the reference did not run to its end is asked again.
     cut = capture('<row:1>', error='step 7 (quiesce): timed out waiting for the agent idle')
     two = [{'id': 's'}, {'id': 't'}]
@@ -1347,7 +1426,8 @@ def selftest() -> list:
     assert kept['s'] is cut and kept['t'] is cut, 'a scenario that never ran to its end was taken as run'
     assert asked == [(attempt, ['s', 't']) for attempt in range(1, UNFINISHED_TRIES + 1)], asked
     assert len(lines) == 2 and all('never did' in line for line in lines), lines
-    return ['the rule for a scenario whose every recording carries the mark of defect R19: tried on 5 cases, holds',
+    return ['the rule for a scenario whose every recording carries the mark of a defect (R19, the late stamp): '
+            'tried on 12 cases, holds',
             'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds',
             f'the rules for defects of the reference told by their shape: tried on {shapes_tried()} cases, hold',
             f'the rule for an event\'s place in its lane: tried on {places_tried()} cases, holds']
@@ -1487,6 +1567,24 @@ def shapes_tried() -> int:
     told('R19', place, spoken(reply('A remark', 'commentary'), reply(), {'role': 'user', 'text': 'Next'}, reply(turn=ended)),
          spoken(reply('A remark', 'commentary'), reply(turn=ended), {'role': 'user', 'text': 'Next'}, reply(turn=ended)),
          kind='field-added')
+    # The late stamp: the reference's answer newer than the cursor at which a snapshot named it
+    # complete; the Rust Host's not.
+    def stamped(revision, words='The answer', named=True):
+        agent = {'conversation_id': 'c', 'last_message_id': '<row:1>', 'head_revision': 1,
+                 'last_completed_message': 'The answer' if named else ''}
+        return answered({'agents': [agent]}, {'conversation_id': 'c', 'turns': [
+            {'id': 'u-one', 'role': 'user', 'revision': 0, 'text': 'A question'},
+            {'id': '<row:1>', 'role': 'assistant', 'revision': revision, 'text': words}]})
+    place = '[1].body.turns[1].revision'
+    told('late-stamp', place, stamped(1), stamped(0))
+    told('', place, stamped(0), stamped(1))                         # this Host late: never excused
+    told('', place, stamped(1), stamped(1))                         # both late: nothing to tell
+    told('', place, stamped(1), stamped(0, words='Other words'))    # not the same answer
+    told('', place, stamped(1, words='Other words'), stamped(0, words='Other words'))  # its words not named
+    told('', place, stamped(1, named=False), stamped(0))            # nothing was named complete there
+    told('', place, stamped(1), stamped(0, named=False))            # nor here
+    told('', place, stamped(1), stamped(0), kind='field-added')     # another kind of difference
+    told('', '[1].body.turns[0].revision', stamped(1), stamped(0))  # a row nobody named
     return tried
 
 
@@ -1739,6 +1837,23 @@ def _end_on_no_row(base: dict, head: dict, exchange: int, at: int, _bases) -> bo
     return not any(row.get('turn') is not None for row in rows[:at])
 
 
+def _stamped_late_there(base: dict, head: dict, exchange: int, at: int, _bases) -> bool:
+    """The late stamp: an answer that was complete at a cursor a snapshot handed out is not newer
+    than that cursor; the reference's row is, with the same words. Held only where the Rust Host's
+    own row is the same answer and is not newer than the cursor its own snapshot handed out, so a
+    Host that stamped its rows late is told nothing by this rule."""
+    theirs, ours = _row(base, exchange, 'turns', at), _row(head, exchange, 'turns', at)
+    if not theirs or theirs.get('id') != ours.get('id') or theirs.get('text') != ours.get('text'):
+        return False
+    if not stamped_late(base, exchange, theirs):
+        return False
+    body = head['http'][exchange].get('body') if exchange < len(head.get('http') or []) else None
+    if not isinstance(body, dict) or not isinstance(ours.get('revision'), int):
+        return False
+    named = named_complete(head, exchange, body.get('conversation_id'), ours.get('id'), ours.get('text'))
+    return named is not None and ours['revision'] < named
+
+
 # The defect, the kinds of difference it shows as, where a difference of its shape lies (the
 # exchange and the row), and what the rows have to say for it to be that defect.
 SHAPES = (
@@ -1749,6 +1864,8 @@ SHAPES = (
     ('R17', ('changed',), re.compile(r'^\[(\d+)\]\.body\.agents\[(\d+)\]\.live_activity$'), _no_line_at_rest),
     # A row without the field at all, or with nothing in it.
     ('R19', ('field-added', 'changed'), re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.turn$'), _end_on_no_row),
+    # Its number is the release owner's to give; until then it goes by what it is.
+    ('late-stamp', ('changed',), re.compile(r'^\[(\d+)\]\.body\.turns\[(\d+)\]\.revision$'), _stamped_late_there),
 )
 
 
