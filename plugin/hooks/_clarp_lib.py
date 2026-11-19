@@ -13,12 +13,23 @@ Import this for its side effect, before importing anything from `lib`. It is
 silent when no candidate matches: the caller's `except ImportError` then makes
 the hook a no-op, which is the right behaviour on a machine where Clarp is not
 installed.
+
+A turn the Rust Host runs is that Host's (R111). Its launcher sets
+CLARP_RUST_MANAGED_TURN=1 for the Claude children it manages; where this plugin
+is also enabled for every Claude process on the machine, our hooks fire inside
+that turn. Every hook imports this module first, after the standard library
+only, so the hook exits 0 here: before any import of `lib`, any resolution,
+log line, marker or output. Only the exact value '1' does this.
 """
 from __future__ import annotations
 
 import os
-import pathlib
 import sys
+
+if os.environ.get("CLARP_RUST_MANAGED_TURN") == "1":
+    sys.exit(0)
+
+import pathlib  # noqa: E402
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 

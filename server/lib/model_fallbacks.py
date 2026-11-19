@@ -21,6 +21,7 @@ import sys
 from contextlib import contextmanager
 
 from . import lifecycle as lk
+from .hook_runtime import without_inherited_identity
 from .lifecycle import Edge, Lifecycle, WaitForever
 from .persistence.schema_parts.model_fallbacks import SCHEMA
 
@@ -411,7 +412,7 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
-            env={**os.environ, **runner.routing_env()},
+            env={**without_inherited_identity(os.environ), **runner.routing_env()},
         )
         deadline = time.monotonic() + timeout
         payload = call.input
