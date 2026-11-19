@@ -439,3 +439,58 @@ def test_a_row_written_after_its_copy_still_links(tmp_path, monkeypatch, configu
         users, replies = cli.imported(full=full)
         assert [row_id for row_id, _text in users] == ["u-late-row"]     # no copy beside its row
         assert replies == [(ANSWER, "bound-late")]
+
+
+@CONFIGURATIONS
+def test_an_agy_copy_is_timed_and_held_to_the_same_rule(tmp_path, monkeypatch, configuration):
+    """agy's steps log carries an ISO created_at on every step (a real 5,940-line log on elitebook:
+    all 393 USER_INPUT copies timed), so its copies take the same rule: the same words three times,
+    an old failed send, a copy typed with no row outside every turn, then a send with its own turn.
+    The typed copy takes neither row; the send's copy takes its own."""
+    _configured(monkeypatch, configuration)
+    now = [BASE]
+    monkeypatch.setattr(time, 'time', lambda: now[0] / 1000)
+    aid = agents.create_agent(persona='Ava', session='ava', voice_id='v', cwd=str(tmp_path), backend='agy')
+    agents.bind_backend_session(aid, 'conv-ava')
+    logs = tmp_path / 'brain' / 'conv-ava' / '.system_generated' / 'logs'
+    logs.mkdir(parents=True)
+    path = logs / 'transcript.jsonl'
+    path.write_text('')
+    words = "Check the feeds and report."
+    steps = []
+
+    def step(kind, at, **fields):
+        steps.append({"step_index": len(steps), "source": "USER_EXPLICIT" if kind == "USER_INPUT" else "MODEL",
+                      "type": kind, "status": "DONE", "created_at": clock.iso_from_ms(at), **fields})
+        path.write_text("".join(json.dumps(s) + "\n" for s in steps))
+
+    now[0] = BASE - 7 * 86_400_000                                       # an old failed send
+    agents.record_user_message(agent_id=aid, backend_session_id='conv-ava', client_msg_id="old0", text=words,
+                               trace_id="old-0", origin="automation")
+    agents.open_turn(agent_id=aid, source='pwa', trace_id="old-0")
+    with db.conn() as con:
+        con.execute("UPDATE turns SET settled_at=?, outcome='failed' WHERE trace_id='old-0'", (now[0] + 1000,))
+    db.close_local()
+    step("USER_INPUT", BASE, content=f"<USER_REQUEST>\n{words}\n</USER_REQUEST>")    # typed: no row, no turn
+    step("PLANNER_RESPONSE", BASE + 3000, content="Typed answer.")
+    now[0] = BASE + STEP
+    agents.record_user_message(agent_id=aid, backend_session_id='conv-ava', client_msg_id="later", text=words,
+                               trace_id="later-turn", origin="automation")
+    agents.open_turn(agent_id=aid, source='pwa', trace_id="later-turn")
+    step("USER_INPUT", BASE + STEP + 500, content=f"<USER_REQUEST>\n{words}\n</USER_REQUEST>")
+    step("PLANNER_RESPONSE", BASE + STEP + 4000, content="Sent answer.")
+    from lib import transcript_incremental as inc
+    for full in (False, False, True):
+        if full:
+            monkeypatch.setattr(inc, "parser_version", lambda backend: "another-importer")
+        now[0] += 5
+        transcript_incremental.import_transcript(backend='agy', path=path, agent_id=aid,
+                                                 backend_session_id='conv-ava')
+        db.close_local()
+        rows = message_store.list_messages(agent_id=aid, backend_session_id='conv-ava')
+        users = [(row["id"], row["text"]) for row in rows if row["role"] == "user"]
+        replies = {row["text"]: row["trace_id"] for row in rows if row["role"] == "assistant"}
+        assert [text for row_id, text in users if not row_id.startswith("u-")] == [words], users
+        assert {"u-old0", "u-later"} <= {row_id for row_id, _ in users}
+        assert replies["Typed answer."] != "old-0"
+        assert replies["Sent answer."] == "later-turn"
