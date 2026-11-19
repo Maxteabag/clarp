@@ -24,7 +24,7 @@ class _Automation:
     Each turn has two turn rows of one trace a second apart, as the dispatcher and the prompt hook
     leave them."""
 
-    def __init__(self, tmp_path, monkeypatch, *, unsent=(), old_sends=0, turns=8):
+    def __init__(self, tmp_path, monkeypatch, *, unsent=(), old_sends=0, turns=8, old_settled=True):
         self.now = [BASE]
         monkeypatch.setattr(time, 'time', lambda: self.now[0] / 1000)
         self.id = agents.create_agent(persona='August', session='august', voice_id='v', cwd=str(tmp_path),
@@ -38,10 +38,11 @@ class _Automation:
             agents.record_user_message(agent_id=self.id, backend_session_id='native', client_msg_id=f"old{k}",
                                        text=PROMPT, trace_id=f"old-{k}", origin="automation")
             agents.open_turn(agent_id=self.id, source='pwa', trace_id=f"old-{k}")
-            with db.conn() as con:
-                con.execute("UPDATE turns SET settled_at=?, outcome='failed' WHERE trace_id=?",
-                            (self.now[0] + 1000, f"old-{k}"))
-            db.close_local()
+            if old_settled:
+                with db.conn() as con:
+                    con.execute("UPDATE turns SET settled_at=?, outcome='failed' WHERE trace_id=?",
+                                (self.now[0] + 1000, f"old-{k}"))
+                db.close_local()
         for k in range(turns):
             self._turn(k, sent=k not in unsent)
 
@@ -98,10 +99,12 @@ class _Automation:
         return imported, left
 
 
-@pytest.mark.parametrize("old_sends", [0, 3], ids=["no old sends", "three old failed sends"])
+@pytest.mark.parametrize("old_sends, old_settled", [(0, True), (3, True), (3, False)],
+                         ids=["no old sends", "three old failed sends", "three old sends never settled"])
 @pytest.mark.parametrize("unsent", [(), (2,), (0, 5)], ids=["every prompt sent", "one copy unsent", "two unsent"])
-def test_every_reply_carries_its_own_prompts_trace_and_none_is_shown_twice(tmp_path, monkeypatch, unsent, old_sends):
-    world = _Automation(tmp_path, monkeypatch, unsent=unsent, old_sends=old_sends)
+def test_every_reply_carries_its_own_prompts_trace_and_none_is_shown_twice(
+        tmp_path, monkeypatch, unsent, old_sends, old_settled):
+    world = _Automation(tmp_path, monkeypatch, unsent=unsent, old_sends=old_sends, old_settled=old_settled)
     for _ in range(2):
         world.now[0] += STEP
         world.imported()
@@ -126,13 +129,18 @@ def test_replies_given_another_prompts_trace_carry_their_own_after_the_next_impo
 def _index(*turns):
     return message_turns.TurnIndex.from_rows(
         [{"trace_id": trace, "started_at": BASE + started, "settled_at": None if settled is None else BASE + settled,
-          "outcome": "completed"} for trace, started, settled in turns])
+          "outcome": "completed"} for trace, started, settled in sorted(turns, key=lambda turn: turn[1])])
 
 
-def test_a_turn_runs_from_two_seconds_before_it_began_until_it_settled():
-    index = _index(("t", 10_000, 20_000), ("t", 11_000, 21_000), ("open", 30_000, None))
+def test_a_turn_runs_from_two_seconds_before_it_began_until_it_settled_or_the_next_began():
+    index = _index(("t", 10_000, 20_000), ("t", 11_000, 21_000), ("never", 30_000, None),
+                   ("never", 31_000, 32_000), ("late", 40_000, 60_000), ("next", 50_000, None))
     assert [index.ran_at("t", BASE + at) for at in (7_999, 8_000, 21_000, 21_001)] == [False, True, True, False]
-    assert index.ran_at("open", BASE + 10**9) is True
+    # One row never settled: the turn ended when the next turn began, not never.
+    assert [index.ran_at("never", BASE + at) for at in (32_000, 40_000, 40_001)] == [True, True, False]
+    # Settled after the next turn began: it ended at that start.
+    assert [index.ran_at("late", BASE + at) for at in (50_000, 50_001)] == [True, False]
+    assert index.ran_at("next", BASE + 10**9) is True                  # the latest still runs
     assert index.ran_at("steered", BASE + 15_000) is None
 
 
@@ -145,11 +153,11 @@ def _rows(*sent):
     ((("old-0", -900_000), ("turn-4", 80_000)), None),                 # an old failed send, a later turn's
     ((("steered", 41_000), ("turn-4", 80_000)), 0),                    # steered into this turn: no turn of its own
     ((("turn-4", 80_000), ("turn-2", 39_000)), 1),                     # its own row, wherever it stands
-    ((("racing", 39_500),), 0),                                        # a turn that ran at the copy's time
+    ((("racing", 41_500),), 0),                                        # a turn beginning just after the copy
 ], ids=["later turns", "old and later", "steered", "its own", "running at the time"])
 def test_a_copy_without_its_own_row_takes_none_sent_for_another_turn(sent, chosen):
     index = _index(("turn-2", 40_000, 55_000), ("turn-3", 60_000, 75_000), ("turn-4", 80_000, 95_000),
-                   ("old-0", -900_000, -899_000), ("racing", 39_000, 50_000))
+                   ("old-0", -900_000, -899_000), ("racing", 42_000, 50_000))
     rows = _rows(*sent)
     traces = {row[0]: trace for row, (trace, _at) in zip(rows, sent)}
     copy_at = BASE + 41_000
