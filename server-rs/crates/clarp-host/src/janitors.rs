@@ -479,7 +479,7 @@ fn turn_of(app: &App, run: &Run) -> (Option<i64>, Option<Ended>) {
         Some(Outcome::Failed { reason, .. } | Outcome::Interrupted { reason }) => {
             failed(reason.clone())
         }
-        Some(Outcome::Stopped { by }) => failed(format!("Stopped by {by}")),
+        Some(Outcome::Stopped { by, .. }) => failed(format!("Stopped by {by}")),
         Some(Outcome::Withdrawn { .. }) => {
             failed("Its turn was taken back before it started".to_string())
         }

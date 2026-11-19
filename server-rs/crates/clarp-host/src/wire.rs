@@ -8,6 +8,7 @@
 use clarp_actor::conversation::{Page, Versioned};
 use clarp_actor::{LiveStatus, LiveTool, Status};
 use clarp_kernel::agent::Rest;
+use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
 use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
@@ -222,19 +223,21 @@ fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEn
         .and_then(|end| end.trace_id.clone())
         .unwrap_or_default();
     match &last.outcome {
-        Outcome::Stopped { by } => {
-            let mut detail = json!({
-                "source": "user_stop",
-                "message": "Turn stopped",
-                "stop_actor": by,
-                "stop_actor_verified": false,
-                "stop_reason": "",
-            });
-            // A Stop names the turn it took from the slot, where one ran.
-            if !trace.is_empty() {
-                detail["trace_id"] = json!(trace);
+        Outcome::Stopped { .. } => {
+            // Who stopped it and why, as the Stop said it; and the turn it took from the slot,
+            // where one ran.
+            let by = last.outcome.stopped_by().unwrap_or_default();
+            let mut marked = control::marked(control::STOPPED, &by, "");
+            let mut detail = Map::new();
+            if let Some(source) = marked.remove("source") {
+                detail.insert("source".to_string(), source);
             }
-            detail
+            detail.insert("message".to_string(), json!("Turn stopped"));
+            detail.extend(marked);
+            if !trace.is_empty() {
+                detail.insert("trace_id".to_string(), json!(trace));
+            }
+            Value::Object(detail)
         }
         Outcome::Failed { reason, kind } => {
             let (kind, told) = failure(reason, kind, model);
@@ -282,6 +285,15 @@ pub fn state(
 ) -> Value {
     let kind = state_kind(status);
     let detail = match (&status.live, &status.last) {
+        // A repair's note, while nothing about the state changed since: the same state, with who
+        // repaired it and why.
+        _ if status.note.is_some() => {
+            let note = status
+                .note
+                .as_ref()
+                .map(|note| control::marked(control::REPAIRED, &note.by, &note.released));
+            Value::Object(note.unwrap_or_default())
+        }
         // Between two attempts: the turn is as busy as before, and reconnects.
         (Some(live), _) if reconnecting(live).is_some() => {
             let (next, after_ms) = reconnecting(live).unwrap_or_default();
@@ -348,7 +360,7 @@ pub fn state(
         "session": record.session,
         "persona": record.persona,
         "kind": state_name(&kind),
-        "ts": state_since(record, status),
+        "ts": status.note.as_ref().map_or_else(|| state_since(record, status), |note| note.at_ms),
         "detail": detail,
         "status_text": status.label,
     })
@@ -535,12 +547,19 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "turn_started_ms": running.map(|live| live.started_at_ms),
         "ts": followed.map_or_else(|| state_since(record, status), |tool| tool.started_at_ms),
     });
-    if let Some(Outcome::Stopped { by }) = status.last.as_ref().map(|last| &last.outcome)
-        && running.is_none()
-    {
-        activity["stop_actor"] = json!(by);
-        activity["stop_actor_verified"] = json!(false);
-        activity["stop_reason"] = json!("");
+    // Who stopped or repaired the agent and why, while that is its latest state.
+    let marked = match (&status.note, status.last.as_ref()) {
+        (Some(note), _) => Some(control::marked(control::REPAIRED, &note.by, &note.released)),
+        (None, Some(last)) if running.is_none() => last
+            .outcome
+            .stopped_by()
+            .map(|by| control::marked(control::STOPPED, &by, "")),
+        _ => None,
+    };
+    if let Some(marked) = marked {
+        for (key, value) in control::provenance(&marked) {
+            activity[key] = value;
+        }
     }
     activity
 }
@@ -1699,6 +1718,7 @@ mod tests {
             completed_at_ms: None,
             answered_by: None,
             arrived: false,
+            note: None,
         }
     }
 
@@ -1737,12 +1757,7 @@ mod tests {
         assert_eq!(name(Some(Activity::Compacting), None), "compacting");
         assert_eq!(name(None, Some(Outcome::Completed)), "done");
         assert_eq!(
-            name(
-                None,
-                Some(Outcome::Stopped {
-                    by: "user".to_string()
-                })
-            ),
+            name(None, Some(Outcome::stopped(control::Control::by("user")))),
             "interrupted"
         );
         assert!(state_kind(&status(Some(Activity::Thinking), None)).is_busy());
@@ -2276,12 +2291,7 @@ mod tests {
         );
         assert_eq!(row["latest_state_ts"], 1, "as it is since it was made");
 
-        let halted = status(
-            None,
-            Some(Outcome::Stopped {
-                by: "user".to_string(),
-            }),
-        );
+        let halted = status(None, Some(Outcome::stopped(control::Control::by("user"))));
         let row = summary(&record(), &halted, "claude", None, None, false);
         assert_eq!(row["latest_state"], "interrupted");
         assert_eq!(
@@ -2421,12 +2431,7 @@ mod tests {
         assert_eq!(activity(&record(), &done)["summary"], "Done");
         assert!(stopped(&record(), &done, None).is_none());
 
-        let halted = status(
-            None,
-            Some(Outcome::Stopped {
-                by: "user".to_string(),
-            }),
-        );
+        let halted = status(None, Some(Outcome::stopped(control::Control::by("user"))));
         let at_once = stopped(&record(), &halted, None).unwrap();
         assert_eq!(at_once["kind"], "interrupted");
         assert_eq!(at_once["detail"]["source"], "user_stop");

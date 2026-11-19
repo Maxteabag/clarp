@@ -33,7 +33,7 @@ use clarp_kernel::trust::{self, FailureLimiter};
 use clarp_kernel::turn::{Admission, Origin, TurnId};
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
-use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest};
+use clarp_protocol::requests::{CreateAgentRequest, SendRequest, SessionRequest, StopRequest};
 use clarp_protocol::responses::{SelectResponse, SendResponse, StopResponse};
 use clarp_protocol::server_info::{
     Capabilities, ClientCompatibility, Compatibility, Contract, LocalConnection, ServerInfo,
@@ -180,6 +180,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A quiet agent (a janitor) never reaches its owner by itself: its row says so, its turns tell
     // nobody, and it is in none of the lists the roster's members make.
     ("quiet_agents", 56),
+    // A Stop says who stopped the agent and why, an agent's own turn known by its token; and a
+    // turn nothing runs is repaired, which here gives nothing back: nothing can be busy with
+    // no process behind it (`controls.rs`).
+    ("turn_slot_repair", 61),
     ("text_input_requests", 29),
     ("artifact_pins", 38),
     // `POST /devices` takes a phone's own grant, and the Host pushes by it.
@@ -538,6 +542,7 @@ pub fn router(app: App) -> Router {
         .route("/send", post(send))
         .route("/orchestrator/route-delegation", post(route_delegation))
         .route("/stop", post(stop))
+        .route("/repair-slot", post(repair_slot))
         .route("/select", post(select))
         .route("/turn-queue", get(queue))
         .route("/live", get(shown))
@@ -2446,26 +2451,43 @@ async fn send_as(
 
 async fn stop(
     State(app): State<App>,
-    Json(request): Json<SessionRequest>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    Json(request): Json<StopRequest>,
 ) -> Result<Json<StopResponse>, ApiError> {
-    let answer = StopResponse {
-        ok: true,
-        stop_actor: Some("user".to_string()),
-        stop_actor_verified: Some(false),
-        stop_reason: Some(String::new()),
-        ..StopResponse::default()
+    let by = crate::controls::control_of(
+        &app,
+        matches!(principal, Principal::Device { .. }),
+        turn_of(&headers),
+        request.actor.as_ref(),
+        request.reason.as_ref(),
+    )
+    .await?;
+    Ok(Json(
+        crate::controls::stop(&app, &request.session, by).await?,
+    ))
+}
+
+/// The token of the turn a request says it comes from (`X-Clarp-Turn`), where it says so. A
+/// header that is no text is a token of nobody.
+fn turn_of(headers: &HeaderMap) -> Option<&str> {
+    let token = headers.get(crate::turn_identity::HEADER);
+    token.map(|token| token.to_str().unwrap_or_default())
+}
+
+/// `POST /repair-slot {session, reason, actor?}` (`controls::repair`).
+async fn repair_slot(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let Ok(Value::Object(data)) = serde_json::from_slice::<Value>(&body) else {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "bad json"));
     };
-    let Some(member) = app.member(&request.session) else {
-        // Nothing runs under a name the Host does not have: nothing was ended, and that is all.
-        return Ok(Json(answer));
-    };
-    let stopped = member.agent.stop("user".to_string()).await?;
-    Ok(Json(StopResponse {
-        terminated: u64::from(stopped.told),
-        queue_paused: Some(stopped.queue.paused),
-        goals_paused: Some(stopped.goals_paused as u64),
-        ..answer
-    }))
+    let device = matches!(principal, Principal::Device { .. });
+    let repaired = crate::controls::repair(&app, &data, device, turn_of(&headers)).await?;
+    Ok(Json(repaired))
 }
 
 async fn select(

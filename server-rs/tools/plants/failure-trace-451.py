@@ -19,7 +19,7 @@ PLANTS = [
     (W, "wire", "the trace of any turn that ended",
      '.filter(|end| end.turn == last.id.0)\n        .and_then(|end| end.trace_id.clone())', '.and_then(|end| end.trace_id.clone())'),
     (W, "stop", "a Stop that names no trace",
-     'if !trace.is_empty() {\n                detail["trace_id"] = json!(trace);', 'if trace.is_empty() {\n                detail["trace_id"] = json!(trace);'),
+     'if !trace.is_empty() {\n                detail.insert("trace_id".to_string(), json!(trace));', 'if trace.is_empty() {\n                detail.insert("trace_id".to_string(), json!(trace));'),
     (A, "stop", "the Stop told at once without its end",
      'wire::stopped(&record, &rested, self.ended.as_ref())', 'wire::stopped(&record, &rested, None)'),
     (W, "stop", "an ended state told without its end",
@@ -29,7 +29,7 @@ PLANTS = [
     (T, "job", "a job in a turn given none",
      '.and_then(|live| live.trace_id.clone())\n                .unwrap_or_default();', '.and_then(|_| None::<String>)\n                .unwrap_or_default();'),
     (K, "stop", "a Stop that lets what waits run",
-     'work.record(AgentEvent::Paused { by, at_ms: now_ms });', 'let _ = by;'),
+     'work.record(AgentEvent::Paused {\n                    by: by.actor,\n                    verified: by.verified,\n                    reason: by.reason,\n                    at_ms: now_ms,\n                });', 'let _ = by;'),
 ]
 
 if __name__ == "__main__":
