@@ -421,6 +421,79 @@ fn came_back(output: &str) -> (String, Option<i64>) {
     (clarp_kernel::python::strip(body).to_string(), code)
 }
 
+/// The figure that says only how much in all: no usage of a step's own.
+const TOTAL: &str = "total_tokens";
+
+/// The figures of a usage Antigravity tells, under the names the Python Host gives them, as
+/// its `int()` reads each: a whole number, a fraction cut to one, or a text of one; what is
+/// none of these, or a truth, is left out.
+fn figures(usage: &Value) -> Vec<(&'static str, i128)> {
+    const NAMES: [(&str, &str); 5] = [
+        ("input_tokens", "input_tokens"),
+        ("output_tokens", "output_tokens"),
+        ("thinking_tokens", "thinking_tokens"),
+        ("cache_read_tokens", "cache_read_input_tokens"),
+        ("total_tokens", TOTAL),
+    ];
+    let mut read = Vec::new();
+    for (written, named) in NAMES {
+        let figure = match &usage[written] {
+            Value::Number(number) => number
+                .as_i64()
+                .map(i128::from)
+                .or_else(|| number.as_u64().map(i128::from))
+                .or_else(|| number.as_f64().filter(|value| value.is_finite()).map(cut)),
+            Value::String(text) => clarp_kernel::python::int(text),
+            _ => None,
+        };
+        if let Some(figure) = figure {
+            read.push((named, figure));
+        }
+    }
+    read
+}
+
+/// A fraction cut to the whole number below it, toward nothing, as `int()` cuts one.
+#[allow(clippy::cast_possible_truncation)]
+fn cut(value: f64) -> i128 {
+    value.trunc() as i128
+}
+
+/// What steps took, figure by figure.
+#[derive(Debug, Default, Clone, Copy)]
+struct Took {
+    any: bool,
+    input: i128,
+    output: i128,
+    thinking: i128,
+    cache_read: i128,
+}
+
+impl Took {
+    fn add(&mut self, figures: &[(&'static str, i128)]) {
+        self.any = true;
+        for (name, figure) in figures {
+            match *name {
+                "input_tokens" => self.input += figure,
+                "output_tokens" => self.output += figure,
+                "thinking_tokens" => self.thinking += figure,
+                "cache_read_input_tokens" => self.cache_read += figure,
+                _ => {}
+            }
+        }
+    }
+
+    /// What went in (cache reads with it) and what came out (what the model thought is billed
+    /// as what it wrote), as the Python Host counts a turn of any tool.
+    fn tokens(self) -> (u64, u64) {
+        let whole = |figure: i128| u64::try_from(figure.max(0)).unwrap_or(u64::MAX);
+        (
+            whole(self.input + self.cache_read),
+            whole(self.output + self.thinking),
+        )
+    }
+}
+
 pub struct AgyInterpreter {
     turn: u64,
     /// The turn's own name: what the ids of its pieces are built from.
@@ -435,9 +508,14 @@ pub struct AgyInterpreter {
     /// The tool calls of this turn, by the id Antigravity or their step gives them.
     tools: BTreeMap<String, ToolCall>,
     activity: Option<Activity>,
-    /// What the steps said they took, added up: what went in, and what came out (what the
-    /// model thought is billed as what it wrote).
-    took: (u64, u64),
+    /// What the steps said they took, added up, by figure: each step counted once, by the
+    /// first of its updates that said anything of what it took.
+    took: Took,
+    /// The steps whose usage is counted, by their index as the Python Host writes it.
+    counted: BTreeSet<String>,
+    /// The lines that are not taken twice: a DONE, a tool's step, the first line and the result,
+    /// each as written, keys in order.
+    seen: BTreeSet<String>,
     /// Antigravity said how the turn ended: well, or with what went wrong.
     result: Option<Result<(), String>>,
     stderr: ErrorTail,
@@ -455,7 +533,9 @@ impl AgyInterpreter {
             last_written: String::new(),
             tools: BTreeMap::new(),
             activity: None,
-            took: (0, 0),
+            took: Took::default(),
+            counted: BTreeSet::new(),
+            seen: BTreeSet::new(),
             result: None,
             stderr: ErrorTail::default(),
             ended: false,
@@ -488,6 +568,15 @@ impl AgyInterpreter {
         if self.result.is_some() {
             return; // nothing after the result is of the turn
         }
+        // A line Antigravity tells again word for word is told once: a step that is done, a
+        // tool's step, the first line and the result each happen once.
+        let update = &event["step_update"];
+        let once = matches!(text_of(&event["event"]), "init" | "result")
+            || update["state"] == "DONE"
+            || update["step_type"] == "tool";
+        if once && !self.seen.insert(clarp_kernel::python::canonical(&event)) {
+            return;
+        }
         match text_of(&event["event"]) {
             "init" => {
                 self.bind(&event["conversation_id"], out);
@@ -513,9 +602,18 @@ impl AgyInterpreter {
     fn on_step(&mut self, update: &Value, t: i64, out: &mut Vec<Signal>) {
         let done = text_of(&update["state"]).eq_ignore_ascii_case("DONE");
         if done {
-            let count = |field: &str| update["usage"][field].as_u64().unwrap_or(0);
-            self.took.0 += count("input_tokens");
-            self.took.1 += count("output_tokens") + count("thinking_tokens");
+            // A step is counted once, by the first of its updates that says what it took (an
+            // explicit nothing included); one without an index is a step of its own.
+            let figures = figures(&update["usage"]);
+            let usable = figures.iter().any(|(name, _)| *name != TOTAL);
+            let key = match &update["step_index"] {
+                Value::Null => None,
+                Value::String(index) => Some(index.clone()),
+                index => Some(clarp_kernel::python::repr(index)),
+            };
+            if usable && key.is_none_or(|key| self.counted.insert(key)) {
+                self.took.add(&figures);
+            }
         }
         let step = update["step_index"].as_u64();
         match text_of(&update["step_type"]) {
@@ -680,19 +778,20 @@ impl AgyInterpreter {
         // is no turn's where a conversation is continued: it is what the whole conversation
         // has taken so far (four calls in one conversation on 17 Nov 2026 said 8,805, 13,774,
         // 18,950 and 24,431 tokens in, for steps of 8,805, 4,969, 5,176 and 5,481). It is
-        // taken only where no step said anything.
-        let count = |field: &str| result["usage"][field].as_u64();
-        let took = match (self.took, count("input_tokens"), count("output_tokens")) {
-            ((0, 0), Some(tokens_in), Some(tokens_out)) => (
-                tokens_in,
-                tokens_out + count("thinking_tokens").unwrap_or(0),
-            ),
-            (own, ..) => own,
+        // taken only where no step said anything (the Python Host's rule since its PR 413).
+        let took = if self.took.any {
+            Some(self.took)
+        } else {
+            let terminal = figures(&result["usage"]);
+            let mut took = Took::default();
+            took.add(&terminal);
+            (!terminal.is_empty()).then_some(took)
         };
-        if took != (0, 0) {
+        if let Some(took) = took {
+            let (tokens_in, tokens_out) = took.tokens();
             out.push(Signal::Usage {
-                tokens_in: took.0,
-                tokens_out: took.1,
+                tokens_in,
+                tokens_out,
             });
         }
         self.result = Some(Ok(()));

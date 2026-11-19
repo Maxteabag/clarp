@@ -152,9 +152,10 @@ fn a_real_turn_that_runs_a_command_and_answers() {
         (said[0].id.as_str(), said[0].text.as_str()),
         ("r-m1-3", "TOOL_DONE\n")
     );
-    // What the turn took is the result's own count, which is the sum of its steps.
+    // What the turn took is the sum of its steps, which is the result's own count; what was
+    // read from the cache went in as well (the Python Host's count since its PR 413).
     assert!(signals.contains(&Signal::Usage {
-        tokens_in: 21_549,
+        tokens_in: 37_835,
         tokens_out: 84
     }));
     assert_eq!(signals.last(), Some(&Signal::Ended(RunOutcome::Completed)));
@@ -212,7 +213,7 @@ fn a_real_turn_that_searches_reads_and_writes_its_answer_in_pieces() {
     assert_eq!(said[0].text.trim(), response.trim());
     assert!(all.contains(&Signal::Model("claude-opus-5-5-high".to_string())));
     assert!(all.contains(&Signal::Usage {
-        tokens_in: 31_764,
+        tokens_in: 170_895,
         tokens_out: 688
     }));
     assert_eq!(all.last(), Some(&Signal::Ended(RunOutcome::Completed)));
@@ -270,7 +271,7 @@ fn a_real_turn_of_a_newer_antigravity() {
         ("r-m1-3", "AGY_OK\n")
     );
     assert!(all.contains(&Signal::Usage {
-        tokens_in: 13_712,
+        tokens_in: 17_761,
         tokens_out: 46
     }));
     assert_eq!(all.last(), Some(&Signal::Ended(RunOutcome::Completed)));
@@ -281,9 +282,9 @@ const INIT: &str = r#"{"event":"init","conversation_id":"c-9","init":{"model":"m
 #[test]
 fn a_real_turn_that_continues_a_conversation_took_what_its_steps_took() {
     // Recorded on 17 Nov 2026 with agy 1.5.10: the second turn of a conversation, started
-    // with its name. Its one step took 4,969 tokens in and 1 out. Its result says 13,774 and
-    // 3: what the whole conversation has taken so far (the turn before took 8,805 and 2),
-    // which is no turn's.
+    // with its name. Its one step took 4,969 tokens in, 4,049 more read from the cache, and 1
+    // out. Its result says 13,774 and 3: what the whole conversation has taken so far (the turn
+    // before took 8,805 and 2), which is no turn's.
     let signals = read("agy-1.5.10-continued.jsonl");
     let took: Vec<&Signal> = signals
         .iter()
@@ -292,7 +293,7 @@ fn a_real_turn_that_continues_a_conversation_took_what_its_steps_took() {
     assert_eq!(
         took,
         [&Signal::Usage {
-            tokens_in: 4_969,
+            tokens_in: 9_018,
             tokens_out: 1
         }]
     );

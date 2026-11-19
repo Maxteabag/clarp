@@ -87,6 +87,21 @@ pub fn rise(stood_at: Option<u64>, total: u64) -> Option<u64> {
     stood_at.and_then(|before| total.checked_sub(before))
 }
 
+/// What a turn took in and gave out, of a tool that tells with a turn's end what its whole
+/// conversation has taken so far and not the turn's share (Codex, `codex exec --json`): what
+/// each half of that total grew by from where the turn began. `None` where where it began is
+/// not known (a conversation this Host did not begin and kept no total of), or a half fell.
+/// The Python Host, which hears every call of a turn with what that call took, measures from
+/// where its first call says the turn began (its PR 413): the same where nothing happened to
+/// the conversation between two turns, held by `tests/fixtures/codex-turn-usage-vectors.json`.
+pub fn share(began_at: Option<(u64, u64)>, total: (u64, u64)) -> Option<(u64, u64)> {
+    let (began_in, began_out) = began_at?;
+    Some((
+        total.0.checked_sub(began_in)?,
+        total.1.checked_sub(began_out)?,
+    ))
+}
+
 /// A tool's sums over each window, and when its newest turn ended (`last_turn_at`; `null`
 /// where none is kept). A window holds the turns that ended less than its length ago. The
 /// cost of a window is told only where a turn in it said one. Of a tool that tells its

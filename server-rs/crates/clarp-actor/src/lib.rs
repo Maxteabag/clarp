@@ -841,11 +841,9 @@ fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Optio
     // grew by. Where what it stood at before is not known, the share is not either, and the
     // total is kept for the turn after.
     if let Some((tokens_in, tokens_out)) = facts.total {
-        let grew = facts
-            .base
-            .filter(|(before_in, before_out)| tokens_in >= *before_in && tokens_out >= *before_out);
-        end.tokens_in = grew.map(|(before_in, _)| tokens_in - before_in);
-        end.tokens_out = grew.map(|(_, before_out)| tokens_out - before_out);
+        let share = clarp_kernel::usage::share(facts.base, (tokens_in, tokens_out));
+        end.tokens_in = share.map(|(took_in, _)| took_in);
+        end.tokens_out = share.map(|(_, took_out)| took_out);
         end.total = batch.agent().backend_session().map(|session| Total {
             session: session.to_string(),
             tokens_in,
