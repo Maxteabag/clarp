@@ -80,6 +80,17 @@ class TurnIndex:
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
         self._spans = None
 
+    def ended_at(self, trace: str) -> int | None:
+        """When the turn of ``trace`` ended (ms), the one definition both the
+        prompt's row and the reply's turn by time use: the latest settle among
+        its rows if any of them settled (a twin row that never settled does not
+        keep it running), else the start of the agent's next turn of another
+        trace, never later than that start; None while it has neither."""
+        if self._spans is None:
+            self._spans = self._turn_spans()
+        span = self._spans.get(trace)
+        return span[1] if span is not None else None
+
     def ended_before(self, trace: str, timestamp: Any) -> bool:
         """Whether the turn of ``trace`` had ended before ``timestamp``: at the
         latest settle among its rows, or, when none of its rows settled, when
@@ -87,11 +98,9 @@ class TurnIndex:
         a time); never later than that next start. False for a trace with no
         turn (a message steered into another turn), a turn still running, or a
         time not known."""
-        if self._spans is None:
-            self._spans = self._turn_spans()
-        span = self._spans.get(trace)
+        end = self.ended_at(trace)
         ms = iso_ms(timestamp)
-        return span is not None and ms is not None and span[1] is not None and ms > span[1]
+        return end is not None and ms is not None and ms > end
 
     def _turn_spans(self) -> dict[str, tuple[int, int | None]]:
         first: dict[str, int] = {}
@@ -122,23 +131,33 @@ class TurnIndex:
             spans[trace] = (began, end)
         return spans
 
-    def trace_at(self, timestamp: Any) -> str:
-        return self.running_at(timestamp)[0]
+    def trace_at(self, timestamp: Any, *, reply: bool = False) -> str:
+        return self.running_at(timestamp, reply=reply)[0]
 
-    def running_at(self, timestamp: Any) -> tuple[str, int | None]:
+    def running_at(self, timestamp: Any, *, reply: bool = False) -> tuple[str, int | None]:
         """The turn that was running at ``timestamp``: its trace and when it
-        began (ms); ("", None) when there was none."""
+        began (ms); ("", None) when there was none. A prompt may be written a
+        moment before its turn is recorded, so for a prompt a turn that began
+        up to _START_SLACK_MS after it counts. A reply is never written before
+        its turn began: it is the latest turn's that had begun by its time,
+        also when that turn had settled (within its reach), never one that
+        began after it (R91: the agent's next turn, opened just after the
+        reply, took it from its own)."""
         ms = iso_ms(timestamp)
         if ms is None or not self._starts:
             return "", None
-        index = bisect.bisect_right(self._starts, ms + _START_SLACK_MS) - 1
+        index = bisect.bisect_right(self._starts, ms + (0 if reply else _START_SLACK_MS)) - 1
         if index < 0:
             return "", None
         row = self._rows[index]
-        settled = row["settled_at"]
-        reach = (int(settled) + _SETTLED_REACH_MS) if settled else \
+        if not row["trace_id"]:
+            return "", None
+        # Its reach runs from when the turn ended (ended_at: also for a settled
+        # turn whose twin row never settled), else from when it began.
+        ended = self.ended_at(str(row["trace_id"]))
+        reach = (ended + _SETTLED_REACH_MS) if ended is not None else \
             (int(row["started_at"]) + _UNSETTLED_REACH_MS)
-        if ms > reach or not row["trace_id"]:
+        if ms > reach:
             return "", None
         return str(row["trace_id"]), int(row["started_at"])
 
