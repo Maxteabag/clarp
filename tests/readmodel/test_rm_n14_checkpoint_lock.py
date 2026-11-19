@@ -72,5 +72,11 @@ def test_a_tail_with_nothing_to_write_and_the_import_after_it(tmp_path, backend,
             assert _decision(after) == "tail_applied"
             assert after["frontier_held"] is not other_writer
             assert after["digest_reads"] == ["added"]         # the file is not read again
-            assert after["session_reads"]["every_row"] == (4 if other_writer else 3)
+            # R119: the locked pass reads the rows again only when the conversation's head moved
+            # (_revalidate_import_prelude), and here it did not; the frontier's rows are read once,
+            # after the commit (commit_snapshot). Left: the read-only pass (its own read snapshot)
+            # and commit_snapshot, and with another writer the frontier's check of the rows
+            # (recorded_rows_changed, no transaction): none under the write lock. Before: those,
+            # the locked pass's re-read, and the frontier's read inside the final transaction.
+            assert after["session_reads"]["every_row"] == (3 if other_writer else 2)
             harness.assert_product_equal(reference, candidate)

@@ -977,6 +977,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
                           carry_witness: dict | None = None,
                           checkpoint_status: dict | None = None,
                           yield_after_first_write: bool = False,
+                          on_committed=None,
                           ) -> list[dict[str, Any]]:
     """Apply a certified tail through the full import's admission protocol.
 
@@ -992,6 +993,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     ``carry_rules`` name what they cannot read. ``carry_witness`` receives
     what the next record can build on (lib.message_carry.record). With
     ``yield_after_first_write`` the locked pass is a ``_TailWriter``.
+    ``on_committed(database)`` runs right after the final commit, before
+    anything else touches the store (R119: the frontier's read snapshot).
     """
     visible_replies = _visible_replies(turns)
     phases = _row_phases(turns)
@@ -1032,6 +1035,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
             _write_checkpoint(writer, database, on_stored, captured)
         if database.in_transaction:
             database.execute("COMMIT")
+        if on_committed is not None:
+            on_committed(database)
         _account_imported_heartbeats(writer, agent_id)
         return out
     except _WriteNeeded:
@@ -1057,6 +1062,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
         if on_stored is not None and writer.checkpoint_allowed(checkpoint_status):
             _write_checkpoint(writer, database, on_stored, captured)
         writer.finish()
+        if on_committed is not None:
+            on_committed(database)
         _account_imported_heartbeats(writer, agent_id)
         return out
     except Exception:
@@ -1102,6 +1109,8 @@ class _ImportPrelude:
     oracle_rows: list | None = None
     # Whether carry_rows are this session's message rows only (lib.message_carry).
     session_rows: bool = False
+    # The head carry_rows were read under, read BEFORE them (_carry_head; R119).
+    carry_head: tuple | None = None
 
     def raw_carry_inputs(self) -> tuple:
         return (self.turn_index._rows, self.client_rows, self.user_provenance,
@@ -1127,7 +1136,24 @@ class _ImportPrelude:
             self.turn_index, self.phases,
             {key: list(rows) for key, rows in self.client_user_provenance.items()},
             self.user_provenance, self.client_rows, self.carry_rows, self.oracle_rows,
-            self.session_rows)
+            self.session_rows, self.carry_head)
+
+
+def _carry_head(database, agent_id, backend_session_id, session_rows) -> tuple:
+    """What every commit that changes a carry row moves (R119): the conversation's
+    head (revision, replace_revision) when the rows are this session's; for the
+    agent's rows, one statement over the agent's heads (COUNT, MAX(revision),
+    MAX(replace_revision)) on conversation_heads' primary key. Revisions are one
+    clock, so any head that rises raises the MAX; a head removed lowers the COUNT."""
+    if session_rows:
+        row = database.execute(
+            "SELECT revision, replace_revision FROM conversation_heads "
+            "WHERE agent_id=? AND backend_session_id=?", (agent_id, backend_session_id)).fetchone()
+        return ("session", int(row[0]), int(row[1])) if row else ("session", 0, 0)
+    row = database.execute(
+        "SELECT COUNT(*), COALESCE(MAX(revision), 0), COALESCE(MAX(replace_revision), 0) "
+        "FROM conversation_heads WHERE agent_id=?", (agent_id,)).fetchone()
+    return ("agent", int(row[0]), int(row[1]), int(row[2]))
 
 
 def _carry_message_rows(database, agent_id, backend_session_id, session_rows):
@@ -1157,6 +1183,9 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
                              (agent_id,)).fetchall())
     turn_index = message_turns.TurnIndex(database, agent_id)
     phases = _row_phases(turns) if phases is None else phases
+    # The head FIRST, then the rows: a change before the read is in the rows and
+    # in a later head, one after it is in a later head only (R119).
+    carry_head = _carry_head(database, agent_id, backend_session_id, session_rows) if guard_carry else None
     carry_rows = _carry_message_rows(
         database, agent_id, backend_session_id, session_rows) if guard_carry else None
     rows, user = _sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
@@ -1164,7 +1193,7 @@ def _prepare_import_prelude(database, agent_id, backend_session_id, turns,
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if guard_carry else None
     return _ImportPrelude(turn_index, phases, _client_provenance(rows), user,
-                          rows, carry_rows, oracle_rows, session_rows)
+                          rows, carry_rows, oracle_rows, session_rows, carry_head)
 
 
 def _sends_and_latest_user(database, agent_id, backend_session_id, message_rows):
@@ -1187,9 +1216,19 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
     # of membership and ordering. A count/MAX fingerprint cannot certify that.
     # No normalization or index rebuilding is done unless that input changed.
     turn_rows = message_turns.TurnIndex.read_rows(database, agent_id)
-    carry_rows = _carry_message_rows(
-        database, agent_id, backend_session_id, prelude.session_rows
-    ) if prelude.carry_rows is not None else None
+    carry_rows, carry_head = None, None
+    if prelude.carry_rows is not None:
+        # Under the writer lock: the head, one row (or one statement for the
+        # agent). Unchanged since the rows were read: they are the committed
+        # rows, and are not read again. Moved: read again, here (R119).
+        carry_head = _carry_head(database, agent_id, backend_session_id, prelude.session_rows)
+        if prelude.carry_head is not None and carry_head == prelude.carry_head:
+            carry_rows = prelude.carry_rows
+        else:
+            from .log import log
+            log("importCarryReread", "reason=head_moved")
+            carry_rows = _carry_message_rows(
+                database, agent_id, backend_session_id, prelude.session_rows)
     client_rows, user = _sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
     turn_index = prelude.turn_index
     if turn_rows != turn_index._rows:
@@ -1201,7 +1240,7 @@ def _revalidate_import_prelude(database, agent_id, backend_session_id,
         "SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id", (agent_id,)
     ).fetchall() if prelude.carry_rows is not None else None
     return _ImportPrelude(turn_index, prelude.phases, provenance, user, client_rows,
-                          carry_rows, oracle_rows, prelude.session_rows)
+                          carry_rows, oracle_rows, prelude.session_rows, carry_head)
 
 
 # R62: turns whose own id a row of another agent holds, and when that was last
