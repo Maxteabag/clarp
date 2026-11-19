@@ -85,6 +85,10 @@ PLANTS = [
     (Q, 'kernel', "a notice's tries are pushed with it", '        fields.remove("delivery_retry");', ''),
     (Q, 'kernel', 'a notice does not say when its window resets', '                "resets_at": window.get("resets_at").cloned().unwrap_or(Value::Null),', '                "resets_at": Value::Null,'),
     (Q, 'kernel', 'a look that stopped says nothing of what it kept', '    format!("The check stopped ({why}); what it read before is kept")', '    format!("The check stopped ({why})")'),
+    (Q, 'kernel', "a tie of two notices' moment is broken by the order written, not by the id",
+     '    by_age.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));', '    by_age.sort_by(|a, b| a.1.cmp(&b.1));'),
+    (Q, 'kernel', "a tie of two notices' moment is broken by the smaller id",
+     '    by_age.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));', '    by_age.sort_by(|a, b| (a.1, b.0).cmp(&(b.1, a.0)));'),
     (Q, 'kernel', 'what waits is delivered by when it was written and its id, not as it was written', '    for (id, _, payload) in waiting {', '    for (id, _, payload) in by_age.clone() {'),
     (K, 'retry', 'a push that reached nobody is settled', '                quota::after_push(&mut receipt.payload, told, now)', '                Some(told)'),
 ]
