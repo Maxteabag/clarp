@@ -153,10 +153,8 @@ unexplained, and names them in its verdict; it fails where one of them does not 
 stale: the port landed, or the reference moved again) and where an id is both awaited and
 intended. The port's commit takes its lines out.
 
-Awaited now: ten differences of the scenario `router`, from PR 443 (the reference's rulings on
-R83 and R84): where a command or a message the router was asked to hand on was refused or held,
-the answer's `session` and the decision's `target_session` are the session the user spoke to
-there and the session the name resolved to here. The port is rs-router's.
+Awaited now: nothing. The ten differences of the scenario `router` from PR 443 (R83 and R84) went
+with its port (19 Nov 2026).
 
 ## Differences the conformance corpus does not reach
 
@@ -244,7 +242,7 @@ there and the session the name resolved to here. The port is rs-router's.
 | An agent started again on a tool the Host has not (`backend`) | started again on the Host's default tool, whatever tool it had | refused, 400, as a new agent on such a tool is | A tool nobody has is nobody's choice |
 | The model of an agent that is started again on another tool | kept where the new tool has a model of that name | not kept: a model's name is its tool's, and this Host does not look a model up in the list of the new tool's models | The new tool's own choice of model |
 | What a Host says aloud when an agent is started again ("Nova relaunched.") | said, unless the request says not to | not said | As when an agent is made |
-| What the router says aloud | a clip by the engine the owner chose, or a phrase kept ready-spoken where there is one | a clip where an engine of this Host can say it, in the agent's voice or the router's, played whichever agent is open; where none can, nothing is said, and the apps are told what was decided all the same | Phrases kept ready-spoken are not built |
+| What the router says aloud | a clip by the engine the owner chose, or a phrase kept ready-spoken where there is one | a clip where an engine of this Host can say it, in the agent's voice or the router's, played whichever agent is open; where none can, nothing is said, and the apps are told what was decided all the same | Phrases kept ready-spoken are not built: the Python Host's cache of clips of the router's own sentences is not here, nor what PR 443 made of it (one of its sentences always played under its own key whatever key the model gave, and a stale clip logged only for one of them). What is said, in whose voice and to whom, is the same |
 | What the router keeps | every decision and every held message, for good | the newest two hundred decisions, which is as many as can be asked for; a held message for a day; of what it gave each agent the newest five, which is what a model is shown | The router's book is kept whole, and stays small |
 | The agent a message is for that names none | the one the Host is configured to default to (`default_session`, `claude` unless set) | `claude`, when there is an agent of that name | This Host has no setting for it. A hands-free message stays with the agent that is open before that is asked |
 | How exact a place is that a phone says it is at (`POST /location`, `accuracy`), given as a list or an object | 500, `store failed` (a `TypeError` nobody catches as what it is) | 400, `accuracy must be a number` | What an app sent wrongly is the app's to hear, not a failure of the Host. A text that is no number is refused in the Python Host's own words on both |

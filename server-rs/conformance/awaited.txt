@@ -10,17 +10,3 @@
 # One line a difference: its id from the report, the reference's PR (a number), the branch that owes
 # the port (or its owner, until the branch is made), and what it is: the scenario first, as the
 # report names it.
-
-# PR 443 (R83, R84): the router answers with the session it was spoken to where a name it resolved
-# was refused or not acted on; this Host answers with the session the name resolved to. Measured by
-# run 44476165892 on 002e0c28; the port is rs-router's.
-14f3906b47b5  443  rs-router  router / http / [10].body.session: clarify; claire there, nova here
-c422510d3d42  443  rs-router  router / http / [14].body.session: clarify; claire there, nova here
-ceb9cf26280f  443  rs-router  router / http / [16].body.orchestrator.decision.target_session: clarify; '' there, nova here
-d4105aae557b  443  rs-router  router / http / [16].body.session: clarify; claire there, nova here
-95f84cd7b920  443  rs-router  router / http / [17].body.orchestrator.decision.target_session: clarify; '' there, nova here
-e00b348514dc  443  rs-router  router / http / [17].body.session: clarify; claire there, nova here
-446f7fa01f7a  443  rs-router  router / http / [21].body.session: clarify; nova there, claire here
-230bd90daf7c  443  rs-router  router / http / [22].body.session: status_query; nova there, claire here
-91b5e5b8f70d  443  rs-router  router / sse / lane[orchestrator-decision@781105][7].data.target_session: '' there, nova here
-60bf8739a735  443  rs-router  router / sse / lane[orchestrator-decision@781105][8].data.target_session: '' there, nova here
