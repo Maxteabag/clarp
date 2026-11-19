@@ -222,7 +222,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
         }
     };
     for dir in &dirs {
-        let index = confined(&root, &dir.join("sessions-index.json"))
+        let index = confined("claude", &root, &dir.join("sessions-index.json"))
             .and_then(|path| std::fs::read(path).ok());
         let index = index.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
         let entries = index.as_ref().and_then(|index| index["entries"].as_array());
@@ -232,7 +232,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             .filter(|entry| entry.is_object())
         {
             let id = text_of(entry.get("sessionId"));
-            if !one_name(&id) {
+            if !checked_id("claude", &id) {
                 continue;
             }
             if truthy(entry.get("isSidechain")) {
@@ -242,7 +242,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             }
             let declared = PathBuf::from(text_of(entry.get("fullPath")));
             let beside = dir.join(format!("{id}.jsonl"));
-            if confined(&root, &declared).is_none() && confined(&root, &beside).is_none() {
+            if confined("claude", &root, &declared).is_none() && confined("claude", &root, &beside).is_none() {
                 continue;
             }
             named.insert(id.clone());
@@ -273,7 +273,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
                 .map(|stem| stem.to_string_lossy().into_owned());
             if transcript
                 && id.is_some_and(|id| one_name(&id) && !named.contains(&id))
-                && confined(&root, &path).is_some()
+                && confined("claude", &root, &path).is_some()
             {
                 unnamed.push((written(&path).0, path));
             }
@@ -552,7 +552,7 @@ pub fn claude_source(
     session: &str,
     other_projects: bool,
 ) -> Result<Option<PathBuf>, OutsideStore> {
-    if !one_name(session) {
+    if !checked_id("claude", session) {
         return Err(OutsideStore);
     }
     let Ok(root) = projects.canonicalize() else {
@@ -571,13 +571,13 @@ pub fn claude_source(
         None
     };
     candidate
-        .map(|path| confined(&root, &path).ok_or(OutsideStore))
+        .map(|path| confined("claude", &root, &path).ok_or(OutsideStore))
         .transpose()
 }
 
 /// The newest rollout whose complete timestamped name identifies this session.
 pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
-    if !one_name(session) || !sessions.is_dir() {
+    if !checked_id("codex", session) || !sessions.is_dir() {
         return None;
     }
     let root = sessions.canonicalize().ok()?;
@@ -592,7 +592,7 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
             .is_some_and(|matched| &matched[1] == session)
     });
     let mut newest: Option<(SystemTime, PathBuf)> = None;
-    for path in named.into_iter().filter_map(|p| confined(&root, &p)) {
+    for path in named.into_iter().filter_map(|p| confined("codex", &root, &p)) {
         let Some(at) = written(&path).0 else {
             continue;
         };
@@ -622,7 +622,7 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
 /// own file counts. Where agy has no store at all on this machine nothing is known, and the
 /// conversation counts as kept (`conversation_exists`). Malformed names are refused.
 pub fn agy_kept(base: &Path, conversation: &str) -> bool {
-    if !one_name(conversation) {
+    if !checked_id("agy", conversation) {
         return false;
     }
     let store = base.join("conversations");
@@ -630,19 +630,19 @@ pub fn agy_kept(base: &Path, conversation: &str) -> bool {
         return true;
     }
     base.canonicalize()
-        .is_ok_and(|root| confined(&root, &store.join(format!("{conversation}.db"))).is_some())
+        .is_ok_and(|root| confined("agy", &root, &store.join(format!("{conversation}.db"))).is_some())
 }
 
 /// The transcript of a conversation of agy, where there is one (`find_latest_jsonl`).
 pub fn agy_transcript(base: &Path, conversation: &str) -> Option<PathBuf> {
-    if !one_name(conversation) {
+    if !checked_id("agy", conversation) {
         return None;
     }
     let brain = base.join("brain").canonicalize().ok()?;
     let path = brain
         .join(conversation)
         .join(".system_generated/logs/transcript.jsonl");
-    confined(&brain, &path)
+    confined("agy", &brain, &path)
 }
 
 /// A text of a URI with every `%` and two digits read as the byte they stand for
@@ -871,9 +871,27 @@ fn native_file(tool: clarp_kernel::grok_muse::Tool) -> &'static str {
     }
 }
 
-fn confined(base: &Path, file: &Path) -> Option<PathBuf> {
+fn refused(backend: &str) {
+    eprintln!("transcriptSessionIdRefused backend={backend}");
+}
+
+fn checked_id(backend: &str, id: &str) -> bool {
+    if one_name(id) {
+        return true;
+    }
+    if !id.is_empty() {
+        refused(backend);
+    }
+    false
+}
+
+fn confined(backend: &str, base: &Path, file: &Path) -> Option<PathBuf> {
     let path = file.canonicalize().ok()?;
-    (path.starts_with(base) && path.is_file()).then_some(path)
+    if !path.starts_with(base) {
+        refused(backend);
+        return None;
+    }
+    path.is_file().then_some(path)
 }
 
 pub fn native_transcript(
@@ -890,13 +908,14 @@ fn native_transcript_in(
     id: &str,
 ) -> Option<String> {
     use clarp_kernel::grok_muse::Tool;
-    if !one_name(id) {
+    if !checked_id(tool.id(), id) {
         return None;
     }
     if tool == Tool::Muse
         && (!(8..=64).contains(&id.len())
             || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'))
     {
+        refused(tool.id());
         return None;
     }
     let base = sessions.canonicalize().ok()?;
@@ -908,7 +927,7 @@ fn native_transcript_in(
     }
     let file = dirs
         .iter()
-        .find_map(|d| confined(&base, &d.join(id).join(native_file(tool))))?;
+        .find_map(|d| confined(tool.id(), &base, &d.join(id).join(native_file(tool))))?;
     Some(String::from_utf8_lossy(&std::fs::read(file).ok()?).into_owned())
 }
 
@@ -929,7 +948,7 @@ pub fn native_sessions(
             continue;
         }
         for dir in files_of(&parent) {
-            let Some(file) = confined(&base, &dir.join(native_file(tool))) else {
+            let Some(file) = confined(tool.id(), &base, &dir.join(native_file(tool))) else {
                 continue;
             };
             let Ok(bytes) = std::fs::read(&file) else {
@@ -945,7 +964,7 @@ pub fn native_sessions(
                         .and_then(|r| r["text"].as_str())
                         .unwrap_or("")
                         .to_string();
-                    let info: Value = confined(&base, &dir.join("summary.json"))
+                    let info: Value = confined(tool.id(), &base, &dir.join("summary.json"))
                         .and_then(|p| std::fs::read(p).ok())
                         .and_then(|b| serde_json::from_slice(&b).ok())
                         .unwrap_or_default();
@@ -1110,7 +1129,7 @@ mod confinement {
         for row in vectors["locations"].as_array().unwrap() {
             let file = alias.join(row[0].as_str().unwrap());
             assert_eq!(
-                confined(&alias.canonicalize().unwrap(), &file).is_some(),
+                confined("claude", &alias.canonicalize().unwrap(), &file).is_some(),
                 row[1].as_bool().unwrap(),
                 "{row}"
             );
@@ -1128,7 +1147,44 @@ mod confinement {
             std::fs::remove_file(file).unwrap();
             rollouts += 1;
         }
-        assert_eq!((names, locations, rollouts), (235, 7, 18));
+        assert_eq!((names, locations, rollouts), (235, 8, 19));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn the_claude_catalogue_offers_only_usable_files_in_the_store() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("clarp-r70-catalogue-{}", std::process::id()));
+        let store = root.join("projects");
+        let project = store.join("-work");
+        std::fs::create_dir_all(&project).unwrap();
+        let outside = root.join("elsewhere.jsonl");
+        std::fs::write(&outside, "{}").unwrap();
+        for name in ["usable", "_invalid", "_indexed"] {
+            std::fs::write(project.join(format!("{name}.jsonl")), "{}").unwrap();
+        }
+        for name in ["indexed-link", "unindexed-link"] {
+            symlink(&outside, project.join(format!("{name}.jsonl"))).unwrap();
+        }
+        let entries = json!({"entries":[
+            {"sessionId":"usable","fullPath":outside,"summary":"beside the index"},
+            {"sessionId":"declared","fullPath":outside},
+            {"sessionId":"indexed-link"},
+            {"sessionId":"_indexed","fullPath":project.join("usable.jsonl")}
+        ]});
+        let index = project.join("sessions-index.json");
+        std::fs::write(&index, entries.to_string()).unwrap();
+        let offered = || claude_sessions(&store, "/work", false, 20);
+        let rows = offered();
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["id"], "usable");
+        assert_eq!(rows[0]["title"], "beside the index");
+        std::fs::remove_file(&index).unwrap();
+        let external_index = root.join("index.json");
+        std::fs::write(&external_index, entries.to_string()).unwrap();
+        symlink(external_index, index).unwrap();
+        assert_eq!(offered()[0]["title"], "");
         std::fs::remove_dir_all(root).unwrap();
     }
 

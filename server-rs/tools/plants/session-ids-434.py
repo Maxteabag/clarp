@@ -8,6 +8,7 @@ DOOR = 'clarp-host/src/edge.rs'
 FORK = 'clarp-host/src/past.rs'
 AGENT = 'clarp-kernel/src/agent.rs'
 RUNS = {
+    'replay': ['test', '--lib', 'replaying_a_refused_native_session_binding_clears_the_previous_one'],
     'lookup': ['test', '--lib', 'past::confinement::'],
     'door': ['test', '--test', 'host', 'session_ids_are_checked_before_creation_and_a_restored_agent_runs_fresh'],
 }
@@ -61,23 +62,35 @@ plant(PAST, 'lookup', 'Muse accepts 65 characters', '8..=64', '8..=65')
 plant(PAST, 'lookup', 'Muse allows non-hex letters', 'b.is_ascii_hexdigit()', 'b.is_ascii_alphanumeric()')
 plant(PAST, 'lookup', 'Muse refuses a dash in a name', "b.is_ascii_hexdigit() || b == b'-'", "b.is_ascii_hexdigit()")
 plant(PAST, 'lookup', 'Grok alone gets the Muse rule', 'if tool == Tool::Muse\n        &&', 'if tool == Tool::Grok\n        &&')
-plant(PAST, 'lookup', 'a resolved file outside the store is taken', 'path.starts_with(base) && path.is_file()', 'path.is_file()')
+plant(PAST, 'lookup', 'a resolved file outside the store is taken', 'if !path.starts_with(base)', 'if false')
 plant(PAST, 'lookup', 'a sibling with the same name prefix counts as inside', 'path.starts_with(base)', 'path.to_string_lossy().starts_with(base.to_string_lossy().as_ref())')
-plant(PAST, 'lookup', 'the suffix of a name suffices for Codex admission', 'if !one_name(session) || !sessions.is_dir()', 'if !sessions.is_dir()')
-plant(PAST, 'lookup', 'Claude reads a rejected id', 'if !one_name(session) {\n        return Err(OutsideStore);', 'if false {\n        return Err(OutsideStore);')
-plant(PAST, 'lookup', 'Grok reads a rejected id', 'if !one_name(id) {', 'if false {')
-plant(PAST, 'lookup', 'Antigravity reads a rejected id', 'if !one_name(conversation) {\n        return None;', 'if false {\n        return None;')
+plant(PAST, 'lookup', 'the suffix of a name suffices for Codex admission', 'if !checked_id("codex", session) || !sessions.is_dir()', 'if !sessions.is_dir()')
+plant(PAST, 'lookup', 'Claude reads a rejected id', 'if !checked_id("claude", session) {\n        return Err(OutsideStore);', 'if false {\n        return Err(OutsideStore);')
+plant(PAST, 'lookup', 'Grok reads a rejected id', 'if !checked_id(tool.id(), id) {', 'if false {')
+plant(PAST, 'lookup', 'Antigravity reads a rejected id', 'if !checked_id("agy", conversation) {\n        return None;', 'if false {\n        return None;')
 plant('clarp-backend/src/history/opencode.rs', 'lookup', 'the shared database accepts a rejected key', 'if !clarp_kernel::native_session_name(id)', 'if false')
 for why, old, new in [
     ('validate only resume', '["resume_session_id", "fork_session_id"]', '["resume_session_id"]'),
     ('validate only fork', '["resume_session_id", "fork_session_id"]', '["fork_session_id"]'),
-    ('refuse the omitted empty string', 'id.is_empty()', 'false'),
+    ('refuse the omitted empty string', 'if id.is_empty()\n                    ||', 'if false ||'),
     ('refuse surrounding space on a valid id', 'clarp_kernel::python::strip(id)', 'id'),
-    ('admit a whitespace-only name', 'id.is_empty()', 'id.trim().is_empty()'),
+    ('admit a whitespace-only name', 'if id.is_empty()\n                    ||', 'if id.trim().is_empty() ||'),
     ('say something else on refusal', 'bad("invalid session id")', 'bad("bad session")'),
 ]:
     plant(DOOR, 'door', why, old, new)
 plant(AGENT, 'door', 'retain the refused binding when replaying old events', '.filter(|id| crate::native_session_name(id))', '.filter(|_| true)')
 plant(FORK, 'door', 'give the wrong answer for a forbidden copy', 'let why = "cannot fork that session";', 'let why = "fork io failed";')
+plant(PAST, 'lookup', 'a directory counts as a transcript', 'path.is_file().then_some(path)', 'Some(path)')
+plant(PAST, 'door', 'a refusal loses its backend-only log line', 'transcriptSessionIdRefused backend={backend}', 'transcriptRead backend={backend}')
+plant(PAST, 'lookup', 'the catalogue accepts an invalid indexed name', 'if !checked_id("claude", &id)', 'if id.is_empty()')
+plant(PAST, 'lookup', 'the catalogue accepts an invalid unindexed name', 'one_name(&id) && !named.contains(&id)', '!named.contains(&id)')
+plant(PAST, 'lookup', 'trust an index outside the project store', 'confined("claude", &root, &dir.join("sessions-index.json"))', 'Some(dir.join("sessions-index.json"))')
+plant(PAST, 'lookup', 'accept an indexed file outside the project store', 'confined("claude", &root, &declared).is_none()', '!declared.is_file()')
+plant(PAST, 'lookup', 'accept an external fallback beside the index', 'confined("claude", &root, &beside).is_none()', '!beside.is_file()')
+plant(PAST, 'lookup', 'accept an external unindexed transcript', 'confined("claude", &root, &path).is_some()', 'path.is_file()')
+plant(FORK, 'door', 'a refused fork source is reported as missing', 'past::claude_source(&root, &of, &name, true)\n            .map_err(|_| StatusCode::BAD_REQUEST)?', 'past::claude_source(&root, &of, &name, true)\n            .map_err(|_| StatusCode::NOT_FOUND)?')
+plant(AGENT, 'replay', 'adopting a historical binding bypasses validation', 'self.bind_session(backend_session.as_deref());', 'self.backend_session.clone_from(backend_session);')
+plant(AGENT, 'replay', 'a historical turn binds a rejected session', 'self.bind_session(Some(backend_session));','self.backend_session = Some(backend_session.clone());')
+plant(AGENT, 'door', 'taking up a historical session bypasses validation', '=> self.bind_session(Some(backend_session)),','=> self.backend_session = Some(backend_session.clone()),')
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

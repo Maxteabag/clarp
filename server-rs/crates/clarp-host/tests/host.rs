@@ -23681,12 +23681,13 @@ fn session_ids_are_checked_before_creation_and_a_restored_agent_runs_fresh() {
 
     let place = Place::new("session-ids");
     let codex = place.root.join("codex-stand-in");
-    let args = place.root.join("arguments");
+    let args = codex.with_extension("args");
+    let codex_home = place.root.join("codex-home");
     program(
         &codex,
         r#"#!/bin/sh
 [ "$1" = exec ] || exit 0
-printf '%s\n' "$@" > "$SESSION_ARGS"
+printf '%s\n' "$@" > "$0.args"
 cat >/dev/null
 echo '{"type":"thread.started","thread_id":"fresh-id"}'
 echo '{"type":"turn.started"}'
@@ -23697,7 +23698,7 @@ echo '{"type":"turn.completed","usage":{}}'
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
-        ("SESSION_ARGS", args.to_str().unwrap()),
+        ("CODEX_HOME", codex_home.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
     let bad = (
@@ -23753,6 +23754,9 @@ echo '{"type":"turn.completed","usage":{}}'
         )
     };
     assert_eq!(fork("outside"), refusal);
+    wait_for("the content-free transcript refusal", || {
+        host.heard.lock().unwrap().lines().any(|line| line == "transcriptSessionIdRefused backend=claude")
+    });
     std::fs::remove_file(project.join("outside.jsonl")).unwrap();
     std::fs::remove_dir(&project).unwrap();
     std::os::unix::fs::symlink(&other, &project).unwrap();

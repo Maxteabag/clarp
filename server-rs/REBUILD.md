@@ -2684,6 +2684,16 @@ steps made for the question, reproducible); this is built to its answers.
   restart), by `an_agent_is_started_again_in_place_with_a_conversation_that_begins_anew` on a Host, and by
   the scenario `started-again`.
 
+**Native session IDs** (19 Nov 2026, R70). A tool's session name begins with an ASCII letter or
+digit and holds at most 128 ASCII letters, digits, dots, underscores and hyphens. A transcript
+file must resolve inside its store. Muse also requires 8 to 64 hexadecimal digits or hyphens.
+OpenCode and DeepSeek share a database and use the name as a key. Codex matches the complete
+timestamped rollout filename and the full session ID. Agent creation checks both the resume and
+fork fields before it can open or replace an agent. A malformed field receives HTTP 400 with
+`invalid session id`. Replaying an old, invalid binding clears the session used for the next turn.
+The reference vectors cover names, resolved files and rollout filenames. The Host test restores
+an older binding through the log port and observes the next invocation of a stand-in Codex.
+
 **A new agent begins with a session its tool kept** (17 Nov 2026). An app's sheet for a new agent offers the
 sessions Claude Code kept in a directory (`GET /past-sessions`) and makes an agent that takes one up where it
 left off (`POST /agents` with `resume_session_id`), or that begins with a copy of one and leaves the session
