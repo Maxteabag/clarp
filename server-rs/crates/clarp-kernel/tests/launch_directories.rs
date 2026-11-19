@@ -24,22 +24,42 @@ fn directory_answers_match_the_reference() {
     assert_eq!(json!(recent), suite["recent"]);
     let existing: BTreeSet<String> = serde_json::from_value(suite["existing"].clone()).unwrap();
     for c in suite["ranked"].as_array().unwrap() {
-        let fallback=c["fallback"].as_bool().unwrap();
-        let raw=(0..c["size"].as_u64().unwrap()).map(|i|{
-            let suffix=if fallback && (i%11==9 || i>=998){"-Az"}else{""};
-            format!("/synthetic/{i}{suffix}")
-        }).collect::<Vec<_>>().join("\n");
-        let raw=c["raw"].as_array().map_or(raw,|v| v.iter().map(|p|p.as_str().unwrap()).collect::<Vec<_>>().join("\n"));
-        let seen=rules::ranked(&raw,c["q"].as_str().unwrap(),fallback);
-        assert_eq!(json!(seen),c["seen"]);
+        let fallback = c["fallback"].as_bool().unwrap();
+        let raw = (0..c["size"].as_u64().unwrap())
+            .map(|i| {
+                let suffix = if fallback && (i % 11 == 9 || i >= 998) {
+                    "-Az"
+                } else {
+                    ""
+                };
+                format!("/synthetic/{i}{suffix}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let raw = c["raw"].as_array().map_or(raw, |v| {
+            v.iter()
+                .map(|p| p.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
+        let seen = rules::ranked(&raw, c["q"].as_str().unwrap(), fallback);
+        assert_eq!(json!(seen), c["seen"]);
     }
-    for c in suite["completions"].as_array().unwrap(){
-        let children=serde_json::from_value(c["names"].clone()).unwrap();
-        assert_eq!(json!(rules::completions(children,c["prefix"].as_str().unwrap())),c["seen"]);
+    for c in suite["completions"].as_array().unwrap() {
+        let children = serde_json::from_value(c["names"].clone()).unwrap();
+        assert_eq!(
+            json!(rules::completions(children, c["prefix"].as_str().unwrap())),
+            c["seen"]
+        );
     }
-    assert_eq!(suite["ranked"].as_array().unwrap().len(),17);
-    assert_eq!(suite["completions"].as_array().unwrap().len(),18);
-    for case in suite["spellings"].as_array().unwrap(){assert_eq!(rules::spelling(case["value"].as_str().unwrap()),case["expected"]);}
+    assert_eq!(suite["ranked"].as_array().unwrap().len(), 17);
+    assert_eq!(suite["completions"].as_array().unwrap().len(), 18);
+    for case in suite["spellings"].as_array().unwrap() {
+        assert_eq!(
+            rules::spelling(case["value"].as_str().unwrap()),
+            case["expected"]
+        );
+    }
     let mut checked = 0;
     for f in suite["favorites"].as_array().unwrap() {
         assert_eq!(

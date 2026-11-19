@@ -16,14 +16,25 @@ DEST = ROOT/"server-rs/crates/clarp-kernel/tests/fixtures/launch-directories.jso
 def capture(place):
     from lib import agents, db, launch_directories
     from lib.routes.settings import SettingsRoutes
-    home = place/"home"
+    # Rank names in one fixed namespace. A random temporary prefix can itself
+    # match fuzzy queries, even when replaced in the serialized answer.
+    home = Path("/fixture/home")
+    def actual(path):
+        return place/path.relative_to("/fixture")
+    is_dir = Path.is_dir
+    iterdir = Path.iterdir
+    def children(path):
+        return [path/p.name for p in iterdir(actual(path))]
+    def expand(path):
+        parts=path.parts
+        return home.joinpath(*parts[1:]) if parts and parts[0]=="~" else path
     names = ["pr", "project", "Project TWO", ".private", "Stra" + chr(223) + "e", "shared", "janitor", "orphan"]
     names += [f"p{i:02d}" for i in range(40)]
     for name in names:
-        (home/name).mkdir(exist_ok=True)
-    (home/"project"/"inner").mkdir()
+        actual(home/name).mkdir(exist_ok=True)
+    actual(home/"project"/"inner").mkdir()
     (place/"homesibling").mkdir()
-    (home/"link").symlink_to(home/"project", target_is_directory=True)
+    actual(home/"link").symlink_to(actual(home/"project"), target_is_directory=True)
     paths = [str(home/name) for name in names]
     launches = []
     for index, name in enumerate(["old-missing", *names, "project", "Project TWO", "janitor", "shared"]):
@@ -57,7 +68,7 @@ def capture(place):
                 raise subprocess.TimeoutExpired(args,.5)
             return SimpleNamespace(returncode=rc if len(calls)==1 else 9,
                                    stdout="\n".join(rows if len(calls)==1 else backup))
-        with patch.object(launch_directories.subprocess,"run",side_effect=run):
+        with patch.object(launch_directories.subprocess,"run",side_effect=run), patch.object(Path,"is_dir",lambda p:is_dir(actual(p))), patch.object(Path,"iterdir",children), patch.object(Path,"expanduser",expand):
             answer=launch_directories.lookup(q,home=home,zoxide="fake")
         cases.append(dict(q=q,rc=rc,rows=rows,backup=backup,fail=fail,calls=calls,answer=answer))
     for q in ["", "pr","PR","./pr","./project/","project/","~","~sibling",str(home/"project"),
@@ -74,7 +85,7 @@ def capture(place):
         one("unknown",0,paths[:n])
     # No query candidate is required to match zoxide's successful output.
     one("no-such-name",0,["~/project",str(home/"project"),str(home/"./pr"),str(home)+"/project//inner/"])
-    existing=[str(home),str(place/"homesibling"),str(home/"project/inner"),str(home/"link"),str(home/"link/inner"),*paths]
+    existing=[str(home),"/fixture/homesibling",str(home/"project/inner"),str(home/"link"),str(home/"link/inner"),*paths]
     # Observe the ranked candidates before existence checks and the 16-result limit.
     # No recent rows, explicit directories or home candidate can obscure a cutoff.
     ranked_cases=[]
@@ -126,7 +137,7 @@ def capture(place):
     assert probes[0]==str(home)
     spellings=[dict(value=v,expected=str(Path(v))) for v in ("", ".", "./.", "./abc/", "//", "///", "//server//path", "a/./../b", "../../../.", "/.", "~example/a/.", "a/ /b")]
     fixture=dict(spellings=spellings,ranked=ranked_cases,completions=completions,recent=probes[1:],home=str(home),existing=existing,launches=launches,owners=owners,favorites=favored,cases=cases)
-    return json.loads(json.dumps(fixture,ensure_ascii=True).replace(str(place),"/fixture"))
+    return fixture
 
 
 if __name__=="__main__":
