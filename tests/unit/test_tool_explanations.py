@@ -255,3 +255,35 @@ def _failing_with(error):
 def test_a_failed_explanation_is_told_by_what_its_failure_is(error, reason):
     with ToolExplanations(translate=_failing_with(error), debounce=.001) as service:
         assert wait_ready(service) == {"id": "phone", "status": "failed", "reason": reason}
+
+
+# ---- R85 (ruled 01:33) and the R88 review: a timeout however it arrives; nothing else is one ----
+
+def test_a_raw_timeout_that_reaches_the_service_is_told_as_a_timeout():
+    """A builtin TimeoutError is not converted by execute(): it is still a timeout."""
+    with ToolExplanations(translate=_failing_with(TimeoutError("no answer in 45 s")), debounce=.001) as service:
+        assert wait_ready(service) == {"id": "phone", "status": "failed", "reason": "timeout"}
+
+
+class _TimedOutValueError(ValueError):
+    category = "timeout"
+
+
+class _TimedOutMissingCli(FileNotFoundError):
+    category = "timeout"
+
+
+@pytest.mark.parametrize("error, reason", [
+    (model_fallbacks.ProviderFailure("codex timed out after 45 s", "timeout"), "timeout"),
+    (subprocess.TimeoutExpired(["codex"], 45), "timeout"),
+    (TimeoutError("no answer"), "timeout"),
+    (model_fallbacks.ProviderFailure("invalid explanation response"), "translator_failed"),
+    (model_fallbacks.ProviderFailure("rate limited", "rate_limit"), "translator_failed"),
+    (_TimedOutValueError("both"), "timeout"),
+    (_TimedOutMissingCli("both"), "timeout"),
+    (FileNotFoundError("codex"), "codex_unavailable"),
+    (ValueError("not JSON"), "invalid_response"),
+])
+def test_the_reason_of_every_kind_of_failure(error, reason):
+    from lib.tool_explanations import _failure_reason
+    assert _failure_reason(error) == reason

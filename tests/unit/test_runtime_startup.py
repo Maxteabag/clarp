@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from lib.runtime_startup import recover_runtime
 
 
@@ -209,10 +211,13 @@ def test_a_failed_prompt_directory_sweep_never_stops_the_runtime_from_recovering
         raise PermissionError("temporary directory not readable")
     monkeypatch.setattr(routing_input, "sweep_stale", broken)
     restored = []
-    result = recover_runtime(
-        SimpleNamespace(stream=None),
-        SimpleNamespace(submit=lambda *_: None, recover_queued=lambda: 0),
-        restore_agents=restored.append,
-    )
+    try:
+        result = recover_runtime(
+            SimpleNamespace(stream=None),
+            SimpleNamespace(submit=lambda *_: None, recover_queued=lambda: 0),
+            restore_agents=restored.append,
+        )
+    except OSError as exc:
+        pytest.fail(f"a failed sweep stopped recovery: {exc!r}")
     assert len(restored) == 1 and result["queued"] == 0
     assert "routingDirSweepFail" in capfd.readouterr().err
