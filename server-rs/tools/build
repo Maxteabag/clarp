@@ -23,41 +23,6 @@
 # and never several builds at once. This script is that rule: it copies this checkout's server-rs/
 # to the build machine, waits for the one build slot (flock), and runs cargo there at lowest priority
 # with a target directory per checkout, so a second run is incremental.
-# The queue sources this function on the build machine with the build directory as its cwd.
-build_has_space() (
-    set -euo pipefail
-    local floor=$1 build_dir=$PWD free incremental=no removed=0 stale exe
-    free=$(df -B1 --output=avail "$build_dir" | tail -1)
-    if (( free < floor )) && [[ ! -L target && ! -L target/debug ]]; then
-        if [[ -d target/debug/incremental && ! -L target/debug/incremental ]]; then
-            rm -rf -- target/debug/incremental
-            incremental=yes
-            free=$(df -B1 --output=avail "$build_dir" | tail -1)
-        fi
-        if (( free < floor )) && [[ -d target/debug/deps && ! -L target/debug/deps ]]; then
-            cd target/debug/deps
-            # Newest first marks the one to keep per name. Remove the rest oldest first.
-            stale=$(find . -maxdepth 1 -type f -perm /111 -regextype posix-extended \
-                -regex './[A-Za-z0-9_]+-[0-9a-f]{16}' -printf '%T@ %f\n' |
-                LC_ALL=C sort -rn | awk '{name=$2; sub(/-[^-]+$/, "", name); if (seen[name]++) print $2}' | tac)
-            for exe in $stale; do
-                rm -- "$exe"
-                (( removed += 1 ))
-                free=$(df -B1 --output=avail "$build_dir" | tail -1)
-                if (( free >= floor )); then break; fi
-            done
-        fi
-    fi
-    printf 'Build disk: incremental cache removed=%s, stale test executables removed=%d, free=%d bytes.\n' \
-        "$incremental" "$removed" "$free"
-    if (( free < floor )); then
-        echo "Build stopped before cargo because less than $floor bytes are free." >&2
-        exit 1
-    fi
-)
-
-# Only the queue uses the function above when it sources this file.
-if [[ ${BASH_SOURCE[0]} != "$0" ]]; then return 0; fi
 set -euo pipefail
 
 HOST="${CLARP_BUILD_HOST:-xps15}"
@@ -133,11 +98,15 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     rsync -a --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../server/" "$HOST:$remote/server/"
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
+# Cargo releases the slot before rsync fetches the binaries. Keep links for the
+# transfer so a later build can evict this target without interrupting the fetch.
+if [ "$cmd" = release ]; then
+    export_dir=$(ssh "${ssh_opts[@]}" "$HOST" "mktemp -d $remote/.release-XXXXXXXX")
+    trap 'ssh "${ssh_opts[@]}" "$HOST" "rm -f -- $export_dir/clarp-host $export_dir/clarp-shim && rmdir -- $export_dir"' EXIT
+    cargo_cmd+=" && ln target/release/clarp-host target/release/clarp-shim $export_dir/"
+fi
 set +e
-printf -v queued '%q ' env "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$who" bash -c "
-    source tools/build
-    build_has_space $floor || exit \$?
-    CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
+printf -v queued '%q ' env "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py --build "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
 ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec $queued"
 code=$?
 set -e
@@ -146,7 +115,7 @@ if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
 fi
 if [ "$cmd" = release ] && [ $code -eq 0 ]; then
     mkdir -p "$here/dist"
-    rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$remote/server-rs/target/release/clarp-host" "$HOST:$remote/server-rs/target/release/clarp-shim" "$here/dist/"
+    rsync -a -e "ssh ${ssh_opts[*]}" "$HOST:$export_dir/clarp-host" "$HOST:$export_dir/clarp-shim" "$here/dist/"
     (cd "$here/dist" && sha256sum clarp-host clarp-shim > SHA256SUMS && git -C "$here" rev-parse HEAD > COMMIT)
 fi
 if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
