@@ -8,7 +8,7 @@ use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const META_BYTES: u64 = 64 * 1024;
@@ -132,7 +132,7 @@ pub struct HelperSource {
     pub(crate) children: Children,
     parent: Parent,
     provider: ProviderReader,
-    parent_path: Option<std::path::PathBuf>,
+    parent_path: Option<(Stamp, PathBuf, PathBuf)>,
     available: bool,
     pub(crate) recovered_through: Option<u64>,
     #[cfg(test)]
@@ -366,6 +366,67 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn provider_refresh_and_final_boundary_use_the_bound_sessions_store() {
+        use std::os::unix::fs::symlink;
+        let f = Fixture::new();
+        let alias = f.parent.with_file_name("alias.jsonl");
+        symlink(&f.parent, &alias).unwrap();
+        fs::write(&f.parent, b"{}\n").unwrap();
+        let mark = boundary(&f.root, "/fixture", "parent").unwrap();
+        assert_eq!(boundary(&f.root, "/fixture", "alias").unwrap(), mark);
+        let mut read = ProviderRead {
+            helpers: false,
+            parent: false,
+            visit: clarp_kernel::provider_tasks::Session::default().visit("alias".into()),
+        };
+        let mut source = HelperSource::default();
+        source
+            .read_visit(&f.root, "/fixture", &mut read, 0)
+            .unwrap();
+        assert_eq!(
+            (
+                read.visit.cursor.device,
+                read.visit.cursor.inode,
+                read.visit.cursor.offset
+            ),
+            mark
+        );
+        // A file with that name in another project does not belong to this runtime.
+        assert_eq!(boundary(&f.root, "/other", "alias").unwrap(), (0, 0, 0));
+        assert!(boundary(&f.root, "/fixture", "../alias").is_err());
+        // A new in-store target starts its own cursor even if the alias name is unchanged.
+        let second = f.parent.with_file_name("second.jsonl");
+        fs::write(&second, b"{}\n{}\n").unwrap();
+        fs::remove_file(&alias).unwrap();
+        symlink(&second, &alias).unwrap();
+        source
+            .read_visit(&f.root, "/fixture", &mut read, 0)
+            .unwrap();
+        let second_mark = boundary(&f.root, "/fixture", "second").unwrap();
+        assert_eq!(
+            (
+                read.visit.cursor.device,
+                read.visit.cursor.inode,
+                read.visit.cursor.offset
+            ),
+            second_mark
+        );
+        // Retargeting the alias outside the store cannot advance either cursor.
+        let other = Fixture::new();
+        fs::write(&other.parent, b"{}\n{}\n").unwrap();
+        fs::remove_file(&alias).unwrap();
+        symlink(&other.parent, &alias).unwrap();
+        assert!(boundary(&f.root, "/fixture", "alias").is_err());
+        let before = read.visit.cursor.clone();
+        assert!(
+            source
+                .read_visit(&f.root, "/fixture", &mut read, 0)
+                .is_err()
+        );
+        assert_eq!(read.visit.cursor, before);
     }
 
     #[test]
@@ -770,18 +831,14 @@ impl HelperSource {
         if !clarp_kernel::native_session_name(&v.native) {
             return Err(io::Error::other("invalid native session"));
         }
-        let path = self
-            .parent_path
-            .get_or_insert_with(|| {
-                root.join(clarp_backend::past::claude_project(cwd))
-                    .join(format!("{}.jsonl", v.native))
-            })
-            .clone();
+        let named = root
+            .join(clarp_backend::past::claude_project(cwd))
+            .join(format!("{}.jsonl", v.native));
         #[cfg(test)]
         {
             self.io_counts[0] += 1;
         }
-        let meta = match std::fs::symlink_metadata(&path) {
+        let meta = match std::fs::metadata(&named) {
             Ok(meta) if meta.is_file() => meta,
             Ok(_) => {
                 return Err(io::Error::other(
@@ -792,6 +849,7 @@ impl HelperSource {
                 v.eof = true;
                 let changed = self.available;
                 self.available = false;
+                self.parent_path = None;
                 self.children.clear();
                 self.metas.clear();
                 return Ok(changed);
@@ -799,7 +857,18 @@ impl HelperSource {
             Err(e) => return Err(e),
         };
         let stamp = Stamp::from(&meta);
-        let changed = request.helpers && (self.discover(root, &path) || !self.available);
+        // On an unchanged visit the one stat above suffices. Resolve a new
+        // file identity or changed contents through the backend store rule.
+        let (store, path) = match self.parent_path.as_ref() {
+            Some((old, store, path)) if *old == stamp => (store.clone(), path.clone()),
+            _ => {
+                let (store, path) = session_source(root, cwd, &v.native)?
+                    .ok_or_else(|| io::Error::other("provider parent disappeared"))?;
+                self.parent_path = Some((stamp, store.clone(), path.clone()));
+                (store, path)
+            }
+        };
+        let changed = request.helpers && (self.discover(&store, &path) || !self.available);
         self.available = true;
         if v.final_read
             .as_ref()
@@ -847,13 +916,7 @@ impl HelperSource {
         };
         let mut bytes = Vec::new();
         if start < end {
-            let relative = path
-                .strip_prefix(root)
-                .ok()
-                .and_then(|p| p.to_str())
-                .ok_or_else(|| io::Error::other("invalid provider path"))?;
-            let (_, mut file) = open_beneath(root, relative, false)
-                .map_err(|_| io::Error::other("provider parent unavailable"))?;
+            let mut file = open_parent(&store, &path)?;
             let m = file.metadata()?;
             if !m.is_file() || m.dev() != stamp.device || m.ino() != stamp.inode {
                 return Err(io::Error::other("provider parent changed"));
@@ -862,7 +925,7 @@ impl HelperSource {
             file.take((end - start).min(VISIT_BYTES))
                 .read_to_end(&mut bytes)?;
             // Replacement or truncation during the read invalidates the evidence.
-            let latest = std::fs::symlink_metadata(&path)?;
+            let latest = std::fs::metadata(&named)?;
             if latest.dev() != stamp.device
                 || latest.ino() != stamp.inode
                 || latest.len() < start + bytes.len() as u64
@@ -911,17 +974,32 @@ impl HelperSource {
     }
 }
 
+/// Resolve this session in the agent's own project under the provider store.
+fn session_source(root: &Path, cwd: &str, session: &str) -> io::Result<Option<(PathBuf, PathBuf)>> {
+    let path = clarp_backend::past::claude_source(root, cwd, session, false)
+        .map_err(|_| io::Error::other("provider parent outside its store"))?;
+    path.map(|path| root.canonicalize().map(|store| (store, path)))
+        .transpose()
+}
+
+fn open_parent(store: &Path, path: &Path) -> io::Result<File> {
+    let relative = path
+        .strip_prefix(store)
+        .ok()
+        .and_then(Path::to_str)
+        .ok_or_else(|| io::Error::other("invalid provider path"))?;
+    open_beneath(store, relative, false)
+        .map(|(_, file)| file)
+        .map_err(|_| io::Error::other("provider parent unavailable"))
+}
+
 pub(crate) fn boundary(root: &Path, cwd: &str, session: &str) -> io::Result<(u64, u64, u64)> {
-    if !clarp_kernel::native_session_name(session) {
-        return Err(io::Error::other("invalid native session"));
+    let Some((store, path)) = session_source(root, cwd, session)? else {
+        return Ok((0, 0, 0));
+    };
+    let m = open_parent(&store, &path)?.metadata()?;
+    if !m.is_file() {
+        return Err(io::Error::other("provider parent is not a file"));
     }
-    let path = root
-        .join(clarp_backend::past::claude_project(cwd))
-        .join(format!("{session}.jsonl"));
-    match std::fs::symlink_metadata(path) {
-        Ok(m) if m.is_file() => Ok((m.dev(), m.ino(), m.len())),
-        Ok(_) => Err(io::Error::other("provider parent is not a file")),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok((0, 0, 0)),
-        Err(e) => Err(e),
-    }
+    Ok((m.dev(), m.ino(), m.len()))
 }
