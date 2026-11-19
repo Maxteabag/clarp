@@ -1686,6 +1686,15 @@ SCENARIOS.append({
         post('/tool-explanations', {'session': 'nobody-of-the-kind', 'items': []}, 'explained for nobody'),
         post('/tool-explanations', {'items': []}, 'explained for no session'),
         post('/tool-explanations', [1], 'asked with something that is no object'),
+        # What the features tool_explanation_sources and tool_explanation_stats name, where
+        # nothing explains: an item asked with its provenance, and the ledger asked over a
+        # window and in buckets nobody has (the ledger itself is held by the reference's own
+        # scenes, tests/tool_explanation_service.rs).
+        post('/tool-explanations', {'session': AGENT, 'include_provenance': True,
+                                    'items': [{'id': 'tool-2', 'name': 'Bash', 'input': {'command': 'ls'}}]},
+             'a tool asked to be explained with its provenance, where nothing explains'),
+        get('/tool-explanations/stats?window=1y', 'how explaining went, over a window nobody has'),
+        get('/tool-explanations/stats?bucket=week', 'how explaining went, in buckets nobody has'),
     ],
 })
 
