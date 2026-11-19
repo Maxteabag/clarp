@@ -196,6 +196,27 @@ pub const FEATURES: &[(&str, u64)] = &[
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
     (SEATS, 84),
     ("hotseat_desk_actions", 86),
+    // How the account seats stand as they were last read (`GET /hotseat/status`,
+    // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
+    // every Host, as there: the strict answer of a Host without the owner's tool says so.
+    ("accounts_hotseat", 78),
+    // What an agent says aloud (`/tts/providers`, `/voices`, `/voice-catalog`,
+    // `/voice-preview`, the clips): five built-in engines, among them Google's Chirp 3 HD
+    // voices and its refusal of an old adapter that took its id. Custom speech adapters are
+    // not run here (docs/differences.md).
+    ("tts", 1),
+    ("tts_provider_google", 69),
+    ("tts_google_id_guard", 70),
+    // The clips of a reply, to play it again (`GET /clips/message`).
+    ("message_audio_replay", 1),
+    // The use of a tool explained in plain words (`POST /tool-explanations`): by a template,
+    // by what was learned (`GET /tool-explanations/stats`), or by the model of the janitor
+    // that explains, each with its source and, asked for, its provenance; the owner's
+    // setting (`/tool-explanations/settings`), off here until the owner turns it on.
+    ("tool_explanations", 1),
+    ("tool_explanation_sources", 10),
+    ("tool_explanation_stats", 20),
+    ("tool_explanation_setting", 43),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
