@@ -1226,7 +1226,7 @@ pub(crate) fn agent_row(
         .jobs
         .iter()
         .filter(|job| job.status.is_active())
-        .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none())
+        .filter(|job| !view.provider_mirrors.contains_key(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none())
         .map(|job| helpers::Process {
             title: job.title.clone(),
             progress: job.progress_text.clone(),
@@ -2602,6 +2602,7 @@ async fn background_jobs(State(app): State<App>) -> Result<Json<Value>, ApiError
     let listed: Vec<Value> = active
         .iter()
         .chain(ended.iter().take(100))
+        .filter(|(member, job)| !member.as_ref().is_some_and(|m| m.agent.view().provider_mirrors.contains_key(&job.id)))
         .map(|(member, job)| project_job(member.as_deref(), &app.server_id, job, now))
         .collect();
     Ok(Json(json!({

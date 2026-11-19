@@ -2732,7 +2732,7 @@ pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
             .jobs
             .iter()
             .filter(|job| job.status.is_active())
-            .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none());
+            .filter(|job| !view.provider_mirrors.contains_key(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none());
         let last_job = view.jobs.iter().map(|job| job.updated_at_ms).max();
         let last_turn = view.status.last.as_ref().map(|last| last.ended_at_ms);
         helpers::Doing {
