@@ -28,8 +28,9 @@ PLANTS = [
     (Q, 'kernel', "the card's title is the tool's name as it is written", '        "title": format!("{titled} quota exhausted"),', '        "title": format!("{provider} quota exhausted"),'),
     (Q, 'kernel', 'the card names no receipt', '        "reference_id": receipt_id,', '        "reference_id": "",'),
     # ---- what the runtime checks
-    (Q, 'kernel', 'a keeper set anew recovers for the old setting', '    let Some(now) = standing.filter(|now| now.enabled && now.job == ROLE && now.generation == generation) else {',
-     '    let Some(now) = standing.filter(|now| now.enabled && now.job == ROLE) else {'),
+    (Q, 'kernel', 'a keeper set anew recovers for the old setting',
+     '        standing.filter(|now| now.enabled && now.job == ROLE && now.generation == generation)',
+     '        standing.filter(|now| now.enabled && now.job == ROLE)'),
     (Q, 'kernel', 'a card turned down approves', '        let accepted = card.is_some_and(|card| card["decision"]["resolved_choice"] == "accepted");',
      '        let accepted = card.is_some();'),
     (Q, 'kernel', 'a keeper that only tells may recover', '    } else if now.mode != "automatic" {', '    } else if now.mode == "never" {'),
