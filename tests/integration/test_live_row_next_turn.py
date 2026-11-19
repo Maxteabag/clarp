@@ -30,6 +30,27 @@ REPLY_A = "Here is the overview. 1. Slides 2. Script 3. Rehearsal"
 REPLY_B = "Report received; nothing to do."
 
 
+# Each turn of a test has a minute of its own on this clock (R89, third part): its client row is
+# sent and its turn begins two seconds before 09:3n:00, where the transcript's copy of the prompt
+# is dated, and it settles at 09:3n:30, after its reply at 09:3n:10. The copies were dated in the
+# past before, while the rows and turns were written at the real time: a copy before its own
+# send, which a copy cannot be.
+_SLOT_ZERO_MS = 1_792_315_800_000           # 2026-10-18T09:30:00Z
+_CLOCK = {"slot": -1, "now": _SLOT_ZERO_MS - 60_000}
+
+
+@pytest.fixture(autouse=True)
+def _minutes(monkeypatch):
+    import time
+    _CLOCK.update(slot=-1, now=_SLOT_ZERO_MS - 60_000)
+    monkeypatch.setattr(time, "time", lambda: _CLOCK["now"] / 1000)
+
+
+def _next_minute():
+    _CLOCK["slot"] += 1
+    _CLOCK["now"] = _SLOT_ZERO_MS + _CLOCK["slot"] * 60_000 - 2_000
+
+
 @pytest.fixture
 def host(tmp_path):
     agent_id = agents_db.create_agent(persona="Koda", voice_id="v", cwd=str(tmp_path),
@@ -61,6 +82,7 @@ def _log(host):
 
 
 def _start(agent_id, trace):
+    _next_minute()
     agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id=trace)
     turn_lifecycle.try_transition(agent_id, TurnEvent.SPAWN_STARTED,
                                   {"source": "pwa", "dispatch": "claude", "trace_id": trace})
@@ -73,6 +95,7 @@ def _stream(agent_id, trace, text, key):
 
 
 def _finish(agent_id, trace, event=TurnEvent.PROCESS_EXITED_OK):
+    _CLOCK["now"] = _SLOT_ZERO_MS + _CLOCK["slot"] * 60_000 + 30_000
     turn_lifecycle.try_transition(agent_id, event, {"trace_id": trace})
     agents_db.conn().execute(
         "UPDATE turns SET ended_at = 1 WHERE agent_id = ? AND trace_id = ?", (agent_id, trace))
@@ -105,8 +128,8 @@ def test_the_late_import_adopts_the_kept_reply_once_under_its_id(host):
     _stream(agent_id, "trace-b", REPLY_B, "msg_b")
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id=BACKEND_SESSION, source_file="/x/t.jsonl",
-        turns=[{"role": "user", "text": "work on the slides", "timestamp": "2026-10-18T09:33:53Z"},
-               {"role": "assistant", "text": REPLY_A, "timestamp": "2026-10-18T09:35:10Z"}])
+        turns=[{"role": "user", "text": "work on the slides", "timestamp": "2026-10-18T09:30:00Z"},
+               {"role": "assistant", "text": REPLY_A, "timestamp": "2026-10-18T09:30:10Z"}])
     rows = _log(host)
     assert [row for row in rows if row[1] == REPLY_A] == [(a["id"], REPLY_A)]
     assert [text for _id, text in rows] == [REPLY_A, REPLY_B]
