@@ -9,6 +9,7 @@ RUNS = {
     'vectors': ['test', '--test', 'body_limits_vectors'],
     'host': ['test', '--test', 'host', '--', 'the_host_accepts_full_voice_batches_and_large_artifact_bodies'],
 }
+RUNS['framing'] = ['test', '--test', 'host', '--', 'body_framing_seen_at_the_local_door']
 PLANTS = []
 
 
@@ -56,6 +57,11 @@ rules(LIBRARY,'host',[
 
 rules('clarp-host/src/connector.rs','host',[
     ('the relay forwards a refused body to authentication', '&& body.len() > limit', '&& body.len() < limit'),
+])
+rules(EDGE,'framing',[
+    ('transfer coding reaches dispatch', 'if request.headers().contains_key(header::TRANSFER_ENCODING)', 'if false && request.headers().contains_key(header::TRANSFER_ENCODING)'),
+    ('the transfer-coded refusal keeps the socket', 'if request.headers().contains_key(header::TRANSFER_ENCODING) {\n        return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);', 'if request.headers().contains_key(header::TRANSFER_ENCODING) {\n        return body_refusal(StatusCode::BAD_REQUEST, "bad json", false);'),
+    ('absence of length prevents route validation', 'let Some(value) = request.headers().get(header::CONTENT_LENGTH) else {','let Some(value) = request.headers().get(header::CONTENT_LENGTH) else {\n        if request.uri().path()=="/voice-events" {return body_refusal(StatusCode::BAD_REQUEST,"bad json",true);}'),
 ])
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
