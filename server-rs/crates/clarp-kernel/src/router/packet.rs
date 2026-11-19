@@ -24,6 +24,10 @@ const SAID_MOST: usize = 5;
 const TEXT_MOST: usize = 240;
 const HELD_MOST: usize = 3;
 pub const RECENT_MS: i64 = 30 * 60 * 1000;
+/// Of how many agents, besides the one a message was said to and the one that is open, a
+/// packet with everyone in view shows what they were last told and said and what they are
+/// doing: the most recently active. Every other agent is listed by its name only.
+pub const BROAD_DETAIL_MOST: usize = 20;
 /// How many words of a message are held against the agents' names, and how alike a word
 /// and a name have to be.
 const WORDS_MOST: usize = 12;
@@ -209,6 +213,77 @@ pub fn sound_alike(utterance: &str, agents: &[Value]) -> Vec<Value> {
     found.into_iter().map(|(_, agent)| agent).collect()
 }
 
+/// What decides which agents a packet lists, and which of them it shows in detail.
+#[derive(Debug, Clone, Copy)]
+pub struct InView<'a> {
+    /// Every agent of the Host, in the order they are listed.
+    pub agents: &'a [Member],
+    /// The agent the message was said to.
+    pub requested_session: &'a str,
+    /// The agent that is open, by its id.
+    pub focus: Option<&'a str>,
+    /// The agents of a call: nobody else is listed. `None`: everyone.
+    pub only_sessions: Option<&'a [String]>,
+    /// An app asks, that could place the message by no name.
+    pub fallback_request: bool,
+    /// Everyone is in view: the model is asked a second time.
+    pub scope_all: bool,
+    pub now_ms: i64,
+}
+
+/// The agents a packet lists, in their order, each with whether it is shown in detail (what it
+/// was last told and said, and what it is doing): the agent the message was said to and the
+/// one that is open, and with everyone in view the most recently active of the others, as many
+/// as [`BROAD_DETAIL_MOST`]; of those equally recent, the first listed. The Host reads the last
+/// words of these and of no other.
+pub fn in_view<'a>(view: &InView<'a>) -> Vec<(&'a Member, bool)> {
+    let focus = view.focus.and_then(|id| {
+        let mut all = view.agents.iter();
+        all.find(|agent| agent.agent_id == id)
+    });
+    let focus_session = focus.map_or(view.requested_session, |focus| focus.session.as_str());
+    let detailed = [view.requested_session, focus_session];
+    let recent_from = view.now_ms - RECENT_MS;
+    let active = |agent: &Member| {
+        let active = agent.created_at.max(agent.last_activity);
+        active.max(agent.state.as_ref().map_or(0, |state| state.ts))
+    };
+    let listed: Vec<&Member> = view
+        .agents
+        .iter()
+        .filter(|agent| {
+            let spoken_to = !agent.archived && agent.voice_target;
+            let in_call = view
+                .only_sessions
+                .is_none_or(|only| only.contains(&agent.session));
+            // An app that could place the message by no name is shown the agents of the last
+            // half hour, and the two the message may have been meant for anyway.
+            let recent = detailed.contains(&agent.session.as_str()) || active(agent) >= recent_from;
+            spoken_to && in_call && (!view.fallback_request || recent)
+        })
+        .collect();
+    // With everyone in view, the most recently active of the others are shown in detail too;
+    // of those equally recent, the first listed.
+    let mut others: Vec<&Member> = Vec::new();
+    if view.scope_all {
+        others = listed
+            .iter()
+            .copied()
+            .filter(|agent| !detailed.contains(&agent.session.as_str()))
+            .collect();
+        others.sort_by_key(|agent| std::cmp::Reverse(active(agent)));
+        others.truncate(BROAD_DETAIL_MOST);
+    }
+    let in_detail = |agent: &Member| {
+        detailed.contains(&agent.session.as_str())
+            || others.iter().any(|other| other.agent_id == agent.agent_id)
+    };
+    listed
+        .into_iter()
+        .map(|agent| (agent, in_detail(agent)))
+        .collect()
+}
+
 /// The packet for one asking of a model.
 pub fn packet(shown: &Shown<'_>) -> Value {
     let focus = shown.focus.and_then(|id| {
@@ -216,24 +291,18 @@ pub fn packet(shown: &Shown<'_>) -> Value {
         all.find(|agent| agent.agent_id == id)
     });
     let focus_session = focus.map_or(shown.requested_session, |focus| focus.session.as_str());
-    let detailed = [shown.requested_session, focus_session];
-    let recent_from = shown.now_ms - RECENT_MS;
-    let listed = shown.agents.iter().filter(|agent| {
-        let spoken_to = !agent.archived && agent.voice_target;
-        let in_call = shown
-            .only_sessions
-            .is_none_or(|only| only.contains(&agent.session));
-        // An app that could place the message by no name is shown the agents of the last
-        // half hour, and the two the message may have been meant for anyway.
-        let active = agent.created_at.max(agent.last_activity);
-        let active = active.max(agent.state.as_ref().map_or(0, |state| state.ts));
-        let recent = detailed.contains(&agent.session.as_str()) || active >= recent_from;
-        spoken_to && in_call && (!shown.fallback_request || recent)
+    let listed = in_view(&InView {
+        agents: shown.agents,
+        requested_session: shown.requested_session,
+        focus: shown.focus,
+        only_sessions: shown.only_sessions,
+        fallback_request: shown.fallback_request,
+        scope_all: shown.scope_all,
+        now_ms: shown.now_ms,
     });
     let mut message_count = 0;
     let mut agents: Vec<Value> = Vec::new();
-    for agent in listed {
-        let detail = shown.scope_all || detailed.contains(&agent.session.as_str());
+    for (agent, detail) in listed {
         let (told, said) = match detail {
             true => (
                 last_said(agent, "user", SAID_MOST),
