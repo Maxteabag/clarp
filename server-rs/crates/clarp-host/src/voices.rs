@@ -388,18 +388,34 @@ async fn controller_narration(
 ) -> Response {
     use clarp_kernel::controller_narration::{self as narration, PERSONA};
     let Some(text) = narration::text(uri.query().unwrap_or_default()) else {
-        return ApiError::plain(StatusCode::BAD_REQUEST, "text required (at most 240 characters)").into_response();
+        return ApiError::plain(
+            StatusCode::BAD_REQUEST,
+            "text required (at most 240 characters)",
+        )
+        .into_response();
     };
     let owners = app.mouth.owners();
     let settings = owner::voices(&owners);
     let voice = settings.cartesia_voice_for(PERSONA);
     let Some(voice) = voice.filter(|_| app.mouth.has_key("cartesia", &owners)) else {
-        return ApiError::plain(StatusCode::SERVICE_UNAVAILABLE, "narration voice unavailable").into_response();
+        return ApiError::plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "narration voice unavailable",
+        )
+        .into_response();
     };
     let key = narration::cache_key(&text, voice, &owner::cartesia_model(&owners));
-    match app.mouth.preview_with(&owners, "cartesia", voice, &text, Audition::Narration(&key)).await {
+    match app
+        .mouth
+        .preview_with(&owners, "cartesia", voice, &text, Audition::Narration(&key))
+        .await
+    {
         Ok(clip) => clip.send(&header_text(&headers, "range")),
-        Err(why) if why == "preview cache unavailable" => ApiError::plain(StatusCode::INTERNAL_SERVER_ERROR, "narration cache unavailable").into_response(),
+        Err(why) if why == "preview cache unavailable" => ApiError::plain(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "narration cache unavailable",
+        )
+        .into_response(),
         Err(_) => ApiError::plain(StatusCode::BAD_GATEWAY, "narration unavailable").into_response(),
     }
 }

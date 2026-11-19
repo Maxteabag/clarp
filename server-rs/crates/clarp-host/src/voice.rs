@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, FileExt};
+use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path as FilePath, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -344,11 +344,17 @@ impl Mouth {
         text: &str,
         audition: Audition<'_>,
     ) -> Result<Preview, String> {
-        self.preview_with(&self.owners(), provider, voice, text, audition).await
+        self.preview_with(&self.owners(), provider, voice, text, audition)
+            .await
     }
 
     pub(crate) async fn preview_with(
-        &self, owners: &Table, provider: &str, voice: &str, text: &str, audition: Audition<'_>,
+        &self,
+        owners: &Table,
+        provider: &str,
+        voice: &str,
+        text: &str,
+        audition: Audition<'_>,
     ) -> Result<Preview, String> {
         let (name, session) = match audition {
             Audition::Catalogue(key) | Audition::Narration(key) => (Some(key), ""),
@@ -356,18 +362,32 @@ impl Mouth {
         };
 
         let directory_handle = if name.is_some() {
-            std::fs::DirBuilder::new().recursive(true).mode(0o700)
-                .create(&self.previews).map_err(|e| {
-                    if self.previews.is_symlink() { "preview cache unavailable".to_string() } else { e.to_string() }
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&self.previews)
+                .map_err(|e| {
+                    if self.previews.is_symlink() {
+                        "preview cache unavailable".to_string()
+                    } else {
+                        e.to_string()
+                    }
                 })?;
-            Some(crate::files::open(&self.previews, true)
-                .map_err(|_| "preview cache unavailable".to_string())?)
+            Some(
+                crate::files::open(&self.previews, true)
+                    .map_err(|_| "preview cache unavailable".to_string())?,
+            )
         } else {
             None
         };
-        let prefix = if matches!(audition, Audition::Narration(_)) { "narration-" } else { "" };
-        let file = name.zip(directory_handle.as_ref()).map(|(key, dir)|
-            crate::files::beneath(dir, &format!("{prefix}{key}.mp3")));
+        let prefix = if matches!(audition, Audition::Narration(_)) {
+            "narration-"
+        } else {
+            ""
+        };
+        let file = name
+            .zip(directory_handle.as_ref())
+            .map(|(key, dir)| crate::files::beneath(dir, &format!("{prefix}{key}.mp3")));
         let _lock = if let Some(name) = name {
             let bucket =
                 name.bytes().next().unwrap_or_default() as usize % self.preview_locks.len();
@@ -398,9 +418,13 @@ impl Mouth {
             fallback: voices.fallback.clone(),
         };
         let directory = self.fleet.directory();
-        let persona = if matches!(audition, Audition::Narration(_)) { clarp_kernel::controller_narration::PERSONA } else { directory
-            .named(session)
-            .map_or("", |m| m.record.persona.as_str()) };
+        let persona = if matches!(audition, Audition::Narration(_)) {
+            clarp_kernel::controller_narration::PERSONA
+        } else {
+            directory
+                .named(session)
+                .map_or("", |m| m.record.persona.as_str())
+        };
         let clip = voices.for_clip(
             Some(voice),
             Who {
@@ -529,17 +553,25 @@ impl Preview {
         match self {
             Self::Cached(file, total) => {
                 let part = media::byte_range(range, total);
-                if matches!(part, Part::Missing) { return no_such_part(&total.to_string(), true); }
+                if matches!(part, Part::Missing) {
+                    return no_such_part(&total.to_string(), true);
+                }
                 let file = Arc::new(file);
-                part_of("audio/mpeg", part, total, &total.to_string(), |first, length| {
-                    chunked_body(first, length, move |at, most| {
-                        let mut bytes = vec![0; most];
-                        let read = file.read_at(&mut bytes, at)?;
-                        bytes.truncate(read);
-                        Ok(bytes)
-                    })
-                })
-            },
+                part_of(
+                    "audio/mpeg",
+                    part,
+                    total,
+                    &total.to_string(),
+                    |first, length| {
+                        chunked_body(first, length, move |at, most| {
+                            let mut bytes = vec![0; most];
+                            let read = file.read_at(&mut bytes, at)?;
+                            bytes.truncate(read);
+                            Ok(bytes)
+                        })
+                    },
+                )
+            }
             Self::Temporary(bytes) => {
                 let total = bytes.len() as u64;
                 let part = media::byte_range(range, total);
@@ -1425,7 +1457,11 @@ fn file_body(path: PathBuf, first: u64, length: u64) -> Body {
     chunked_body(first, length, move |at, most| read_at(&path, at, most))
 }
 
-fn chunked_body(first: u64, length: u64, read: impl Fn(u64, usize) -> std::io::Result<Vec<u8>> + Clone + Send + Sync + 'static) -> Body {
+fn chunked_body(
+    first: u64,
+    length: u64,
+    read: impl Fn(u64, usize) -> std::io::Result<Vec<u8>> + Clone + Send + Sync + 'static,
+) -> Body {
     let parts = stream::unfold((first, length), move |(at, left)| {
         let read = read.clone();
         async move {
@@ -1467,10 +1503,18 @@ fn answer(status: StatusCode, said: Vec<(header::HeaderName, String)>, body: Bod
 /// Some bytes of a clip's file, or all of them, with what a player needs to know of them.
 /// `of` is the whole clip's length as it is told: a number, or `*` while it still grows.
 fn part_of_file(path: PathBuf, part: Part, there: u64, of: &str) -> Response {
-    part_of(kind_of(&path), part, there, of, |first, length| file_body(path, first, length))
+    part_of(kind_of(&path), part, there, of, |first, length| {
+        file_body(path, first, length)
+    })
 }
 
-fn part_of(kind: &str, part: Part, there: u64, of: &str, body: impl FnOnce(u64, u64) -> Body) -> Response {
+fn part_of(
+    kind: &str,
+    part: Part,
+    there: u64,
+    of: &str,
+    body: impl FnOnce(u64, u64) -> Body,
+) -> Response {
     let (status, first, length) = match part {
         Part::Whole => (StatusCode::OK, 0, there),
         Part::Bytes { first, last } => (StatusCode::PARTIAL_CONTENT, first, last - first + 1),
@@ -1863,7 +1907,9 @@ mod tests {
         let owner = std::fs::metadata(&path).unwrap().uid();
         assert!(preview_hit(&dir, owner).is_none());
         assert!(preview_hit(&path, owner.wrapping_add(1)).is_none());
-        let Preview::Cached(mut opened, size) = preview_hit(&path, owner).unwrap() else { unreachable!() };
+        let Preview::Cached(mut opened, size) = preview_hit(&path, owner).unwrap() else {
+            unreachable!()
+        };
         std::fs::remove_file(&path).unwrap();
         std::fs::write(&path, b"replacement").unwrap();
         let link = dir.join("link.mp3");
@@ -1874,7 +1920,6 @@ mod tests {
         assert_eq!((size, original.as_str()), (8, "original"));
         std::fs::remove_dir_all(dir).unwrap();
     }
-
 
     fn record(persona: &str, voice_id: &str) -> AgentRecord {
         AgentRecord {
