@@ -27,7 +27,7 @@ pub(crate) struct Judge {
     breaker: Mutex<Breaker>,
 }
 impl Judge {
-    fn remaining(&self) -> f64 {
+    pub(crate) fn remaining(&self) -> f64 {
         self.breaker
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -37,7 +37,7 @@ impl Judge {
             })
     }
 
-    fn record(&self, success: bool, billing: bool) {
+    pub(crate) fn record(&self, success: bool, billing: bool) {
         let mut b = self.breaker.lock().unwrap_or_else(|p| p.into_inner());
         if success {
             *b = Breaker::default();
@@ -58,26 +58,17 @@ fn budget(dir: &crate::fleet::Directory) -> u64 {
         .clamp(100, 30000)
 }
 
-pub async fn kept(app: &App, text: String) -> String {
-    let directory = app.fleet.directory();
-    let enabled = |k: &str| directory.setting(k) == Some("true");
-    let judge = &app.ears.judge;
-    let fallback = || clarp_kernel::heard::kept(&text);
-    if !enabled("judgments.enabled") || !enabled("judgments.junk") || judge.remaining() > 0.0 {
-        return fallback();
-    }
-    let Some(key) = app.ears.key("typesafe") else {
-        return fallback();
-    };
-    let url = if app.config.judge_endpoint.is_empty() {
+pub(crate) fn endpoint(app:&App)->String {
+    if app.config.judge_endpoint.is_empty() {
         URL
     } else {
         &app.config.judge_endpoint
     }
-    .to_string();
-    let timeout = budget(&directory);
-    let state = json!({"model":"jev-latest","state":{"transcript":text},"questions":{"junk":*clarp_kernel::vocabulary::JUNK_QUESTION}});
-    let verdict = tokio::task::spawn_blocking(move || {
+    .to_string()
+}
+
+pub(crate) async fn post(url:String,key:String,state:Value,timeout:u64)->Result<Value,bool>{
+    tokio::task::spawn_blocking(move || {
         let client: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_millis(timeout)))
             .max_redirects(0)
@@ -93,6 +84,24 @@ pub async fn kept(app: &App, text: String) -> String {
             return Err(response.status().as_u16() == 402);
         }
         let answer: Value = response.body_mut().read_json().map_err(|_| false)?;
+        Ok(answer)
+    }).await.unwrap_or(Err(false))
+}
+
+pub async fn kept(app: &App, text: String) -> String {
+    let directory = app.fleet.directory();
+    let enabled = |k: &str| directory.setting(k) == Some("true");
+    let judge = &app.ears.judge;
+    let fallback = || clarp_kernel::heard::kept(&text);
+    if !enabled("judgments.enabled") || !enabled("judgments.junk") || judge.remaining() > 0.0 {
+        return fallback();
+    }
+    let Some(key) = app.ears.key("typesafe") else {
+        return fallback();
+    };
+    let timeout = budget(&directory);
+    let state = json!({"model":"jev-latest","state":{"transcript":text},"questions":{"junk":*clarp_kernel::vocabulary::JUNK_QUESTION}});
+    let verdict = post(endpoint(app), key, state, timeout).await.and_then(|answer| {
         let junk = answer["answers"].get("junk").ok_or(false)?;
         let n = &junk["noul"];
         if n.is_null() {
@@ -102,9 +111,7 @@ pub async fn kept(app: &App, text: String) -> String {
             .or_else(|| n.as_str()?.trim().parse().ok())
             .filter(|f| f.is_finite())
             .ok_or(false)
-    })
-    .await
-    .unwrap_or(Err(false));
+    });
     match verdict {
         Ok(n) => {
             judge.record(true, false);

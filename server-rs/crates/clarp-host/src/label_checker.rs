@@ -170,3 +170,108 @@ mod tests {
         }));
     }
 }
+
+/// The master switch and the labels switch are both required before reading a key.
+pub fn site_enabled(app:&crate::edge::App)->bool{
+    let dir=app.fleet.directory();
+    dir.setting("judgments.enabled")==Some("true") && dir.setting("judgments.labels")==Some("true") && app.ears.key("typesafe").is_some()
+}
+
+const DIAGNOSTIC:&str="label-judgment-diagnostic";
+const CURSOR:&str="label-judgment-cursor";
+const CAPACITY:u64=100;
+
+/// There is one writer, the claimed lane. The cursor and its bounded slot are committed
+/// together. The 101st call replaces the first; no diagnostic scan is needed.
+async fn diagnostic(app:&crate::edge::App, mut row:Value)->Result<(),Unavailable>{
+    let prior=app.fleet.kept(CURSOR,"labels".into()).await?;
+    let next=match prior{
+        None=>0,
+        Some(bytes)=>serde_json::from_slice::<u64>(&bytes).map_err(|_|Unavailable("invalid label diagnostic cursor".into()))?
+    };
+    row["sequence"]=json!(next);
+    app.fleet.keep_together(vec![
+        (DIAGNOSTIC,(next%CAPACITY).to_string(),row.to_string().into_bytes()),
+        (CURSOR,"labels".into(),next.wrapping_add(1).to_string().into_bytes())
+    ]).await
+}
+
+use crate::vocabulary::judge;
+use clarp_kernel::janitors::label_audit::{JUDGE_SECONDS,batch,findings};
+
+/// Ask the labels site once. No other provider is eligible on a failed judgment.
+pub async fn judge_labels(app:&crate::edge::App, entries:&[Evidence],run:&str)->Option<Vec<Value>>{
+    let body=batch(entries)?;
+    if !site_enabled(app){return None;}
+    let key=app.ears.key("typesafe")?;
+    let breaker=&app.ears.judge;
+    let began=std::time::Instant::now();
+    let clipped=|v:&Value,n|clarp_kernel::python::dumps(v).chars().take(n).collect::<String>();
+    let mut row=json!({"run_id":run,"site":"labels","created_at":app.clock.now_ms(),
+        "state_json":clipped(&body["state"],4000),"question_json":clipped(&body["questions"],2000),
+        "question_ids":(1..=entries.len()).map(|i|format!("l_a{i}")).collect::<Vec<_>>().join(","),
+        "error":"","outcome":"","answers_json":"{}","input_tokens":0,"output_tokens":0});
+    let found=if breaker.remaining()>0.0{
+        row["error"]=json!("breaker open");
+        None
+    }else{
+        match judge::post(judge::endpoint(app),key,body,JUDGE_SECONDS*1000).await{
+            Ok(response)=>{
+                let result=findings(entries,&response["answers"]);
+                breaker.record(result.is_some(),false);
+                if let Some(items)=&result {
+                    row["answers_json"]=json!(clipped(&response["answers"],4000));
+                    for field in ["input_tokens","output_tokens"]{row[field]=json!(response["usage"][field].as_i64().unwrap_or(0));}
+                    let outcome:Vec<_>=entries.iter().enumerate().map(|(i,e)|{
+                        let verdict=items.iter().find(|v|v["agent_id"]==e.agent_id).and_then(|v|v["verdict"].as_str());
+                        format!("a{}={}",i+1,verdict.map_or_else(||"ok".into(),|v|format!("mismatch:{v}")))
+                    }).collect();
+                    row["outcome"]=json!(outcome.join(","));
+                }else{row["error"]=json!("invalid judgment response");}
+                result
+            }
+            Err(billing)=>{
+                breaker.record(false,billing);
+                row["error"]=json!(if billing{"billing refusal"}else{"judgment unavailable"});
+                None
+            }
+        }
+    };
+    row["fallback_used"]=json!(found.is_none());
+    row["latency_ms"]=json!(began.elapsed().as_millis() as u64);
+    if let Err(e)=diagnostic(app,row).await{app.fleet.unkept(DIAGNOSTIC,&e.0);}
+    found
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod site_tests {
+    use super::*;
+    use std::io::{BufRead,BufReader,Read,Write};
+    #[tokio::test]
+    async fn a_loopback_judge_receives_one_batch_and_returns_each_choice(){
+        let listener=std::net::TcpListener::bind(("127.0.0.1",0)).unwrap();
+        let url=format!("http://{}/judge",listener.local_addr().unwrap());
+        let peer=std::thread::spawn(move ||{
+            let (mut stream,_)=listener.accept().unwrap();
+            let mut reader=BufReader::new(&mut stream);
+            let mut lines=Vec::new();
+            loop{let mut line=String::new();assert!(reader.read_line(&mut line).unwrap()>0);if line=="\r\n"{break;}lines.push(line.trim().to_lowercase());}
+            assert!(lines.iter().any(|l|l=="authorization: bearer demo"));
+            assert_eq!(lines[0],"post /judge http/1.1");
+            let length=lines.iter().find_map(|l|l.strip_prefix("content-length: ")).unwrap().parse().unwrap();
+            let mut bytes=vec![0;length];reader.read_exact(&mut bytes).unwrap();
+            let request:Value=serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(request["questions"].as_object().unwrap().len(),2);
+            let body=json!({"answers":{"l_a1":{"choice":"finished","probabilities":{"finished":1}},
+                "l_a2":{"choice":"accurate","probabilities":{"accurate":1}}}}).to_string();
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            request
+        });
+        let entries:Vec<_>=["one","two"].into_iter().map(|id|Evidence{agent_id:id.into(),name:id.into(),packet:json!({"label":"sample"}),idle_min:None}).collect();
+        let response=judge::post(url,"demo".into(),batch(&entries).unwrap(),JUDGE_SECONDS*1000).await.unwrap();
+        let found=findings(&entries,&response["answers"]).unwrap();
+        assert_eq!(found.len(),1);assert_eq!(found[0]["agent_id"],"one");
+        assert_eq!(peer.join().unwrap()["state"]["agents"],json!({"a1":{"label":"sample"},"a2":{"label":"sample"}}));
+    }
+}
