@@ -9578,7 +9578,7 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
         )
         .unwrap()
     };
-    configure(false);
+    std::fs::write(&cfg, "[controller_actions]\nallowed_urls=['invalid-private-fixture']\n").unwrap();
     let start = || place.start_with("admin", &["--speech-keys", cfg.to_str().unwrap()]);
     let host = start();
     let (limited, device) = pair(&host, "Watch", "limited");
@@ -9606,6 +9606,10 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
         ask(&host, "admin", base, def.clone()),
         (400, json!({"error":"url is not allow-listed"}))
     );
+    wait_for("invalid configured address logged without its text", || {
+        host.heard.lock().unwrap().lines().any(|line| line == "controllerActionAllowedUrlInvalid")
+    });
+    assert!(!host.heard.lock().unwrap().contains("invalid-private-fixture"));
     configure(true);
     let (code, created) = ask(&host, "admin", base, def.clone());
     assert_eq!(code, 201);
@@ -9754,6 +9758,11 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
         assert_eq!(r["error"], format!("HTTP {status}"));
     }
     assert_eq!(requests.lock().unwrap().len(), 3);
+    let repeated_failure = ask(&host, &limited, invoke, json!({"request_id":"failure"})).1;
+    assert_eq!(repeated_failure["ok"], false);
+    assert_eq!(repeated_failure["status"], 503);
+    assert_eq!(repeated_failure["duplicate"], true);
+    assert_eq!(requests.lock().unwrap().len(), 3);
     assert_eq!(
         ask(
             &host,
@@ -9801,6 +9810,14 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
         .0,
         0
     );
+    let (code, listing, _) = cli(&["list"]);
+    assert_eq!(code, 0);
+    assert!(listing.contains("• ask — Ask"));
+    assert!(listing.contains("← primary hold"));
+    let (code, _, error) = cli(&["update", "ask"]);
+    assert_eq!((code, error.trim()), (1, "nothing to update"));
+    let (code, _, error) = cli(&["add", "bad", "--title", "Bad", "--http-post", &target, "--body", "[]"]);
+    assert_eq!((code, error.trim()), (1, "--body must be a JSON object"));
     let (code, screen, _) = cli(&["list", "--json"]);
     assert_eq!(code, 0);
     assert_eq!(
