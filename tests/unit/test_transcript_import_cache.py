@@ -603,9 +603,43 @@ def test_a_locked_database_retries_instead_of_dropping_the_import(tmp_path, monk
     assert attempts == [1, 1]
 
 
-def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_import(tmp_path, monkeypatch):
-    import time
+class _FiredByHand:
+    """threading.Timer as the cache arms it, fired by the test instead of by the wall clock."""
+    armed: list["_FiredByHand"] = []
 
+    def __init__(self, wait, function):
+        self.wait, self.function, self.args, self.daemon = wait, function, (), True
+        self._state = "new"
+
+    def start(self):
+        self._state = "armed"
+        _FiredByHand.armed.append(self)
+
+    def is_alive(self):
+        return self._state == "armed"
+
+    def cancel(self):
+        self._state = "cancelled"
+
+    def fire(self):
+        if self._state == "armed":
+            self._state = "fired"
+            self.function(*self.args)
+
+
+def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_import(tmp_path, monkeypatch):
+    """No import inside the owner's window however often the growing file is asked for, then one
+    trailing import that sees the latest file. On a planted clock with the window's timer fired
+    by hand: the four requests fall inside the 0.4 s window whatever the machine's load (they
+    had to fit in 0.4 s of real time, and the timer could fire among them)."""
+    import threading
+
+    class Planted:
+        now = 1_000.0
+
+        @classmethod
+        def monotonic(cls):
+            return cls.now
     transcript_import_cache.reset_for_tests()
     monkeypatch.setattr(transcript_import_cache, "_BACKGROUND_MIN_INTERVAL", 0.4)
     path = tmp_path / "rollout.jsonl"
@@ -615,18 +649,22 @@ def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_impo
     def importer():
         imported.append(len(path.read_text().splitlines()))
 
+    monkeypatch.setattr(transcript_import_cache, "time", Planted)
+    _FiredByHand.armed.clear()
+    monkeypatch.setattr(threading, "Timer", _FiredByHand)
     assert transcript_import_cache.schedule_import(path, importer, owner="a1")
-    assert transcript_import_cache.wait_for_background(2)
+    assert transcript_import_cache.wait_for_background(30)
     for n in range(2, 6):            # the file keeps growing; /log keeps asking
         path.write_text("".join(f"{i}\n" for i in range(1, n + 1)))
         _bump_mtime(path)
         transcript_import_cache.schedule_import(path, importer, owner="a1")
-        time.sleep(0.02)
+        Planted.now += 0.02
     assert imported == [1]           # no import inside the window
-    deadline = time.monotonic() + 3
-    while len(imported) < 2 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    transcript_import_cache.wait_for_background(2)
+    assert len([timer for timer in _FiredByHand.armed if timer.is_alive()]) == 1
+    Planted.now += 0.4               # the window closes
+    for timer in list(_FiredByHand.armed):
+        timer.fire()
+    assert transcript_import_cache.wait_for_background(30)
     assert imported == [1, 5]        # one trailing import sees the latest file
 
 
