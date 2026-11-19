@@ -15749,7 +15749,7 @@ async fn measured_length_fields_delivered_by_hyper_to_tower() {
             let (status, body) = answer.split_once("\r\n\r\n").unwrap();
             assert!(status.starts_with("HTTP/1.1 200 "));
             writeln!(std::io::stdout(), "R86 Tower measurement {name}: {body}").unwrap();
-            assert!(body.ends_with("all digits=true"));
+            assert_eq!(body, "1 fields; all digits=true", "{name}");
         }
     })
     .await
