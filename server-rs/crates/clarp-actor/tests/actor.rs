@@ -2098,6 +2098,9 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     drop(actor);
     let mut actor=world.open();
     assert_eq!(actor.provider_session(archive).unwrap().owner,Some(owner));
+    // Even a long outage cannot let the independent retention sweep
+    // forget the one launch link whose final write is still outstanding.
+    assert!(!actor.expire_provider_links(archive,401+7*86_400_000).unwrap());
     drain(&mut actor,401);
     assert_eq!(actor.provider_session(archive).unwrap().owner,Some(successor));
     assert!(actor.provider_session(archive).unwrap().final_read.is_none());

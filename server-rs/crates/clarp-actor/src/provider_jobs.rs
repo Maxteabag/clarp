@@ -33,6 +33,7 @@ impl Actor {
     }
     pub fn expire_provider_links(&mut self,native:&str,now:i64)->Result<bool,ActorError>{
         let Some(saved)=self.provider_sessions.get(native) else{return Ok(false);};
+        if saved.final_read.is_some(){return Ok(false);}
         if !saved.links.values().any(|link|link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now))){return Ok(false);}
         let mut session=saved.clone();
         session.links.retain(|_,link|!link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now)));
@@ -118,7 +119,11 @@ impl Actor {
             next.owner=end.successor;
             next.final_read=next.following.pop_front();
         }
-        next.links.retain(|_,link|!link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now)));
+        // An old end can require several batches on rejoin. Keep the
+        // launch links until every task of that attempt has been settled.
+        if next.final_read.is_none(){
+            next.links.retain(|_,link|!link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now)));
+        }
         if records.is_empty() && next==previous{return Ok(Outputs::default())}
         next.revision+=1;
         let entry=JournalEntry{native:visit.native,session:next,records};
