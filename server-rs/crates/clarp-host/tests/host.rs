@@ -11393,8 +11393,8 @@ else:
     );
 
     // Told to make an agent, of no name: the Host itself refuses to make it. Said in the router's fixed
-    // sentence, in the voice of the agent spoken to; kept as a question with the Host's word for why;
-    // and no agent is made.
+    // sentence, in the voice of the agent spoken to; kept as a question, under that sentence's key,
+    // with the Host's word for why; and no agent is made.
     let (status, made) = dictate("make a new agent", "r-2");
     let decided = &made["orchestrator"];
     assert_eq!(
@@ -11409,11 +11409,13 @@ else:
         (
             &newest["final_action"],
             &newest["decision_kind"],
+            &newest["phrase_key"],
             &newest["error"]
         ),
         (
             &json!("clarify"),
-            &json!("agent_control"),
+            &json!("clarify"),
+            &json!("command_refused"),
             &json!("name required")
         ),
         "{newest}"
