@@ -417,3 +417,25 @@ def test_a_copy_no_turn_covers_is_held_to_the_same_two_exclusions(sent, chosen):
         None, rows, "", None, trace_ids=traces, written_at=copy_at,
         ended_before=lambda trace: index.ended_before(trace, copy_at),
         began_after=lambda trace: index.began_after(trace, copy_at)) == chosen
+
+
+@CONFIGURATIONS
+@pytest.mark.parametrize("turn", [True, False], ids=["its turn running", "its turn row missing"])
+def test_a_row_written_after_its_copy_still_links(tmp_path, monkeypatch, configuration, turn):
+    """The one real path where a copy comes before its own row: a new Codex session persists the
+    client row only when its session init binds the backend id, after the spawn
+    (turn_launcher, 'persist it as soon as init binds the UUID'). Its own turn runs, so the row
+    is found by its trace first; with that turn row missing, no exclusion rules it out either
+    (a row sent after a copy is ruled out only for a turn that began after the copy)."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    if turn:
+        cli.now[0] = BASE - 1000
+        agents.open_turn(agent_id=cli.id, source='pwa', trace_id="bound-late")
+    cli.line('user', PROMPT, BASE)                                       # the CLI writes its copy
+    cli.send("late-row", PROMPT, "bound-late", BASE + 3000, turn=False)   # init binds 3 s later
+    cli.line('assistant', [{'type': 'text', 'text': ANSWER}], BASE + 5000)
+    for full in (False, True):
+        users, replies = cli.imported(full=full)
+        assert [row_id for row_id, _text in users] == ["u-late-row"]     # no copy beside its row
+        assert replies == [(ANSWER, "bound-late")]
