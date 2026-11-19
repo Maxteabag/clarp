@@ -95,6 +95,15 @@ async fn act(
     }
 }
 
+fn request_owner(turn: Option<&str>, owner: &Member) -> crate::agent::GoalCaller {
+    match turn {
+        Some(id) if id == owner.record.agent_id => {
+            crate::agent::GoalCaller::Verified(id.to_owned())
+        }
+        _ => crate::agent::GoalCaller::Default,
+    }
+}
+
 /// Makes the asker's own goal wait for the request's result. Refused when the goal is not
 /// the asker's, not being worked with wakes, or already waits for something else: another
 /// dependency is never replaced.
@@ -177,7 +186,13 @@ async fn wait_on(
 
 /// The Host refused the request: the wait is settled truthfully, not left to its deadline.
 /// Answers whether a goal was told.
-async fn abandon_wait(app: &App, plan_id: &str, request_id: &str, why: &str) -> bool {
+async fn abandon_wait(
+    app: &App,
+    plan_id: &str,
+    request_id: &str,
+    why: &str,
+    turn: Option<&str>,
+) -> bool {
     let key = requests::dependency_key(request_id);
     for _ in 0..3 {
         let Some((owner, plan)) = plan_of(app, plan_id) else {
@@ -194,7 +209,7 @@ async fn abandon_wait(app: &App, plan_id: &str, request_id: &str, why: &str) -> 
             &plan,
             "dependency",
             data,
-            crate::agent::GoalCaller::Default,
+            request_owner(turn, &owner),
         )
         .await
         .is_ok()
@@ -252,14 +267,12 @@ pub async fn request(app: &App, args: &[String], token: Option<&str>) -> ToolAns
         }
         let requester = agent(app, from, "requester")?;
         let recipient = agent(app, to, "recipient")?;
+        let mut turn = None;
         if let Some(plan_id) = goal {
-            let caller = match crate::turn_identity::presented(app, token)
+            turn = crate::turn_identity::presented(app, token)
                 .await
                 .map_err(|e| e.message().to_owned())?
-            {
-                Some(who) => crate::agent::GoalCaller::Verified(who.record.agent_id.clone()),
-                None => crate::agent::GoalCaller::Default,
-            };
+                .map(|who| who.record.agent_id.clone());
             wait_on(
                 app,
                 &requester,
@@ -267,13 +280,13 @@ pub async fn request(app: &App, args: &[String], token: Option<&str>) -> ToolAns
                 &request_id,
                 &recipient,
                 deadline,
-                caller,
+                request_owner(turn.as_deref(), &requester),
             )
             .await?;
         }
-        Ok((requester, recipient))
+        Ok((requester, recipient, turn))
     };
-    let (requester, recipient) = match prepared.await {
+    let (requester, recipient, turn) = match prepared.await {
         Ok(found) => found,
         Err(why) => {
             return ToolAnswer::said(4, format!("clarp-admin request: {why}; nothing was sent"));
@@ -296,7 +309,14 @@ pub async fn request(app: &App, args: &[String], token: Option<&str>) -> ToolAns
             let status = refused.status().as_u16();
             let settled = match goal {
                 Some(plan_id) => {
-                    abandon_wait(app, plan_id, &request_id, &format!("HTTP {status}")).await
+                    abandon_wait(
+                        app,
+                        plan_id,
+                        &request_id,
+                        &format!("HTTP {status}"),
+                        turn.as_deref(),
+                    )
+                    .await
                 }
                 None => false,
             };

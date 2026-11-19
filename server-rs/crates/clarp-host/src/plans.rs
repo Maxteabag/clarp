@@ -160,8 +160,71 @@ async fn action(
     Ok(Json(json!({ "plan": plan })))
 }
 
+pub(crate) async fn ledger_page(
+    app: &App,
+    plan_id: &str,
+    after: i64,
+    limit: i128,
+) -> Result<Value, ApiError> {
+    let limit = limit.clamp(1, 500) as usize;
+    let (events, more) = match owner(app, plan_id) {
+        None => app.fleet.past_ledger(plan_id.into(), after, limit).await?,
+        Some(member) => {
+            member
+                .agent
+                .goal_events(plan_id.into(), after, limit)
+                .await?
+        }
+    };
+    let mut sessions = HashMap::from([(String::new(), String::new())]);
+    let next = events.last().map_or(after, |e| e.event_id);
+    let mut rows = Vec::with_capacity(events.len());
+    for event in events {
+        let name = match sessions.entry(event.actor_agent_id.clone()) {
+            std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                let session = app
+                    .fleet
+                    .stored_agent(event.actor_agent_id.clone())
+                    .await?
+                    .map(|r| r.session)
+                    .unwrap_or_default();
+                e.insert(session)
+            }
+        };
+        let mut row = json!(event);
+        row["actor_session"] = json!(name);
+        rows.push(row);
+    }
+    Ok(json!({"plan_id":plan_id,"events":rows,"has_more":more,"next_after":next}))
+}
+
+async fn ledger(State(app): State<App>, Query(query): Params) -> Result<Json<Value>, ApiError> {
+    let id = query.get("plan_id").map_or("", |s| s.trim());
+    if id.is_empty() {
+        return Err(ApiError::new(StatusCode::BAD_REQUEST, "plan_id required"));
+    }
+    let integer = |key: &str, default| {
+        query
+            .get(key)
+            .filter(|s| !s.is_empty())
+            .map_or(Some(default), |s| clarp_kernel::python::int(s))
+            .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "after and limit are integers"))
+    };
+    let after = i64::try_from(integer("after", 0)?).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "after outside signed integer range",
+        )
+    })?;
+    Ok(Json(
+        ledger_page(&app, id, after, integer("limit", 200)?).await?,
+    ))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
+        .route("/goal-ledger", get(ledger))
         .route("/task-plan", get(active))
         .route("/task-plans", get(plans))
         .route("/task-plan/document", get(document))

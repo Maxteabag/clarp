@@ -118,6 +118,12 @@ async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
         Ok(ask) => ask,
         Err(said) => return said,
     };
+    if let goaltool::Ask::Ledger { plan_id, after } = &ask {
+        return match crate::plans::ledger_page(app, plan_id, *after, 200).await {
+            Ok(page) => ToolAnswer::printed(0, page.to_string()),
+            Err(why) => ToolAnswer::said(1, why.message()),
+        };
+    }
     // The keeper's receipts of a goal are the Host's own, whoever owns the goal.
     if let goaltool::Ask::Receipts { plan_id, limit } = &ask {
         return crate::keeper::receipts_said(app, plan_id, *limit).await;
@@ -142,7 +148,7 @@ async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
     let caller = match crate::turn_identity::presented(app, token).await {
         Ok(Some(who)) => crate::agent::GoalCaller::Verified(who.record.agent_id.clone()),
         Ok(None) => crate::agent::GoalCaller::Default,
-        Err(why) => return ToolAnswer::said(1, why.message().to_string()),
+        Err(why) => return ToolAnswer::said(1, why.message()),
     };
     match member.agent.goal_as(ask, caller).await {
         // A plan is printed with how the Goal keeper stands to it, as an app reads it.

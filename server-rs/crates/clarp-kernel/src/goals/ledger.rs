@@ -205,12 +205,7 @@ pub fn legacy(plan: &Plan) -> Vec<Event> {
             delegation_id: String::new(),
             basis: String::new(),
             source_refs: vec![],
-            reason: detail["reason"]
-                .as_str()
-                .unwrap_or("")
-                .chars()
-                .take(4000)
-                .collect(),
+            reason: python::first(detail["reason"].as_str().unwrap_or_default(), 4000).to_owned(),
             prior: Value::Null,
             new: json!({"detail":detail}),
             plan_revision: entry["revision"].as_i64(),

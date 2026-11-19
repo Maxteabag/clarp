@@ -2222,40 +2222,228 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
 #[test]
 fn incoming_goal_events_keep_disjoint_ids_and_reject_a_collision_atomically() {
     use clarp_actor::Kept;
-    use clarp_kernel::goals::{GoalBook,Owner,ledger::Event};
-    let mut w=World::new("ledger-import");
-    let mut actor=w.open();
-    let make=|name:&str|{
-        let row=json!({"plan_id":name,"agent_id":"a1","status":"active","goal":{"history":[]}});
-        GoalBook::new().taken_over(Owner{agent_id:"a1",session:"fixture"},&row,&[]).unwrap()
+    use clarp_kernel::goals::{GoalBook, Owner, ledger::Event};
+    let mut w = World::new("ledger-import");
+    use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
+    use std::sync::atomic::AtomicBool;
+    struct Cut {
+        inner: Box<dyn AgentLog>,
+        fail: Arc<AtomicBool>,
+    }
+    impl AgentLog for Cut {
+        fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError> {
+            if self.fail.swap(false, Ordering::SeqCst) {
+                return Err(LogError::Storage("cut before append".into()));
+            }
+            self.inner.append(items)
+        }
+        fn last_seq(&self) -> Result<Seq, LogError> {
+            self.inner.last_seq()
+        }
+        fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+            self.inner.find(key)
+        }
+        fn read_before(&self, b: Seq, k: Kinds, n: usize) -> Result<Vec<Item>, LogError> {
+            self.inner.read_before(b, k, n)
+        }
+        fn read_after(&self, a: Seq, k: Kinds, n: usize) -> Result<Vec<Item>, LogError> {
+            self.inner.read_after(a, k, n)
+        }
+    }
+    let fail = Arc::new(AtomicBool::new(false));
+    let log = Cut {
+        inner: w
+            .engine
+            .open(&w.profile.dir, standard_set("zstd").unwrap())
+            .unwrap(),
+        fail: fail.clone(),
     };
-    let event=|id:i64,name:&str|serde_json::from_value::<Event>(json!({
+    let (mut actor, _) = Actor::open(
+        w.profile.clone(),
+        w.backend.clone(),
+        Box::new(log),
+        w.now_ms,
+    )
+    .unwrap();
+    let make = |name: &str| {
+        let row = json!({"plan_id":name,"agent_id":"a1","status":"active","goal":{"history":[]}});
+        GoalBook::new()
+            .taken_over(
+                Owner {
+                    agent_id: "a1",
+                    session: "fixture",
+                },
+                &row,
+                &[],
+            )
+            .unwrap()
+    };
+    let event = |id: i64, name: &str| {
+        serde_json::from_value::<Event>(json!({
         "event_id":id,"plan_id":name,"at":100,"kind":"checkpoint","subject":"goal","actor_kind":"owner","actor_agent_id":"a1","delegation_id":"","basis":"","source_refs":["goal_event:3"],"reason":"","prior":null,"new":{},"plan_revision":0
-    })).unwrap();
-    let first=make("a1:first");
-    let old=vec![event(3,"a1:first"),event(40,"a1:first")];
-    actor.keep(&Kept{goal:Some(&first),imported_events:Some(&old),..Default::default()},200).unwrap();
-    assert_eq!(actor.next_goal_event_id().unwrap(),41);
-    let second=make("a1:second");
-    let mut enters=vec![event(7,"a1:second"),event(40,"a1:second")];
-    let open_log=||w.engine.open(&w.profile.dir,standard_set("zstd").unwrap()).unwrap();
-    let last=open_log().last_seq().unwrap();
-    let err=actor.keep(&Kept{goal:Some(&second),imported_events:Some(&enters),entry_source:Some("source"),..Default::default()},300).unwrap_err();
+    })).unwrap()
+    };
+    let first = make("a1:first");
+    let old = vec![event(3, "a1:first"), event(40, "a1:first")];
+    fail.store(true, Ordering::SeqCst);
+    let refused = actor.keep(
+        &Kept {
+            goal: Some(&first),
+            imported_events: Some(&old),
+            applied_cursor: Some(("apply", 100)),
+            ..Default::default()
+        },
+        199,
+    );
+    assert!(refused.is_err());
+    assert_eq!(actor.next_goal_event_id().unwrap(), 1);
+    assert!(actor.goals().plan("a1:first").is_none());
+    let disk = w
+        .engine
+        .open(&w.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    for key in [
+        "ledger/id/3",
+        "ledger/id/40",
+        "ledger/tail/a1:first",
+        "ledger/applied/apply",
+        "g-a1:first",
+    ] {
+        assert!(disk.find(key).unwrap().is_none());
+    }
+    actor
+        .keep(
+            &Kept {
+                goal: Some(&first),
+                imported_events: Some(&old),
+                applied_cursor: Some(("apply", 100)),
+                ..Default::default()
+            },
+            200,
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<i64>(&disk.find("ledger/applied/apply").unwrap().unwrap().body)
+            .unwrap(),
+        40
+    );
+    assert_eq!(actor.next_goal_event_id().unwrap(), 41);
+    let second = make("a1:second");
+    let mut enters = vec![event(7, "a1:second"), event(40, "a1:second")];
+    let open_log = || {
+        w.engine
+            .open(&w.profile.dir, standard_set("zstd").unwrap())
+            .unwrap()
+    };
+    let last = open_log().last_seq().unwrap();
+    let err = actor
+        .keep(
+            &Kept {
+                goal: Some(&second),
+                imported_events: Some(&enters),
+                entry_source: Some("source"),
+                ..Default::default()
+            },
+            300,
+        )
+        .unwrap_err();
     assert!(err.to_string().contains("already belongs"));
-    assert_eq!(open_log().last_seq().unwrap(),last);
+    assert_eq!(open_log().last_seq().unwrap(), last);
     assert!(actor.goals().plan("a1:second").is_none());
     assert!(open_log().find("ledger/id/7").unwrap().is_none());
-    enters[1].event_id=19;
-    actor.keep(&Kept{goal:Some(&second),imported_events:Some(&enters),entry_source:Some("source"),..Default::default()},400).unwrap();
-    assert_eq!(actor.next_goal_event_id().unwrap(),42);
-    let row=|key:&str|serde_json::from_slice::<serde_json::Value>(&open_log().find(key).unwrap().unwrap().body).unwrap();
-    assert_eq!(row("ledger/id/41"),json!(["a1:second",3]));
-    assert_eq!(row("ledger/event/a1:second/2"),json!(enters[1]));
-    let latest=row("ledger/event/a1:second/3");
-    assert_eq!(latest["event_id"],41);
-    assert_eq!(latest["kind"],"plan_imported");
-    assert_eq!(latest["new"],json!({"from":"source","plan_id":"a1:second","first_id":7,"last_id":19}));
+    enters[1].event_id = 19;
+    actor
+        .keep(
+            &Kept {
+                goal: Some(&second),
+                imported_events: Some(&enters),
+                entry_source: Some("source"),
+                ..Default::default()
+            },
+            400,
+        )
+        .unwrap();
+    assert_eq!(actor.next_goal_event_id().unwrap(), 42);
+    let summary = actor.goals().get("a1:second", 400).unwrap();
+    assert_eq!(summary["ledger"]["event_count"], 3);
+    assert_eq!(summary["ledger"]["last_event_at"], 400);
+    let empty = make("a1:empty");
+    actor
+        .keep(
+            &Kept {
+                goal: Some(&empty),
+                imported_events: Some(&[]),
+                ..Default::default()
+            },
+            450,
+        )
+        .unwrap();
+    let row = |key: &str| {
+        serde_json::from_slice::<serde_json::Value>(&open_log().find(key).unwrap().unwrap().body)
+            .unwrap()
+    };
+    assert_eq!(row("ledger/id/41"), json!(["a1:second", 3]));
+    assert_eq!(row("ledger/event/a1:second/2"), json!(enters[1]));
+    let latest = row("ledger/event/a1:second/3");
+    assert_eq!(latest["event_id"], 41);
+    assert_eq!(latest["kind"], "plan_imported");
+    assert_eq!(
+        latest["new"],
+        json!({"from":"source","plan_id":"a1:second","first_id":7,"last_id":19})
+    );
+    let (after, more) = actor.goal_events("a1:second", 40, 20).unwrap();
+    assert_eq!(after.len(), 1);
+    assert!(!more);
+    assert_eq!(json!(after[0]), latest);
     drop(actor);
-    let actor=w.open();
-    assert_eq!(actor.next_goal_event_id().unwrap(),42);
+    let actor = w.open();
+    assert!(actor.goal_events("a1:empty", 0, 20).unwrap().0.is_empty());
+    assert_eq!(actor.next_goal_event_id().unwrap(), 42);
+}
+
+#[test]
+fn a_legacy_goal_gets_only_its_surviving_history_and_one_status_baseline() {
+    use clarp_kernel::goals::{GoalBook, Owner};
+    use clarp_ports::log::NewItem;
+    let mut w = World::new("legacy-ledger");
+    let book = GoalBook::new();
+    let plan = json!({"agent_id":"a1","plan_id":"a1:legacy","status":"paused","revision":7,"updated_at":90,
+        "ledger":{"event_count":301,"last_event_at":82},"goal":{"history_offset":300,"history":[
+            {"kind":"step","at":82,"revision":7,"detail":{"item_id":"s","reason":"ready"}}]}});
+    let change = book
+        .taken_over(
+            Owner {
+                agent_id: "a1",
+                session: "fixture",
+            },
+            &plan,
+            &[],
+        )
+        .unwrap();
+    let mut log = w
+        .engine
+        .open(&w.profile.dir, standard_set("none").unwrap())
+        .unwrap();
+    let stored = serde_json::to_vec(&book.record(&change, 90)).unwrap();
+    log.append(&[NewItem::new(kind::GOAL, 90, stored).keyed("g-a1:legacy")])
+        .unwrap();
+    for _ in 0..2 {
+        let actor = w.open();
+        let (events, more) = actor.goal_events("a1:legacy", 0, 500).unwrap();
+        assert!(!more);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].actor_kind, "legacy");
+        assert_eq!(events[0].subject, "step:s");
+        assert_eq!(
+            events[0].new,
+            json!({"detail":{"item_id":"s","reason":"ready"}})
+        );
+        assert_eq!(events[1].kind, "ledger_started");
+        assert_eq!(events[1].new, json!({"status":"paused"}));
+        assert_eq!(actor.next_goal_event_id().unwrap(), 3);
+        let plan = actor.goals().get("a1:legacy", 100).unwrap();
+        assert_eq!(plan["ledger"]["event_count"], 2);
+        assert_eq!(plan["ledger"]["last_event_at"], 90);
+        assert_eq!(plan["goal"]["history_offset"], 300);
+    }
 }
