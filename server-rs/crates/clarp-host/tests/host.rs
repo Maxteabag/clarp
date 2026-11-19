@@ -19135,9 +19135,12 @@ fn an_app_says_which_agent_its_user_looks_at_and_whether_it_is_in_front() {
     assert_eq!(focus(&host), agent_id(&host, &second));
 
     // A client can submit diagnostics without enabling capture.
-    let (status,said)=host.ask_as(&limited,"POST","/clog",Some(&json!({"event":"fixture"})));
-    assert_eq!((status,said),(200,json!({"ok":true,"captured":false})));
-    assert_eq!(fetch(&host,token,"POST","/clog",&[],b"[1]").status,400);
+    let (status, said) = host.ask_as(&limited, "POST", "/clog", Some(&json!({"event":"fixture"})));
+    assert_eq!((status, said), (200, json!({"ok":true,"captured":false})));
+    assert_eq!(
+        fetch(&host, token, "POST", "/clog", &[], b"[1]").status,
+        400
+    );
 
     // What a phone's system told an app of itself is kept as it came, a file for each
     // report; a device with limited scope hands over none, and what is no report is none.
@@ -43170,37 +43173,54 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
 }
 
 #[test]
-fn diagnostics_capture_is_opt_in_private_and_persists_across_restart(){
-    let place=Place::new("diagnostics");
-    let token="fixture-admin";
-    let h=place.start_with_token(token);
-    let (limited,_)=pair(&h,"Fixture","limited");
-    let key="/diagnostics/settings";
-    let payload=json!({"event":"ios.demo","detail":{"prompt":"SYNTHETIC PRIVATE","msg":"SYNTHETIC PRIVATE"}});
-    let asked=json!({"enabled":true,"categories":[" CLIENT ","requests","agents","client"]});
-    let read=|host:&Host|host.ask_as(&limited,"GET",key,None);
-    assert_eq!(read(&h).1["settings"]["enabled"],false);
-    let who=h.new_agent("Diagnostics");
-    for n in 0..5{h.send(&who,"synthetic",&format!("diagnostic-{n}"));}
-    wait_for("the busy fixture agent settles",||h.state(&who)=="done");
-    assert_eq!(h.post("/clog",payload.clone()),json!({"ok":true,"captured":false}));
-    let dir=place.root.join("data/diagnostics");
+fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
+    let place = Place::new("diagnostics");
+    let token = "fixture-admin";
+    let h = place.start_with_token(token);
+    let (limited, _) = pair(&h, "Fixture", "limited");
+    let key = "/diagnostics/settings";
+    let payload = json!({"event":"ios.demo","detail":{"prompt":"SYNTHETIC PRIVATE","msg":"SYNTHETIC PRIVATE"}});
+    let asked = json!({"enabled":true,"categories":[" CLIENT ","requests","agents","client"]});
+    let read = |host: &Host| host.ask_as(&limited, "GET", key, None);
+    assert_eq!(read(&h).1["settings"]["enabled"], false);
+    let who = h.new_agent("Diagnostics");
+    for n in 0..5 {
+        h.send(&who, "synthetic", &format!("diagnostic-{n}"));
+    }
+    wait_for("the busy fixture agent settles", || h.state(&who) == "done");
+    assert_eq!(
+        h.post("/clog", payload.clone()),
+        json!({"ok":true,"captured":false})
+    );
+    let dir = place.root.join("data/diagnostics");
     use clarp_ports::diagnostics::DiagnosticUsage;
-    let store=clarp_store_files::diagnostics::HourFiles::new(dir,clarp_host::diagnostics::CAP);
-    assert_eq!(store.usage().unwrap(),(0,0));
-    let health=h.ask_as(&limited,"GET","/diagnostics/health",None);
-    assert_eq!(health.0,200);
-    assert_eq!(health.1["ready"],health.1["checks"]["stt_ready"]);
-    assert_eq!(health.1["checks"]["ffmpeg_ready"],true);
+    let store = clarp_store_files::diagnostics::HourFiles::new(dir, clarp_host::diagnostics::CAP);
+    assert_eq!(store.usage().unwrap(), (0, 0));
+    let health = h.ask_as(&limited, "GET", "/diagnostics/health", None);
+    assert_eq!(health.0, 200);
+    assert_eq!(health.1["ready"], health.1["checks"]["stt_ready"]);
+    assert_eq!(health.1["checks"]["ffmpeg_ready"], true);
     assert!(health.1["tts_queue"]["in_flight"].is_number());
-    assert_eq!(h.ask_as(&limited,"POST",key,Some(&asked)).0,403);
-    assert_eq!(h.ask("POST",key,Some(&json!({"categories":["INVALID"]}))).0,400);
-    assert_eq!(h.post(key,asked)["settings"]["categories"],json!(["requests","agents","client"]));
-    assert_eq!(h.ask_as(&limited,"POST","/clog",Some(&payload)).1,json!({"ok":true}));
-    wait_for("enabled capture stores events",||store.usage().is_ok_and(|(n,bytes)|n>0 && bytes>0));
+    assert_eq!(h.ask_as(&limited, "POST", key, Some(&asked)).0, 403);
+    assert_eq!(
+        h.ask("POST", key, Some(&json!({"categories":["INVALID"]})))
+            .0,
+        400
+    );
+    assert_eq!(
+        h.post(key, asked)["settings"]["categories"],
+        json!(["requests", "agents", "client"])
+    );
+    assert_eq!(
+        h.ask_as(&limited, "POST", "/clog", Some(&payload)).1,
+        json!({"ok":true})
+    );
+    wait_for("enabled capture stores events", || {
+        store.usage().is_ok_and(|(n, bytes)| n > 0 && bytes > 0)
+    });
     h.kill();
-    let h=place.start_with_token(token);
-    assert_eq!(read(&h).1["settings"]["enabled"],true);
-    h.post(key,json!({"enabled":false,"categories":["client"]}));
-    assert_eq!(h.post("/clog",payload)["captured"],false);
+    let h = place.start_with_token(token);
+    assert_eq!(read(&h).1["settings"]["enabled"], true);
+    h.post(key, json!({"enabled":false,"categories":["client"]}));
+    assert_eq!(h.post("/clog", payload)["captured"], false);
 }

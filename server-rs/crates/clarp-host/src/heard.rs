@@ -110,7 +110,9 @@ struct Chosen {
 type Refused = (StatusCode, String);
 
 impl Ears {
-    pub(crate) fn ready(&self)->bool{self.own.as_ref().is_some_and(|(engine,_)|engine.ready())}
+    pub(crate) fn ready(&self) -> bool {
+        self.own.as_ref().is_some_and(|(engine, _)| engine.ready())
+    }
     fn available(&self) -> bool {
         self.own.is_some() || PROVIDERS.iter().any(|p| self.has(p.id))
     }
@@ -618,7 +620,8 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
                 .await
                 .unwrap_or_default();
         let said = hear_chat(
-            app,            &ears,
+            app,
+            &ears,
             &order,
             &language,
             audit["payload"].as_str().unwrap_or(""),
@@ -694,7 +697,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
 }
 
 async fn hear_chat(
-    app:&App,
+    app: &App,
     ears: &Arc<Ears>,
     order: &[String],
     language: &str,
@@ -704,7 +707,7 @@ async fn hear_chat(
 ) -> Result<Heard, Told> {
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
-        let started=std::time::Instant::now();
+        let started = std::time::Instant::now();
         let heard = ears
             .heard_by(
                 model,
@@ -714,8 +717,8 @@ async fn hear_chat(
                 &mut None,
             )
             .await;
-        let at=app.clock.now_ms();
-        app.capture.mark("stt",heard.is_ok(),at);
+        let at = app.clock.now_ms();
+        app.capture.mark("stt", heard.is_ok(), at);
         app.capture.emit("transcript",at,||json!({"kind":"transcription","size":audio.len(),"duration_ms":started.elapsed().as_millis(),"ok":heard.is_ok()}));
         match heard {
             Ok(heard) => {

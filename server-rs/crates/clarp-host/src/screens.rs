@@ -362,7 +362,7 @@ pub fn routes() -> Router<App> {
             "/diagnostics/settings",
             get(crate::diagnostics::settings).post(crate::diagnostics::update),
         )
-        .route("/diagnostics/health",get(crate::diagnostics::health))
+        .route("/diagnostics/health", get(crate::diagnostics::health))
         .route("/hotseat/status", get(hotseat_status))
         .route("/hotseat/desk", get(hotseat_desk))
         .route("/hotseat/resume", post(hotseat_resume))
