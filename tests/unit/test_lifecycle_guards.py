@@ -20,6 +20,9 @@ import sqlite3
 
 from lib import db
 from lib.lifecycle import Lifecycle
+import pytest
+
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 STATUS_COLUMN = re.compile(r"(?:^|_)(?:status|state|phase)$")

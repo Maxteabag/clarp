@@ -10,6 +10,9 @@ import time
 from lib import server_identity
 from lib.live_hub import LiveFanout, LiveHub, LiveRelay
 from lib.runtime_rpc_server import RuntimeRPCServer
+import pytest
+
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 LIVE_FEATURES = {"live_items", "live_activity_push"}
 

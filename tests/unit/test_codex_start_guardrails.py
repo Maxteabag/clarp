@@ -26,6 +26,8 @@ from tests.patching import patch_shared
 from tests.unit.test_codex_start_head_of_line import _Stream, _agent, _timed, _wait
 from tests.unit.test_codex_generations import fake as gen_fake, _agent as _gen_agent, _turn as _gen_turn, _wait as _gen_wait  # noqa: F401
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 FAKE = Path(__file__).resolve().parents[2] / "tests/qa/fake_codex.py"
 
 

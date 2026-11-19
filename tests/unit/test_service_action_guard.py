@@ -20,6 +20,8 @@ import pytest
 
 from lib import service_manager
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SLICE = "/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/"
 

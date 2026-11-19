@@ -23,6 +23,8 @@ import textwrap
 
 import pytest
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 NAMES = ("claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux", "muse")
 

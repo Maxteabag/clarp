@@ -21,6 +21,8 @@ sys.path.insert(0, str(ROOT / "server"))
 from lib import backends  # noqa: E402
 from lib.backend import registry  # noqa: E402
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek", "muse")
 
 # --- (4) source guard --------------------------------------------------------

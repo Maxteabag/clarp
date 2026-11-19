@@ -17,6 +17,8 @@ import pytest
 
 from tests.patching import logical_split_trees
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "server"
 _WRITE = re.compile(
     r"\b(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)\b")
@@ -31,6 +33,7 @@ OWNERS = {
     "turns": "lib/turn_lifecycle.py",
     "state_log": "lib/turn_lifecycle.py",
     "queued_turns": "lib/turn_queue.py",
+    "task_items": "lib/task_plans.py",
 }
 
 _MIGRATION = "schema creation, seed rows or a one-time migration"
@@ -42,6 +45,7 @@ ALLOWED = {
     ("decision_deliveries", "lib/db_migrations.py"): _MIGRATION,
     ("message_clock", "lib/db_migrations.py"): _MIGRATION,
     ("teams", "lib/db_migrations.py"): _MIGRATION,
+    ("task_items", "lib/db_migrations.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/db_schema.py"): _MIGRATION,
     ("janitor_trigger_definitions", "lib/persistence/schema_parts/audio_bookkeeper.py"):
         _MIGRATION + " (the audio_bookkeeper schema seeds the audio trigger)",

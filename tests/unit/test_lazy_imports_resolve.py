@@ -22,6 +22,9 @@ import functools
 import importlib
 import importlib.util
 import pathlib
+import pytest
+
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 INTERNAL = ("lib", "server")

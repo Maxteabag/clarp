@@ -16,7 +16,7 @@ from lib import provider_capabilities as capabilities  # noqa: E402
 
 # These tests exercise provider CLI resolution itself (with stubbed runners),
 # so the session's model-catalog warm-up stub stays off for them.
-pytestmark = pytest.mark.probes_provider_clis
+pytestmark = [pytest.mark.probes_provider_clis, pytest.mark.structural]
 
 
 OBSERVED_AT = "2026-08-26T10:00:00Z"
@@ -380,16 +380,20 @@ def test_fresh_host_accepts_agy_claude_5_5_models_before_any_probe(monkeypatch):
     """A Host that has never run ``agy models`` still admits the Claude 5.5
     variants agy offers, effort folded into the id, and not a bare family id."""
     monkeypatch.setattr(capabilities, "_cache", None)
-    assert [m[0] for m in capabilities._fallback_model_rows("agy")[:6]] == [
-        "gemini-4-carbon-high", "gemini-4-carbon-medium", "gemini-4-carbon-low",
-        "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
-    ]
-    for model in ("gemini-4-carbon-high", "gemini-4-carbon-medium", "gemini-4-carbon-low",
-                  "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
-                  "claude-opus-5-5-high", "claude-opus-5-5-medium",
-                  "claude-opus-5-5-low", "claude-sonnet-5-5-high",
-                  "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low",
-                  "gemini-3.8-flash-high"):
+    models = ("gemini-4-carbon-high", "gemini-4-carbon-medium", "gemini-4-carbon-low",
+              "gemini-4-argon-high", "gemini-4-argon-medium", "gemini-4-argon-low",
+              "claude-opus-5-5-high", "claude-opus-5-5-medium",
+              "claude-opus-5-5-low", "claude-sonnet-5-5-high",
+              "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low",
+              "gemini-3.8-flash-high")
+    # Offered before any probe, by name. The listing order is not a rule this test can hold:
+    # be00b3e9 put gemini-4-hydrogen between carbon and argon on purpose (it decides listing
+    # only, never a default), and while the Gemini families list the higher effort first, the
+    # Claude 5.5 families are listed low to high (b694623d). Only the first entry is held.
+    rows = [row[0] for row in capabilities._fallback_model_rows("agy")]
+    assert rows[0] == "gemini-4-carbon-high"
+    assert set(models) <= set(rows), sorted(set(models) - set(rows))
+    for model in models:
         assert capabilities.is_dispatchable_agy_model(model), model
     assert not capabilities.is_dispatchable_agy_model("claude-opus-5-5")
 

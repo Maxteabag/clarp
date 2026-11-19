@@ -94,14 +94,14 @@ def increment(key: str) -> None:
         (key, now_ms()))
 
 
-def set_text_if_blank(key: str, value: str) -> str:
+def set_text_if_blank(key: str, value: str, *, updated_at: int | None = None) -> str:
     """Store `value` unless a non-blank value exists; return what is stored."""
     conn().execute(
         """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
                value = excluded.value, updated_at = excluded.updated_at
            WHERE TRIM(settings.value) = ''""",
-        (key, str(value), now_ms()),
+        (key, str(value), now_ms() if updated_at is None else int(updated_at)),
     )
     return get_text(key)
 
