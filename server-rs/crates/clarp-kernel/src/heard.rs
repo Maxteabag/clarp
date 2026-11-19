@@ -515,6 +515,79 @@ pub fn again(mut kept: Value) -> Value {
     kept
 }
 
+/// What each paired client last opened (`/select`, `/focus`), kept among the settings under
+/// a key of its own: a clip it records belongs to the chat open on it, not to the focus that
+/// every client shares and the Host itself moves. The Python Host's `lib/client_chat.py`,
+/// held by `tests/fixtures/client-chat-vectors.json`.
+pub const CLIENT_CHAT_PREFIX: &str = "client-chat:";
+/// For how long what a client opened is what it records for: twelve hours.
+pub const CLIENT_CHAT_FOR_MS: i64 = 12 * 3600 * 1000;
+
+/// The key a client's last chat is kept under: the digest of who it is (a device's id, or
+/// `administrator`), never the name itself.
+pub fn client_chat_key(principal: &str) -> String {
+    format!(
+        "{CLIENT_CHAT_PREFIX}{:x}",
+        Sha256::digest(principal.as_bytes())
+    )
+}
+
+/// What is kept for a client that opened `session` at `now_ms`.
+pub fn client_chat_kept(session: &str, now_ms: i64) -> String {
+    let session = crate::python::compact_ascii(&Value::String(session.to_string()));
+    format!("{{\"session\":{session},\"at\":{now_ms}}}")
+}
+
+/// The chat a client last opened within twelve hours, as it was kept; empty where it opened
+/// none, longer ago, or what is kept cannot be read.
+pub fn client_chat(kept: Option<&str>, now_ms: i64) -> String {
+    let text = kept.filter(|kept| !kept.is_empty()).unwrap_or("{}");
+    let Ok(Value::Object(kept)) = serde_json::from_str::<Value>(text) else {
+        return String::new();
+    };
+    let at = match kept.get("at") {
+        None => 0,
+        Some(Value::Number(at)) => match at.as_i64() {
+            Some(at) => at,
+            None => match at.as_f64() {
+                Some(at) if at.is_finite() => at.trunc() as i64,
+                _ => return String::new(),
+            },
+        },
+        Some(Value::String(at)) => match crate::python::int(at) {
+            Some(at) => i64::try_from(at).unwrap_or(i64::MAX),
+            None => return String::new(),
+        },
+        Some(Value::Bool(at)) => i64::from(*at),
+        Some(_) => return String::new(),
+    };
+    if now_ms.saturating_sub(at) > CLIENT_CHAT_FOR_MS {
+        return String::new();
+    }
+    // `str(value.get("session") or "")`: what is no text is read as Python writes it.
+    match kept.get("session") {
+        Some(session) if !crate::python::truthy(session) => String::new(),
+        Some(Value::String(session)) => session.clone(),
+        Some(Value::Bool(_)) => "True".to_string(),
+        Some(session) => crate::python::repr(session),
+        None => String::new(),
+    }
+}
+
+/// The chat a recording is for (`POST /transcribe` without a call): the session the client
+/// names (`X-Transcription-Session`) where the Host has that agent, else the chat this
+/// client last opened where the Host has that agent; empty: the focus every client shares.
+pub fn transcription_session(explicit: &str, last: &str, known: impl Fn(&str) -> bool) -> String {
+    let explicit = crate::python::strip(explicit);
+    if !explicit.is_empty() && known(explicit) {
+        return explicit.to_string();
+    }
+    if !last.is_empty() && known(last) {
+        return last.to_string();
+    }
+    String::new()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

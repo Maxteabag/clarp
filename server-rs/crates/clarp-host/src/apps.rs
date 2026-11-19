@@ -33,7 +33,11 @@ fn bad(message: &str) -> ApiError {
 
 /// `POST /focus` with `{session}`: the app says which agent its user is looking at. An agent
 /// nobody has is nothing to look at, and no error either.
-async fn focus(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+async fn focus(
+    State(app): State<App>,
+    Extension(principal): Extension<crate::edge::Principal>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
     let Ok(Value::Object(said)) = serde_json::from_slice::<Value>(&body) else {
         return Err(bad("bad json"));
     };
@@ -43,7 +47,10 @@ async fn focus(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<V
         return Err(bad("session required"));
     }
     // Nobody is told: the app that says it is the one that knows.
-    app.fleet.open(session.to_string()).await?;
+    if app.fleet.open(session.to_string()).await?.is_some() {
+        // The chat this client opened, for what it records next.
+        crate::edge::opened_by(&app, &principal, session).await;
+    }
     // The user turned to this agent: what the herald held of it is played.
     app.mouth.opened(session).await;
     Ok(Json(json!({ "ok": true })))
