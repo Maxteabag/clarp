@@ -1291,6 +1291,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
+    client_traces = {row.message_id: row.trace_id for row in prelude.client_rows
+                     if hasattr(row, "trace_id")}
     final_rows = _FinalRows(database, agent_id, backend_session_id,
                             turns=turns, visible_replies=visible_replies,
                             start_seq=start_seq, turn_index=turn_index,
@@ -1488,8 +1490,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             own = None
             if rows:
                 running, began = turn_index.running_at(turn.get("timestamp"))
-                own = _own_turns_row(database, rows, running, began, ran_at=(
-                    lambda sent, at=turn.get("timestamp"): turn_index.ran_at(sent, at)))
+                own = _own_turns_row(
+                    database, rows, running, began, trace_ids=client_traces,
+                    written_at=turn.get("timestamp"),
+                    ended_before=lambda sent, at=turn.get("timestamp"): turn_index.ended_before(sent, at))
             if own is not None:
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
                     provenance.take(key, rows, own)

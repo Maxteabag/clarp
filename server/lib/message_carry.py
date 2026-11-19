@@ -96,8 +96,8 @@ LIVE_ROWS = "carry_live_rows"
 #   turn's reach, which is settled_at + _SETTLED_REACH_MS once it has
 #   settled and started_at + _UNSETTLED_REACH_MS before; and, for a prompt's
 #   copy linked to a client row by its words, whether the turn a row was
-#   sent for was running at the copy's time: until it settled or the next
-#   turn began (TurnIndex.ran_at). A settle moves the reach and ends the
+#   sent for had ended before the copy: settled, or the next turn began
+#   (TurnIndex.ended_before). A settle moves the reach and ends the
 #   running, and those are the only ways it can change which turn an old row
 #   belongs to. It cannot when every old row lies within both reaches and
 #   before the settle, or when the turn began after them all;

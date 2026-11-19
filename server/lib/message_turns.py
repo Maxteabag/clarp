@@ -80,21 +80,17 @@ class TurnIndex:
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
         self._spans = None
 
-    def ran_at(self, trace: str, timestamp: Any) -> bool | None:
-        """Whether a turn of ``trace`` was running at ``timestamp``: from
-        _START_SLACK_MS before it began until it settled, and never past the
-        start of a later turn of another trace (an agent runs one turn at a
-        time, so a turn that never settled ended when the next began). None
-        when the trace has no turn (a message steered into another turn) or
-        the time is not known."""
+    def ended_before(self, trace: str, timestamp: Any) -> bool:
+        """Whether every turn of ``trace`` had ended before ``timestamp``: it
+        settled, or the agent's next turn of another trace began (an agent
+        runs one turn at a time, so a turn that never settled ended when the
+        next began). False for a trace with no turn (a message steered into
+        another turn), a turn still running, or a time not known."""
         if self._spans is None:
             self._spans = self._turn_spans()
         span = self._spans.get(trace)
         ms = iso_ms(timestamp)
-        if span is None or ms is None:
-            return None
-        start, end = span
-        return start - _START_SLACK_MS <= ms and (end is None or ms <= end)
+        return span is not None and ms is not None and span[1] is not None and ms > span[1]
 
     def _turn_spans(self) -> dict[str, tuple[int, int | None]]:
         first: dict[str, int] = {}
