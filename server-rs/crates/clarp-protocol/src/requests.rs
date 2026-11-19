@@ -59,6 +59,17 @@ pub struct SendRequest {
     pub sender: Option<Value>,
 }
 
+/// `POST /stop`: the agent, and who stops it and why (contract 61), each as it came: an actor or
+/// a reason may be of any kind, and is read as the Python Host reads it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StopRequest {
+    pub session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<Value>,
+}
+
 /// `POST /stop`, `POST /select` and the other commands that only name an agent.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SessionRequest {

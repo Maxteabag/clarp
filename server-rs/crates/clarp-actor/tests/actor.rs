@@ -419,9 +419,7 @@ fn a_stop_is_passed_to_the_shim_and_a_direct_message_takes_the_place_of_the_live
     let status = actor.status();
     assert_eq!(
         status.last.unwrap().outcome,
-        Outcome::Stopped {
-            by: "peter".to_string()
-        }
+        Outcome::stopped(clarp_kernel::control::Control::by("peter"))
     );
     assert_eq!(
         (status.live, status.waiting),

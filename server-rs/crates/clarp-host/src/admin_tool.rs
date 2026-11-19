@@ -20,6 +20,9 @@
 //! and `clarp-admin calendar` asks for an event in the user's calendar (the skill
 //! `calendar`).
 //!
+//! And an agent stops another's turn, or repairs it, with `clarp-admin stop` and `clarp-admin
+//! repair` (the skill `clarp-sessions`), known by its own turn.
+//!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
@@ -171,6 +174,99 @@ fn shown(value: &Value) -> ToolAnswer {
         Ok(shown) => ToolAnswer::printed(0, shown),
         Err(error) => ToolAnswer::said(1, format!("clarp-admin: {error}")),
     }
+}
+
+/// `clarp-admin stop` and `clarp-admin repair` (`--session --reason [--from]`): an agent stops
+/// another's turn, or gives back a turn of another that nothing runs, saying who acts (`--from`,
+/// recorded as `agent:<it>`; the user where it is not given) and why. Asked with the token of the
+/// turn the command runs in, as the Python tool asks it (`X-Clarp-Turn`), so that an agent is
+/// known by its turn and not by its word. What is printed is the Python tool's: the answer, as
+/// `json.dumps(answer, indent=2)` writes it, or the refusal it does not catch.
+async fn control(app: &App, call: &ToolCall, command: &str, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin {command} [-h] --session SESSION --reason REASON \
+                 [--from FROM_SESSION]\nclarp-admin {command}: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &["--session", "--reason", "--from"], &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let missing: Vec<&str> = ["--session", "--reason"]
+        .into_iter()
+        .filter(|name| parsed.option(name).is_none())
+        .collect();
+    if !missing.is_empty() {
+        let why = format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        );
+        return usage(&why);
+    }
+    let session = parsed.option("--session").unwrap_or_default();
+    let actor = match parsed.option("--from") {
+        Some(from) if !from.is_empty() => format!("agent:{from}"),
+        _ => "user".to_string(),
+    };
+    let body = json!({ "session": session, "actor": actor, "reason": parsed.option("--reason") });
+    let token = call.env.get(crate::turn_identity::TURN_ENV);
+    let token = token.map(String::as_str).filter(|token| !token.is_empty());
+    let answered = if command == "stop" {
+        let by =
+            crate::controls::control_of(app, false, token, body.get("actor"), body.get("reason"));
+        match by.await {
+            Ok(by) => crate::controls::stop(app, session, by)
+                .await
+                .map(|stopped| {
+                    json!({
+                        "ok": stopped.ok, "terminated": stopped.terminated,
+                        "stop_actor": stopped.stop_actor,
+                        "stop_actor_verified": stopped.stop_actor_verified,
+                        "stop_reason": stopped.stop_reason, "goals_paused": stopped.goals_paused,
+                        "queue_paused": stopped.queue_paused,
+                    })
+                }),
+            Err(refused) => Err(refused),
+        }
+    } else {
+        let data = body.as_object().cloned().unwrap_or_default();
+        crate::controls::repair(app, &data, false, token).await
+    };
+    match answered {
+        Ok(answer) => ToolAnswer::printed(0, python_indented(&answer)),
+        // The Python tool does not catch a refusal: it ends on its words.
+        Err(refused) => {
+            let status = refused.status();
+            let words = status.canonical_reason().unwrap_or("Error");
+            let said = format!(
+                "urllib.error.HTTPError: HTTP Error {}: {words}",
+                status.as_u16()
+            );
+            ToolAnswer::said(1, said)
+        }
+    }
+}
+
+/// A value as Python's `json.dumps(value, indent=2)` writes it: two spaces in, and every sign
+/// beyond ASCII written as its escape.
+fn python_indented(value: &Value) -> String {
+    let shown = serde_json::to_string_pretty(value).unwrap_or_default();
+    let mut out = String::with_capacity(shown.len());
+    for sign in shown.chars() {
+        if sign.is_ascii() {
+            out.push(sign);
+        } else {
+            let mut units = [0u16; 2];
+            for unit in sign.encode_utf16(&mut units) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
+        }
+    }
+    out
 }
 
 /// `clarp-admin sessions`: the agents of this Host, by their names: what an agent reads
@@ -1732,6 +1828,9 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "trigger" => trigger(app, rest).await,
         Some((command, rest)) if command == "location" => location(app, rest).await,
         Some((command, rest)) if command == "calendar" => calendar(app, rest),
+        Some((command, rest)) if command == "stop" || command == "repair" => {
+            control(app, call, command, rest).await
+        }
         Some((command, _)) => not_here(command),
         None => ToolAnswer::said(2, "usage: clarp-admin COMMAND ..."),
     }

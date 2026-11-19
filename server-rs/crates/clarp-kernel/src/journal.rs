@@ -28,6 +28,11 @@ pub mod kind {
     /// When its turn starts, the same message is written again as a [`MESSAGE`]: that is the
     /// moment it enters the conversation, and where it stands in it.
     pub const WAITING: u16 = 3;
+    /// The note a repair left on the agent's state: an
+    /// [`AgentEvent::Repaired`](crate::agent::AgentEvent::Repaired) as JSON. Kept apart from
+    /// [`AGENT_EVENT`] so that a build that does not know the note passes it by, as it passes
+    /// by every kind a newer build wrote, and still opens the agent.
+    pub const NOTE: u16 = 4;
     /// A [`Message`](crate::conversation::Message) to the agent.
     pub const MESSAGE: u16 = 100;
     /// A [`Reply`](crate::conversation::Reply) of the agent.
@@ -205,7 +210,11 @@ pub struct Recorder {
 
 fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     let body = serde_json::to_vec(event).map_err(|e| JournalError::Encode(e.to_string()))?;
-    let mut item = NewItem::new(kind::AGENT_EVENT, ts_ms, body);
+    let written_as = match event {
+        AgentEvent::Repaired { .. } => kind::NOTE,
+        _ => kind::AGENT_EVENT,
+    };
+    let mut item = NewItem::new(written_as, ts_ms, body);
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
@@ -216,6 +225,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         | AgentEvent::Adopted { .. }
         | AgentEvent::TookUp { .. }
         | AgentEvent::StartedAgain { .. }
+        | AgentEvent::Repaired { .. }
         | AgentEvent::Labelled { .. } => None,
     };
     Ok(item)
@@ -238,7 +248,7 @@ impl Recorder {
                     why: e.to_string(),
                 };
                 match item.kind {
-                    kind::AGENT_EVENT => {
+                    kind::AGENT_EVENT | kind::NOTE => {
                         let event: AgentEvent =
                             serde_json::from_slice(&item.body).map_err(corrupt)?;
                         if matches!(event, AgentEvent::StartedAgain { .. }) {
@@ -658,6 +668,7 @@ mod tests {
     use clarp_store_mem::MemEngine;
 
     use super::*;
+    use crate::control::Control;
     use crate::turn::{Activity, RunOutcome, TurnId, Wait};
 
     fn open(engine: &MemEngine) -> Recorder {
@@ -708,7 +719,7 @@ mod tests {
             Box::new(|r, t| {
                 r.handle(
                     Command::Stop {
-                        by: "peter".to_string(),
+                        by: Control::by("peter"),
                     },
                     t,
                 )
@@ -784,7 +795,7 @@ mod tests {
             Box::new(|r, t| {
                 r.handle(
                     Command::Stop {
-                        by: "peter".to_string(),
+                        by: Control::by("peter"),
                     },
                     t,
                 )
@@ -982,6 +993,139 @@ mod tests {
         );
     }
 
+    /// A Stop's line as today's build writes it: who stopped, nothing more.
+    const TODAY_SETTLED: &str = r#"{"agent":"turn","turn":1,"change":{"event":"settled","outcome":{"outcome":"stopped","by":"user"},"at_ms":5}}"#;
+    const TODAY_REQUESTED: &str =
+        r#"{"agent":"stop-requested","turn":1,"by":"agent:omar","at_ms":5}"#;
+    const TODAY_PAUSED: &str = r#"{"agent":"paused","by":"user","at_ms":5}"#;
+
+    #[test]
+    fn a_stop_written_by_todays_build_is_read_as_it_was_and_written_so_again() {
+        // Read: who stopped, not known to the Host, for no reason given.
+        let settled: AgentEvent = serde_json::from_str(TODAY_SETTLED).unwrap();
+        let AgentEvent::Turn {
+            change: crate::turn::TurnEvent::Settled { outcome, .. },
+            ..
+        } = &settled
+        else {
+            panic!("{settled:?}");
+        };
+        assert_eq!(outcome.stopped_by(), Some(Control::by("user")));
+        let requested: AgentEvent = serde_json::from_str(TODAY_REQUESTED).unwrap();
+        assert!(matches!(
+            requested,
+            AgentEvent::StopRequested { ref by, verified: false, ref reason, .. }
+                if by == "agent:omar" && reason.is_empty()
+        ));
+        let paused: AgentEvent = serde_json::from_str(TODAY_PAUSED).unwrap();
+        assert!(matches!(
+            paused,
+            AgentEvent::Paused { ref by, verified: false, ref reason, .. }
+                if by == "user" && reason.is_empty()
+        ));
+        // Written: a Stop that is the user's claim and gives no reason is the same line.
+        assert_eq!(serde_json::to_string(&settled).unwrap(), TODAY_SETTLED);
+        assert_eq!(serde_json::to_string(&requested).unwrap(), TODAY_REQUESTED);
+        assert_eq!(serde_json::to_string(&paused).unwrap(), TODAY_PAUSED);
+    }
+
+    #[test]
+    fn a_stop_written_by_this_build_is_read_by_todays_and_a_note_is_passed_by() {
+        // Today's types, as today's build has them: they deny no field they do not know.
+        #[derive(Deserialize)]
+        #[serde(tag = "agent", rename_all = "kebab-case")]
+        #[allow(dead_code)]
+        enum TodayEvent {
+            Turn { turn: u64, change: TodayChange },
+            StopRequested { turn: u64, by: String, at_ms: i64 },
+            Paused { by: String, at_ms: i64 },
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "event", rename_all = "kebab-case")]
+        #[allow(dead_code)]
+        enum TodayChange {
+            Settled { outcome: TodayOutcome, at_ms: i64 },
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "outcome", rename_all = "kebab-case")]
+        #[allow(dead_code)]
+        enum TodayOutcome {
+            Stopped { by: String },
+        }
+        let by = Control {
+            actor: "agent:omar".to_string(),
+            verified: true,
+            reason: "it loops".to_string(),
+        };
+        let settled = AgentEvent::Turn {
+            turn: TurnId(1),
+            change: crate::turn::TurnEvent::Settled {
+                outcome: crate::turn::Outcome::stopped(by.clone()),
+                at_ms: 5,
+            },
+        };
+        let line = serde_json::to_string(&settled).unwrap();
+        assert_eq!(
+            line,
+            r#"{"agent":"turn","turn":1,"change":{"event":"settled","outcome":{"outcome":"stopped","by":"agent:omar","verified":true,"reason":"it loops"},"at_ms":5}}"#
+        );
+        let read: TodayEvent = serde_json::from_str(&line).unwrap();
+        assert!(
+            matches!(read, TodayEvent::Turn { change: TodayChange::Settled { outcome: TodayOutcome::Stopped { by }, .. }, .. } if by == "agent:omar")
+        );
+        let requested = AgentEvent::StopRequested {
+            turn: TurnId(1),
+            by: by.actor.clone(),
+            verified: true,
+            reason: by.reason.clone(),
+            at_ms: 5,
+        };
+        let line = serde_json::to_string(&requested).unwrap();
+        assert!(serde_json::from_str::<TodayEvent>(&line).is_ok(), "{line}");
+        // The Stop of an agent that runs no turn: its pause is the one line that says whose Stop
+        // it was, and today's build reads it as the pause it knows.
+        let engine = MemEngine::default();
+        let mut recorder = open(&engine);
+        recorder
+            .handle(Command::Stop { by: by.clone() }, 6)
+            .unwrap();
+        let items = recorder.log().read_after(0, kind::MACHINERY, 10).unwrap();
+        let lines: Vec<String> = items
+            .iter()
+            .map(|item| String::from_utf8(item.body.clone()).unwrap())
+            .collect();
+        let paused =
+            r#"{"agent":"paused","by":"agent:omar","verified":true,"reason":"it loops","at_ms":6}"#;
+        assert_eq!(lines, vec![paused.to_string()]);
+        assert!(matches!(
+            serde_json::from_str::<TodayEvent>(paused).unwrap(),
+            TodayEvent::Paused { by, .. } if by == "agent:omar"
+        ));
+        let read: AgentEvent = serde_json::from_str(paused).unwrap();
+        assert!(matches!(
+            read,
+            AgentEvent::Paused { verified: true, ref reason, .. } if reason == "it loops"
+        ));
+        drop(recorder);
+
+        // A repair's note is an event today's build does not know: it is written as a kind of
+        // its own, which today's build passes by (it reads only events as events), so that it
+        // still opens the agent. This build reads it back.
+        let engine = MemEngine::default();
+        let mut recorder = open(&engine);
+        recorder
+            .handle(Command::Repair { by: by.clone() }, 7)
+            .unwrap();
+        let items = recorder.log().read_after(0, kind::MACHINERY, 10).unwrap();
+        let kinds: Vec<u16> = items.iter().map(|item| item.kind).collect();
+        assert_eq!(kinds, vec![kind::NOTE]);
+        assert_ne!(kind::NOTE, kind::AGENT_EVENT);
+        drop(recorder);
+        let reopened = open(&engine);
+        let note = reopened.agent().note().unwrap();
+        assert_eq!((&note.by, note.at_ms), (&by, 7));
+    }
+
     fn message(key: &str, admission: Admission) -> Incoming {
         Incoming {
             key: Some(key.to_string()),
@@ -1163,7 +1307,7 @@ mod tests {
         recorder
             .handle(
                 Command::Stop {
-                    by: "relaunch".to_string(),
+                    by: Control::by("relaunch"),
                 },
                 5,
             )

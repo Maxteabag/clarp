@@ -2178,6 +2178,37 @@ work; Keeper asks and publishes as a member, is refused as a janitor while its t
 refused a message, and its own run is held while Mike works: no notification, no push, nothing in `/attention`, the
 inbox or the chip, and its new request and document are refused) and the wrong rules `tools/plants/quiet-agents.py`.
 
+**Who stops or repairs an agent, and why** (19 Nov 2026; Host feature `turn_slot_repair`, 61). `POST /stop` takes
+`actor` and `reason`, and so does `POST /repair-slot {session, reason, actor?}`; both are read as the Python Host reads
+them (`actor` cut to 80 signs, `user` where none is said; `reason` cut to 200; what is no text is written as Python
+writes it). The Host knows who acts where an agent's own turn asks (its token, `X-Clarp-Turn`: then it is
+`agent:<its session>` whatever was claimed) or a paired phone says it is the user; anything else is the claim, told as
+unverified; a token whose agent cannot be said is answered 503, never taken for the claim. One value says who did it
+and why (`clarp_kernel::control::Control`), and one function puts it on a state's detail (`marked`) and from there on
+its activity (`provenance`), for a Stop and for a repair alike, as the Python Host's `_control_provenance` is one for
+both. Whether a Stop is the user's (anything but an agent's own, the one that may do what only the user's Stop does)
+is one function of that value, `Control::is_the_users`, for every reader of the log. Only the user's Stop drops
+what the agent had yet to say aloud, as on the Python Host: an agent stopping another orchestrates, and what was about
+to be said is still the user's to hear (the lead's decision of 19 Nov; held by
+`only_the_users_stop_silences_what_an_agent_had_yet_to_say`, in rows: the administrator's Stop, a paired phone's, an
+unverified claim to be an agent, and an agent's own turn's). A Stop's answer says it, its
+goals are paused in its words, and the interrupted state and its activity carry it
+while it is the latest, through a restart: the log's `Stopped`, `StopRequested` and `Paused` keep `verified` and
+`reason` beside `by` (`Paused` is the one line an idle agent's Stop leaves, where a reader asks whose Stop it was), written only where they say something, so a user's Stop with no reason is written as before and a line
+of an older log is read as it was (the journal's own tests hold both directions with literal lines, and that an older
+build reads a newer line: no type of the log denies a field it does not know). A repair interrupts nothing and holds
+or lets go nothing. What it gives back on the Python Host, a turn's slot that no process owns, cannot be here: a turn
+is the agent's log, followed through its shim's socket, and it ends when nothing answers there (held by
+`nothing_holds_an_agent_busy_with_no_process_behind_it`, in the four ways the Python Host can leak one). So it answers
+`released_trace: ""` and `queue_recovered: 0`, and keeps its note as the Python Host keeps it whatever it released:
+the state repeated, with who repaired it and why, until the state changes. The note is an event of a kind of its own
+in the log (`NOTE`), which a build that does not know it passes by, so that it still opens the agent. The agents'
+tool has `clarp-admin stop` and `clarp-admin repair` (`--session --reason [--from]`), asked with the token of the
+turn they run in and printed as the Python tool prints them. Held to the Python Host's own handlers
+(`tools/turn-slot-repair-vectors.py`: who acts over claims, phones and tokens, the Stop and the repair of an agent with
+nothing to release, the activity's provenance) and by `a_stop_and_a_repair_say_who_acted_and_why_and_an_agent_is_known_by_its_own_turn`;
+the wrong rules are `tools/plants/turn-slot-repair.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

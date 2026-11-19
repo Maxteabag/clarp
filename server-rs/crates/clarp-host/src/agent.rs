@@ -21,6 +21,7 @@ use clarp_backend::Backend;
 use clarp_kernel::artifacts::decisions as requests;
 use clarp_kernel::artifacts::reports;
 use clarp_kernel::artifacts::{Artifact, Ctx, Maker, Refused, Shelf};
+use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{Entry, Message, TurnEnd};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, Looked, Owner, Seen, TurnSeen, World};
 use clarp_kernel::jobs::{Job, JobChange, JobCommand, JobRecord, JobRefusal, Worker as JobWorker};
@@ -119,8 +120,13 @@ pub enum Ask {
         answer: Answer<Sent>,
     },
     Stop {
-        by: String,
+        by: Control,
         answer: Answer<Stopped>,
+    },
+    /// A turn nothing runs is looked for and given back, and a note of who and why is kept.
+    Repair {
+        by: Control,
+        answer: Answer<()>,
     },
     /// Answers whether the mailbox was held, and where the queue stands after.
     Resume {
@@ -489,7 +495,17 @@ impl AgentHandle {
     }
 
     pub async fn stop(&self, by: String) -> Result<Stopped, Unavailable> {
+        self.stop_as(Control::by(by)).await
+    }
+
+    /// Stops the agent: who asks it, whether the Host knows it is they, and why.
+    pub async fn stop_as(&self, by: Control) -> Result<Stopped, Unavailable> {
         self.ask(|answer| Ask::Stop { by, answer }).await
+    }
+
+    /// Gives back a turn of the agent that nothing runs, and keeps a note of who and why.
+    pub async fn repair(&self, by: Control) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Repair { by, answer }).await
     }
 
     pub async fn resume(&self, by: String) -> Result<(bool, QueueState), Unavailable> {
@@ -868,6 +884,7 @@ pub(crate) fn never_ran() -> Status {
         completed_at_ms: None,
         answered_by: None,
         arrived: false,
+        note: None,
     }
 }
 
@@ -1011,7 +1028,7 @@ fn seen_end(last: &Settled) -> Option<TurnSeen> {
         Outcome::Completed => ("completed", String::new()),
         Outcome::Failed { reason, .. } => ("failed", reason.clone()),
         Outcome::Interrupted { reason } => ("interrupted", reason.clone()),
-        Outcome::Stopped { by } => ("interrupted", format!("Stopped by {by}")),
+        Outcome::Stopped { by, .. } => ("interrupted", format!("Stopped by {by}")),
         Outcome::Withdrawn { .. } => return None,
     };
     Some(TurnSeen {
@@ -2003,11 +2020,8 @@ impl Worker {
                 }
                 // A Stop holds the agent's goals too: each one that is being worked is paused
                 // until someone resumes it, so that none wakes the agent the user just stopped.
-                let stopped = actor.stop(&by, now).and_then(|(told, mut out)| {
-                    let reason = match by.as_str() {
-                        "user" => "User stopped this agent".to_string(),
-                        by => format!("Stopped by {by} (unverified)"),
-                    };
+                let reason = clarp_kernel::control::paused_by(&by);
+                let stopped = actor.stop_as(by, now).and_then(|(told, mut out)| {
                     let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
                     for change in &paused {
                         let kept = keep_goal(actor, &self.setup.record, change, None, now)?;
@@ -2026,6 +2040,9 @@ impl Worker {
                     (stopped, out)
                 });
                 answered(stopped, answer)?
+            }
+            Ask::Repair { by, answer } => {
+                answered(actor.repair(by, now).map(|out| ((), out)), answer)?
             }
             // The mailbox alone: the agent's goals stay as they are, and wait with it.
             Ask::Hold { answer } => {
@@ -3084,8 +3101,8 @@ impl Worker {
 }
 
 /// What a client is shown as an agent's state: which turn runs and what it does, or which
-/// turn ended last. A change in any of it is told.
-fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId>, String, u32) {
+/// turn ended last, and a repair's note while it stands. A change in any of it is told.
+fn told_state(status: &Status) -> ToldState {
     let live = status.live.as_ref();
     // What it does within its state: the tool it runs, or that it writes its answer now.
     // An agent that goes from thinking to answering is thinking still by its state, and
@@ -3110,8 +3127,21 @@ fn told_state(status: &Status) -> (Option<TurnId>, String, String, Option<TurnId
         // An attempt of the live turn failed and the turn is tried again: the apps are told
         // that it reconnects. They are not told when the next attempt begins.
         live.map_or(0, |live| live.failed_attempts),
+        // A repair: the same state, told again with who repaired it and why.
+        status.note.as_ref().map(|note| note.at_ms),
     )
 }
+
+/// What [`told_state`] compares: a change in any of it is told.
+type ToldState = (
+    Option<TurnId>,
+    String,
+    String,
+    Option<TurnId>,
+    String,
+    u32,
+    Option<i64>,
+);
 
 /// Whether a live turn waits for an account: between two attempts, or before its first.
 fn waits_for_an_account(live: &clarp_actor::LiveStatus) -> bool {
@@ -3190,6 +3220,7 @@ fn refuse_for(
         match rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
             Ok(Ask::Send { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Stop { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Repair { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Resume { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::StartAgain { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),

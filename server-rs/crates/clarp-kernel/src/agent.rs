@@ -21,6 +21,8 @@ use std::collections::{BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+use crate::control::Control;
+
 use crate::turn::{
     Activity, Admission, IllegalTransition, Origin, Outcome, Parked, Queued, RunOutcome, Settled,
     StartOutcome, Turn, TurnEvent, TurnId, Wait,
@@ -51,8 +53,11 @@ pub enum Command {
     /// The words of a waiting message were written anew, at `message_seq`: its turn answers
     /// those. It keeps its place among what waits.
     Reword { turn: TurnId, message_seq: u64 },
-    /// End the live turn and hold the mailbox.
-    Stop { by: String },
+    /// End the live turn and hold the mailbox: who asks it, and why.
+    Stop { by: Control },
+    /// Someone looked for a turn of the agent that nothing runs, and gives it back: nothing is
+    /// ended and nothing is held or let go. What is kept is a note of who and why, on the state.
+    Repair { by: Control },
     /// Let the mailbox run again.
     Resume { by: String },
     /// The agent says, in a few words, what it is busy with beyond its turns: work it left
@@ -108,14 +113,36 @@ pub enum AgentEvent {
         turn: TurnId,
         change: TurnEvent,
     },
-    /// Someone asked the live turn to stop. It settles when the tool process is gone.
+    /// Someone asked the live turn to stop. It settles when the tool process is gone. Whether
+    /// the Host knew who asked, and why, are absent from a log written before they were kept.
     StopRequested {
         turn: TurnId,
         by: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        verified: bool,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
         at_ms: i64,
     },
+    /// Someone repaired the agent: a note of who and why, kept on its state until the state
+    /// changes. `released`: the turn that was given back, none on this Host.
+    Repaired {
+        by: String,
+        verified: bool,
+        reason: String,
+        released: String,
+        at_ms: i64,
+    },
+    /// The agent was stopped, or its mailbox held: who did it, whether the Host knew it was
+    /// they, and why (`Control`), written only where they say something, as `StopRequested`.
+    /// The Stop of an idle agent leaves no other line, so this is where a reader asks whose
+    /// Stop it was (`Control::is_the_users`).
     Paused {
         by: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        verified: bool,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
         at_ms: i64,
     },
     Resumed {
@@ -223,8 +250,10 @@ pub struct Agent {
     mailbox: VecDeque<Queued>,
     /// The turn that holds the agent: starting or running, never anything else.
     live: Option<Turn>,
-    /// Who asked the live turn to stop, while it has not gone yet.
-    stopping: Option<String>,
+    /// Who asked the live turn to stop and why, while it has not gone yet.
+    stopping: Option<Control>,
+    /// Who last repaired the agent, why, and when: while nothing about its state changed since.
+    note: Option<Note>,
     paused: bool,
     stop_generation: u64,
     settled: u64,
@@ -256,6 +285,20 @@ pub struct Agent {
     arrived: bool,
 }
 
+/// What a repair left on the agent's state: who repaired it and why, the turn it gave back (none
+/// on this Host), and when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    pub by: Control,
+    pub released: String,
+    pub at_ms: i64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// What an agent that runs no turn rests in, when it has said so itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rest {
@@ -272,6 +315,7 @@ impl Default for Agent {
             mailbox: VecDeque::new(),
             live: None,
             stopping: None,
+            note: None,
             paused: false,
             settled: 0,
             queue_revision: 0,
@@ -376,8 +420,13 @@ impl Agent {
     }
 
     /// Who asked the live turn to stop, while it has not gone yet.
-    pub fn stopping(&self) -> Option<&str> {
-        self.stopping.as_deref()
+    pub fn stopping(&self) -> Option<&Control> {
+        self.stopping.as_ref()
+    }
+
+    /// The note a repair left, while nothing about the agent's state changed since.
+    pub fn note(&self) -> Option<&Note> {
+        self.note.as_ref()
     }
 
     fn live_id(&self) -> Option<TurnId> {
@@ -430,7 +479,7 @@ impl Agent {
                 });
                 if admission == Admission::Direct {
                     // The live turn makes way. One that is already on its way out is left to it.
-                    work.stop_live(preempted_by(turn), now_ms);
+                    work.stop_live(Control::by(preempted_by(turn)), now_ms);
                 }
             }
             Command::Withdraw { turn, by } => {
@@ -474,7 +523,22 @@ impl Agent {
                 // A stop holds everything that waits, also what an earlier hold let through.
                 // Even an already held mailbox observes a newer Stop. Listen-first
                 // openings admitted under the previous Stop must lose authority.
-                work.record(AgentEvent::Paused { by, at_ms: now_ms });
+                work.record(AgentEvent::Paused {
+                    by: by.actor,
+                    verified: by.verified,
+                    reason: by.reason,
+                    at_ms: now_ms,
+                });
+            }
+            Command::Repair { by } => {
+                // Nothing here holds a turn that nothing runs: there is nothing to give back.
+                work.record(AgentEvent::Repaired {
+                    by: by.actor,
+                    verified: by.verified,
+                    reason: by.reason,
+                    released: String::new(),
+                    at_ms: now_ms,
+                });
             }
             Command::Resume { by } => {
                 if !work.agent.paused {
@@ -539,7 +603,7 @@ impl Agent {
             Command::StartFailed { turn, reason } => {
                 work.must_have_process(turn)?;
                 let outcome = match work.agent.stopping.clone() {
-                    Some(by) => Outcome::Stopped { by },
+                    Some(by) => Outcome::stopped(by),
                     None => Outcome::not_started(reason),
                 };
                 work.record(AgentEvent::Turn {
@@ -576,14 +640,14 @@ impl Agent {
                 work.must_have_process(turn)?;
                 let outcome = match (work.agent.stopping.clone(), outcome) {
                     // Whatever the process said on its way out, it went because it was told to.
-                    (Some(by), _) => Outcome::Stopped { by },
+                    (Some(by), _) => Outcome::stopped(by),
                     (None, RunOutcome::Completed) => {
                         // A tool that finished before it said it had started did still run.
                         work.running(turn, now_ms);
                         Outcome::Completed
                     }
                     (None, RunOutcome::Failed { reason }) => Outcome::failed(reason),
-                    (None, RunOutcome::Stopped { by }) => Outcome::Stopped { by },
+                    (None, RunOutcome::Stopped { by }) => Outcome::stopped(Control::by(by)),
                     (None, RunOutcome::Interrupted { reason }) => Outcome::Interrupted { reason },
                 };
                 work.record(AgentEvent::Turn {
@@ -604,7 +668,7 @@ impl Agent {
                 let change = match work.agent.stopping.clone() {
                     // It went because it was told to: nothing is tried again.
                     Some(by) => TurnEvent::Settled {
-                        outcome: Outcome::Stopped { by },
+                        outcome: Outcome::stopped(by),
                         at_ms: now_ms,
                     },
                     None => {
@@ -656,6 +720,8 @@ impl Agent {
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
             AgentEvent::Paused { .. } => {
+                // A Stop is a state of its own: a note left before it is no longer the latest.
+                self.note = None;
                 self.stop_generation += 1;
                 if !self.paused || !self.unheld.is_empty() {
                     self.queue_revision += 1;
@@ -701,7 +767,13 @@ impl Agent {
                 // so (it is claimed, then started), and a client orders queue news by this.
                 self.queue_revision += 1;
             }
-            AgentEvent::StopRequested { turn, by, .. } => {
+            AgentEvent::StopRequested {
+                turn,
+                by,
+                verified,
+                reason,
+                ..
+            } => {
                 if self.live_id() != Some(*turn) {
                     return Err(IllegalTransition {
                         turn: *turn,
@@ -709,7 +781,30 @@ impl Agent {
                         event: "stop-requested",
                     });
                 }
-                self.stopping = Some(by.clone());
+                self.stopping = Some(Control {
+                    actor: by.clone(),
+                    verified: *verified,
+                    reason: reason.clone(),
+                });
+                self.note = None;
+            }
+            AgentEvent::Repaired {
+                by,
+                verified,
+                reason,
+                released,
+                at_ms,
+            } => {
+                let by = Control {
+                    actor: by.clone(),
+                    verified: *verified,
+                    reason: reason.clone(),
+                };
+                self.note = Some(Note {
+                    by,
+                    released: released.clone(),
+                    at_ms: *at_ms,
+                });
             }
             AgentEvent::Adopted {
                 backend_session, ..
@@ -720,7 +815,10 @@ impl Agent {
             AgentEvent::TookUp {
                 backend_session, ..
             } => self.bind_session(Some(backend_session)),
-            AgentEvent::StartedAgain { .. } => self.backend_session = None,
+            AgentEvent::StartedAgain { .. } => {
+                self.backend_session = None;
+                self.note = None;
+            }
             AgentEvent::Labelled { text, at_ms } => {
                 self.resting = Some(if text.is_empty() {
                     Rest::Idle
@@ -736,6 +834,11 @@ impl Agent {
     }
 
     fn apply_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
+        // What a turn does is a state of the agent: a note left before it is no longer the
+        // latest. A message that only joins the queue changes no state.
+        if !matches!(change, TurnEvent::Accepted { .. }) {
+            self.note = None;
+        }
         if let TurnEvent::Accepted { turn: accepted, .. } = change {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
@@ -879,14 +982,14 @@ impl Work {
     /// Ends the live turn for someone: a turn with a tool process is asked to stop and ends
     /// when the process is gone; a turn that waits between two attempts has none, and ends
     /// here. One that is already on its way out is left to it.
-    fn stop_live(&mut self, by: String, now_ms: i64) {
+    fn stop_live(&mut self, by: Control, now_ms: i64) {
         match (&self.agent.live, &self.agent.stopping) {
             (Some(Turn::Parked(parked)), _) => {
                 let turn = parked.id;
                 self.record(AgentEvent::Turn {
                     turn,
                     change: TurnEvent::Settled {
-                        outcome: Outcome::Stopped { by },
+                        outcome: Outcome::stopped(by),
                         at_ms: now_ms,
                     },
                 });
@@ -895,7 +998,9 @@ impl Work {
                 let turn = live.id();
                 self.record(AgentEvent::StopRequested {
                     turn,
-                    by,
+                    by: by.actor,
+                    verified: by.verified,
+                    reason: by.reason,
                     at_ms: now_ms,
                 });
                 self.decision.effects.push(Effect::StopTurn { turn });
@@ -1146,16 +1251,14 @@ mod tests {
         a.send(dropped(1)).unwrap();
         assert_eq!(
             a.send(Command::Stop {
-                by: "user".to_string()
+                by: Control::by("user"),
             })
             .unwrap(),
             vec![]
         );
         assert_eq!(
             a.agent.last().unwrap().outcome,
-            Outcome::Stopped {
-                by: "user".to_string()
-            }
+            Outcome::stopped(Control::by("user"))
         );
         assert_eq!((a.live(), a.waiting()), (None, vec![2]));
         assert!(a.agent.is_paused());
@@ -1174,9 +1277,7 @@ mod tests {
         );
         assert_eq!(
             a.agent.last().unwrap().outcome,
-            Outcome::Stopped {
-                by: preempted_by(TurnId(2))
-            }
+            Outcome::stopped(Control::by(preempted_by(TurnId(2))))
         );
 
         // A tool that is told to stop and then drops its connection was stopped: it is not
@@ -1184,15 +1285,13 @@ mod tests {
         let mut a = Driven::new();
         a.user(10);
         a.send(Command::Stop {
-            by: "user".to_string(),
+            by: Control::by("user"),
         })
         .unwrap();
         a.send(dropped(1)).unwrap();
         assert_eq!(
             a.agent.last().unwrap().outcome,
-            Outcome::Stopped {
-                by: "user".to_string()
-            }
+            Outcome::stopped(Control::by("user"))
         );
         assert_eq!(a.live(), None);
     }
@@ -1251,7 +1350,7 @@ mod tests {
         a.user(12);
         assert_eq!(
             a.send(Command::Stop {
-                by: "peter".to_string()
+                by: Control::by("peter"),
             })
             .unwrap(),
             vec![Effect::StopTurn { turn: TurnId(1) }]
@@ -1265,7 +1364,7 @@ mod tests {
         // The process goes; whatever it reports, it went because it was told to.
         assert_eq!(a.finish(1), vec![], "the mailbox is held: nothing starts");
         assert!(
-            matches!(a.history.last(), Some(AgentEvent::Turn { change: TurnEvent::Settled { outcome: Outcome::Stopped { by }, .. }, .. }) if by == "peter")
+            matches!(a.history.last(), Some(AgentEvent::Turn { change: TurnEvent::Settled { outcome: Outcome::Stopped { by, .. }, .. }, .. }) if by == "peter")
         );
         assert_eq!((a.live(), a.waiting()), (None, vec![2, 3]));
         // Background work that comes now is held with the rest.
@@ -1312,7 +1411,7 @@ mod tests {
         a.user(10);
         a.user(11);
         a.send(Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         })
         .unwrap();
         assert_eq!(a.finish(1), vec![], "held");
@@ -1346,7 +1445,7 @@ mod tests {
         a.user(14);
         assert!(!a.agent.holds(TurnId(5)));
         a.send(Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         })
         .unwrap();
         assert!(a.agent.holds(TurnId(5)));
@@ -1419,7 +1518,7 @@ mod tests {
 
     fn stop() -> Command {
         Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         }
     }
 
@@ -1579,7 +1678,7 @@ mod tests {
         );
         assert!(a.history.iter().any(|event| matches!(
             event,
-            AgentEvent::Turn { turn: TurnId(1), change: TurnEvent::Settled { outcome: Outcome::Stopped { by }, .. } }
+            AgentEvent::Turn { turn: TurnId(1), change: TurnEvent::Settled { outcome: Outcome::Stopped { by, .. }, .. } }
                 if *by == preempted_by(TurnId(3))
         )));
         // The second direct message does not end the first: both run, in order, then the queue.
@@ -1646,7 +1745,7 @@ mod tests {
         // While a turn of it runs it is not started again: that turn is stopped first.
         assert_eq!(a.send(Command::StartAgain), Err(Refusal::AtWork));
         a.send(Command::Stop {
-            by: "relaunch".to_string(),
+            by: Control::by("relaunch"),
         })
         .unwrap();
         a.finish(1);
@@ -1736,7 +1835,7 @@ mod tests {
         a.user(11);
         assert_eq!(a.agent.queue_revision(), 1, "a message joined the queue");
         a.send(Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         })
         .unwrap();
         assert_eq!(a.agent.queue_revision(), 2, "the queue is held");
@@ -1795,7 +1894,7 @@ mod tests {
         a.user(10);
         a.user(11);
         a.send(Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         })
         .unwrap();
         assert_eq!(a.finish(1), vec![], "held");
@@ -1830,7 +1929,7 @@ mod tests {
     fn background_work_does_not_get_past_a_stop_but_a_resume_lets_it_run() {
         let mut a = Driven::new();
         a.send(Command::Stop {
-            by: "peter".to_string(),
+            by: Control::by("peter"),
         })
         .unwrap();
         assert_eq!(a.background(20), vec![], "accepted, and held");
@@ -2039,7 +2138,7 @@ mod tests {
                         }
                     }
                     3 => Command::Stop {
-                        by: "peter".to_string(),
+                        by: Control::by("peter"),
                     },
                     4 => Command::Resume {
                         by: "peter".to_string(),

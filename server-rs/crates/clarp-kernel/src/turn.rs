@@ -145,8 +145,15 @@ pub enum Outcome {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         kind: String,
     },
+    /// Someone stopped it: who, whether the Host knew it was they, and why. The last two are
+    /// absent from a log written before they were kept, and from a Stop that is the user's own
+    /// claim and gave no reason: such a line is written as it was before.
     Stopped {
         by: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        verified: bool,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
     },
     /// The tool process went away under the turn: a crash, a killed shim, a lost machine.
     Interrupted {
@@ -158,7 +165,37 @@ pub enum Outcome {
     },
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl Outcome {
+    /// A turn someone stopped: who, and why.
+    pub fn stopped(by: crate::control::Control) -> Self {
+        Self::Stopped {
+            by: by.actor,
+            verified: by.verified,
+            reason: by.reason,
+        }
+    }
+
+    /// Who stopped the turn and why, where someone did.
+    pub fn stopped_by(&self) -> Option<crate::control::Control> {
+        match self {
+            Self::Stopped {
+                by,
+                verified,
+                reason,
+            } => Some(crate::control::Control {
+                actor: by.clone(),
+                verified: *verified,
+                reason: reason.clone(),
+            }),
+            _ => None,
+        }
+    }
+
     /// A turn whose tool failed, with the tool's words for it.
     pub fn failed(reason: String) -> Self {
         Self::Failed {
@@ -494,7 +531,7 @@ impl StartOutcome {
     fn into_outcome(self) -> Outcome {
         match self {
             Self::Failed { reason } => Outcome::not_started(reason),
-            Self::Stopped { by } => Outcome::Stopped { by },
+            Self::Stopped { by } => Outcome::stopped(crate::control::Control::by(by)),
             Self::Interrupted { reason } => Outcome::Interrupted { reason },
         }
     }
@@ -514,7 +551,7 @@ impl RunOutcome {
         match self {
             Self::Completed => Outcome::Completed,
             Self::Failed { reason } => Outcome::failed(reason),
-            Self::Stopped { by } => Outcome::Stopped { by },
+            Self::Stopped { by } => Outcome::stopped(crate::control::Control::by(by)),
             Self::Interrupted { reason } => Outcome::Interrupted { reason },
         }
     }
@@ -626,7 +663,7 @@ impl Parked {
 
     /// Someone stopped the turn while it waited. There is no tool process to wait for.
     pub fn stop(self, by: String, at_ms: i64) -> (Settled, TurnEvent) {
-        let outcome = Outcome::Stopped { by };
+        let outcome = Outcome::stopped(crate::control::Control::by(by));
         (
             self.ended(outcome.clone(), at_ms),
             TurnEvent::Settled { outcome, at_ms },
@@ -908,9 +945,7 @@ mod tests {
         let (stopped, by_hand) = parked.stop("user".to_string(), 1_500);
         assert_eq!(
             stopped.outcome,
-            Outcome::Stopped {
-                by: "user".to_string()
-            }
+            Outcome::stopped(crate::control::Control::by("user"))
         );
         let mut halted = waited.to_vec();
         halted.push(by_hand);

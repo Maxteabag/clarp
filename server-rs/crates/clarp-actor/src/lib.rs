@@ -31,8 +31,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clarp_backend::{Backend, Interpreter, LiveReply, Signal, TurnSpec};
-use clarp_kernel::agent::{Command, Effect, Refusal, Rest};
+use clarp_kernel::agent::{Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
+use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{
     Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Notice, Reply, ToolCall,
     ToolStatus, Total, TurnEnd,
@@ -464,6 +465,8 @@ pub struct Status {
     pub answered_by: Option<String>,
     /// The agent came from another Host, where it had worked.
     pub arrived: bool,
+    /// The note a repair left on the agent's state, while nothing about the state changed since.
+    pub note: Option<Note>,
 }
 
 /// What changed in the agent's books together, to be written together: a goal,
@@ -1411,6 +1414,7 @@ impl Actor {
             completed_at_ms: self.remembered.completed_at_ms,
             answered_by: self.remembered.answered_by.clone(),
             arrived: agent.arrived(),
+            note: agent.note().cloned(),
         }
     }
 
@@ -2360,9 +2364,30 @@ impl Actor {
         Ok((true, out))
     }
 
-    /// Ends the live turn and holds the mailbox. Returns how many turns were told to end.
+    /// Ends the live turn and holds the mailbox, as this actor's claim and for no reason given.
+    /// Returns how many turns were told to end.
     pub fn stop(&mut self, by: &str, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
-        let command = Command::Stop { by: by.to_string() };
+        self.stop_as(Control::by(by), now_ms)
+    }
+
+    /// A turn that nothing runs is looked for and given back, and a note of who and why is kept
+    /// on the agent's state. Nothing is ended, and nothing that waits is held or let go.
+    pub fn repair(&mut self, by: Control, now_ms: i64) -> Result<Outputs, ActorError> {
+        self.recorder.handle(Command::Repair { by }, now_ms)?;
+        Ok(Outputs {
+            changed: Changed {
+                status: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        })
+    }
+
+    /// Ends the live turn and holds the mailbox: who asks it, and why. Returns how many turns
+    /// were told to end.
+    pub fn stop_as(&mut self, by: Control, now_ms: i64) -> Result<(u32, Outputs), ActorError> {
+        let silenced = by.is_the_users();
+        let command = Command::Stop { by };
         let effects = self.recorder.handle(command, now_ms)?;
         let told = effects
             .iter()
@@ -2378,8 +2403,12 @@ impl Actor {
             ..Outputs::default()
         };
         self.carry_out(effects, &mut out)?;
-        // Whoever stops an agent does not want to hear the rest of what it had to say.
-        out.changed.speech = self.drop_lines(now_ms)? > 0;
+        // Only the user's own Stop means "be quiet": the rest of what the agent had to say is
+        // not spoken. An agent that stops another orchestrates; what was about to be said is
+        // still the user's to hear.
+        if silenced {
+            out.changed.speech = self.drop_lines(now_ms)? > 0;
+        }
         Ok((u32::try_from(told).unwrap_or(u32::MAX), out))
     }
 

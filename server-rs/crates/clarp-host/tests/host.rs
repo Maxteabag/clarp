@@ -1952,6 +1952,718 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
 }
 
 #[test]
+fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
+    // The Python Host keeps a turn's slot beside its record, and a slot can outlive the turn's
+    // process: its callback never ran, the Host restarted, a spawn nobody launches, an account
+    // that was waited for. That is what `POST /repair-slot` gives back there. Here a turn is the
+    // agent's log, followed through its shim's socket: each of those ways ends the turn, and what
+    // waits runs, with nobody's hand.
+    let kill = |pid: &str| {
+        let _ = Command::new("kill").args(["-9", pid]).status();
+    };
+    // The message was answered: each stand-in below answers with the letters of the line it was
+    // handed (the message, written as the tool reads it), so its answer holds the message's words.
+    let answered = |host: &Host, session: &str, text: &str| {
+        let answers = host.conversation(session);
+        answers.iter().any(|(role, said)| {
+            role == "assistant" && said.starts_with("done: ") && said.contains(text)
+        })
+    };
+    // A stand-in's answer, in the letters of the line it was handed (no quote in them).
+    let answers = "clean=$(printf '%s' \"$message\" | tr -dc 'a-zA-Z0-9 ')\n\
+                   printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n\
+                   printf '{\"type\":\"assistant\",\"session_id\":\"stand-in\",\"message\":{\"id\":\"msg_1\",\"role\":\"assistant\",\"model\":\"stand-in\",\"content\":[{\"type\":\"text\",\"text\":\"done: %s\"}]}}\\n' \"$clean\"\n\
+                   printf '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"stand-in\",\"result\":\"done: %s\",\"num_turns\":1}\\n' \"$clean\"\n";
+
+    // A stand-in whose turn, told to hold, writes down its shim's number and its own and runs on
+    // while that note is there (a test that fails leaves no tool behind it); tried again (the Host may try a turn whose tool died again), it answers.
+    let place = Place::new("no-slot");
+    let pids = place.root.join("pids");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "case \"$message\" in\n*HOLD*) if [ ! -e \"{p}\" ]; then echo \"$PPID $$\" > \"{p}\"; \
+             while [ -e \"{p}\" ]; do sleep 0.1; done; fi;;\nesac\n",
+            p = pids.display()
+        ),
+        answers,
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("", &[], &world);
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let held = |host: &Host, id: &str| {
+        let _ = std::fs::remove_file(&pids);
+        host.send(&agent, "HOLD", id);
+        wait_for("the turn to run", || pids.exists());
+        std::fs::read_to_string(&pids).unwrap().trim().to_string()
+    };
+
+    // The turn's shim and tool are killed without a word: the turn ends, and the message that
+    // waited runs.
+    let numbers = held(&host, "h-1");
+    host.send(&agent, "after the kill", "a-1");
+    for pid in numbers.split_whitespace() {
+        kill(pid);
+    }
+    // Waited for as `wait_for` does, saying what was there when it gives up.
+    let waited = |host: &Host, what: &str, ready: &dyn Fn() -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !ready() {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {what}: state {}, conversation {:?}, turns {:?}, said {}",
+                host.state(&agent),
+                host.conversation(&agent),
+                host.turns(&agent),
+                host.heard.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    waited(
+        &host,
+        "the message that waited behind a killed turn to be answered",
+        &|| answered(&host, &agent, "after the kill"),
+    );
+    wait_for("the agent to be done", || host.state(&agent) == "done");
+
+    // The Host is away while the turn's shim and tool die: the Host that comes back finds the turn
+    // ended, and what waited runs.
+    let numbers = held(&host, "h-2");
+    host.send(&agent, "after the restart", "a-2");
+    host.kill();
+    for pid in numbers.split_whitespace() {
+        kill(pid);
+    }
+    let host = place.start_in("", &[], &world);
+    wait_for(
+        "the message that waited behind a turn that died while the Host was away",
+        || answered(&host, &agent, "after the restart"),
+    );
+    wait_for("the agent to be done", || host.state(&agent) == "done");
+    drop(host);
+
+    // A launch that never starts (no shim to start the turn with): the turn fails at once, and
+    // the next message is taken too; the agent is never left busy.
+    let place = Place::new("no-shim");
+    let nowhere = place.root.join("no-shim-here");
+    let shim = ["--shim", nowhere.to_str().unwrap()];
+    let host = place.start_in("", &shim, &world);
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    host.send(&agent, "first", "n-1");
+    host.send(&agent, "second", "n-2");
+    let row = |host: &Host| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap().clone();
+        rows.into_iter()
+            .find(|row| row["session"] == agent.as_str())
+            .unwrap()
+    };
+    wait_for("both turns to have ended", || {
+        let turns = host.turns(&agent);
+        let ended = turns
+            .iter()
+            .filter(|turn| turn["turn"]["status"] == "failed")
+            .count();
+        ended == 2 && row(&host)["busy"] == false
+    });
+    assert_eq!(row(&host)["queued_turn_count"], 0);
+    drop(host);
+
+    // A turn that waits for an account when the Host restarts: still the account's to take up,
+    // not left to nobody. When the login changes it runs, and what waited runs after it.
+    let place = Place::new("account-restart");
+    let out_of_usage = place.root.join("out");
+    let init = "printf '%s\\n' '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"stand-in\",\"model\":\"stand-in\"}'\n";
+    let script = [
+        "#!/bin/sh\nread message\n",
+        &format!("if [ -e \"{}\" ]; then\n", out_of_usage.display()),
+        init,
+        "printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"rejected\"}}'\n",
+        "printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"session_id\":\"stand-in\",\"result\":\"out for now\"}'\n",
+        "exit 1\nfi\n",
+        answers,
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let home = place.root.join("home");
+    let login = home.join(".claude").join(".credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(&login, "the first account").unwrap();
+    let args = ["--accounts", "follow", "--logins-checked-every-ms", "100"];
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("HOME", home.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &args, &world);
+    let made = host.post("/agents", json!({ "name": "Worker", "backend": "claude" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    let row = |host: &Host| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap().clone();
+        rows.into_iter()
+            .find(|row| row["session"] == agent.as_str())
+            .unwrap()
+    };
+    std::fs::write(&out_of_usage, "").unwrap();
+    host.send(&agent, "work on this", "w-1");
+    wait_for("the turn to wait for an account", || {
+        row(&host)["live_activity"]["state"] == "limited"
+    });
+    host.send(&agent, "after the account", "w-2");
+    host.kill();
+    let host = place.start_in("", &args, &world);
+    let shown = row(&host);
+    assert_eq!(
+        (
+            &shown["busy"],
+            &shown["live_activity"]["state"],
+            &shown["queued_turn_count"]
+        ),
+        (&json!(true), &json!("limited"), &json!(1)),
+        "{shown}"
+    );
+    std::fs::remove_file(&out_of_usage).unwrap();
+    std::fs::write(&login, "a second account").unwrap();
+    wait_for("what waited behind the account to be answered", || {
+        answered(&host, &agent, "after the account")
+    });
+    wait_for("the agent to be done", || host.state(&agent) == "done");
+}
+
+#[test]
+fn a_stop_and_a_repair_say_who_acted_and_why_and_an_agent_is_known_by_its_own_turn() {
+    let place = Place::new("controls");
+    let at = |name: &str| place.root.join(name);
+    // A stand-in for Claude Code. A turn told to hold runs on until it is stopped. A turn told to
+    // stop or repair Omar does so with the agents' own tool, writing down what it printed. A held
+    // turn ends too when the test's place is gone (a test that fails leaves no tool behind it).
+    let host_program = serde_json::to_string(env!("CARGO_BIN_EXE_clarp-host")).unwrap();
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!("host={host_program}\n"),
+        &format!(
+            "case \"$message\" in\n\
+             *HOLD*) touch \"{held}\"; while [ -e \"{held}\" ]; do sleep 0.1; done;;\n\
+             *STOP-OMAR*) \"$host\" tool clarp-admin stop --session omar --reason 'it loops' --from desk \
+             > \"{stop}\" 2>&1; echo \"exit=$?\" >> \"{stop}\";;\n\
+             *REPAIR-OMAR*) \"$host\" tool clarp-admin repair --session omar --reason '  busy with nothing ' \
+             --from desk > \"{repair}\" 2>&1; echo \"exit=$?\" >> \"{repair}\";;\n\
+             *REPAIR-NOBODY*) \"$host\" tool clarp-admin repair --session nobody --reason x \
+             > \"{nobody}\" 2>&1; echo \"exit=$?\" >> \"{nobody}\";;\nesac\n",
+            held = at("held").display(),
+            stop = at("stop-out").display(),
+            repair = at("repair-out").display(),
+            nobody = at("nobody-out").display(),
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("secret", &[], &world);
+    for (name, session) in [("Omar", "omar"), ("Desk", "desk")] {
+        let made = host.post(
+            "/agents",
+            json!({ "name": name, "session": session, "backend": "claude" }),
+        );
+        assert_eq!(made["session"], session, "{made}");
+    }
+    let events = host.listen_at("/events?token=secret");
+    let row = |host: &Host, session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap().clone();
+        rows.into_iter()
+            .find(|row| row["session"] == session)
+            .unwrap()
+    };
+    let told_state = |source: &str| -> Value {
+        let heard = events.lock().unwrap();
+        let states = heard
+            .iter()
+            .rev()
+            .filter(|event| event["type"] == "agent-state");
+        let mut of_omar = states.filter(|event| event["session"] == "omar");
+        of_omar
+            .find(|event| event["detail"]["source"] == source)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let mut sent = 0;
+    let mut hold_omar = |host: &Host| {
+        sent += 1;
+        let _ = std::fs::remove_file(at("held"));
+        host.send("omar", "HOLD", &format!("o-{sent}"));
+        wait_for("Omar's turn to run", || at("held").exists());
+    };
+    let provenance = |row: &Value| -> Vec<Value> {
+        ["stop_actor", "stop_actor_verified", "stop_reason"]
+            .iter()
+            .map(|key| row["activity"][*key].clone())
+            .collect()
+    };
+
+    // Stopped by a caller who says it is another agent: its word, which the Host does not know to
+    // be true, and its reason without the blanks around it.
+    hold_omar(&host);
+    let asked =
+        json!({ "session": "omar", "actor": "agent:mallory", "reason": "  wrong branch  " });
+    let (status, stopped) = host.ask("POST", "/stop", Some(&asked));
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(
+        (
+            &stopped["stop_actor"],
+            &stopped["stop_actor_verified"],
+            &stopped["stop_reason"]
+        ),
+        (
+            &json!("agent:mallory"),
+            &json!(false),
+            &json!("wrong branch")
+        ),
+        "{stopped}"
+    );
+    assert_eq!(
+        (&stopped["terminated"], &stopped["queue_paused"]),
+        (&json!(1), &json!(true))
+    );
+    wait_for("the Stop to be told", || {
+        told_state("user_stop") != Value::Null
+    });
+    let state = told_state("user_stop");
+    assert_eq!(
+        (
+            &state["kind"],
+            &state["detail"]["stop_actor"],
+            &state["detail"]["stop_actor_verified"],
+            &state["detail"]["stop_reason"]
+        ),
+        (
+            &json!("interrupted"),
+            &json!("agent:mallory"),
+            &json!(false),
+            &json!("wrong branch")
+        ),
+        "{state}"
+    );
+    assert_eq!(
+        provenance(&row(&host, "omar")),
+        [json!("agent:mallory"), json!(false), json!("wrong branch")]
+    );
+
+    // Stopped from a paired phone, as the user: the Host knows it is so.
+    let (phone, _) = pair(&host, "Phone", "full");
+    hold_omar(&host);
+    let (status, stopped) =
+        host.ask_as(&phone, "POST", "/stop", Some(&json!({ "session": "omar" })));
+    assert_eq!(status, 200, "{stopped}");
+    assert_eq!(
+        (
+            &stopped["stop_actor"],
+            &stopped["stop_actor_verified"],
+            &stopped["stop_reason"]
+        ),
+        (&json!("user"), &json!(true), &json!("")),
+        "{stopped}"
+    );
+    // The administrator's own claim to be the user is not known to be true.
+    let (_, stopped) = host.ask(
+        "POST",
+        "/stop",
+        Some(&json!({ "session": "omar", "actor": "user" })),
+    );
+    assert_eq!(stopped["stop_actor_verified"], false, "{stopped}");
+
+    // Stopped by Desk in its own turn, with its tool: the Host knows the turn is Desk's.
+    hold_omar(&host);
+    host.send("desk", "STOP-OMAR", "d-1");
+    wait_for("Desk's tool to say what it did", || {
+        std::fs::read_to_string(at("stop-out")).is_ok_and(|out| out.contains("exit="))
+    });
+    let out = std::fs::read_to_string(at("stop-out")).unwrap();
+    let (printed, exit) = out.rsplit_once("exit=").unwrap();
+    assert_eq!(exit.trim(), "0", "{out}");
+    let printed: Value = serde_json::from_str(printed.trim()).unwrap();
+    assert_eq!(
+        (
+            &printed["stop_actor"],
+            &printed["stop_actor_verified"],
+            &printed["stop_reason"],
+            &printed["terminated"]
+        ),
+        (
+            &json!("agent:desk"),
+            &json!(true),
+            &json!("it loops"),
+            &json!(1)
+        ),
+        "{out}"
+    );
+    assert!(
+        out.starts_with(
+            "{\n  \"ok\": true,\n  \"terminated\": 1,\n  \"stop_actor\": \"agent:desk\","
+        ),
+        "{out}"
+    );
+    wait_for("Omar to be stopped", || host.state("omar") == "interrupted");
+    // What the Stop said is kept with the turn it ended: a Host started again shows it.
+    drop(host);
+    let host = place.start_in("secret", &[], &world);
+    assert_eq!(
+        provenance(&row(&host, "omar")),
+        [json!("agent:desk"), json!(true), json!("it loops")]
+    );
+    let events = host.listen_at("/events?token=secret");
+    let told_note = || -> Value {
+        let heard = events.lock().unwrap();
+        let states = heard
+            .iter()
+            .rev()
+            .filter(|event| event["type"] == "agent-state");
+        let mut of_omar = states.filter(|event| event["session"] == "omar");
+        of_omar
+            .find(|event| event["detail"]["source"] == "slot_repair")
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+
+    // A repair is refused in the Python Host's words where it cannot be one.
+    let repair = |body: &[u8]| {
+        let answered = fetch(&host, &host.token, "POST", "/repair-slot", &[], body);
+        (
+            answered.status,
+            serde_json::from_slice::<Value>(&answered.body).unwrap_or(Value::Null),
+        )
+    };
+    let refused = |status: u16, error: &str| (status, json!({ "error": error }));
+    assert_eq!(repair(b"not json"), refused(400, "bad json"));
+    assert_eq!(repair(b"[]"), refused(400, "bad json"));
+    assert_eq!(repair(b"{}"), refused(404, "agent not found"));
+    assert_eq!(
+        repair(br#"{"session":"nobody","reason":"x"}"#),
+        refused(404, "agent not found")
+    );
+    assert_eq!(
+        repair(br#"{"session":"omar"}"#),
+        refused(400, "reason is required")
+    );
+    assert_eq!(
+        repair(br#"{"session":"omar","reason":"   "}"#),
+        refused(400, "reason is required")
+    );
+    let janitor = repair(br#"{"session":"clarp-message-delegator","reason":"x"}"#);
+    assert_eq!(
+        (janitor.0, &janitor.1["code"]),
+        (403, &json!("janitor_inspection_only"))
+    );
+    // Omar is repaired: nothing to give back, nothing started, a note of who and why.
+    let (status, repaired) = repair(br#"{"session":" omar ","reason":" stuck "}"#);
+    assert_eq!(status, 200, "{repaired}");
+    assert_eq!(
+        repaired,
+        json!({
+            "ok": true, "session": "omar", "released_trace": "", "queue_recovered": 0,
+            "repair_actor": "user", "repair_actor_verified": false, "repair_reason": "stuck",
+        })
+    );
+    wait_for("the repair's note to be told", || {
+        told_note() != Value::Null
+    });
+    let note = told_note();
+    assert_eq!(note["kind"], "interrupted", "the state is the same: {note}");
+    assert_eq!(
+        note["detail"],
+        json!({
+            "source": "slot_repair", "repair_actor": "user", "repair_actor_verified": false,
+            "repair_reason": "stuck", "released_trace": "",
+        })
+    );
+    let shown = row(&host, "omar");
+    assert_eq!(
+        (
+            &shown["activity"]["repair_actor"],
+            &shown["activity"]["repair_reason"],
+            &shown["activity"]["released_trace"]
+        ),
+        (&json!("user"), &json!("stuck"), &json!("")),
+        "{shown}"
+    );
+    assert!(shown["activity"].get("stop_actor").is_none(), "{shown}");
+    assert_eq!(
+        shown["queue_paused"], true,
+        "a repair lets go of nothing: {shown}"
+    );
+
+    // Desk repairs Omar in its own turn: known to be Desk. A repair of nobody is refused in the
+    // words the Python tool ends on.
+    host.send("desk", "REPAIR-OMAR", "d-2");
+    wait_for("Desk's repair to be printed", || {
+        std::fs::read_to_string(at("repair-out")).is_ok_and(|out| out.contains("exit="))
+    });
+    let out = std::fs::read_to_string(at("repair-out")).unwrap();
+    let (printed, exit) = out.rsplit_once("exit=").unwrap();
+    assert_eq!(exit.trim(), "0", "{out}");
+    let printed: Value = serde_json::from_str(printed.trim()).unwrap();
+    assert_eq!(
+        (
+            &printed["repair_actor"],
+            &printed["repair_actor_verified"],
+            &printed["repair_reason"]
+        ),
+        (
+            &json!("agent:desk"),
+            &json!(true),
+            &json!("busy with nothing")
+        ),
+        "{out}"
+    );
+    wait_for("Desk to be done", || host.state("desk") == "done");
+    host.send("desk", "REPAIR-NOBODY", "d-3");
+    wait_for("the refusal to be printed", || {
+        std::fs::read_to_string(at("nobody-out")).is_ok_and(|out| out.contains("exit="))
+    });
+    let out = std::fs::read_to_string(at("nobody-out")).unwrap();
+    assert_eq!(
+        out,
+        "urllib.error.HTTPError: HTTP Error 404: Not Found\nexit=1\n"
+    );
+    // A command line without its reason is refused before anything is asked.
+    let told = host.ask(
+        "POST",
+        "/tools/run",
+        Some(&json!({ "tool": "clarp-admin", "argv": ["repair", "--session", "omar"] })),
+    );
+    let said = told.1["stderr"].as_str().unwrap_or_default().to_string();
+    assert!(
+        said.contains("the following arguments are required: --reason"),
+        "{told:?}"
+    );
+
+    // Omar's next turn is a state of its own: the note is no longer shown.
+    host.send("omar", "go", "o-last");
+    wait_for("Omar's next turn to be done", || {
+        host.state("omar") == "done"
+    });
+    let shown = row(&host, "omar");
+    assert!(shown["activity"].get("repair_actor").is_none(), "{shown}");
+
+    // A turn's token whose agent the Host cannot say (its key cannot be read) is no claim of the
+    // user's: the Stop is answered so, and may be asked again.
+    drop(host);
+    keep_record(
+        &place,
+        "turn-identity",
+        "key",
+        &json!({ "key": "not a key" }),
+    );
+    let host = place.start_in("secret", &[], &world);
+    let body = json!({ "session": "omar", "actor": "user" }).to_string();
+    let headers = [
+        ("X-Clarp-Turn", "1.6f6d6172.1.00"),
+        ("Content-Type", "application/json"),
+    ];
+    let answered = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/stop",
+        &headers,
+        body.as_bytes(),
+    );
+    assert_eq!(
+        (answered.status, answered.text()),
+        (
+            503,
+            r#"{"error":"turn identity unavailable","retryable":true}"#.to_string()
+        )
+    );
+}
+
+/// What an agent had yet to say aloud when it is stopped: dropped by the user's Stop, kept by an
+/// agent's own. The engine holds the first line of each reply while the agent is stopped, so the
+/// second waits; it is spoken afterwards only where the Stop was not the user's.
+#[test]
+fn only_the_users_stop_silences_what_an_agent_had_yet_to_say() {
+    let place = Place::new("hush");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound);
+    let owners = place.root.join("python-host-config.toml");
+    std::fs::write(
+        &owners,
+        "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"a-key\"\n\n\
+         [cartesia.voices]\nOmar = \"voice-of-omar\"\n",
+    )
+    .unwrap();
+    // Desk, a stand-in for Claude Code, writes down the token of the turn it runs in.
+    let token_at = place.root.join("desk-token");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "printf '%s' \"$CLARP_PROVIDER_TURN\" > \"{}\"\n",
+            token_at.display()
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    // No engine outside is reached, whatever keys the machine that runs this test has.
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+    ];
+    let host = place.start_in("secret", &args, &world);
+    let omar = host.new_agent("Omar");
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Desk", "session": "desk", "backend": "claude" }),
+    );
+    assert_eq!(made["session"], "desk", "{made}");
+    host.send("desk", "hello", "d-1");
+    wait_for("Desk's turn to hold its token", || {
+        std::fs::read_to_string(&token_at).is_ok_and(|token| !token.is_empty())
+    });
+    let desk_token = std::fs::read_to_string(&token_at).unwrap();
+    let (phone, _) = pair(&host, "Phone", "full");
+    let heard = host.listen_at("/events?token=secret");
+    let clips_of_omar = || -> Vec<u64> {
+        let heard = heard.lock().unwrap();
+        let clips = heard
+            .iter()
+            .filter(|event| event["type"] == "audio" && event["session"] == omar.as_str());
+        clips
+            .filter_map(|event| event["clip_id"].as_u64())
+            .collect()
+    };
+    let asked = || -> Vec<String> {
+        let asked = voice.asked();
+        let said = asked
+            .iter()
+            .filter_map(|asked| asked["transcript"].as_str());
+        said.map(str::to_string).collect()
+    };
+    let stop_body = |actor: Option<&str>| -> Value {
+        match actor {
+            Some(actor) => json!({ "session": omar, "actor": actor }),
+            None => json!({ "session": omar }),
+        }
+    };
+
+    // Each row: who stops Omar, as the Host knows it, and whether what he had yet to say is
+    // dropped.
+    let rows: [(&str, (&str, bool), bool); 4] = [
+        ("the administrator, for the user", ("user", false), true),
+        ("a paired phone, as the user", ("user", true), true),
+        ("a caller who says it is Desk", ("agent:desk", false), true),
+        ("Desk, in its own turn", ("agent:desk", true), false),
+    ];
+    for (row, (who, shown, silenced)) in rows.iter().enumerate() {
+        // Omar says two lines aloud; the engine holds the first, so the second waits.
+        voice.held.store(true, Ordering::SeqCst);
+        let clips_before = clips_of_omar().len();
+        let text = format!("<speak>First of row {row}.</speak> <speak>Then row {row}.</speak>");
+        host.post(
+            "/send",
+            json!({
+                "session": omar, "text": text, "client_msg_id": format!("s-{row}"),
+                "origin": "schedule", "synthesize_audio": true,
+            }),
+        );
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !(clips_of_omar().len() > clips_before
+            && asked()
+                .iter()
+                .any(|said| said.contains(&format!("First of row {row}."))))
+        {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for Omar's first line of row {row} to be spoken: asked {:?}, \
+                 clips {:?}, state {}, conversation {:?}",
+                asked(),
+                clips_of_omar(),
+                host.state(&omar),
+                host.conversation(&omar)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        wait_for("Omar's turn to be over", || host.state(&omar) == "done");
+
+        let body = stop_body((row == 2).then_some("agent:desk"));
+        let (status, stopped) = match row {
+            1 => host.ask_as(&phone, "POST", "/stop", Some(&body)),
+            3 => {
+                let headers = [
+                    ("X-Clarp-Turn", desk_token.as_str()),
+                    ("Content-Type", "application/json"),
+                ];
+                let body = body.to_string();
+                let answered = fetch(
+                    &host,
+                    &host.token,
+                    "POST",
+                    "/stop",
+                    &headers,
+                    body.as_bytes(),
+                );
+                (
+                    answered.status,
+                    serde_json::from_slice(&answered.body).unwrap(),
+                )
+            }
+            _ => host.ask("POST", "/stop", Some(&body)),
+        };
+        assert_eq!(status, 200, "{}: {stopped}", who);
+        assert_eq!(
+            (&stopped["stop_actor"], &stopped["stop_actor_verified"]),
+            (&json!(shown.0), &json!(shown.1)),
+            "{who}: {stopped}"
+        );
+
+        // The engine is let go: the first line ends whole, and the second is spoken only where
+        // the Stop was not the user's.
+        voice.held.store(false, Ordering::SeqCst);
+        let clip = *clips_of_omar().last().unwrap();
+        let whole = fetch(
+            &host,
+            &host.token,
+            "GET",
+            &format!("/clips/{clip}/complete.mp3"),
+            &[],
+            b"",
+        );
+        assert_eq!(whole.status, 200, "{who}");
+        if !silenced {
+            wait_for("what Omar had yet to say to be spoken", || {
+                asked()
+                    .iter()
+                    .any(|said| said.contains(&format!("Then row {row}.")))
+            });
+        }
+    }
+    // An agent's lines are spoken one at a time in the order they were said, so a line that had
+    // waited would have been spoken before the next row's first: those dropped never were.
+    let said = asked();
+    for (row, (who, _, silenced)) in rows.iter().enumerate() {
+        let spoken = said
+            .iter()
+            .any(|said| said.contains(&format!("Then row {row}.")));
+        assert_eq!(spoken, !silenced, "{who}: {said:?}");
+    }
+}
+
+#[test]
 fn a_turn_is_known_by_the_signed_token_it_is_given_while_it_runs_after_it_ended_and_after_a_restart()
  {
     use clarp_kernel::turn_identity;
