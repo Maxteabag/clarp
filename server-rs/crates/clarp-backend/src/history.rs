@@ -11,11 +11,10 @@
 //! that, and an answer the tool made up when its provider failed.
 //!
 //! The rule is the Python Host's (`server/lib/claude_transcript.py`, `parse_turns`), held
-//! by `tests/fixtures/claude-history-vectors.json`. One thing is not copied: a tool that
-//! starts a helper inside the agent's own process (`Agent`, `Task`) is a card like any
-//! other here, where the Python Host shows a cell of its own (`docs/differences.md`).
+//! by `tests/fixtures/claude-history-vectors.json`.
 
-use std::collections::BTreeSet;
+use clarp_kernel::helper_cells::{self, Children};
+use std::collections::{BTreeMap, BTreeSet};
 
 use clarp_kernel::python;
 use clarp_kernel::tools;
@@ -56,7 +55,7 @@ fn by_the_tool(text: &str) -> bool {
 
 /// Whether an answer was made up by the tool itself: when its provider failed, it writes
 /// the failure down as if the agent had said it.
-fn made_up(record: &Value) -> bool {
+pub fn made_up(record: &Value) -> bool {
     let message = match &record["message"] {
         message @ Value::Object(_) => message,
         _ => record,
@@ -98,6 +97,11 @@ fn settle(turns: &mut [Value], answer: &Value) {
 /// (`role`: `user` or `assistant`), its `text`, the `tools` used with it and its
 /// `timestamp` as the transcript writes it.
 pub fn claude(transcript: &str) -> Vec<Value> {
+    claude_with_children(transcript, &Children::new())
+}
+
+pub fn claude_with_children(transcript: &str, children: &Children) -> Vec<Value> {
+    let mut calls: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut turns: Vec<Value> = Vec::new();
     // The lines the tool writes when a session is taken up again: neither they nor the
     // answers to them were said by anybody.
@@ -107,6 +111,12 @@ pub fn claude(transcript: &str) -> Vec<Value> {
             continue;
         };
         let record = Value::Object(record);
+        if record["type"] == "queue-operation" {
+            if let Some(text) = record["content"].as_str() {
+                notify_helpers(text, &calls, &mut turns);
+            }
+            continue;
+        }
         let role = match record["type"].as_str() {
             Some(role @ ("user" | "assistant")) => role,
             _ => continue,
@@ -122,7 +132,7 @@ pub fn claude(transcript: &str) -> Vec<Value> {
         {
             continue;
         }
-        let (mut said, mut cards) = (Vec::new(), Vec::new());
+        let (mut said, mut cards, mut cells) = (Vec::new(), Vec::new(), Vec::new());
         match &record["message"]["content"] {
             Value::String(text) => said.push(text.as_str()),
             Value::Array(parts) => {
@@ -132,9 +142,36 @@ pub fn claude(transcript: &str) -> Vec<Value> {
                         Some("tool_use") => {
                             let name = part.get("name").and_then(Value::as_str).unwrap_or("tool");
                             let id = part["id"].as_str().unwrap_or_default();
-                            cards.push(tools::card(name, &part["input"], id));
+                            if helper_cells::is_helper(name) && python::truthy(&part["id"]) {
+                                let id = part["id"]
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| python::repr(&part["id"]));
+                                calls.insert(id.clone(), (turns.len(), cells.len()));
+                                cells.push(helper_cells::started(&id, &part["input"]));
+                            } else {
+                                cards.push(tools::card(name, &part["input"], id));
+                            }
                         }
-                        Some("tool_result") => settle(&mut turns, part),
+                        Some("tool_result") => {
+                            let loc = part["tool_use_id"]
+                                .as_str()
+                                .and_then(|id| calls.get(id))
+                                .copied();
+                            match loc {
+                                Some((row, col)) if row == turns.len() => helper_cells::returned(
+                                    &mut cells[col],
+                                    part,
+                                    &record["toolUseResult"],
+                                ),
+                                Some((row, col)) => helper_cells::returned(
+                                    &mut turns[row]["display_cells"][col],
+                                    part,
+                                    &record["toolUseResult"],
+                                ),
+                                None => settle(&mut turns, part),
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -143,8 +180,11 @@ pub fn claude(transcript: &str) -> Vec<Value> {
         }
         let said: Vec<&str> = said.into_iter().filter(|text| !text.is_empty()).collect();
         let text = python::strip(&said.join("\n")).to_string();
-        if text.is_empty() && cards.is_empty() {
+        if text.is_empty() && cards.is_empty() && cells.is_empty() {
             continue;
+        }
+        if role == "user" {
+            notify_helpers(&text, &calls, &mut turns);
         }
         if role == "user" && cards.is_empty() && by_the_tool(&text) {
             continue;
@@ -153,9 +193,33 @@ pub fn claude(transcript: &str) -> Vec<Value> {
             .get("timestamp")
             .cloned()
             .unwrap_or_else(|| json!(""));
-        turns.push(json!({ "role": role, "text": text, "tools": cards, "timestamp": at }));
+        let mut row = json!({ "role": role, "text": text, "tools": cards, "timestamp": at });
+        if !cells.is_empty() {
+            row["display_cells"] = Value::Array(cells);
+        }
+        turns.push(row);
+    }
+    for (row, col) in calls.values().copied() {
+        if let Some(cell) = turns
+            .get_mut(row)
+            .and_then(|r| r["display_cells"].get_mut(col))
+        {
+            *cell = helper_cells::shown(cell, children);
+        }
     }
     turns
+}
+
+fn notify_helpers(text: &str, calls: &BTreeMap<String, (usize, usize)>, turns: &mut [Value]) {
+    helper_cells::notifications(text, |id, status, agent, result| {
+        if let Some(&(row, col)) = calls.get(id)
+            && let Some(cell) = turns
+                .get_mut(row)
+                .and_then(|r| r["display_cells"].get_mut(col))
+        {
+            helper_cells::notified(cell, status, agent, result);
+        }
+    });
 }
 
 /// What each turn of a transcript is in its conversation, as the Python Host marks the rows

@@ -19,7 +19,7 @@ A = 'clarp-actor/src/lib.rs'
 #     run, MISSED): the actor writes every answer under the trace of the turn it is running, whatever the reader
 #     names; that is planted instead.
 PLANTS = [
-    (C, 'host', "Claude's copy of the user's words is read as an answer", '            "user" => self.on_user(&event["message"], t, out),', '            "user" => self.on_assistant(&event, t, out),'),
+    (C, 'host', "Claude's copy of the user's words is read as an answer", 'self.on_user(&event["message"], &event["toolUseResult"], t, out);', 'self.on_assistant(&event, t, out);'),
     (G, 'host', "Antigravity's step of the user's input is read as an answer", '            "agent_response" => {', '            "agent_response" | "user_input" => {'),
     (E, 'host', "a message is filed under its words", '    let (id, marked) = Message::filed(minted.unwrap_or(&trace_id));', '    let (id, marked) = Message::filed(&text);'),
     (A, 'host', "an answer is written without its turn's trace", '                            reply.trace_id = live.trace_id.clone();', '                            reply.trace_id = None;'),
