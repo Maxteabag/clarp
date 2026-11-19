@@ -37865,7 +37865,7 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     program(
         &fake,
         &format!(
-            "#!/bin/sh\nread -r request\n\x27{}\x27 \"$@\" || exit 1\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
+            "#!/bin/sh\nread -r request\n'{}' \"$@\" || exit 1\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
             probe.display(), detached.display(), place.root.display(), place.root.join("started").display(),place.root.display(),release.display()
         ),
     );
@@ -37947,9 +37947,44 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     assert_eq!(refusal["job_handle"],detail["handle"]);
     assert_eq!(refusal["job"]["revision"],shown["revision"]);
     assert_eq!(host.get(&path)["timeline"],detail["timeline"]);
+    // The origin exported by the hook links an explicit registration to
+    // exactly this task. Detail stays canonical while live clients remove
+    // the superseded row before they receive the new worker's event.
+    let events=host.listen();
+    let register=|host:&Host,raw:&str|{
+        let result=Command::new(env!("CARGO_BIN_EXE_clarp-host")).args(["tool","clarp-agent-bg",session,"job-upsert","linked-worker","fixture","Explicit job"])
+            .env_clear().env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
+            .env("CLARP_BACKGROUND_ORIGIN",raw).current_dir(&cwd).ended();
+        assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    };
+    let mut invalid=origin_json.clone();
+    invalid["agent_id"]=json!("someone-else");
+    register(&host,&invalid.to_string());
+    assert!(host.get("/background-jobs/linked-worker")["job"]["metadata"].get("tool_use_id").is_none());
+    register(&host,origin);
+    let event_id=shown["job_id"].as_str().unwrap();
+    wait_for("the registration follows its superseded native event",||{
+        let kept=events.lock().unwrap();
+        kept.iter().any(|e|e["job_id"]=="linked-worker" && e["job"]["metadata"]["tool_use_id"]=="managed")
+    });
+    let kept=events.lock().unwrap();
+    let mirrored=kept.iter().position(|e|e["job_id"]==event_id && e["status"]=="superseded").unwrap();
+    let explicit=kept.iter().position(|e|e["job_id"]=="linked-worker" && e["job"]["metadata"]["tool_use_id"]=="managed").unwrap();
+    assert!(mirrored<explicit);
+    assert_eq!(kept[mirrored]["job"]["projection_only"],true);
+    assert_eq!(kept[mirrored]["job"]["replaced_by_job_id"],"linked-worker");
+    drop(kept);
+    let visible=|host:&Host|host.get("/background-jobs")["jobs"].as_array().unwrap().iter().any(|j|j["job_id"]==event_id);
+    assert!(!visible(&host));
+    assert_eq!(host.get(&path)["job"]["status"],"running");
     host.kill();
     std::fs::write(&release, "end").unwrap();
     let host = place.start_in("", &flags, &env);
+    assert!(!visible(&host));
+    // Registering without an origin removes the link. A restart cannot
+    // erase either display invalidation from the native task's timeline.
+    register(&host,"");
+    assert!(visible(&host));
     wait_for("the exited attempt is reconciled after rejoin", || {
         job(&host, "managed")["metadata"]["stop_basis"] == "turn_exit"
     });
@@ -37970,7 +38005,7 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
         || job(&host, "managed")["status"] == "succeeded",
     );
     let settled = host.get(&path);
-    assert_eq!(settled["timeline"].as_array().unwrap().len(), 4);
+    assert_eq!(settled["timeline"].as_array().unwrap().len(), 6);
     assert!(settled["job"]["metadata"].get("stop_basis").is_none());
     host.kill();
     let host = place.start_in("", &flags, &env);

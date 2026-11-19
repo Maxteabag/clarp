@@ -313,7 +313,8 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
                 heartbeat_timeout_ms: None,
                 metadata: Value::Null,
             };
-            match member.agent.job(command).await {
+            let origin=call.env.get("CLARP_BACKGROUND_ORIGIN").and_then(|raw|clarp_kernel::provider_tasks::RegistrationOrigin::parse(raw));
+            match member.agent.job_with_origin(command,origin).await {
                 Err(error) => could_not(&error),
                 Ok(Err(refusal)) => ToolAnswer::said(1, format!("agent_bg: {refusal}")),
                 Ok(Ok(change)) => match change.job {

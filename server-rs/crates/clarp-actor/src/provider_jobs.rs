@@ -336,6 +336,7 @@ impl Actor {
         out.changed.jobs = !entry.records.is_empty();
         for record in entry.records {
             self.jobs.apply(&record);
+            self.remember_job_event(&record);
         }
         self.provider_sessions.insert(entry.native, entry.session);
         Ok(out)

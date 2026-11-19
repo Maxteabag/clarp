@@ -140,3 +140,15 @@ fn the_hook_returns_only_the_scoped_origin_and_background_turn_advice(){
     }
     assert_eq!(count,117);
 }
+
+#[test]
+fn only_the_registered_owner_and_its_open_native_session_accept_an_origin(){
+    let rows:Vec<(String,bool,Value)>=serde_json::from_str(include_str!("fixtures/provider-origins.json")).unwrap();
+    let mut count=0;
+    for (raw,open,expected) in rows{
+        let result=native::RegistrationOrigin::parse(&raw).and_then(|o|o.metadata("fixture-agent","claude",open.then_some("native"))).unwrap_or_else(||json!({}));
+        assert_eq!(result,expected);
+        count+=1;
+    }
+    assert_eq!(count,90);
+}
