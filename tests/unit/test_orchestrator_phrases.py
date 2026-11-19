@@ -252,13 +252,16 @@ def test_a_rows_audio_always_belongs_to_its_text():
     spec.loader.exec_module(generator)
     generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="Old words.", audio_path="/audio/old.mp3")
     generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="Old words.")
-    assert _row("no_such_agent")["audio_path"] == "/audio/old.mp3"      # same words: the audio stays
+    kept = _row("no_such_agent")
+    assert kept["audio_path"] == "/audio/old.mp3" and kept["generated_at"]   # same words: audio stays
     generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="New words.")
-    assert _row("no_such_agent")["audio_path"] == ""                    # new words, no new audio
+    cleared = _row("no_such_agent")
+    assert cleared["audio_path"] == "" and cleared["generated_at"] is None    # new words, no new audio
     generator.upsert_phrase(phrase_key="no_such_agent", voice_id="v", text="New words.", audio_path="/audio/new.mp3")
     assert _row("no_such_agent")["audio_path"] == "/audio/new.mp3"
 
 
 def _row(key):
-    return dict(db.conn().execute("SELECT text, audio_path FROM orchestrator_phrase_cache WHERE phrase_key=?",
+    return dict(db.conn().execute(
+        "SELECT text, audio_path, generated_at FROM orchestrator_phrase_cache WHERE phrase_key=?",
                                   (key,)).fetchone())

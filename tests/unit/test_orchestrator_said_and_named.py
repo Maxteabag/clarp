@@ -9,6 +9,7 @@ session spoken to."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -162,9 +163,14 @@ NAMED = {
     "a name nobody has": (_command("stop", "ZED"), None, "", "mike", "clarify"),
     "two of that name": (_command("stop", "SAM"), _two_sams, "", "mike", "clarify"),
     "names that disagree": (_command("restart", "ANTONI", name="Mike"), None, "", "mike", "clarify"),
-    "unsure": (_command("stop", "ANTONI", confidence=0.4), None, "", "mike", "clarify"),
-    "fork": (_command("fork", "ANTONI"), None, "", "mike", "clarify"),
+    "unsure, naming a real agent": (_command("stop", "ANTONI", confidence=0.4), None, "antoni", "mike",
+                                    "clarify"),
+    "unsure, naming nobody": (_command("stop", "ZED", confidence=0.4), None, "", "mike", "clarify"),
+    "fork of a real agent": (_command("fork", "ANTONI"), None, "antoni", "mike", "clarify"),
+    "fork naming nobody": (_command("fork", "ZED"), None, "", "mike", "clarify"),
     "an archived agent": (_command("stop", "ANTONI"), _archive_antoni, "antoni", "mike", "clarify"),
+    "an agent taking no voice commands": (_command("stop", "clarp-message-delegator"), None,
+                                          "clarp-message-delegator", "mike", "clarify"),
     "the lifecycle refuses": (_command("restart", "ANTONI"), _lifecycle_refuses, "antoni", "mike",
                               "clarify"),
     "carried out": (_command("stop", "ANTONI"), None, "antoni", "antoni", "control"),
@@ -213,3 +219,108 @@ def test_a_refused_command_and_a_held_question_answer_the_same_shape(effects, re
     for outcome in (refused, asked):
         assert (outcome.action, outcome.session, outcome.dispatch) == ("clarify", "mike", "")
     assert set(refused.decision) == set(asked.decision)
+
+
+# ---- R83, ruled for every clarify (00:47): the answer names the session spoken to; the row, the
+# event and the decision's suggestion name the session the decision's target resolves to, or "" ----
+
+def _message(target, confidence=0.95):
+    return {"kind": "agent_message", "target_session": target, "confidence": confidence}
+
+
+CLARIFIES = {
+    "an unsure message": (_message("antoni", 0.4), None, "antoni"),
+    "a message to nobody": (_message("zed"), None, ""),
+    "a message to one out of reach": (_message("antoni"), _archive_antoni, "antoni"),
+    "the model's question with a name as said": ({"kind": "clarify", "target_session": "ANTONI",
+                                                  "confidence": 0.9}, None, "antoni"),
+    "the model's question naming nobody": ({"kind": "clarify", "target_session": "ZED",
+                                            "confidence": 0.9}, None, ""),
+    "a status about nobody": ({"kind": "status_query", "target_session": "zed", "confidence": 0.95},
+                              None, ""),
+    "a status about two of a name": ({"kind": "status_query", "target_session": "Sam",
+                                      "confidence": 0.95}, _two_sams, ""),
+    "a status out of reach": ({"kind": "status_query", "target_session": "antoni", "confidence": 0.95},
+                              _archive_antoni, "antoni"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(CLARIFIES))
+def test_every_clarify_answers_the_session_spoken_to_and_names_what_it_resolved_to(
+        effects, monkeypatch, recorded, case):
+    decision, setup, resolved = CLARIFIES[case]
+    say, dispatched = router(lambda packet: {"reason": "case", **decision}, effects)
+    if setup:
+        setup(monkeypatch)
+    outcome = say("the request")
+    assert outcome.action == "clarify" and dispatched == []
+    assert outcome.session == "mike"
+    assert _row()["target_session"] == resolved
+    assert recorded["events"][-1]["target_session"] == resolved
+    assert recorded["log"][-1]["detail"].get("target_session", "<absent>") == resolved
+    assert outcome.decision["target_session"] == resolved
+
+
+def test_a_message_no_longer_held_answers_the_session_spoken_to(effects, recorded):
+    say, dispatched = router(_model("held", None), effects)
+    _held_then_expired(say)
+    outcome = say("yes")
+    assert outcome.action == "clarify" and dispatched == []
+    assert outcome.session == "mike"
+    assert _row()["target_session"] == "antoni" == outcome.decision["target_session"]
+
+
+# ---- R83, rulings of 01:28: a command that did nothing answers the session spoken to whatever its
+# final action; the run's receipt names the resolved target; a replay answers as the request did ----
+
+def _receipt():
+    row = db.conn().execute(
+        "SELECT result_json FROM janitor_demand_results ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
+    return json.loads(row["result_json"]) if row else {}
+
+
+def _agent_id(session):
+    return agents.get_by_session(session)["agent_id"] if session else ""
+
+
+def test_a_create_that_fails_after_it_was_accepted_answers_the_session_spoken_to(effects, monkeypatch, recorded):
+    def broken(self, payload):
+        raise RuntimeError("the lifecycle could not start it")
+    monkeypatch.setattr(agent_lifecycle.AgentLifecycleService, "create", broken)
+    say, _ = router(lambda packet: _command("create", "NOVA", name="Nova"), effects)
+    outcome = say("make a new agent called Nova")
+    assert outcome.action == "error" and outcome.status == 500
+    assert outcome.session == "mike"
+    assert _row()["target_session"] == "" == recorded["events"][-1]["target_session"]
+    assert _receipt().get("target_agent_id") == ""
+
+
+def test_a_clarifys_receipt_names_its_resolved_target_and_its_replay_answers_as_it_did(effects):
+    from lib import prompt_admissions
+    from tests.unit.test_orchestrator_janitor import ROLE, builtins
+    for session in ("mike", "antoni"):
+        agents.create_agent(persona=session.title(), voice_id="", cwd="/tmp", session=session)
+    builtins().ensure_builtins(initial={ROLE: {
+        "enabled": True, "backend": "codex", "provider": "codex",
+        "model": "gpt-5.3-codex-spark", "effort": "", "options": {"fallback_only": False}}})
+    asked = []
+    service = orchestrator.OrchestratorService(
+        SimpleNamespace(default_session="mike", stream=SimpleNamespace(broadcast=lambda _e: None),
+                        speak_announcement=lambda *a, **k: None),
+        model_call=lambda packet, *_: asked.append(1) or {"reason": "unsure", **_message("antoni", 0.4)})
+    admission = prompt_admissions.create(
+        authenticated_at_admission=True, origin="user", sender_agent_id="", channel="voice",
+        observed_at=db.now_ms(), client_admission_id="request-replayed", trace_id="route-r",
+        original_text="send the report")
+
+    def send():
+        return service.handle_send(text="send the report", requested_session="mike", trace_id="route-r",
+                                   prompt_admission=admission, hands_free=True, synthesize_audio=False,
+                                   dispatch=lambda **kw: pytest.fail("nothing is dispatched"))
+    first = send()
+    assert first.action == "clarify" and first.session == "mike"
+    assert _receipt().get("target_agent_id") == _agent_id("antoni")     # the resolved target
+    calls = len(asked)
+    again = send()                                                       # answered from the run
+    assert len(asked) == calls
+    assert again.session == "mike"
