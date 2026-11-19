@@ -23,12 +23,13 @@ use serde_json::{Map, Value, json};
 use crate::schedules;
 
 pub mod adaptive;
-pub mod label_audit;
 pub mod audio;
 pub mod book;
 pub mod creation;
 pub mod demand;
 pub mod fallbacks;
+pub mod label_audit;
+pub mod label_evidence;
 pub mod quota;
 pub mod routing_input;
 pub mod runs;
