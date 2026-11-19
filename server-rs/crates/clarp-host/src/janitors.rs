@@ -55,12 +55,6 @@ const OWN_TOOL: &str = "codex";
 /// Who a run's turn is from, as the apps file it: the Host itself, for a janitor.
 const FROM_A_JANITOR: &str = "janitor";
 
-/// What an app is told when it turns on a janitor whose job does not run here.
-const CANNOT_RUN: &str = "This Host runs a janitor's scheduled task, the router of spoken \
-                          messages, the explainer of tools, the Goal keeper and the audio \
-                          bookkeeper, and no other job yet: this janitor is made, set and \
-                          paused here, and nothing starts it. Nothing was turned on.";
-
 /// The janitors of this Host. `None` until the book was read where it is kept.
 #[derive(Default)]
 pub struct Desk {
@@ -881,18 +875,12 @@ async fn change(
                 return bad("enabled must be true or false");
             };
             let on = *on;
-            let runs_here = [
-                runs::SCHEDULED_TASK,
-                clarp_kernel::router::JOB,
-                crate::explain::JOB,
-                clarp_kernel::goals::keeper::ROLE,
-                clarp_kernel::janitors::audio::ROLE,
-            ];
-            let seats = app.config.accounts == clarp_kernel::recovery::Accounts::Select
-                && app.seats.told()
-                && agent["template_id"] == "account-hotseat";
-            if on && !seats && !runs_here.iter().any(|job| agent["template_id"] == *job) {
-                let told = Refused::new(503, "janitor_runtime_unavailable", CANNOT_RUN);
+            let seats =
+                app.config.accounts == clarp_kernel::recovery::Accounts::Select && app.seats.told();
+            let job = agent["template_id"].as_str().unwrap_or_default();
+            if on && !rules::runs_here(job, seats) {
+                let why = rules::cannot_run(seats);
+                let told = Refused::new(503, "janitor_runtime_unavailable", why);
                 return refusal(&told);
             }
             let turned = app.janitors.change(&app, &key, |book, world, now_ms| {

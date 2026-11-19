@@ -163,6 +163,54 @@ pub fn demand_roles() -> impl Iterator<Item = &'static String> {
     listed.roles.iter().chain(&listed.optional_roles)
 }
 
+/// The jobs whose janitor runs on every Rust Host when it is turned on: a scheduled task, the
+/// router of spoken messages, the explainer of tools, the Goal keeper and the audio
+/// bookkeeper. Every other janitor is made, set, paused, removed and shown, and nothing
+/// starts it.
+pub const RUN_HERE: [&str; 5] = [
+    runs::SCHEDULED_TASK,
+    crate::router::JOB,
+    "tool-explainer",
+    crate::goals::keeper::ROLE,
+    audio::ROLE,
+];
+
+/// The job whose janitor runs only on a Host that keeps the machine's logins itself
+/// (`--accounts select`) and was told the owner's tool for the account seats.
+pub const SEATS_JOB: &str = "account-hotseat";
+
+/// Whether a janitor with this job runs on a Host, as it is set up: `seats` where it keeps
+/// the logins itself and was told the owner's tool for the seats.
+pub fn runs_here(job: &str, seats: bool) -> bool {
+    RUN_HERE.contains(&job) || (seats && job == SEATS_JOB)
+}
+
+/// What an app is told when it turns on a janitor whose job does not run on this Host: the
+/// jobs that do not, by their names in the catalogue, and where the switcher of seats runs.
+pub fn cannot_run(seats: bool) -> String {
+    let names: Vec<&str> = templates()
+        .iter()
+        .filter(|template| !runs_here(template["id"].as_str().unwrap_or_default(), seats))
+        .filter_map(|template| template["name"].as_str())
+        .collect();
+    let listed = match names.split_last() {
+        Some((last, [])) => (*last).to_string(),
+        Some((last, before)) => format!("{} or {last}", before.join(", ")),
+        None => String::new(),
+    };
+    let mut said = format!(
+        "This Host does not run a janitor whose job is {listed}: this janitor is made, set \
+         and paused here, and nothing starts it. Nothing was turned on."
+    );
+    if !seats {
+        said.push_str(
+            " The Hotseat switcher runs on a Host that keeps the logins itself \
+             (--accounts select) and was told the owner's tool for the account seats.",
+        );
+    }
+    said
+}
+
 /// The id the janitor a Host installs for a job has, on every Host: the Python Host makes
 /// it from the job's name, so that the same janitor is the same agent wherever it is.
 pub fn own_id(role: &str) -> Option<&'static str> {
@@ -652,4 +700,41 @@ pub fn execution(
         run.insert("isolated".to_string(), json!(true));
     }
     Ok(run)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_janitor_that_cannot_run_is_told_which_jobs_do_not_run_here() {
+        for job in RUN_HERE {
+            assert!(runs_here(job, false) && runs_here(job, true), "{job}");
+        }
+        assert!(!runs_here(SEATS_JOB, false) && runs_here(SEATS_JOB, true));
+        for job in [
+            "heartbeat-decider",
+            "quota-monitor",
+            "task-labels",
+            "label-auditor",
+            "",
+        ] {
+            assert!(!runs_here(job, false) && !runs_here(job, true), "{job}");
+        }
+        assert_eq!(
+            cannot_run(false),
+            "This Host does not run a janitor whose job is Heartbeat keeper, Quota keeper, \
+             Hotseat switcher, Task labels or Label checker: this janitor is made, set and paused \
+             here, and nothing starts it. Nothing was turned on. The Hotseat switcher runs on a \
+             Host that keeps the logins itself (--accounts select) and was told the owner's tool \
+             for the account seats."
+        );
+        assert_eq!(
+            cannot_run(true),
+            "This Host does not run a janitor whose job is Heartbeat keeper, Quota keeper, \
+             Task labels or Label checker: this janitor is made, set and paused here, and nothing \
+             starts it. Nothing was turned on."
+        );
+    }
 }

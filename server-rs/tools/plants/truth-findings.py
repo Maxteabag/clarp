@@ -32,5 +32,25 @@ for label,old,new in [
     ('the old goal not asked','not_built_at(&uri, "A goal of this kind is")','not_built("A goal of this kind is")'),
 ]:
     PLANTS.append((S,'wire',label,old,new))
+J='clarp-kernel/src/janitors.rs'
+H='clarp-host/src/janitors.rs'
+RUNS['words']=['test','-p','clarp-kernel','--lib','a_janitor_that_cannot_run_is_told']
+RUNS['auditor']=['test','--test','host','a_janitors_scheduled_task_runs_when_its_schedule_says']
+RUNS['seats']=['test','--test','host','the_desk_and_automatic_switcher_move_only_an_owned_idle_login']
+for job in ['runs::SCHEDULED_TASK,','crate::router::JOB,','"tool-explainer",','crate::goals::keeper::ROLE,','audio::ROLE,\n]']:
+    PLANTS.append((J,'words',f'{job.split(",")[0]} does not run','    '+job.replace('\\n','\n'),'    "never",'+('\n]' if job.endswith(']') else '')))
+for file,run,label,old,new in [
+    (J,'words','the switcher of seats runs everywhere','(seats && job == SEATS_JOB)','job == SEATS_JOB'),
+    (J,'words','every job runs with the seats','(seats && job == SEATS_JOB)','seats'),
+    (J,'words','the jobs said without their last','Some((last, before)) => format!("{} or {last}", before.join(", ")),','Some((_, before)) => before.join(", "),'),
+    (J,'words','every job said','.filter(|template| !runs_here(template["id"].as_str().unwrap_or_default(), seats))','.filter(|_| true)'),
+    (J,'words','where the switcher runs not said','    if !seats {\n        said.push_str(','    if false {\n        said.push_str('),
+    (J,'words','where the switcher runs said always','    if !seats {\n        said.push_str(','    if true {\n        said.push_str('),
+    (H,'seats','a seats tool is not asked for','&& app.seats.told();\n','&& true;\n'),
+    (H,'auditor','the words of a Host with the seats','let why = rules::cannot_run(seats);','let why = rules::cannot_run(true);'),
+    (H,'seats','the switcher let on everywhere','if on && !rules::runs_here(job, seats) {','if on && !rules::runs_here(job, true) {'),
+    (H,'auditor','every janitor turned on','if on && !rules::runs_here(job, seats) {','if false {'),
+]:
+    PLANTS.append((file,run,label,old,new))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
