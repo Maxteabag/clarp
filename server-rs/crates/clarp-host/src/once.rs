@@ -374,6 +374,14 @@ async fn run_with(
     for name in crate::OWN_SECRETS {
         command.env_remove(name);
     }
+    for (name, value) in crate::child_environment() {
+        match value {
+            Some(value) if keeps.is_none_or(|names| names.contains(name)) => {
+                command.env(name, value)
+            }
+            _ => command.env_remove(name),
+        };
+    }
     for (name, value) in &launch.env {
         command.env(name, value);
     }

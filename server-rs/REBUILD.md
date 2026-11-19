@@ -442,6 +442,23 @@ not a wall between an agent and the administrator, who are the same user of the 
 writes for a worker that no turn told where its Host is (`~/.config/clarp-host/config.toml`) holds the
 administrator's token, as the Python Host's file does.
 
+A managed Claude turn carries `CLARP_RUST_MANAGED_TURN=1`. The Host clears its own secrets and
+nine inherited identity names before applying a child's launch order. The names are
+`CLAUDE_PWA_SESSION`, `CLARP_SESSION`, `CLARP_PROVIDER_TURN`, `CLARP_BACKGROUND_ORIGIN`,
+`CLARP_RUST_MANAGED_TURN`, `CLARP_AGY_MANAGED_TURN`, `CLARP_BACKGROUND_WORKER_PID`,
+`CLAUDE_CODE_SESSION_ID` and `CLARP_CODE_ROOT`. It also clears the Python store locations
+`CLAUDE_PWA_DB`, `CLAUDE_PWA_LOG_DIR`, `CLARP_CACHE_DIR` and `CLARP_DATA_DIR`.
+The Host takes `CLAUDE_PWA_CONFIG`, `CLARP_CONFIG_DIR` and `CLARP_SHARE_DIR` at startup and
+explicitly supplies their configured values to its children. The first two let a tool find its
+Host's configuration, and the third lets an installed wrapper find this Host's tools. A
+one-off tool with a restricted environment still receives only the settings its order permits.
+An enabled Python Host plugin can receive prompt, pre-tool,
+post-tool, stop, pre-compact, notification and subagent-stop hooks from a Rust Claude turn.
+When the Python registry resolves the same live or archived agent, those hooks can record
+its turn and activity, show completion, and trigger notification classification. R111 is the
+Python release owner's guard for the marker. Until the installed plugin honors it, an agent
+moved here must no longer resolve on a Python Host whose plugin runs for every Claude process.
+
 **What an agent publishes is there** (15 Nov 2026). An agent shows its user an image, or hands over a
 recording or a document, by publishing a file: its tool sends the bytes, the Host decides what they are by
 their first bytes and not by what the agent calls them, and takes only what a phone can show or play. The rules

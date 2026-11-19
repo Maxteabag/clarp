@@ -132,6 +132,12 @@ impl Launcher {
         for name in crate::OWN_SECRETS {
             command.env_remove(name);
         }
+        for (name, value) in crate::child_environment() {
+            match value {
+                Some(value) => command.env(name, value),
+                None => command.env_remove(name),
+            };
+        }
         for (name, value) in &order.env {
             command.env(name, value);
         }
@@ -280,7 +286,15 @@ mod tests {
             .get_envs()
             .filter(|(_, value)| value.is_some())
             .collect();
-        assert_eq!(given.len(), 1, "the tool is told which agent it works for");
+        let configured = crate::child_environment()
+            .iter()
+            .filter(|(_, value)| value.is_some())
+            .count();
+        assert_eq!(
+            given.len(),
+            configured + 1,
+            "the agent and its Host settings"
+        );
     }
 
     #[test]
@@ -302,6 +316,94 @@ mod tests {
                     removed.iter().any(|key| key == secret),
                     "{launcher}: {secret}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn a_shim_uses_its_own_turn_identity_and_inherits_provider_settings() {
+        // Supply a foreign parent to this test in a separate process so other
+        // tests can launch concurrently with their own environment.
+        const HERE: &str =
+            "launcher::tests::a_shim_uses_its_own_turn_identity_and_inherits_provider_settings";
+        if std::env::var_os("FIXTURE_LAUNCH_PARENT").is_none() {
+            let status = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", HERE])
+                .env("FIXTURE_LAUNCH_PARENT", "1")
+                .env("CLARP_BACKGROUND_ORIGIN", "foreign-origin")
+                .env("CLARP_SESSION", "foreign-session")
+                .env("CLARP_PROVIDER_TURN", "foreign-turn")
+                .env("CLAUDE_PWA_SESSION", "foreign-session")
+                .env("CLARP_AGY_MANAGED_TURN", "foreign-agy")
+                .env("CLARP_BACKGROUND_WORKER_PID", "1111")
+                .env("CLAUDE_CODE_SESSION_ID", "foreign-claude")
+                .env("CLARP_CODE_ROOT", "/fixture/foreign-code")
+                .env("CLAUDE_PWA_DB", "/fixture/foreign-db")
+                .env("CLAUDE_PWA_LOG_DIR", "/fixture/foreign-logs")
+                .env("CLARP_CACHE_DIR", "/fixture/foreign-cache")
+                .env("CLARP_DATA_DIR", "/fixture/foreign-data")
+                .env("CLAUDE_PWA_CONFIG", "/fixture/host.toml")
+                .env("CLARP_CONFIG_DIR", "/fixture/config")
+                .env("CLARP_SHARE_DIR", "/fixture/share")
+                .env("CLARP_QA_PROVIDER_ROOT", "/fixture/provider")
+                .env("CLAUDE_PWA_EXTRA", "fixture-setting")
+                .env(clarp_backend::MANAGED_CLAUDE_ENV, "foreign-marker")
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        }
+        for mode in ["direct", "systemd"] {
+            let launcher = Launcher::by_name(mode, "/bin/clarp-shim".into()).unwrap();
+            let mut turn = order();
+            turn.env = vec![
+                ("CLAUDE_PWA_SESSION".into(), "fixture".into()),
+                ("CLARP_SESSION".into(), "fixture".into()),
+                ("CLARP_PROVIDER_TURN".into(), "own-token".into()),
+            ];
+            for claude in [false, true] {
+                if claude {
+                    turn.env
+                        .push((clarp_backend::MANAGED_CLAUDE_ENV.into(), "1".into()));
+                }
+                let command = launcher.command(&turn);
+                let env: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+                let value = |key: &str| env.get(std::ffi::OsStr::new(key)).copied();
+                for removed in [
+                    "CLARP_BACKGROUND_ORIGIN",
+                    "CLARP_AGY_MANAGED_TURN",
+                    "CLARP_BACKGROUND_WORKER_PID",
+                    "CLAUDE_CODE_SESSION_ID",
+                    "CLARP_CODE_ROOT",
+                    "CLAUDE_PWA_DB",
+                    "CLAUDE_PWA_LOG_DIR",
+                    "CLARP_CACHE_DIR",
+                    "CLARP_DATA_DIR",
+                ] {
+                    assert_eq!(value(removed), Some(None));
+                }
+                // Each configured store value is explicitly in the launch order.
+                for (key, path) in [
+                    ("CLAUDE_PWA_CONFIG", "/fixture/host.toml"),
+                    ("CLARP_CONFIG_DIR", "/fixture/config"),
+                    ("CLARP_SHARE_DIR", "/fixture/share"),
+                ] {
+                    assert_eq!(value(key), Some(Some(std::ffi::OsStr::new(path))));
+                }
+                for inherited in ["CLARP_QA_PROVIDER_ROOT", "CLAUDE_PWA_EXTRA"] {
+                    assert_eq!(value(inherited), None);
+                }
+                assert_eq!(
+                    value(clarp_backend::MANAGED_CLAUDE_ENV),
+                    Some(claude.then_some(std::ffi::OsStr::new("1")))
+                );
+                for (key, want) in [
+                    ("CLARP_SESSION", "fixture"),
+                    ("CLAUDE_PWA_SESSION", "fixture"),
+                    ("CLARP_PROVIDER_TURN", "own-token"),
+                ] {
+                    assert_eq!(value(key), Some(Some(std::ffi::OsStr::new(want))));
+                }
             }
         }
     }

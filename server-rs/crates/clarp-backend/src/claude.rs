@@ -128,7 +128,10 @@ impl Backend for Claude {
             before_stop: None,
             program: self.program.clone(),
             args,
-            env: vec![(SESSION_ENV.to_string(), spec.session.clone())],
+            env: vec![
+                (SESSION_ENV.to_string(), spec.session.clone()),
+                (crate::MANAGED_CLAUDE_ENV.into(), "1".into()),
+            ],
             stdin,
         }
     }
@@ -1641,7 +1644,10 @@ mod tests {
         );
         assert_eq!(
             fresh.env,
-            vec![(SESSION_ENV.to_string(), "maximus".to_string())]
+            vec![
+                (SESSION_ENV.to_string(), "maximus".to_string()),
+                (crate::MANAGED_CLAUDE_ENV.into(), "1".into())
+            ]
         );
         assert_eq!(fresh.stdin.last(), Some(&b'\n'));
         assert_eq!(
