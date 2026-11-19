@@ -14,6 +14,50 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+// The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
+#[path = "host/contacts.rs"]
+mod contacts;
+#[path = "host/controller_actions.rs"]
+mod controller_actions;
+#[path = "host/delivery.rs"]
+mod delivery;
+#[path = "host/diagnostics.rs"]
+mod diagnostics;
+#[path = "host/goal_ledger.rs"]
+mod goal_ledger;
+#[path = "host/installer.rs"]
+mod installer;
+#[path = "host/janitor_attention.rs"]
+mod janitor_attention;
+#[path = "host/launch_directories.rs"]
+mod launch_directories;
+#[path = "host/pictures.rs"]
+mod pictures;
+#[path = "host/provider_tasks.rs"]
+mod provider_tasks;
+#[path = "host/start_tolerance.rs"]
+mod start_tolerance;
+#[path = "host/transcription_inventory.rs"]
+mod transcription_inventory;
+
+/// This file holds no more tests than it held when the pieces were given files of their own
+/// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
+/// end collide there. A new test goes into its piece's file under `tests/host/`, declared above.
+#[test]
+fn this_file_holds_no_more_tests_than_it_held_when_each_piece_was_given_a_file() {
+    const MOST: usize = 175;
+    let marks = [concat!("#[te", "st]"), concat!("#[tokio::te", "st")];
+    let held = include_str!("host.rs")
+        .lines()
+        .filter(|line| marks.iter().any(|mark| line.trim_start().starts_with(mark)))
+        .count();
+    assert!(
+        held <= MOST,
+        "tests/host.rs holds {held} tests, more than {MOST}: a new test goes into its piece's file \
+         under tests/host/ (one file a piece, declared at the top of host.rs), not into host.rs"
+    );
+}
+
 static HOSTS: AtomicU64 = AtomicU64::new(0);
 
 /// A command of the Host's own program that is to end by itself: what it said and how it
