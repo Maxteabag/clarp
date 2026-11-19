@@ -43,10 +43,15 @@ impl Scripted {
 
     /// A tool that answers every message with the message's first line. A message that begins
     /// with `sleep` and a number of seconds is answered after that long, which is how a test
-    /// gets a turn that is still running when it wants one.
+    /// gets a turn that is still running when it wants one. A whole number of seconds is slept
+    /// one at a time, and only while the folder the tool was started in is there: a test's
+    /// tool ends when the test's place is gone, and leaves nothing running behind it.
     pub fn echo() -> Self {
-        let script = "IFS= read -r message; \
-            case \"$message\" in sleep\\ [0-9]*) sleep \"${message#sleep }\";; esac; \
+        let script = "IFS= read -r message; here=$(pwd); \
+            case \"$message\" in sleep\\ [0-9]*) seconds=\"${message#sleep }\"; \
+            case \"$seconds\" in *[!0-9]*) sleep \"$seconds\";; \
+            *) while [ \"$seconds\" -gt 0 ] && [ -d \"$here\" ]; do sleep 1; seconds=$((seconds - 1)); done;; \
+            esac;; esac; \
             printf '%s\\n' \"$message\"";
         Self::new("sh", vec!["-c".to_string(), script.to_string()])
     }
