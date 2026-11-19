@@ -4,7 +4,7 @@ Models propose continuity; current source/identity/stop fences own admission.
 No model can change accounts, approve decisions, or dispatch outside its snapshot.
 """
 from __future__ import annotations
-import hashlib,json,threading,time,subprocess,shutil,os
+import hashlib,json,re,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
 from . import janitor_store,hotseat_status
 from .protocol import AgentState
@@ -135,7 +135,7 @@ def decision_model(packet,run):
         with prepared(adapter.id,cmd,prompt) as call:
             p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
             p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
-        if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
+        if p.returncode:raise model_fallbacks.cli_failure(adapter.id,p.stderr or p.stdout,prompt=prompt,returncode=p.returncode)
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
 
@@ -165,7 +165,11 @@ def model_json(run,prompt,request_suffix=''):
             check_argument(provider,'--print='+prompt)
             try:answer=adapter.isolated_oneshot(prompt,model=model.get('model') or '',home_name=f"{provider}-janitor-{frozen['template_id']}-home")
             except TimeoutError as exc:raise model_fallbacks.ProviderFailure(str(exc)[:500],'timeout') from exc
-            except RuntimeError as exc:raise model_fallbacks.provider_error(str(exc)[:500]) from exc
+            except RuntimeError as exc:
+                # The status is in the backend's own fixed prefix (backend.agy: "agy exited N ..."),
+                # read here once, where its error enters; a provider's words are never read.
+                status=re.match(r'agy exited (-?\d+)',str(exc))
+                raise model_fallbacks.cli_failure(provider,str(exc),prompt=prompt,returncode=int(status.group(1)) if status else None) from None
             usage.update(answer['usage']);return orchestrator._extract_json(answer['text'])
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('CLI unavailable')
@@ -174,7 +178,7 @@ def model_json(run,prompt,request_suffix=''):
         with prepared(adapter.id,cmd,prompt) as call:
             p=subprocess.run(call.argv,cwd=str(existing_workspace_path(None)),input=call.input,stdin=None if call.input is not None else subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=150,check=False,env={**os.environ,**adapter.routing_env()})
             p.stdout,p.stderr=(p.stdout or b'').decode(),(p.stderr or b'').decode()  # bytes in, text out
-        if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
+        if p.returncode:raise model_fallbacks.cli_failure(adapter.id,p.stderr or p.stdout,prompt=prompt,returncode=p.returncode)
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     answer=model_fallbacks.execute(run['agent_id'],run['run_id']+':'+(request_suffix or 'call'),primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))
     if not isinstance(answer,dict):raise ValueError('The model did not answer with a JSON object')
