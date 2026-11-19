@@ -10,10 +10,13 @@
 //! agent opened, stopped or started); [`Book::finish`] keeps what came of it.
 //!
 //! The rules are the Python Host's (`server/lib/orchestrator.py`, `handle_send`,
-//! `_apply_decision` and `_command_check`, as they are since its PR 436 of 18 Nov 2026),
-//! held message by message by `tests/fixtures/router-flow-vectors.json`. A command is never
-//! held; a held message belongs to the session it was made in; a name given anywhere is the
-//! target, resolved as a voice name.
+//! `_apply_decision`, `_command_check` and `_replayed_run`, as they are since its PRs 436 and 443
+//! of 18 and 19 Nov 2026), held message by message by `tests/fixtures/router-flow-vectors.json`.
+//! A command is never held; a held message belongs to the session it was made in; a name given
+//! anywhere is the target, resolved as a voice name. What nothing was delivered for (a question,
+//! a command that did nothing) answers the session spoken to, and its row and event name the
+//! session its target resolved to, or none; an app is told nothing aloud. A run's receipt keeps
+//! what its first answer said, and a message sent again is answered that.
 
 use std::collections::BTreeMap;
 
@@ -29,6 +32,7 @@ use super::{
     IGNORED, JOB, STATUS, Settings, asks_again, should_run,
 };
 use crate::janitors::book::{Book as Janitors, World};
+use crate::janitors::demand;
 use crate::janitors::option_values;
 use crate::python;
 
@@ -87,6 +91,8 @@ const NAME_TAKEN: Fixed = fixed("name_taken", "I already have an agent by that n
 /// The Host refused to start an agent: said, never a silent error.
 const COMMAND_REFUSED: Fixed = fixed("command_refused", "I could not do that.");
 /// A confirmation of a message that is no longer held here: nothing is given in its place.
+/// A message for an agent whose name is none the model was shown, or one that cannot be spoken to.
+const NO_VALID_TARGET: Fixed = fixed("no_valid_target", "I am not sure which agent that was for.");
 const HELD_MESSAGE_GONE: Fixed = fixed(
     "held_message_gone",
     "That message is no longer waiting. Please say it again.",
@@ -304,6 +310,10 @@ pub struct Outcome {
     /// What the Host is still to say, after it did what the decision asked: that it refused
     /// to start an agent.
     pub say: Option<Say>,
+    /// The session the decision resolved to, `""` for none, which the run's receipt names; `None`
+    /// where the answer's session already is it (a message given, an answer without a decision).
+    /// Never in what is answered.
+    pub target: Option<String>,
 }
 
 /// One routing under way: what the Host holds from [`Book::begin`] to [`Book::finish`].
@@ -394,6 +404,8 @@ pub struct Plan {
     raw: Map<String, Value>,
     action: String,
     target: String,
+    /// The decision was a command (before a refusal made it a question).
+    command: bool,
     fallback_used: bool,
     error: String,
 }
@@ -459,11 +471,98 @@ fn agents_named<'a>(agents: &'a [Member], name: &str) -> Vec<&'a Member> {
     agents.iter().filter(named).collect()
 }
 
-/// Whether a command is carried out: the sentence it is refused with, or the session it acts
-/// on (`None`: it makes an agent, and acts on none there is). A name given anywhere, the
-/// decision's own or, of a command for an agent, the payload's, is the target; the agent the
-/// message was said to is the target only where none is given. It acts only on an agent of
-/// the packet: in a call, one of the call. `asked`: the command, as it is compared.
+/// A status kept in a receipt, where a reply to a client can carry it: a whole number from 200 to
+/// 599 but 204 and 304 (yes and no are none). A client cannot read the others as this answer: 0 or
+/// 99 make the status line unreadable, one of the hundreds is passed over as interim, and the
+/// hundreds, 204 and 304 carry no body, so the answer would be lost.
+fn answerable(status: &Value) -> Option<u16> {
+    // A fraction is no whole number, though it be 200.0.
+    let status = status.as_i64()?;
+    let status = u16::try_from(status).ok()?;
+    ((200..=599).contains(&status) && ![204, 304].contains(&status)).then_some(status)
+}
+
+/// One receipt with the fields of another added.
+fn merged(receipt: &Value, more: &Value) -> Value {
+    let mut merged = receipt.clone();
+    if let (Some(into), Some(more)) = (merged.as_object_mut(), more.as_object()) {
+        into.extend(more.iter().map(|(key, value)| (key.clone(), value.clone())));
+    }
+    merged
+}
+
+/// What a run is closed with where its receipt was refused: what its first answer said (its
+/// status and tool, and its session where that fits) beside its action, recipient and status of
+/// failure; without the session where that does not fit; else its action alone.
+fn least_receipt(receipt: &Value, action: &str) -> Value {
+    const KEPT: [&str; 6] = [
+        "status",
+        "target_agent_id",
+        "http_status",
+        "answer_status",
+        "answer_dispatch",
+        "answer_session",
+    ];
+    let kept = KEPT.iter().filter_map(|key| {
+        let value = receipt.get(*key)?;
+        Some(((*key).to_string(), value.clone()))
+    });
+    let mut least = Value::Object(kept.collect());
+    if !demand::fits(&least)
+        && let Some(least) = least.as_object_mut()
+    {
+        least.remove("answer_session");
+    }
+    if !demand::fits(&least) {
+        least = json!({ "status": action });
+    }
+    least
+}
+
+/// The session a name stands for: its one agent, by id, session or voice name (one that was put
+/// away and a janitor too); `""` for none, or for more than one.
+fn resolved(agents: &[Member], name: &str) -> String {
+    let name = python::strip(name);
+    match agents_named(agents, name).as_slice() {
+        [one] if !name.is_empty() => one.session.clone(),
+        _ => String::new(),
+    }
+}
+
+/// The names a command gives: the decision's own and, of a command for an agent, the payload's.
+fn names_given(decision: &Decision) -> Vec<&str> {
+    let mut names = vec![python::strip(&decision.target_session)];
+    if decision.kind == AGENT_CONTROL {
+        let payload = decision.control_payload.as_ref();
+        let given = payload.and_then(|payload| payload.get("name"));
+        names.push(given.and_then(Value::as_str).map_or("", python::strip));
+    }
+    names.retain(|name| !name.is_empty());
+    names
+}
+
+/// The session every name a command gives resolves to, one agent; `""` for none, for more than
+/// one, for names that disagree, or where it gives no name.
+fn named_session(decision: &Decision, agents: &[Member]) -> String {
+    let mut sessions: Vec<String> = Vec::new();
+    for name in names_given(decision) {
+        let session = resolved(agents, name);
+        if !sessions.contains(&session) {
+            sessions.push(session);
+        }
+    }
+    match sessions.as_slice() {
+        [one] => one.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Whether a command is carried out: the sentence it is refused with, where it is, and the
+/// session its name resolved to (`""` where it resolved to none, and for a command that makes an
+/// agent). A refused command still names the session its name resolved to: one out of reach. A
+/// name given anywhere, the decision's own or, of a command for an agent, the payload's, is the
+/// target; the agent the message was said to is the target only where none is given. It acts only
+/// on an agent of the packet: in a call, one of the call. `asked`: the command, as it is compared.
 fn command_check(
     decision: &Decision,
     asked: &str,
@@ -471,14 +570,14 @@ fn command_check(
     shown: &[&str],
     requested: &str,
     agents: &[Member],
-) -> Result<Option<String>, Fixed> {
+) -> (Option<Fixed>, String) {
     if !sure {
-        return Err(UNSURE_COMMAND);
+        return (Some(UNSURE_COMMAND), named_session(decision, agents));
     }
     let of_agents = decision.kind == AGENT_CONTROL;
     if of_agents && asked == "fork" {
-        // No source of a fork is taken from the router.
-        return Err(FORK_IN_APP);
+        // No source of a fork is taken from the router; a real agent it names is kept.
+        return (Some(FORK_IN_APP), named_session(decision, agents));
     }
     if of_agents && asked == "create" {
         // A name the voice already gives an agent (one that was put away too) is taken: the
@@ -487,26 +586,20 @@ fn command_check(
         let given = payload.and_then(|payload| payload.get("name"));
         let given = given.and_then(Value::as_str).unwrap_or_default();
         if !agents_named(agents, given).is_empty() {
-            return Err(NAME_TAKEN);
+            return (Some(NAME_TAKEN), String::new());
         }
-        return Ok(None);
+        return (None, String::new());
     }
-    let mut names = vec![python::strip(&decision.target_session)];
-    if of_agents {
-        let payload = decision.control_payload.as_ref();
-        let given = payload.and_then(|payload| payload.get("name"));
-        names.push(given.and_then(Value::as_str).map_or("", python::strip));
-    }
-    names.retain(|name| !name.is_empty());
+    let names = names_given(decision);
     let agent = if names.is_empty() {
         lookup(agents, requested)
     } else {
         let mut found: Vec<&Member> = Vec::new();
         for name in names {
             match agents_named(agents, name).as_slice() {
-                [] => return Err(NO_SUCH_AGENT),
+                [] => return (Some(NO_SUCH_AGENT), String::new()),
                 [one] => found.push(one),
-                _ => return Err(WHICH_AGENT),
+                _ => return (Some(WHICH_AGENT), String::new()),
             }
         }
         // The two names given disagree.
@@ -514,21 +607,21 @@ fn command_check(
             .iter()
             .any(|agent| agent.agent_id != found[0].agent_id)
         {
-            return Err(WHICH_AGENT);
+            return (Some(WHICH_AGENT), String::new());
         }
         found.first().copied()
     };
     let Some(agent) = agent else {
-        return Err(NO_SUCH_AGENT);
+        return (Some(NO_SUCH_AGENT), String::new());
     };
     if !agent.voice_target {
-        return Err(NO_VOICE_COMMANDS);
+        return (Some(NO_VOICE_COMMANDS), agent.session.clone());
     }
     // No packet shows an agent that was put away: it is out of reach as one of another call is.
     if !shown.contains(&agent.session.as_str()) {
-        return Err(CANNOT_COMMAND);
+        return (Some(CANNOT_COMMAND), agent.session.clone());
     }
-    Ok(Some(agent.session.clone()))
+    (None, agent.session.clone())
 }
 
 /// The name of the agent of a session, or the session's own name where it has none.
@@ -792,21 +885,44 @@ impl Book {
             let status = if out(status) { 202 } else { 200 };
             return answer(true, message.requested_session, action, status, "");
         };
-        let recipient = receipt.get("target_agent_id").and_then(Value::as_str);
-        let recipient = recipient.and_then(|id| lookup(around.agents, id));
-        let session = recipient.map_or(message.requested_session, |agent| agent.session.as_str());
+        let requested = message.requested_session;
         if out(status) {
-            return answer(true, session, PENDING, 202, "");
+            return answer(true, requested, PENDING, 202, "");
         }
         let action = receipt
             .get("status")
             .and_then(Value::as_str)
             .unwrap_or(CLARIFY);
-        if action == ERROR {
-            let said = receipt.get("http_status").and_then(Value::as_u64);
-            let status = said.and_then(|status| u16::try_from(status).ok());
-            let status = status.filter(|status| *status != 0).unwrap_or(500);
-            return answer(false, session, ERROR, status, FAILED);
+        let failed = action == ERROR;
+        let error = if failed { FAILED } else { "" };
+        // What the first answer said, where the receipt keeps it in a form a client can be
+        // answered with: its status one a reply can carry, and its session a text that is not
+        // empty, or none (the first answer named the session asked for, too long to keep).
+        let said_status = receipt.get("answer_status").and_then(answerable);
+        let said_session = receipt.get("answer_session").map(|session| {
+            session
+                .as_str()
+                .filter(|session| !session.is_empty())
+                .map(str::to_string)
+        });
+        let readable = said_session.as_ref().is_none_or(Option::is_some);
+        if let Some(status) = said_status.filter(|_| readable) {
+            let session = said_session
+                .flatten()
+                .unwrap_or_else(|| requested.to_string());
+            let dispatched = receipt.get("answer_dispatch").and_then(Value::as_str);
+            let mut outcome = answer(!failed, &session, action, status, error);
+            outcome.dispatch = dispatched.unwrap_or_default().to_string();
+            return outcome;
+        }
+        // A receipt written before the answer was kept, or one that keeps it in no form a
+        // client can be answered with: answered by its recipient.
+        let recipient = receipt.get("target_agent_id").and_then(Value::as_str);
+        let recipient = recipient.and_then(|id| lookup(around.agents, id));
+        let session = recipient.map_or(requested, |agent| agent.session.as_str());
+        if failed {
+            let said = receipt.get("http_status").and_then(answerable);
+            return answer(false, session, ERROR, said.unwrap_or(500), FAILED);
         }
         let mut outcome = answer(true, session, action, 200, "");
         if action == ROUTE {
@@ -1247,6 +1363,7 @@ impl Book {
                 raw: Map::new(),
                 action: FALLBACK.to_string(),
                 target: requested.to_string(),
+                command: false,
                 fallback_used: true,
                 error: decision.error,
             };
@@ -1274,8 +1391,11 @@ impl Book {
         let mut action: Option<&str> = None;
         let sure = |decision: &Decision| decision.confidence >= settings.confidence_threshold;
         let asked = python::strip(&decision.control_action).to_lowercase();
-        if [CONTROL, AGENT_CONTROL].contains(&decision.kind.as_str()) {
-            let checked = command_check(
+        // Voice is answered aloud; an app's request never is, whichever sentence it would be.
+        let aloud = !routing.fallback_request;
+        let command = [CONTROL, AGENT_CONTROL].contains(&decision.kind.as_str());
+        if command {
+            let (refusal, resolved) = command_check(
                 &decision,
                 &asked,
                 sure(&decision),
@@ -1283,20 +1403,20 @@ impl Book {
                 requested,
                 agents,
             );
-            match checked {
-                // Refused in its sentence, and never held: a later "yes" must not give its
-                // words to an agent as a message.
-                Err(refusal) => {
-                    decision.kind = CLARIFY.to_string();
-                    decision.phrase_key = refusal.key.to_string();
-                    action = Some(CLARIFY);
-                    if !routing.fallback_request {
-                        let said = self.as_agent(requested, refusal.text, refusal.key, around);
-                        effects.extend(said.map(Effect::Say));
-                    }
+            // The row, the event and the decision carry the session the name resolved to, or
+            // nothing; the name as it was said stays in the model's own answer.
+            target.clone_from(&resolved);
+            decision.target_session = resolved;
+            // Refused in its sentence, and never held: a later "yes" must not give its words to
+            // an agent as a message.
+            if let Some(refusal) = refusal {
+                decision.kind = CLARIFY.to_string();
+                decision.phrase_key = refusal.key.to_string();
+                action = Some(CLARIFY);
+                if aloud {
+                    let said = self.as_agent(requested, refusal.text, refusal.key, around);
+                    effects.extend(said.map(Effect::Say));
                 }
-                Ok(Some(session)) => decision.target_session = session,
-                Ok(None) => {}
             }
         }
         let for_an_agent = [AGENT_MESSAGE, CORRECTION].contains(&decision.kind.as_str());
@@ -1310,8 +1430,8 @@ impl Book {
                 None => {
                     target = requested.to_string();
                     action = Some(CLARIFY);
-                    decision = as_question(decision, "I am not sure which agent that was for.");
-                    if !routing.fallback_request {
+                    decision = as_question(decision, NO_VALID_TARGET.text);
+                    if aloud {
                         self.hold(&decision, routing, hold_as, around, &mut effects);
                     }
                 }
@@ -1320,7 +1440,7 @@ impl Book {
                     let words = format!("Was that for {}?", name_of(agents, &agent));
                     decision = as_question(decision, &words);
                     target = agent;
-                    if !routing.fallback_request {
+                    if aloud {
                         self.hold(&decision, routing, hold_as, around, &mut effects);
                     }
                 }
@@ -1334,8 +1454,10 @@ impl Book {
                         decision.kind = CLARIFY.to_string();
                         decision.phrase_key = HELD_MESSAGE_GONE.key.to_string();
                         let gone = HELD_MESSAGE_GONE;
-                        let said = self.as_agent(requested, gone.text, gone.key, around);
-                        effects.extend(said.map(Effect::Say));
+                        if aloud {
+                            let said = self.as_agent(requested, gone.text, gone.key, around);
+                            effects.extend(said.map(Effect::Say));
+                        }
                     } else {
                         let own = python::strip(&decision.text_to_send);
                         let text = held.as_ref().map(|held| held.utterance.as_str());
@@ -1361,7 +1483,7 @@ impl Book {
         let kind = decision.kind.clone();
         if action.is_none() && [CLARIFY, AMBIGUOUS].contains(&kind.as_str()) {
             action = Some(CLARIFY);
-            if !routing.fallback_request {
+            if aloud {
                 self.hold(&decision, routing, hold_as, around, &mut effects);
             }
         }
@@ -1484,6 +1606,7 @@ impl Book {
             decision,
             raw,
             target,
+            command,
             error,
         }
     }
@@ -1501,10 +1624,11 @@ impl Book {
     ) -> Outcome {
         let Plan {
             effects,
-            decision,
+            mut decision,
             raw,
             mut action,
             mut target,
+            command,
             fallback_used,
             mut error,
         } = plan;
@@ -1525,12 +1649,19 @@ impl Book {
             Done::NotGiven { status, error: why } => {
                 (error, action, refused_with) = (why, ERROR.to_string(), status);
             }
-            Done::Started { session } => target = session,
+            // What it acted on: a new agent's session, for one that was made.
+            Done::Started { session } => {
+                decision.target_session.clone_from(&session);
+                target = session;
+            }
             // Refused by the Host (a name or a session in use, ...): said, and kept as a
-            // question, never as a silent error.
+            // question, never as a silent error. Nothing was done.
             Done::Refused { code } => {
                 (error, action) = (code, CLARIFY.to_string());
                 let refused = COMMAND_REFUSED;
+                decision.kind = CLARIFY.to_string();
+                decision.spoken_text = refused.text.to_string();
+                decision.phrase_key = refused.key.to_string();
                 say = self.as_agent(
                     &routing.requested_session,
                     refused.text,
@@ -1539,6 +1670,12 @@ impl Book {
                 );
             }
             Done::Broke(why) => (error, action) = (why, ERROR.to_string()),
+        }
+        if action == CLARIFY {
+            // A question delivered nothing. Its row and its event name the session the decision's
+            // target resolves to, or none, and the decision keeps that as its suggestion.
+            target = resolved(around.agents, &decision.target_session);
+            decision.target_session.clone_from(&target);
         }
         let message = routing.message();
         let id = self.keep(
@@ -1565,9 +1702,18 @@ impl Book {
             (true, 0) => 500,
             (true, status) => status,
         };
+        // Nothing was delivered, or a command did nothing (refused, a question, or an error after
+        // it was taken): the answer names the agent spoken to, so that a client that acts on this
+        // session (a stop of a send it cancelled) never acts on another agent.
+        let nothing_done = action == CLARIFY || (command && action != CONTROL);
+        let session = if nothing_done {
+            routing.requested_session.clone()
+        } else {
+            target.clone()
+        };
         let mut outcome = Outcome {
             ok: !failed,
-            session: target,
+            session,
             dispatch: String::new(),
             trace_id: routing.trace_id.clone(),
             action,
@@ -1577,6 +1723,7 @@ impl Book {
             status,
             told: Some(told),
             say,
+            target: Some(target),
         };
         if let Some((session, backend)) = given {
             outcome = Outcome {
@@ -1585,11 +1732,13 @@ impl Book {
                 dispatch: backend,
                 error: String::new(),
                 status: 200,
+                target: None,
                 ..outcome
             };
         }
         // The receipt of the run: what a message that is sent again is answered by.
-        let recipient = lookup(around.agents, &outcome.session);
+        let recipient = outcome.target.as_deref().unwrap_or(&outcome.session);
+        let recipient = lookup(around.agents, recipient);
         let recipient = recipient
             .map(|agent| agent.agent_id.as_str())
             .unwrap_or_default();
@@ -1605,18 +1754,80 @@ impl Book {
             receipt["reason"] = json!(RETRYABLE);
             receipt["decision_id"] = json!(id);
         }
+        // What the first answer said, so that the message sent again is answered exactly this.
+        // Its status and its tool always fit the history's bound; its session is kept only where
+        // it fits too, never cut (a name cut short is another name). Only a session that was
+        // asked for can be too long, and a status kept without a session means just that.
+        let said = json!({ "answer_dispatch": outcome.dispatch, "answer_status": outcome.status });
+        if demand::fits(&merged(&receipt, &said)) {
+            receipt = merged(&receipt, &said);
+            let session = json!({ "answer_session": outcome.session });
+            if demand::fits(&merged(&receipt, &session)) {
+                receipt = merged(&receipt, &session);
+            }
+        }
         let answered = routing.decided.as_ref();
         let failed = failed || answered.is_some_and(|(decision, _)| decision.kind == ERROR);
+        let (ended, why) = if failed {
+            ("failed", FAILED)
+        } else {
+            ("completed", "")
+        };
         let janitors = &mut *around.janitors;
-        let _ = janitors.complete_run(
-            &routing.run_id,
-            if failed { "failed" } else { "completed" },
-            Some(&receipt),
-            if failed { FAILED } else { "" },
-            None,
-            around.world,
-            now,
-        );
+        let run = &routing.run_id;
+        let world = around.world;
+        if janitors
+            .complete_run(run, ended, Some(&receipt), why, None, world, now)
+            .is_err()
+        {
+            // The receipt never costs the answer, and the run is never left claimed: it is closed
+            // with its least receipt, which keeps what the first answer said where that fits.
+            let least = least_receipt(&receipt, &outcome.action);
+            let _ = janitors.complete_run(run, ended, Some(&least), why, None, world, now);
+        }
         outcome
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The least receipt, as the Python Host makes it where its first completion fails (its own
+    /// tests: a refused completion keeps what the first answer said; with the session refused, only
+    /// the session is left out; with everything refused, the action alone).
+    #[test]
+    fn the_least_receipt_keeps_what_the_first_answer_said_where_it_fits() {
+        let receipt = json!({
+            "summary": "Message routing finished: route", "status": "route",
+            "target_agent_id": "id-antoni", "answer_dispatch": "claude", "answer_status": 200,
+            "answer_session": "antoni",
+        });
+        let least = least_receipt(&receipt, "route");
+        let kept = json!({
+            "status": "route", "target_agent_id": "id-antoni", "answer_status": 200,
+            "answer_dispatch": "claude", "answer_session": "antoni",
+        });
+        assert_eq!(least.to_string(), kept.to_string());
+        // A status of failure is kept beside it; what a retry needs is not.
+        let failed = json!({
+            "status": "error", "target_agent_id": "id-antoni", "http_status": 413,
+            "reason": RETRYABLE, "decision_id": 7, "answer_status": 413,
+        });
+        let least = least_receipt(&failed, "error");
+        let kept = json!({
+            "status": "error", "target_agent_id": "id-antoni", "http_status": 413,
+            "answer_status": 413,
+        });
+        assert_eq!(least.to_string(), kept.to_string());
+        // A session the history does not take is left out; the rest stays.
+        let long =
+            json!({ "status": "clarify", "answer_status": 200, "answer_session": "s".repeat(501) });
+        let least = least_receipt(&long, "clarify");
+        assert_eq!(least, json!({ "status": "clarify", "answer_status": 200 }));
+        // Where even that does not fit, the action alone.
+        let id =
+            json!({ "status": "route", "target_agent_id": "i".repeat(501), "answer_status": 200 });
+        assert_eq!(least_receipt(&id, "route"), json!({ "status": "route" }));
     }
 }

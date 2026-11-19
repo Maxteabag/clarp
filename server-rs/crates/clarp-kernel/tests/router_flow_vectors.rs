@@ -4,15 +4,17 @@
 //! that answers what each story says, and a Host around it that writes down what it is
 //! asked to do), as that router is since its PR 436 of 18 Nov 2026: a command is never
 //! held, a held message belongs to the session it was made in, and a name given anywhere is
-//! the target, resolved as a voice name. Where only the words of an error are another's,
-//! `expected` says so.
+//! the target, resolved as a voice name; and since its PR 443 of 19 Nov 2026: what nothing was
+//! delivered for answers the session spoken to and names the session its target resolved to, an
+//! app is told nothing aloud, and a message sent again is answered what it was answered first.
+//! Where only the words of an error are another's, `expected` says so.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeMap;
 
 use clarp_kernel::janitors::book::{Agent, Asked, Book as Janitors, Config, World};
-use clarp_kernel::janitors::{Attachment, schedule};
+use clarp_kernel::janitors::{Attachment, demand, schedule};
 use clarp_kernel::python;
 use clarp_kernel::router::flow::{
     Around, Begun, Book, Done, Effect, Give, Message, Next, Outcome, Routing, Say, Start,
@@ -361,11 +363,32 @@ impl Stage {
         done
     }
 
+    /// The receipt of a message's run made another before the message is sent again, as the
+    /// Python Host's story makes it (`"<drop>"`: the field is taken away).
+    fn edit_receipt(&mut self, id: &str, edits: &Value) {
+        let digest = Sha256::digest(format!("u-{id}").as_bytes());
+        let digest: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+        let request = json!(format!("routing-{digest}"));
+        let run_id = demand::request_run_id(JOB, &request).unwrap();
+        let run = self.janitors.runs.get_mut(&run_id).unwrap();
+        let receipt = run.demand_result.as_mut().unwrap().as_object_mut().unwrap();
+        for (key, value) in edits.as_object().unwrap() {
+            if value == "<drop>" {
+                receipt.remove(key);
+            } else {
+                receipt.insert(key.clone(), value.clone());
+            }
+        }
+    }
+
     /// One message's way through the router.
     fn send(&mut self, message: &Value) -> Seen {
         let now = message["now"].as_i64().unwrap();
         self.set_router(&message["janitor"], now);
         let id = word(&message["id"]);
+        if message["receipt"].is_object() {
+            self.edit_receipt(&id, &message["receipt"]);
+        }
         let trace = format!("trace-{id}");
         let came = came_of(message);
         let only: Option<Vec<String>> = message["only"]
@@ -572,7 +595,7 @@ fn answered_row(outcome: Option<&Outcome>, theirs: &Value) -> Value {
         "dispatch": outcome.dispatch, "trace_id": outcome.trace_id, "action": outcome.action,
         "decision_id": outcome.decision_id, "decision": outcome.decision,
         "error": outcome.error, "status": outcome.status,
-        "retry_dispatch": theirs["retry_dispatch"],
+        "retry_dispatch": theirs["retry_dispatch"], "target": outcome.target,
     })
 }
 
@@ -668,7 +691,7 @@ fn a_messages_way_is_the_python_hosts_message_by_message() {
     }
     // Every message of the stories, and what the stories are there to show: a model asked
     // once and twice, messages given, and words aloud.
-    assert_eq!((messages, asked, given, said), (107, 170, 11, 57));
+    assert_eq!((messages, asked, given, said), (139, 185, 14, 58));
 }
 
 /// Plays the stories up to the one named, and answers its messages by their ids.

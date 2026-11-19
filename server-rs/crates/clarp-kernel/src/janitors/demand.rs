@@ -31,7 +31,7 @@ const REQUEST_MOST: usize = 160;
 const TEXT_MOST: usize = 500;
 const NUMBER_MOST: i64 = 1_000_000_000_000;
 /// What a request and a result may say of themselves.
-const SAID: [&str; 13] = [
+const SAID: [&str; 16] = [
     "input_hash",
     "request_hash",
     "candidate_count",
@@ -45,6 +45,10 @@ const SAID: [&str; 13] = [
     "reason",
     "decision_id",
     "http_status",
+    // What a routing run's first answer said, so that the same request is answered the same.
+    "answer_session",
+    "answer_dispatch",
+    "answer_status",
 ];
 const GIVEN_UP: &str = "Demand run expired before completion";
 const EPHEMERAL: &str = "ephemeral";
@@ -82,6 +86,12 @@ fn said(value: Option<&Value>) -> Result<Map<String, Value>, Refused> {
         }
     }
     Ok(fields.clone())
+}
+
+/// Whether the history takes this as what a request or a result says of itself: named fields of
+/// short words, numbers and yes or no (the Python Host's `fits_metadata`).
+pub fn fits(value: &Value) -> bool {
+    said(Some(value)).is_ok()
 }
 
 /// The id of the run of a request: the same for the same job and request.

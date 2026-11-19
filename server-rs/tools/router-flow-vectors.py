@@ -37,6 +37,8 @@ REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'router-flow-vectors.json'
 
 T0 = 1_800_000_000_000
+# An agent whose session, and so its id ('id-' and the session), is longer than a receipt keeps.
+LONG = 'l' * 498
 S = 1000
 # The agents: (persona, session, tool, voice). The last is put away before anything is said.
 AGENTS = [('Mike', 'mike', 'codex', 'voice-mike'), ('Anna', 'anna', 'claude', 'voice-anna'),
@@ -327,6 +329,57 @@ STORIES = [
                 'open, and the twenty most recently active of the others are shown with what they were last told and said; of the equally recent, the first',
                 'uh, maybe', [{'kind': 'ignored', 'confidence': 0.5}] * 2, id='b-1', session='extra-01'),
     ], [(f'Extra {n:02d}', f'extra-{n:02d}', 'codex', f'voice-extra-{n:02d}', False) for n in range(1, 23)]),
+    ('a message sent again is answered what it was answered first', [
+        message('a message that is held', 'ship the slides', to('anna', 0.6), id='p-1',
+                janitor={'enabled': True, 'options': {'fallback_only': False}}),
+        message('the same message again: the question, and the session spoken to', 'ship the slides', to('mike'), id='p-1'),
+        message('a command for an agent that is none of the call', 'switch to Zoe',
+                {'kind': 'agent_control', 'control_action': 'switch', 'target_session': 'zoe', 'confidence': 0.95},
+                id='p-2', only=['mike', 'anna']),
+        message('the same command again: refused as it was', 'switch to Zoe', to('mike'), id='p-2', only=['mike', 'anna']),
+        message('make a new agent', 'make an agent called Paula',
+                {'kind': 'agent_control', 'control_action': 'create', 'confidence': 0.95,
+                 'control_payload': {'name': 'Paula'}}, id='p-3'),
+        message('the same command again: the agent it made', 'make an agent called Paula', to('mike'), id='p-3'),
+        message('said to a session longer than a receipt keeps', 'ship it', to('anna', 0.6), id='p-4', session='s' * 501),
+        message('the same message again: the session it was said to', 'ship it', to('mike'), id='p-4', session='s' * 501),
+        message('said to a session as long as a receipt keeps', 'ship it', to('anna', 0.6), id='p-5', session='s' * 500),
+        message('the same message again: the session it was said to, kept', 'ship it', to('mike'), id='p-5',
+                session='s' * 500),
+        message('given to an agent', 'Anna, the notes', to('anna'), id='p-6'),
+        message('again, its status kept another', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 299}),
+        message('again, its status kept as 204: no answer, as it was before', 'Anna, the notes', to('mike'), id='p-6',
+                receipt={'answer_status': 204}),
+        message('again, as 304', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 304}),
+        message('again, as 100', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 100}),
+        message('again, as 600', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 600}),
+        message('again, as yes', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': True}),
+        message('again, as a word', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': '200'}),
+        message('again, as a fraction', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': 200.0}),
+        message('again, as nothing', 'Anna, the notes', to('mike'), id='p-6', receipt={'answer_status': '<drop>'}),
+        message('again, its status kept and its session not: the session it was said to', 'Anna, the notes', to('mike'),
+                id='p-6', receipt={'answer_status': 202, 'answer_session': '<drop>'}),
+        message('again, its session kept empty: as it was before', 'Anna, the notes', to('mike'), id='p-6',
+                receipt={'answer_session': ''}),
+        message('again, its session kept as nothing', 'Anna, the notes', to('mike'), id='p-6',
+                receipt={'answer_session': None}),
+        message('again, its tool kept as a number', 'Anna, the notes', to('mike'), id='p-6',
+                receipt={'answer_session': 'zoe', 'answer_dispatch': 7}),
+        message('the agent refuses the message for good', 'Anna, the long notes', to('anna'), id='p-7', dispatch=413),
+        message('again, by a receipt kept before the answer was, refused 413', 'Anna, the long notes', to('mike'),
+                id='p-7', receipt={'answer_status': '<drop>', 'answer_session': '<drop>', 'answer_dispatch': '<drop>'}),
+        message('again, by such a receipt refused 100', 'Anna, the long notes', to('mike'), id='p-7',
+                receipt={'http_status': 100}),
+        message('again, by such a receipt refused 503', 'Anna, the long notes', to('mike'), id='p-7',
+                receipt={'http_status': 503}),
+        message('again, by such a receipt refused as yes', 'Anna, the long notes', to('mike'), id='p-7',
+                receipt={'http_status': True}),
+        message('again, by such a receipt with no status', 'Anna, the long notes', to('mike'), id='p-7',
+                receipt={'http_status': '<drop>'}),
+        message('given to an agent whose id is longer than a receipt keeps: the receipt is refused, and the run closed '
+                'with its action alone', 'tell the long one hello', to(LONG), id='p-8'),
+        message('the same message again: by that receipt', 'tell the long one hello', to('mike'), id='p-8'),
+    ], [('Long', LONG, 'codex', 'voice-long', False)]),
 ]
 
 
@@ -463,8 +516,13 @@ def run() -> dict:
         rows = []
         added = []
         for persona, session, backend, voice, put_away in (more[0] if more else ()):
+            made_id = agents._new_agent_id
+            if session == LONG:
+                # Its id is the one the vectors name it by, too long for a receipt.
+                agents._new_agent_id = lambda: f'id-{LONG}'
             ids[session] = agents.create_agent(persona=persona, voice_id=voice, cwd='/srv/work', session=session,
                                                backend=backend)
+            agents._new_agent_id = made_id
             if put_away:
                 agents.set_archived(ids[session], True)
             added.append((persona, session, backend, voice, put_away))
@@ -496,6 +554,21 @@ def run() -> dict:
 
             message_id = one.get('id', f'auto-{len(told)}-{len(rows)}')
             requested = one.get('session', 'mike')
+            if 'receipt' in one:
+                # The receipt of its run is made another before it is sent again, as the Python Host's own
+                # tests make it: what it keeps of the first answer read in every form it may come in.
+                run_id = janitor_builtins.get_request_run(
+                    'message-delegator', 'routing-' + hashlib.sha256(f'u-{message_id}'.encode()).hexdigest())['run_id']
+                kept = json.loads(db.conn().execute('SELECT result_json FROM janitor_demand_results WHERE run_id = ?',
+                                                    (run_id,)).fetchone()[0])
+                for key, value in one['receipt'].items():
+                    if value == '<drop>':
+                        kept.pop(key, None)
+                    else:
+                        kept[key] = value
+                db.conn().execute('UPDATE janitor_demand_results SET result_json = ? WHERE run_id = ?',
+                                  (json.dumps(kept), run_id))
+                db.conn().commit()
             held_as['id'] = f'held-{message_id}'
             admission = prompt_admissions.PromptAdmission(
                 admission_id=f'adm-{message_id}', admission_version=1, authenticated_at_admission=True,
@@ -523,7 +596,7 @@ def run() -> dict:
                 'hands_free': one.get('hands_free', True), 'fallback': bool(one.get('fallback')), 'only': one.get('only'),
                 'decide': decide_shown, 'fails': [isinstance(d, Exception) for d in (decide if isinstance(decide, list) else [decide])],
                 'dispatch_fails_with': fails_with, 'pause_at_model': bool(one.get('pause_at_model')),
-                'janitor': one.get('janitor', 'as it was'),
+                'janitor': one.get('janitor', 'as it was'), **({'receipt': one['receipt']} if 'receipt' in one else {}),
                 'shown': shown[:], 'given': given[:], 'said': ctx.said[:], 'told': ctx.stream.told[:],
                 'made': made[:], 'stopped': stopped[:], 'replayed': replayed[:],
                 'answered': answered, 'decisions': decisions, 'held': held_now,

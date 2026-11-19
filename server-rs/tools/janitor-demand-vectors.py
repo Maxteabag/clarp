@@ -211,7 +211,25 @@ def run() -> dict:
     return {'agents': [{'agent_id': f'id-{session}', 'session': session, 'persona': persona, 'backend': backend}
                        for persona, session, backend in AGENTS],
             'given_up_after_ms': janitor_builtins.DEMAND_RUN_TTL_MS,
-            'said': sorted(janitor_builtins._METADATA_KEYS), 'first_day': first_day, 'stories': told}
+            'said': sorted(janitor_builtins._METADATA_KEYS), 'first_day': first_day, 'stories': told,
+            'fits': [{'value': value, 'fits': janitor_builtins.fits_metadata(value)} for value in fitting()]}
+
+
+def fitting() -> list:
+    """What the demand history is asked to take: each name it knows with a short word, the answer of a
+    routing run at and past the bound of a word, numbers at and past theirs, and what it takes no part of."""
+    from lib import janitor_builtins
+    values = [{name: 'x'} for name in sorted(janitor_builtins._METADATA_KEYS)]
+    values += [
+        {'answer_session': 's' * 500, 'answer_dispatch': 'codex', 'answer_status': 200},
+        {'answer_session': 's' * 501, 'answer_dispatch': 'codex', 'answer_status': 200},
+        {'answer_session': '\u00eb' * 500}, {'answer_session': '\u00eb' * 501},
+        {'answer_status': 10 ** 12}, {'answer_status': 10 ** 12 + 1}, {'answer_status': -10 ** 12},
+        {'answer_status': 200.0}, {'answer_status': True}, {'answer_status': None}, {'answer_dispatch': ['codex']},
+        {'answer_dispatch': {'tool': 'codex'}}, {'answer_target': 'mike'}, {}, None, [], 'status',
+        {'status': 'route', 'target_agent_id': 't' * 501, 'answer_status': 200},
+    ]
+    return values
 
 
 def main() -> int:

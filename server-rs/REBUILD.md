@@ -2519,6 +2519,31 @@ turns it on.
   its own words; a name in a command's payload that is another agent's, or nobody's, is asked about and
   makes or starts no agent (`fake_claude.py`: `[qa-unsure-stop:...]`, `[qa-restart-as:...:...]`). A planted
   change to the Python Host that holds a refused command (`router-holds-a-command`) is caught by it.
+- **What nothing was delivered for, and a message sent again** (19 Nov 2026, the Python Host's PR 443, its
+  fixes of R83 and R84). A command's row, its event and its decision carry the session its name resolved to,
+  or nothing; a refused one too where its name resolved to an agent out of reach. A question's carry the
+  session its target resolves to, or nothing. The answer to a question, and to a command that did nothing
+  (refused, turned into a question, or refused by the Host after it was taken), names the session spoken to,
+  so that an app that acts on that session never acts on another agent; a command that was carried out names
+  what it acted on, a new agent's session for one it made. An app is told nothing aloud, whichever sentence
+  it would be. The run's receipt keeps what the first answer said (`answer_session`, `answer_dispatch`,
+  `answer_status`, which the demand history takes since: each only where all fit its bound, and the session
+  only where it fits too), and the same message sent again is answered exactly that: its status where it is
+  one a reply can carry (a whole number from 200 to 599 but 204 and 304), its session where it is a text that
+  is not empty, or the session asked for where none was kept; a receipt that keeps none of it, or none a
+  client can read, is answered by its recipient as before, and so is a status of failure (500 where the one
+  kept is none a reply can carry). A run whose receipt is refused is closed with its least receipt (what the
+  first answer said beside its action, recipient and status of failure; without the session where that does
+  not fit; else its action alone), never left claimed. In the kernel's book a receipt is refused only where it
+  does not fit the bound (an agent's id longer than five hundred signs); the Python Host's other way, a
+  database that cannot be written, cannot happen in a book kept in memory. Held by the router-flow vectors,
+  whose stories gained messages sent again: after a question, a refused command and an agent made, said to a
+  session longer and as long as a receipt keeps, with the receipt made another before it is sent again in
+  each form the Python Host's own tests read (a status of 299, 204, 304, 100, 600, yes, a word, a fraction,
+  none; no session, an empty one, none at all; a tool that is a number; an older receipt refused 413, 100,
+  503, yes, or with no status), and an agent whose id the bound refuses; and by the demand history's own
+  vectors of what it takes (`fits_metadata`). On a Host, by the router's test: its question answers the
+  session spoken to, and the same message sent again after a restart is answered what it was first.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
   only those of the call who can take speech are shown, as there.
 
