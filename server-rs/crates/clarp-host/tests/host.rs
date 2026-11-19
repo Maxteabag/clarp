@@ -20835,8 +20835,16 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(
         (&at_echo[0], &at_fox[0]),
         (
-            &("u-m1".to_string(), "user".to_string(), "said to Echo".to_string()),
-            &("u-m1".to_string(), "user".to_string(), "said to Fox".to_string())
+            &(
+                "u-m1".to_string(),
+                "user".to_string(),
+                "said to Echo".to_string()
+            ),
+            &(
+                "u-m1".to_string(),
+                "user".to_string(),
+                "said to Fox".to_string()
+            )
         )
     );
     assert_eq!(at_echo[1].0, at_fox[1].0, "the answers have one name");
@@ -20848,7 +20856,9 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(head(&fox), json!(at_fox[1].0));
     // The same id again, at the one: the other's rows and head are as they were.
     host.send(&echo, "said to Echo again", "m1");
-    wait_for("Echo to have heard the id again", || host.state(&echo) == "done");
+    wait_for("Echo to have heard the id again", || {
+        host.state(&echo) == "done"
+    });
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(rows(&fox), at_fox);
     assert_eq!(head(&fox), json!(at_fox[1].0));
@@ -20876,10 +20886,17 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
         });
         items.collect()
     };
-    let ambiguous = (409, "queued message id names more than one agent".to_string());
+    let ambiguous = (
+        409,
+        "queued message id names more than one agent".to_string(),
+    );
     for (method, path, body) in [
         ("DELETE", "/turn-queue/m9", None),
-        ("PUT", "/turn-queue/m9", Some(json!({ "text": "other words" }))),
+        (
+            "PUT",
+            "/turn-queue/m9",
+            Some(json!({ "text": "other words" })),
+        ),
         ("POST", "/turn-queue/m9/send", Some(json!({}))),
     ] {
         let (status, said) = host.ask(method, path, body.as_ref());
@@ -20914,9 +20931,7 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     // each keeps its own.
     let imported = |name: &str, said: &str| -> String {
         let session = format!("{}-1a2b", name.to_lowercase());
-        let row = |id: &str, role: &str, text: &str| {
-            json!({ "id": id, "role": role, "text": text, "timestamp": "2026-11-18T10:00:00Z" })
-        };
+        let row = |id: &str, role: &str, text: &str| json!({ "id": id, "role": role, "text": text, "timestamp": "2026-11-18T10:00:00Z" });
         let moved = host.post(
             "/agents/import",
             json!({
@@ -20930,11 +20945,22 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
         assert_eq!(moved["ok"], true, "{moved}");
         session
     };
-    let (gale, hail) = (imported("Gale", "Gale's words"), imported("Hail", "Hail's words"));
+    let (gale, hail) = (
+        imported("Gale", "Gale's words"),
+        imported("Hail", "Hail's words"),
+    );
     let both = |words: &str| {
         vec![
-            ("msg-same-1".to_string(), "user".to_string(), words.to_string()),
-            ("msg-same-2".to_string(), "assistant".to_string(), words.to_string()),
+            (
+                "msg-same-1".to_string(),
+                "user".to_string(),
+                words.to_string(),
+            ),
+            (
+                "msg-same-2".to_string(),
+                "assistant".to_string(),
+                words.to_string(),
+            ),
         ]
     };
     assert_eq!(rows(&gale), both("Gale's words"));

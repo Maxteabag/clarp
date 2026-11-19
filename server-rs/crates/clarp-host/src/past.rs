@@ -434,7 +434,12 @@ mod tests {
         );
         // And of another session the agent took up: a transcript's turns never name a row.
         let later = rows_of("a1b2c3d4e5f60718", "another-session", &turns);
-        assert!(later.iter().zip(&rows).all(|(theirs, ours)| theirs.id != ours.id));
+        assert!(
+            later
+                .iter()
+                .zip(&rows)
+                .all(|(theirs, ours)| theirs.id != ours.id)
+        );
         // What the agent said last before its user spoke again is the final answer.
         let phases: Vec<&Value> = rows.iter().map(|row| &row.row["phase"]).collect();
         assert_eq!(
