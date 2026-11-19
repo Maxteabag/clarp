@@ -123,7 +123,7 @@ d42002ac5baf  tool-turns: its third row, in the short form: its phase
 c264fcea9d05  tool-turns: its third row, in the short form: what it says (the Python Host has the next text row here)
 1ef1950e766a  tool-turns: its third row, in the short form: that there are details to open
 377ee05006ad  tool-turns: its third row, in the short form: its cards
-aeae9c739560  tool-turns: its third row, in the short form: the turn's end (it is on the row that closed the turn, three rows further down)
+c4ca02fd6920  tool-turns: its third row, in the short form: the turn's end (it is on the row that closed the turn, three rows further down)
 8ddceb2c4381  tool-turns: the rows after the second turn, whole (14, where the Python Host has 11)
 378c27fda6a9  tool-turns: the first row of the second turn, whole: its phase
 67f6127add17  tool-turns: the first row of the second turn, whole: its cards
@@ -132,9 +132,9 @@ aeae9c739560  tool-turns: its third row, in the short form: the turn's end (it i
 5aea2a4c366d  tool-turns: its third row, whole: its phase
 b31fe1910bca  tool-turns: its third row, whole: what it says (the Python Host has the next text row here)
 8bc4e90966b5  tool-turns: its third row, whole: its cards
-ca92e3773cde  tool-turns: its third row, whole: the turn's end (it is on the row that closed the turn, three rows further down)
-2a86588b81e4  tool-turns: the id of the first notification (ids are numbered as they come, and six tool ids came before)
-ed6d06764d02  tool-turns: the id of the second notification
+c7d989724caf  tool-turns: its third row, whole: the turn's end (it is on the row that closed the turn, three rows further down)
+0d0be4c3201f  tool-turns: the id of the first notification (ids are numbered as they come: six tool ids, and the traces a send's delivery names, came before)
+af17d14b52fe  tool-turns: the id of the second notification
 39ab584a295e  tool-turns: the row the second notification is about (three rows further down)
 
 # What a Host listens with (`GET /transcription-capabilities`): the Rust Host says which engine

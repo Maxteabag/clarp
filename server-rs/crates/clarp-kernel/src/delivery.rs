@@ -731,6 +731,9 @@ mod tests {
             (last.turn, last.fenced, last.rev, last.seq),
             (5, true, 2, revision(18, 0))
         );
+        // A second Stop finds nothing pending: the fenced one is not fenced again.
+        paused(&mut agent, 19);
+        assert!(told(&mut agent).is_empty());
         let stopped = last.receipt("ag", "m5", "t5");
         assert_eq!(
             project(&stopped, "ag", 2, None, None).unwrap()["state"],

@@ -16,7 +16,7 @@ RUNS = {
     "ledger": ["test", "-p", "clarp-kernel", "--lib", "delivery::tests"],
     "feed": ["test", "-p", "clarp-actor", "--lib", "deliveries::tests"],
     "port": ["test", "-p", "clarp-actor", "--test", "actor", "the_delivery_of_ten_thousand_turns"],
-    "host": ["test", "-p", "clarp-host", "--test", "host", "a_held_send_is_shown_stopped"],
+    "host": ["test", "-p", "clarp-host", "--test", "host", "a_held_send_is_shown"],
 }
 PLANTS = [
     (A, "ledger", "a send left for later shown", "if origin.is_user() && matches!(admission, Admission::Queue | Admission::Direct) {", "if origin.is_user() {"),
