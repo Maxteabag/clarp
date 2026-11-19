@@ -586,6 +586,7 @@ pub fn router(app: App) -> Router {
         .layer(middleware::from_fn_with_state(app.clone(), looked_at_only))
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
+        .layer(middleware::from_fn(declared_framing))
         .with_state(app)
 }
 
@@ -629,6 +630,15 @@ pub(crate) fn too_large(close: bool) -> Response {
     )
 }
 
+/// This listener speaks HTTP/1. A transfer-coded request has no declared
+/// size to admit before reading. Refuse it even when the route needs no body.
+async fn declared_framing(request: Request, next: Next) -> Response {
+    if request.headers().contains_key(header::TRANSFER_ENCODING) {
+        return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
+    }
+    next.run(request).await
+}
+
 async fn json_body(request: Request, next: Next) -> Response {
     use tower::{Layer, ServiceExt};
     let path = request.uri().path();
@@ -636,7 +646,12 @@ async fn json_body(request: Request, next: Next) -> Response {
         return next.run(request).await;
     };
     let Some(value) = request.headers().get(header::CONTENT_LENGTH) else {
-        return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
+        // Python's JSON reader treats a missing length as an empty object.
+        // Never consume bytes that have no admitted length.
+        let (parts, _) = request.into_parts();
+        return next
+            .run(Request::from_parts(parts, axum::body::Body::from("{}")))
+            .await;
     };
     let Some(length) = value.to_str().ok().and_then(|s| s.parse::<u64>().ok()) else {
         return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
@@ -3140,6 +3155,37 @@ enum Heard {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    #[tokio::test]
+    async fn transfer_coding_is_refused_without_polling_even_one_body_frame() {
+        use axum::body::{Body, Bytes};
+        use tower::ServiceExt;
+        let router = Router::new()
+            .fallback(|| async { StatusCode::OK })
+            .layer(middleware::from_fn(declared_framing));
+        for method in [Method::GET, Method::POST, Method::DELETE] {
+            for n in [2, clarp_kernel::request_body::JSON_LIMIT + 1] {
+                let read = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let polled = read.clone();
+                let body = Body::from_stream(futures_util::stream::once(async move {
+                    polled.store(true, std::sync::atomic::Ordering::SeqCst);
+                    let mut payload = vec![b' '; n];
+                    payload[..2].copy_from_slice(b"{}");
+                    Ok::<Bytes, std::convert::Infallible>(Bytes::from(payload))
+                }));
+                let req = Request::builder()
+                    .method(method.clone())
+                    .uri("/unregistered")
+                    .header(header::TRANSFER_ENCODING, "chunked")
+                    .body(body)
+                    .unwrap();
+                let reply = router.clone().oneshot(req).await.unwrap();
+                assert_eq!(reply.status(), StatusCode::BAD_REQUEST);
+                assert_eq!(reply.headers()[header::CONNECTION], "close");
+                assert!(!read.load(std::sync::atomic::Ordering::SeqCst));
+            }
+        }
+    }
+
     use axum::http::HeaderValue;
 
     use super::*;
