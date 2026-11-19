@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import socket
 import subprocess
@@ -137,7 +138,7 @@ class Host:
             self.port=sock.getsockname()[1]
         addr=f"127.0.0.1:{self.port}"
         self.proc=subprocess.Popen([BINARY,"--listen",addr,"--data",root/pop/"data","--run",root/pop/"run",
-            "--cwd",root/"work","--accounts","none"],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
+            "--cwd",root/"work","--static",root/"static","--accounts","none"],cwd=root/"work",env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
         self.bound=None
         self.peak={}
         self.stop=threading.Event()
@@ -236,7 +237,7 @@ def moves(root,shape,env,deadline):
             if NOW()+25>deadline:break
             start=NOW()
             p=subprocess.run([BINARY,"import","--session",session(i),"--from","127.0.0.1:"+str(source_host.server_port),
-                              "--host",f"127.0.0.1:{host.port}"],capture_output=True,env=env,timeout=min(90,deadline-NOW()))
+                              "--host",f"127.0.0.1:{host.port}"],capture_output=True,cwd=root/"work",env=env,timeout=min(90,deadline-NOW()))
             elapsed=NOW()-start
             if p.returncode:
                 raise RuntimeError(p.stderr.decode()[:1200])
@@ -263,7 +264,14 @@ def main():
     if not (root/".fleet-load-private").is_file():raise ValueError("dedicated benchmark directory required")
     if root.stat().st_mode&0o077 or (root/"shape.json").stat().st_mode&0o077:raise ValueError("private directory and manifest required")
     if {l.split(":")[0].strip() for l in Path("/proc/net/dev").read_text().splitlines()[2:]}!={"lo"}:raise ValueError("loopback-only network namespace required")
+    if shutil.disk_usage(root).free < 10*1024**3:
+        raise RuntimeError("insufficient disk reserve for benchmark")
     shape=json.loads((root/"shape.json").read_text())
+    if not shape or any(not isinstance(s.get("rows"),int) or s["rows"]<1 or
+                        not 1<=s["turns"]<=s["rows"] or not 0<=s["plans"]<=s["artifacts"] for s in shape):
+        raise ValueError("invalid synthetic workload")
+    if a.phase=="full" and len(records(root/"moves.jsonl"))!=len(shape):
+        raise RuntimeError("full point requires every move to be verified")
     start=NOW()
     # Charge an interrupted slice its full deadline, including teardown.
     ledger=root/"budget.jsonl"
@@ -274,7 +282,7 @@ def main():
     if remaining<55:raise ValueError("measurement budget reached")
     slice_id=len(charges)
     write(ledger,dict(id=slice_id,phase=a.phase,seconds=remaining+20))
-    for name in ("home","work","bin","tmp"):(root/name).mkdir(exist_ok=True)
+    for name in ("home","work","bin","tmp","static"):(root/name).mkdir(exist_ok=True)
     trap=root/"bin"/"unavailable"
     trap.write_text('#!/bin/sh\nprintf "%s\\n" "${0##*/}" >> "$HOME/attempts"\nexit 125\n')
     trap.chmod(0o700)
