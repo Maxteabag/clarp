@@ -7,6 +7,7 @@ import datetime
 import fcntl
 import os
 from pathlib import Path
+import re
 import select
 import shlex
 import shutil
@@ -311,9 +312,48 @@ def last_build(name, copy, workspace):
         return info.st_mtime_ns
 
 
+def free_after_removal(floor):
+    free = shutil.disk_usage('.').free
+    if free < floor:
+        # A CoW filesystem can defer releasing extents until its transaction commits.
+        subprocess.run(['sync', '-f', '.'], check=True)
+        free = shutil.disk_usage('.').free
+    return free
+
+
+def trim_test_executables(deps, floor, free):
+    files = []
+    for name in os.listdir(deps):
+        match = re.fullmatch(r'([A-Za-z0-9_]+)-[0-9a-f]{16}', name)
+        if match:
+            info = os.stat(name, dir_fd=deps, follow_symlinks=False)
+            if stat.S_ISREG(info.st_mode) and info.st_mode & 0o111:
+                files.append((info.st_mtime_ns, name, match[1]))
+    # Break timestamp ties by filename, keeping one newest executable per crate/test name.
+    files.sort()
+    newest = {group: name for _, name, group in files}
+    removed = 0
+    for _, name, group in files:
+        if name != newest[group]:
+            os.unlink(name, dir_fd=deps)
+            removed += 1
+            free = free_after_removal(floor)
+            if free >= floor:
+                break
+    return removed, free
+
+
 def make_room(root, current, floor):
     free = shutil.disk_usage('.').free
     removed = []
+    tests = 0
+    incremental = 'no'
+    if free < floor:
+        try:
+            with directory('target') as target, directory('debug', target) as debug, directory('deps', debug) as deps:
+                tests, free = trim_test_executables(deps, floor, free)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
     if free < floor:
         # Serialize this scan with publication of a new lease. A keeper may
         # release its lease during cleanup; retaining its copy is safe.
@@ -344,17 +384,23 @@ def make_room(root, current, floor):
                 except (FileNotFoundError, NotADirectoryError):
                     continue
                 removed.append(quote(name, safe=''))
-                free = shutil.disk_usage('.').free
-                if free < floor:
-                    # A CoW filesystem can defer releasing extents until its transaction commits.
-                    # Count those bytes before sacrificing another checkout.
-                    subprocess.run(['sync', '-f', '.'], check=True)
-                    free = shutil.disk_usage('.').free
+                free = free_after_removal(floor)
                 if free >= floor:
                     break
-    print(f"Build disk: for {quote(current, safe='')}, removed targets={','.join(removed) or 'none'}, free={free} bytes.", flush=True)
     if free < floor:
-        print(f'Build stopped before cargo because less than {floor} bytes are free; {floor - free} more bytes needed.', file=sys.stderr)
+        try:
+            with directory('target') as target, directory('debug', target) as debug:
+                with directory('incremental', debug):
+                    shutil.rmtree('incremental', dir_fd=debug)
+                incremental = 'yes'
+                free = free_after_removal(floor)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+    verdict = ('ready' if free >= floor else
+               f'Build stopped before cargo because less than {floor} bytes are free; {floor - free} more bytes needed')
+    print(f"Build disk: for {quote(current, safe='')}, superseded tests={tests}, "
+          f"removed targets={','.join(removed) or 'none'}, incremental removed={incremental}, "
+          f"free={free} bytes, {verdict}.", file=sys.stdout if free >= floor else sys.stderr, flush=True)
     return free >= floor
 
 
