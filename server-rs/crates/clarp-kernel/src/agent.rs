@@ -284,6 +284,14 @@ pub struct Agent {
     resting: Option<Rest>,
     /// The agent came from another Host, where it had worked.
     arrived: bool,
+    /// Where in the agent's own log the event being applied is: a send's revisions are taken
+    /// from it. Set by whoever applies events that are in the log (the journal).
+    at: u64,
+    /// How many times the user stopped the agent: a send admitted before the last of them and
+    /// not handed over since is shown stopped.
+    user_stop_generation: u64,
+    /// The user sends whose delivery can still change.
+    deliveries: crate::delivery::Ledger,
 }
 
 /// What a repair left on the agent's state: who repaired it and why, the turn it gave back (none
@@ -332,6 +340,9 @@ impl Default for Agent {
             label_at: None,
             resting: None,
             arrived: false,
+            at: 0,
+            user_stop_generation: 0,
+            deliveries: crate::delivery::Ledger::default(),
         }
     }
 }
@@ -343,6 +354,26 @@ impl Agent {
 
     pub fn live(&self) -> Option<&Turn> {
         self.live.as_ref()
+    }
+
+    /// The position in the log of the event applied next.
+    pub fn at(&mut self, position: u64) {
+        self.at = position;
+    }
+
+    /// How many times the user stopped the agent.
+    pub fn user_stop_generation(&self) -> u64 {
+        self.user_stop_generation
+    }
+
+    /// The user sends whose delivery can still change.
+    pub fn deliveries(&self) -> &crate::delivery::Ledger {
+        &self.deliveries
+    }
+
+    /// The same, to take what changed or to fold the log quietly.
+    pub fn deliveries_mut(&mut self) -> &mut crate::delivery::Ledger {
+        &mut self.deliveries
     }
 
     pub fn waiting(&self) -> impl Iterator<Item = &Queued> {
@@ -726,9 +757,25 @@ impl Agent {
     /// Changes the state by one event. The only way the state changes.
     pub fn apply(&mut self, event: &AgentEvent) -> Result<(), IllegalTransition> {
         match event {
-            AgentEvent::Paused { .. } => {
+            AgentEvent::Paused {
+                by,
+                verified,
+                reason,
+                at_ms,
+            } => {
                 // A Stop is a state of its own: a note left before it is no longer the latest.
                 self.note = None;
+                // Only the user's Stop withdraws the user's sends not yet launched, and moves the
+                // generation a send is shown stopped by; an agent's own verified Stop does not.
+                let control = crate::control::Control {
+                    actor: by.clone(),
+                    verified: *verified,
+                    reason: reason.clone(),
+                };
+                if control.is_the_users() {
+                    self.user_stop_generation += 1;
+                    self.deliveries.fence(self.at, *at_ms);
+                }
                 self.stop_generation += 1;
                 if !self.paused || !self.unheld.is_empty() {
                     self.queue_revision += 1;
@@ -846,6 +893,43 @@ impl Agent {
         if !matches!(change, TurnEvent::Accepted { .. }) {
             self.note = None;
         }
+        self.move_turn(turn, change)?;
+        // What a user's send is shown of its delivery (send_delivery_state): admitted with a
+        // revision of this event, handed over once its tool process is being started, and over
+        // when its turn ends without that.
+        let revision = crate::delivery::revision(self.at, 0);
+        match change {
+            TurnEvent::Accepted {
+                message_seq,
+                origin,
+                admission,
+                at_ms,
+                ..
+            } => {
+                if origin.is_user() && matches!(admission, Admission::Queue | Admission::Direct) {
+                    let stops = self.user_stop_generation;
+                    self.deliveries
+                        .admit(turn.0, *message_seq, stops, revision, *at_ms);
+                }
+            }
+            _ => {
+                let handed = self
+                    .live
+                    .as_ref()
+                    .is_some_and(|live| live.id() == turn && live.has_process());
+                let waits = self.mailbox.iter().any(|queued| queued.id == turn);
+                if handed {
+                    let at_ms = change_at(change).unwrap_or_default();
+                    self.deliveries.hand(turn.0, revision, at_ms);
+                } else if !waits && self.live_id() != Some(turn) {
+                    self.deliveries.over(turn.0);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn move_turn(&mut self, turn: TurnId, change: &TurnEvent) -> Result<(), IllegalTransition> {
         if let TurnEvent::Accepted { turn: accepted, .. } = change {
             if *accepted != turn || turn.0 != self.next_turn {
                 return Err(IllegalTransition {
@@ -955,6 +1039,19 @@ impl Agent {
             agent.apply(event)?;
         }
         Ok(agent)
+    }
+}
+
+/// When a turn's change happened, where it says.
+fn change_at(change: &TurnEvent) -> Option<i64> {
+    match change {
+        TurnEvent::Accepted { at_ms, .. }
+        | TurnEvent::Started { at_ms }
+        | TurnEvent::Moved { at_ms, .. }
+        | TurnEvent::Parked { at_ms, .. }
+        | TurnEvent::Retried { at_ms }
+        | TurnEvent::Settled { at_ms, .. } => Some(*at_ms),
+        TurnEvent::Bound { .. } => None,
     }
 }
 
