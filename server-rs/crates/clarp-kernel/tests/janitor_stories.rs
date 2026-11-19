@@ -369,7 +369,7 @@ fn a_janitors_life_is_answered_step_by_step_as_the_python_host_answers_it() {
             steps += 1;
         }
     }
-    assert_eq!((stories.len(), steps), (3, 79));
+    assert_eq!((stories.len(), steps), (3, 82));
     // What is kept can be written down and read back as it was.
     let written = serde_json::to_string(&book).unwrap();
     let read: Book = serde_json::from_str(&written).unwrap();
