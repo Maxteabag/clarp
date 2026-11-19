@@ -1431,8 +1431,8 @@ pub(crate) async fn texts(
     }
     let path = request.uri().path().to_string();
     let (parts, body) = request.into_parts();
-    let Ok(bytes) = axum::body::to_bytes(body, 2 * 1024 * 1024).await else {
-        return refused(StatusCode::PAYLOAD_TOO_LARGE, "length limit exceeded").into_response();
+    let Ok(bytes) = axum::body::to_bytes(body, clarp_kernel::request_body::JSON_LIMIT).await else {
+        return crate::edge::too_large(true);
     };
     let data = render_spec::body(&bytes);
     let lone =

@@ -10,9 +10,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::extract::{
-    ConnectInfo, DefaultBodyLimit, Extension, MatchedPath, Path, Query, Request, State,
-};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event as SseEvent, Sse};
@@ -30,6 +28,7 @@ use clarp_kernel::journal::Reworded;
 use clarp_kernel::kept_portraits::{self, Portrait};
 use clarp_kernel::presence::Presence;
 use clarp_kernel::python;
+use clarp_kernel::request_body;
 use clarp_kernel::trust::{self, FailureLimiter};
 use clarp_kernel::turn::{Admission, Origin, TurnId};
 use clarp_ports::blobs::Blobs;
@@ -273,9 +272,6 @@ pub const FEATURES: &[(&str, u64)] = &[
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
 ];
-
-/// The most a conversation that arrives from another Host may weigh, as JSON.
-const IMPORT_LIMIT: usize = 512 * 1024 * 1024;
 
 /// After this long without an event, a stream is sent a heartbeat.
 const HEARTBEAT: Duration = Duration::from_secs(10);
@@ -614,73 +610,61 @@ const CHAT_CONTROLS: [&str; 18] = [
     "/agent-portrait-generation",
     "/agent-schedules",
 ];
-// R81: one JSON dispatch policy. Pairing is public; only imported conversations need more.
-const JSON_BODY_LIMIT: usize = 16 * 1024 * 1024;
-const PAIRING_BODY_LIMIT: usize = 64 * 1024;
-const LARGE_JSON_BODY: usize = 2 * 1024 * 1024;
 
-fn json_body_refused(status: StatusCode, message: &str) -> Response {
-    (
-        status,
-        [(header::CONNECTION, "close")],
-        Json(json!({"error":message})),
+fn body_refusal(status: StatusCode, message: &str, close: bool) -> Response {
+    let mut response = (status, Json(json!({"error":message}))).into_response();
+    if close {
+        response
+            .headers_mut()
+            .insert(header::CONNECTION, HeaderValue::from_static("close"));
+    }
+    response
+}
+
+pub(crate) fn too_large(close: bool) -> Response {
+    body_refusal(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        request_body::TOO_LARGE,
+        close,
     )
-        .into_response()
 }
 
 async fn json_body(request: Request, next: Next) -> Response {
-    use std::error::Error;
     use tower::{Layer, ServiceExt};
-
-    // MatchedPath names the route template. It contains no user-provided IDs,
-    // authorization parameters or query string.
-    let Some(route) = request.extensions().get::<MatchedPath>().cloned() else {
+    let path = request.uri().path();
+    let Some(limit) = request_body::limit(request.method().as_str(), path) else {
         return next.run(request).await;
-    };
-    let path = route.as_str();
-    if !matches!(
-        *request.method(),
-        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
-    ) || matches!(path, "/media" | "/tools/media" | "/upload" | "/transcribe")
-    {
-        return next.run(request).await;
-    }
-    let limit = match (request.method(), path) {
-        (&Method::POST, EXCHANGE) => PAIRING_BODY_LIMIT,
-        (&Method::POST, "/agents/import") => IMPORT_LIMIT,
-        _ => JSON_BODY_LIMIT,
     };
     let Some(value) = request.headers().get(header::CONTENT_LENGTH) else {
-        return json_body_refused(StatusCode::BAD_REQUEST, "bad json");
+        return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
     };
     let Some(length) = value.to_str().ok().and_then(|s| s.parse::<u64>().ok()) else {
-        return json_body_refused(StatusCode::BAD_REQUEST, "bad json");
+        return body_refusal(StatusCode::BAD_REQUEST, "bad json", true);
     };
-    let family = path.trim_start_matches('/').split('/').next().unwrap_or("");
-    if length > limit as u64 {
-        eprintln!("requestBodyTooLarge family=/{family} bytes={length}");
-        return json_body_refused(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
-    }
-    let (parts, body) = request.into_parts();
-    let bytes = match axum::body::to_bytes(body, limit).await {
-        Ok(bytes) => bytes,
-        Err(error)
-            if error
-                .source()
-                .is_some_and(|e| e.is::<http_body_util::LengthLimitError>()) =>
-        {
-            return json_body_refused(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+    match request_body::admission(length, limit) {
+        request_body::Admission::Refuse { close } => {
+            eprintln!(
+                "requestBodyTooLarge family={} bytes={length}",
+                request_body::family(path)
+            );
+            if close {
+                return too_large(true);
+            }
+            // Drain small refusals so an HTTP/1 client can receive the answer
+            // and reuse the connection. Never attempt to parse discarded bytes.
+            let complete = axum::body::to_bytes(request.into_body(), length as usize)
+                .await
+                .is_ok_and(|b| b.len() as u64 == length);
+            return too_large(!complete);
         }
-        Err(_) => {
-            return (StatusCode::BAD_REQUEST, "Failed to buffer the request body").into_response();
-        }
-    };
-    if bytes.len() > LARGE_JSON_BODY {
-        eprintln!("requestBodyLarge family=/{family} bytes={}", bytes.len());
+        request_body::Admission::LogLarge => eprintln!(
+            "requestBodyLarge family={} bytes={length}",
+            request_body::family(path)
+        ),
+        request_body::Admission::Accept => {}
     }
     // Downstream Bytes and Json extractors receive the admitted body under
     // the same cap, including a control inspected by the janitor middleware.
-    let request = Request::from_parts(parts, axum::body::Body::from(bytes));
     DefaultBodyLimit::max(limit)
         .layer(next)
         .oneshot(request)
@@ -718,8 +702,8 @@ async fn looked_at_only(State(app): State<App>, request: Request, next: Next) ->
         return next.run(request).await;
     }
     let (parts, body) = request.into_parts();
-    let Ok(bytes) = axum::body::to_bytes(body, JSON_BODY_LIMIT).await else {
-        return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "request too large").into_response();
+    let Ok(bytes) = axum::body::to_bytes(body, request_body::JSON_LIMIT).await else {
+        return too_large(true);
     };
     let said: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     // The agent it names: its `session`, or where it names none, the one it replaces.

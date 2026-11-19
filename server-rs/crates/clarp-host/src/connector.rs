@@ -653,6 +653,12 @@ fn text_of(value: &HeaderValue) -> String {
 /// The answer of the Host's own router to what a frame asked. `None`: it is no request the
 /// Host can be asked.
 async fn answer(router: Router, meta: &Meta, local: &str, body: Vec<u8>) -> Option<Response> {
+    let path = meta.path.split('?').next().unwrap_or("");
+    if let Some(limit) = clarp_kernel::request_body::limit(meta.method.as_str()?, path)
+        && body.len() > limit
+    {
+        return Some(crate::edge::too_large(false));
+    }
     asked(router, meta, local, body, None).await
 }
 
