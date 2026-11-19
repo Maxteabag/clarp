@@ -15571,6 +15571,89 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
     );
 }
 
+// Observe the HTTP parser separately from the dispatch policy. Each case has
+// one request on its own socket, with an empty payload and no second request.
+#[test]
+fn body_framing_seen_at_the_local_door() {
+    let place = Place::new("framing");
+    let host = place.start();
+    for (name, header) in [
+        ("digits", "Content-Length: 0\r\n"),
+        ("missing", ""),
+        (
+            "equal-duplicate",
+            "Content-Length: 0\r\nContent-Length: 0\r\n",
+        ),
+        ("signed-negative", "Content-Length: -5\r\n"),
+        ("signed-zero", "Content-Length: +0\r\n"),
+        ("trailing-space", "Content-Length: 0 \r\n"),
+        ("leading-space", "Content-Length:    0\r\n"),
+        ("folded", "Content-Length:\r\n 0\r\n"),
+        ("hex", "Content-Length: 0x10\r\n"),
+        ("empty", "Content-Length:\r\n"),
+        ("nul", "Content-Length: 0\0\r\n"),
+        ("transfer", "Transfer-Encoding: chunked\r\n"),
+    ] {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(
+            stream,
+            "POST /voice-events HTTP/1.1\r\nHost: test\r\n{header}\r\n"
+        )
+        .unwrap();
+        if name == "transfer" {
+            stream.write_all(b"0\r\n\r\n").unwrap();
+        }
+        let mut reader = BufReader::new(stream);
+        let mut status = String::new();
+        reader.read_line(&mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 "), "{name}: {status}");
+        let mut headers = Vec::new();
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" || line.is_empty() {
+                break;
+            }
+            headers.push(line);
+        }
+        let size = headers
+            .iter()
+            .filter_map(|h| h.split_once(':'))
+            .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, s)| s.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut body = vec![0; size];
+        reader.read_exact(&mut body).unwrap();
+        reader
+            .get_ref()
+            .set_read_timeout(Some(Duration::from_millis(250)))
+            .unwrap();
+        let mut byte = [0];
+        let closed = match reader.read(&mut byte) {
+            Ok(0) => true,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                false
+            }
+            other => panic!("{name}: {other:?}"),
+        };
+        writeln!(
+            std::io::stdout(),
+            "R86 observation {name}: {} closed={closed} body={}",
+            status.trim_end(),
+            String::from_utf8_lossy(&body)
+        )
+        .unwrap();
+    }
+}
+
 #[test]
 fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     let place = Place::new("body-limits");
