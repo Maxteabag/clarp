@@ -11,7 +11,9 @@
       Runs the corpus against the Rust Host and reports every difference from
       what was written down.
   conform.py cross   --build CHECKOUT --rust BINARY --out DIR
-      All three, for the workflow. The written-down answers go to DIR/golden.
+      All three, for the workflow. The written-down answers go to DIR/golden. Before a
+      difference is called unexplained the reference is asked again (`asked_again`), and
+      its answers go to DIR/golden-asked-<try>.
   conform.py rust    --rust BINARY --out DIR
       Runs the corpus against the Rust Host and writes down what it answered, compared
       with nothing: for a scenario that is new and has no reference yet.
@@ -42,6 +44,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -1198,6 +1201,24 @@ def golden_dirs(first: Path) -> list:
     return [first, first.with_name(first.name + '-again'), first.with_name(first.name + '-more')]
 
 
+def asked_dir(first: Path, attempt: int) -> Path:
+    """Where the answers of the reference asked again in a try (`asked_again`) are written down:
+    only the scenarios asked, beside the first recording."""
+    return first.with_name(f'{first.name}-asked-{attempt}')
+
+
+def load_asked(first: Path, chosen) -> dict:
+    """What the reference answered when it was asked again, as it was written down: try ->
+    scenario id -> views."""
+    answers: dict = {}
+    for attempt in range(1, MORE_TRIES + 1):
+        directory = asked_dir(first, attempt)
+        if directory.is_dir():
+            answers[attempt] = load_golden(directory, [scenario for scenario in chosen
+                                                       if (directory / f"{scenario['id']}.json").is_file()])
+    return answers
+
+
 def load_intended(path) -> set:
     if not path or not Path(path).is_file():
         return set()
@@ -1426,11 +1447,121 @@ def selftest() -> list:
     assert kept['s'] is cut and kept['t'] is cut, 'a scenario that never ran to its end was taken as run'
     assert asked == [(attempt, ['s', 't']) for attempt in range(1, UNFINISHED_TRIES + 1)], asked
     assert len(lines) == 2 and all('never did' in line for line in lines), lines
+    asking = asking_tried(stamped)
     return ['the rule for a scenario whose every recording carries the mark of a defect (R19, the late stamp): '
             'tried on 12 cases, holds',
+            f'the rule that a difference is not called unexplained before the reference has been asked again: '
+            f'tried on {asking} cases, holds',
             'the rule for a scenario the reference did not run to its end: tried on 4 cases, holds',
             f'the rules for defects of the reference told by their shape: tried on {shapes_tried()} cases, hold',
             f'the rule for an event\'s place in its lane: tried on {places_tried()} cases, holds']
+
+
+def asking_tried(stamped) -> int:
+    """`asked_again` and what the report says of it, tried on captures made for it. Raises when it
+    does otherwise; answers how many cases were tried."""
+    def answer(value, error=None, name='s'):
+        return {'full': {'error': error}, 'core': {'scenario': name, 'error': error,
+                                                   'http': [{'path': '/x', 'body': {'answer': value}}], 'sse': []}}
+    common, rare = answer('common'), answer('rare')
+    asked: list = []
+
+    def each(value, scenarios):
+        return {s['id']: answer(value, name=s['id']) for s in scenarios}
+
+    def again(answers):
+        def give(left, attempt):
+            asked.append((attempt, [scenario['id'] for scenario in left]))
+            given = {}
+            for scenario in left:
+                these = answers.get(scenario['id'], answers.get('*'))
+                chosen = these[min(attempt, len(these)) - 1]
+                given[scenario['id']] = answer(chosen, name=scenario['id']) if isinstance(chosen, str) else chosen
+            return given
+        return give
+
+    def run(recordings, seen, chosen, answers, intended=frozenset()):
+        asked.clear()
+        before = {name: dict(views) for name, views in seen.items()}
+        got, unfinished = asked_again(recordings, seen, chosen, set(intended), again(answers))
+        lines, ok = judged(recordings, seen, chosen, set(intended), run_errors(seen, 'rust'), None, got)
+        assert seen == before, 'the Rust Host was asked again'
+        return got, unfinished, lines, ok
+    one = [{'id': 's'}]
+    tried = 0
+    # A sound later answer explains: the reference gave the Rust Host's answer at try 2, which is
+    # one more recording (the fourth), and nothing is asked after it.
+    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [common, rare, common]})
+    assert ok and asked == [(1, ['s']), (2, ['s'])] and sorted(got) == [1, 2], (asked, got)
+    assert 's: recorded 2 more time(s), 4 recordings in all; nothing left unexplained' in lines, lines
+    assert "  s / http / [0].body.answer: a later recording gave the Rust Host's answer: recording 4 (try 2)" in lines
+    assert lines[-1] == 'THE RUST HOST CONFORMS', lines[-1]
+    tried += 1
+    # None in three tries: it stays unexplained, and it was asked as often as it may be.
+    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [common]})
+    assert not ok and asked == [(attempt, ['s']) for attempt in range(1, MORE_TRIES + 1)], asked
+    assert f's: recorded {MORE_TRIES} more time(s), {2 + MORE_TRIES} recordings in all; 1 place(s) still ' \
+           'unexplained' in lines and lines[-1].startswith('THE RUST HOST DIFFERS: 1 unexplained'), lines
+    tried += 1
+    # A Rust Host that is late: an answer newer than the cursor its own snapshot handed out. The
+    # reference, asked three times, is on time every time: it is never asked away.
+    def stamped_in(revision):
+        made = stamped(revision)
+        return {**made, 'core': {**made['core'], 'scenario': 's', 'error': None}}
+    late, on_time = stamped_in(1), stamped_in(0)
+    got, _, lines, ok = run([{'s': on_time}, {'s': on_time}], {'s': late}, one, {'s': [on_time]})
+    assert not ok and len(asked) == MORE_TRIES and 'unexplained' in lines[-1], (asked, lines[-1])
+    tried += 1
+    # A Rust Host that changed: an answer the reference never gives, however often it is asked
+    # (the planted changes are of this kind), while the reference wavers between two others.
+    got, _, lines, ok = run([{'s': common}, {'s': rare}], {'s': answer('changed')}, one, {'s': [rare, common]})
+    assert not ok and len(asked) == MORE_TRIES and 'unexplained' in lines[-1], (asked, lines[-1])
+    tried += 1
+    # A Rust Host that did not run to its end is not asked about: that fails the run as it did.
+    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': answer('rare', error='timed out')}, one,
+                            {'s': [rare]})
+    assert not ok and not asked and not got, asked
+    tried += 1
+    # Nothing unexplained, or only what a register says: nothing is asked, nothing is said.
+    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': common}, one, {'s': [rare]})
+    assert ok and not asked and not got and not any(line.startswith('# Asked again') for line in lines), asked
+    ident = differences({'s': common}, {'s': rare}, one, view='core').items[0]['id']
+    got, _, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one, {'s': [rare]}, {ident})
+    assert ok and not asked and not got, asked
+    tried += 2
+    # Two scenarios: the one explained at try 1 is not asked again; the other is asked to the end.
+    two = [{'id': 's'}, {'id': 't'}]
+    got, _, lines, ok = run([each('common', two)] * 2, each('rare', two), two, {'s': ['rare'], 't': ['common']})
+    assert not ok and asked == [(1, ['s', 't']), (2, ['t']), (3, ['t'])], asked
+    assert 's: recorded 1 more time(s), 3 recordings in all; nothing left unexplained' in lines, lines
+    tried += 1
+    # A try that did not run to its end is no recording, and is said.
+    got, unfinished, lines, ok = run([{'s': common}, {'s': common}], {'s': rare}, one,
+                                     {'s': [answer('rare', error='timed out'), rare]})
+    assert ok and sorted(got) == [2] and len(unfinished) == 1 and 'try 1' in unfinished[0], (got, unfinished)
+    assert any(line.endswith('recording 3 (try 2)') for line in lines), lines
+    tried += 1
+    # The bound: more than ASK_MOST scenarios with an unexplained difference is a real difference,
+    # judged as it stands, and the report says it was not asked again.
+    many = [{'id': f'm{n}'} for n in range(ASK_MOST + 1)]
+    got, _, lines, ok = run([each('common', many)] * 2, each('rare', many), many, {'*': ['rare']})
+    assert not ok and not asked and not got, asked
+    assert any(line.startswith(f'NOT ASKED AGAIN: {ASK_MOST + 1} scenarios') for line in lines), lines
+    tried += 1
+    # ... and ASK_MOST of them are asked.
+    some = many[:ASK_MOST]
+    got, _, lines, ok = run([each('common', some)] * 2, each('rare', some), some, {'*': ['rare']})
+    assert ok and asked == [(1, [s['id'] for s in some])], asked
+    tried += 1
+    # What was written down is judged again the same way: the answers as `load_asked` gives them.
+    with tempfile.TemporaryDirectory() as where:
+        first = Path(where) / 'golden'
+        for attempt, answers in ((1, {'s': common}), (2, {'s': rare})):
+            write_golden(asked_dir(first, attempt), answers)
+        assert load_asked(first, one) == {1: {'s': common}, 2: {'s': rare}}, load_asked(first, one)
+        assert load_asked(first, [{'id': 't'}]) == {1: {}, 2: {}}
+    tried += 1
+    return tried
 
 
 def shapes_tried() -> int:
@@ -1979,13 +2110,10 @@ def verdict(unexplained: list, errors, awaited: dict, shown: set, chosen) -> tup
     return lines, ok
 
 
-def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=None) -> tuple:
-    """What the Rust Host answered (`seen`), held to the recordings of the reference: the lines
-    of the report, and whether it conforms. Nothing is started here: a run that was written
-    down can be judged again."""
-    awaited = awaited or {}
-    both_registers(intended, awaited)
-    registered = intended | set(awaited)
+def held(recordings: list, seen: dict, chosen, registered: set) -> tuple:
+    """The Rust Host held to the recordings of the reference: the differences that count (a
+    report), those a rule tells (id -> what it says), and where it was held to more than the
+    first recording (lines)."""
     report, held_to, shaped = diff.Report(), [], {}
     for scenario in steady(chosen):
         name = scenario['id']
@@ -2010,6 +2138,125 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=
             held_to.append(f"{name}: at {len(elsewhere)} place(s) the recordings differ and the Rust "
                            f"Host gives one of their answers ({'; '.join(' / '.join(p) for p in elsewhere[:6])}"
                            f"{' ...' if len(elsewhere) > 6 else ''})")
+    return report, shaped, held_to
+
+
+def unexplained_at(recordings: list, seen: dict, chosen, registered: set) -> dict:
+    """Scenario id -> the places (`place`) where the Rust Host differs from every recording and
+    neither a register nor a rule says why."""
+    report, shaped, _ = held(recordings, seen, chosen, registered)
+    places: dict = {}
+    for difference in report.items:
+        if difference['id'] not in registered and difference['id'] not in shaped:
+            places.setdefault(difference['scenario'], set()).add(place(difference))
+    return places
+
+
+# How many scenarios a run asks the reference again about, at most (`asked_again`). A run with
+# more is a real difference, judged as it stands.
+ASK_MOST = 5
+
+
+def to_ask(recordings: list, seen: dict, chosen, registered: set) -> tuple:
+    """The scenarios a difference is not called unexplained in before the reference has been
+    asked again (those with an unexplained difference where the Rust Host ran to its end), and
+    whether there are too many to ask: (their ids, too many)."""
+    left = sorted(name for name in unexplained_at(recordings, seen, chosen, registered)
+                  if not seen[name]['full']['error'])
+    return left, len(left) > ASK_MOST
+
+
+def with_answers(recordings: list, answers: dict) -> list:
+    """The recordings, and one more for every try of `asked_again` that gave answers: the first
+    recording with those answers in their places, so that each has the whole corpus."""
+    return [*recordings, *({**recordings[0], **got} for _, got in sorted(answers.items()) if got)]
+
+
+def asked_again(recordings: list, seen: dict, chosen, registered: set, again) -> tuple:
+    """A difference is not called unexplained before the reference has been asked again.
+
+    Every scenario where the Rust Host would end with an unexplained difference is recorded
+    again by the reference (`again(scenarios, attempt)` answers scenario id -> its two views),
+    up to `MORE_TRIES` times, and each answer that ran to its end is one more recording. It is
+    judged by the rule there is: a place counts only where the Rust Host differs from every
+    recording. A scenario stops being asked when nothing in it is unexplained. The Rust Host is
+    never recorded again: the reference may waver, it may not. A scenario where the Rust Host
+    did not run to its end is not asked about (that fails the run as before), and a run with
+    more than `ASK_MOST` such scenarios is not asked about at all: it is judged as it stands.
+    Answers (try -> scenario id -> views, only those that ran to their end) and lines for a
+    try that did not."""
+    left, too_many = to_ask(recordings, seen, chosen, registered)
+    if not left or too_many:
+        return {}, []
+    answers: dict = {}
+    unfinished = []
+    for attempt in range(1, MORE_TRIES + 1):
+        asking = [scenario for scenario in steady(chosen) if scenario['id'] in left]
+        if not asking:
+            break
+        more = again(asking, attempt)
+        answers[attempt] = {}
+        for scenario in asking:
+            views = more[scenario['id']]
+            if views['full']['error']:
+                unfinished.append(f"{scenario['id']}: asked again (try {attempt}), and it did not run to its end: "
+                                  f"{views['full']['error']}")
+            else:
+                answers[attempt][scenario['id']] = views
+        left = sorted(set(left) & set(unexplained_at(with_answers(recordings, answers), seen, asking, registered)))
+    return {attempt: got for attempt, got in answers.items() if got}, unfinished
+
+
+def said_of_asking(recordings: list, answers: dict, seen: dict, chosen, registered: set) -> list:
+    """What the report says of `asked_again`: every scenario asked again, how many recordings it
+    took, and each place where a later recording gave the Rust Host's answer. That list goes to
+    the release owner: each line is the reference wavering, or this Host having moved into one
+    of its rare answers."""
+    left, too_many = to_ask(recordings, seen, chosen, registered)
+    if too_many:
+        return ['', '# Asked again', f'NOT ASKED AGAIN: {len(left)} scenarios end with an unexplained difference, '
+                f'more than {ASK_MOST}: a real difference, judged as it stands ({", ".join(left)})']
+    asked = sorted({name for got in answers.values() for name in got})
+    if not asked:
+        return []
+    before = unexplained_at(recordings, seen, chosen, registered)
+    every = with_answers(recordings, answers)
+    after = unexplained_at(every, seen, chosen, registered)
+    numbered = [(len(recordings) + n + 1, attempt, got)
+                for n, (attempt, got) in enumerate(sorted((a, g) for a, g in answers.items() if g))]
+    lines = ['', '# Asked again: a difference is not called unexplained before the reference has been asked again '
+             '(the Rust Host is never asked again)']
+    for name in asked:
+        scenario = [s for s in chosen if s['id'] == name]
+        mine = [(number, attempt, got[name]) for number, attempt, got in numbered if name in got]
+        explained = sorted(before.get(name, set()) - after.get(name, set()))
+        still = after.get(name, set())
+        lines.append(f'{name}: recorded {len(mine)} more time(s), {len(recordings) + len(mine)} recordings in all; '
+                     + (f'{len(still)} place(s) still unexplained' if still else 'nothing left unexplained'))
+        for where in explained:
+            gave = [number for number, _, views in mine
+                    if where not in {place(d) for d in differences({name: views}, seen, scenario, view='core').items}]
+            tries = {number: attempt for number, attempt, _ in mine}
+            lines.append(f'  {name} / {where[0]} / {where[1]}: ' + (
+                f"a later recording gave the Rust Host's answer: recording {gave[0]} (try {tries[gave[0]]})" if gave
+                else 'no later recording gave the Rust Host\'s answer, and a rule of a defect of the reference '
+                     'tells it against the recordings as they now are'))
+    return lines
+
+
+def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=None, answers=None) -> tuple:
+    """What the Rust Host answered (`seen`), held to the recordings of the reference: the lines
+    of the report, and whether it conforms. Nothing is started here: a run that was written
+    down can be judged again. `answers` are what the reference answered when it was asked again
+    (`asked_again`), try -> scenario id -> views: each is one more recording, and the report
+    says what they explained."""
+    awaited = awaited or {}
+    both_registers(intended, awaited)
+    registered = intended | set(awaited)
+    answers = answers or {}
+    asking = said_of_asking(recordings, answers, seen, chosen, registered)
+    recordings = with_answers(recordings, answers)
+    report, shaped, held_to = held(recordings, seen, chosen, registered)
     unexplained = [d for d in report.items if d['id'] not in registered and d['id'] not in shaped]
     lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors,
                       awaited)]
@@ -2023,20 +2270,28 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=
                   + ', '.join(f'{defect} at {count} place(s)' for defect, count in sorted(by_defect.items())), '']
     if held_to:
         lines += ['', 'held to more than the first recording:', *(f'  {line}' for line in held_to)]
-    lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]
+    lines += ['', '# The same differences by shape', *diff.shapes(report, top=200), *asking]
     said, ok = verdict(unexplained, errors, awaited, {d['id'] for d in report.items}, chosen)
     lines += ['', *said]
     return lines, ok
 
 
 def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int,
-                 awaited=None) -> tuple:
+                 awaited=None, again=None) -> tuple:
     """The Rust Host against what the Python Host answered. Where the reference was recorded
     answering in more than one way, the answer the Rust Host is nearest to is the one it is
-    held to; the report says which recording that was."""
+    held to; the report says which recording that was. With `again` (cross, where both Hosts
+    are there) the reference is asked again before a difference is called unexplained
+    (`asked_again`). The lines, whether it conforms, what the Rust Host answered and the answers
+    of the reference asked again."""
     seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
-    lines, ok = judged(recordings, seen, chosen, intended, run_errors(seen, 'rust'), awaited)
-    return lines, ok, seen
+    answers, unfinished = {}, []
+    if again is not None:
+        answers, unfinished = asked_again(recordings, seen, chosen, intended | set(awaited or {}), again)
+    lines, ok = judged(recordings, seen, chosen, intended, run_errors(seen, 'rust'), awaited, answers)
+    if unfinished:
+        lines[-1:-1] = ['', '# Asked again and not run to its end (no recording is made of it)', *unfinished, '']
+    return lines, ok, seen, answers
 
 
 def choose(names):
@@ -2098,7 +2353,8 @@ def main(argv=None) -> int:
                       if directory == args.golden or directory.is_dir()]
         seen = load_golden(args.out / 'rust', chosen)
         errors = [error for n, recording in enumerate(recordings) for error in run_errors(recording, f'recording {n + 1}')]
-        lines, ok = judged(recordings, seen, chosen, intended, errors + run_errors(seen, 'rust'), awaited)
+        lines, ok = judged(recordings, seen, chosen, intended, errors + run_errors(seen, 'rust'), awaited,
+                           load_asked(args.golden, chosen))
         print('\n'.join(lines))
         return 0 if ok else 1
     run = Run()
@@ -2144,7 +2400,7 @@ def main(argv=None) -> int:
         elif args.mode == 'compare':
             recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
                           if directory == args.golden or directory.is_dir()]
-            lines, ok, rust_seen = against_rust(rust, recordings, chosen, intended, run, args.jobs, awaited)
+            lines, ok, rust_seen, _ = against_rust(rust, recordings, chosen, intended, run, args.jobs, awaited)
             if args.out:
                 write_golden(args.out / 'rust', rust_seen)
                 (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
@@ -2180,9 +2436,15 @@ def main(argv=None) -> int:
                          f'{len(plants.CHANGES)}: give every one a run in conformance.yml']
             else:
                 proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
-            rust_lines, conforms, rust_seen = against_rust(
-                rust, recordings, chosen, intended, run, args.jobs, awaited)
+            # The reference is asked again only where it ran without errors: otherwise nothing
+            # below can be trusted anyway.
+            again = (lambda left, attempt: corpus(python_host(build), left, run.label(f'py-ask-{attempt}'),
+                                                  args.jobs)) if ok else None
+            rust_lines, conforms, rust_seen, answers = against_rust(
+                rust, recordings, chosen, intended, run, args.jobs, awaited, again)
             write_golden(args.out / 'rust', rust_seen)
+            for attempt, got in answers.items():
+                write_golden(asked_dir(args.out / 'golden', attempt), got)
             lines += ['', *proof, '', *rust_lines]
             ok = ok and proved and conforms
             (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
