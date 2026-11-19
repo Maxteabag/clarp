@@ -160,3 +160,4 @@ impl Blobs for Directory {
         Ok(part)
     }
 }
+pub mod diagnostics;
