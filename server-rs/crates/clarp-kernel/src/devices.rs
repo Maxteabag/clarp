@@ -533,7 +533,7 @@ const INVOKE: &str = "/invoke";
 
 /// The action a request invokes (`POST /controller-actions/<id>/invoke`), its id read with
 /// its `%XX`: none where the id is empty or holds a slash.
-fn invoked(path: &str) -> Option<String> {
+pub fn invoked(path: &str) -> Option<String> {
     let id = path
         .strip_prefix(CONTROLLER_ACTIONS)?
         .strip_prefix('/')?

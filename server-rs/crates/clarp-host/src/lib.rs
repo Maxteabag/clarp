@@ -146,3 +146,7 @@ mod tests {
 }
 
 pub mod vocabulary;
+
+pub mod controller_actions;
+
+mod controller_action_tool;

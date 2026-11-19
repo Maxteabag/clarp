@@ -164,6 +164,15 @@ impl Hub {
         id
     }
 
+    /// A live notification without a cursor or a replay record.
+    pub fn ephemeral(&self, event: Value, at_ms: i64) {
+        let _ = self.live.send(Arc::new(Published {
+            id: 0,
+            at_ms,
+            json: event.to_string(),
+        }));
+    }
+
     /// The name of this run of the Host: what a `live` event and `GET /live` say under `epoch`.
     pub fn epoch(&self) -> &str {
         &self.epoch

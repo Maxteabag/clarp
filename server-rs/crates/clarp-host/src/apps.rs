@@ -426,50 +426,6 @@ async fn teams() -> Json<Value> {
     Json(json!({ "teams": [] }))
 }
 
-/// `GET /controller-actions`: what a button of a controller (a Flic, the Watch) can run
-/// instead of what it does by itself, and which of its gestures runs what
-/// (`docs/controller-actions.md`). An app asks this of every Host again and again. Nothing
-/// can be defined on this Host yet, so there is nothing to run and nothing mapped: the
-/// answer is the Python Host's for a Host where nobody defined anything, with the kinds of
-/// action, the buttons and the gestures that Host knows.
-async fn controller_actions() -> Json<Value> {
-    Json(json!({
-        "revision": 0,
-        "actions": [],
-        "mappings": [],
-        "types": ["http_post", "agent_prompt"],
-        "buttons": ["primary", "secondary"],
-        "gestures": [
-            "double-click", "hold", "rotate-clockwise", "rotate-counterclockwise", "single-click",
-            "swipe-down", "swipe-left", "swipe-right", "swipe-up",
-        ],
-    }))
-}
-
-/// `GET /controller-actions/audit?limit=`: what was defined and run, newest first. Nothing
-/// was, here.
-async fn controller_audit(
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, ApiError> {
-    let limit = query.get("limit").map_or("", |limit| limit.as_str());
-    // A limit is a whole number, as Python reads one: an empty one is the usual fifty.
-    if !limit.is_empty() && clarp_kernel::python::int(limit).is_none() {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "limit must be an integer",
-        ));
-    }
-    Ok(Json(json!({ "entries": [] })))
-}
-
-/// Defining an action, mapping a gesture to one and running one are not built.
-async fn no_controller_actions() -> ApiError {
-    ApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "controller actions are not built on this Host yet",
-    )
-}
-
 /// Where the owner's choice of how much a tool's use is explained is kept, and whether it
 /// is explained at all.
 const DETAIL_LEVEL_KEY: &str = "tool_explanations.detail_level";
@@ -759,10 +715,5 @@ pub fn routes() -> Router<App> {
         )
         .route("/tool-explanations", post(explain))
         .route("/tool-explanations/stats", get(explained_how))
-        .route(
-            "/controller-actions",
-            get(controller_actions).post(no_controller_actions),
-        )
-        .route("/controller-actions/audit", get(controller_audit))
-        .route("/controller-actions/{*rest}", post(no_controller_actions))
+        .merge(crate::controller_actions::routes())
 }

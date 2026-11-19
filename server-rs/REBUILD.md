@@ -3079,6 +3079,13 @@ voice and model. The Host keeps primary MP3s by voice, model and text in its pre
 of cached clip must be regular files owned by the Host. A configured built-in fallback can speak on a
 primary failure; its bytes last for that response. Both kinds of response accept byte ranges.
 
+**Controller custom actions** (20 Nov 2026). The administrator defines an HTTP POST or agent prompt;
+a full device may map a button and gesture, and a limited device may read and invoke by ID.
+The registry change and its audit commit together before the ephemeral revision notification.
+The Host retains 500 audit rows and ten minutes of results, including debounced presses.
+Duplicate requests share one execution. Prompts use the same admission as the local admin tool.
+HTTP checks the canonical destination at definition and execution, and never follows redirects.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
