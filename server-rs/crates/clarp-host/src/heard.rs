@@ -145,7 +145,7 @@ impl Ears {
             .map(|(_, model)| format!("{OWN_PROVIDER}:{model}"));
         inventory
             .recover(fleet, &config.data_dir.join("models"), active.as_deref())
-            .await;
+            .await?;
         let keys = OwnerFile::new(config.speech_keys.clone());
         let read = keys.clone();
         let mut scribe = Scribe::new("scribe_v2", Box::new(move || read.key("elevenlabs")));

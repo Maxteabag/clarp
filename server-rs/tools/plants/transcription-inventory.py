@@ -3,6 +3,8 @@
 import runner
 
 RUNS = {
+    "port": ["test", "-p", "clarp-host", "--lib", "unreadable_inventory_requires_a_working_store"],
+    "door": ["test", "--test", "host", "a_change_the_python_host_has_a_route_for_is_not_built_here"],
     "catalog": ["test", "--test", "transcription_inventory_vectors"],
     "host": ["test", "--test", "host", "--", "installed_transcription_models_are_selected_and_removed_by_their_own_records"],
     "worker": ["test", "-p", "clarp-speech", "--lib", "an_installed_variant_loads_before_its_first_clip"],
@@ -63,6 +65,30 @@ changes("clarp-host/src/heard/variants.rs", "host", [
 changes("clarp-speech/src/whisper.rs", "worker", [
     ('could not load transcription model {id}: {error}', 'could not load transcription model {id}'),
     ('*locked(&loaded.state) = State::Up(child)', 'drop(child)'),
+])
+changes("clarp-host/src/heard/inventory.rs", "host", [
+    ('if record["_remove_pending"] != true', 'if record["_remove_pending"] == true'),
+    ('if Some(id) == active', 'if Some(id) != active'),
+    ('fields.remove("_remove_pending");', 'fields.remove("_unused");'),
+    ('if !pending {', 'if pending {'),
+    ('records[index]["_remove_pending"] = json!(true)', 'records[index]["_remove_pending"] = json!(false)'),
+    ('if record["_remove_pending"] == true', 'if record["_remove_pending"] == false'),
+    ('if unreadable {','if !unreadable {'),
+    ('"clarp-host: unreadable transcription inventory; using an empty list"', '"corrupt record"'),
+    ('"records.unreadable".into()', '"records.backup".into()'),
+])
+changes("clarp-host/src/heard/managed.rs", "host", [
+    ('std::io::ErrorKind::NotFound && resuming', 'std::io::ErrorKind::NotFound && !resuming'),
+    ('resuming && error.kind()', '!resuming && error.kind()'),
+])
+changes("clarp-host/src/screens.rs", "door", [
+    ('post(no_model_install)', 'get(no_model_install)'),
+    ('"Installing a transcription model from an app is"', '"Installing models is"'),
+])
+changes("clarp-host/src/heard/inventory.rs", "port", [
+    ('Some(bytes),', 'Some(Vec::new()),'),
+    ('.await\n            .map_err(|e| e.0)?;', '.await.unwrap_or(None);'),
+    ('.await\n                        .map_err(|e| e.0)?;', '.await.unwrap_or(());'),
 ])
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

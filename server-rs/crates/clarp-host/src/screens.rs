@@ -347,6 +347,10 @@ async fn no_teams() -> ApiError {
     not_built("Teams are")
 }
 
+async fn no_model_install() -> ApiError {
+    not_built("Installing a transcription model from an app is")
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/harness-providers", get(model_providers))
@@ -354,6 +358,7 @@ pub fn routes() -> Router<App> {
         .route("/harness-providers/{action}", post(no_model_providers))
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
+        .route("/transcription-models/install", post(no_model_install))
         .route("/server-update", get(software).post(no_update))
         .route("/managed-skills", get(skills).post(no_skills))
         .route("/backend-auth", get(logins))
