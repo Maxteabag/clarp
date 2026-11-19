@@ -376,3 +376,74 @@ impl Task {
         json!({"can_cancel":false,"outcome_state":outcome,"worker_freshness":"unknown","elapsed_ms":self.terminal_at.unwrap_or(now).saturating_sub(self.started_at).max(0),"heartbeat_at":Value::Null,"worker_pid":Value::Null})
     }
 }
+
+/// The observer alone uses this command. It is never decoded from a worker
+/// request. The job book owns the resulting record just like a registered job.
+pub enum Observation<'a> {
+    Evidence { native: &'a str, bound_at: i64, action: &'a Evidence },
+    Reconcile { ended: bool },
+    Exit { turn: &'a str },
+    Age { protected: bool },
+}
+
+impl From<&crate::jobs::Job> for Task {
+    fn from(job:&crate::jobs::Job)->Self {
+        Self { title:job.title.clone(), status:job.status,started_at:job.started_at_ms,
+            updated_at:job.updated_at_ms,terminal_at:job.terminal_at_ms,terminal_reason:job.terminal_reason.clone(),
+            progress_text:job.progress_text.clone(),metadata:job.metadata.clone() }
+    }
+}
+
+impl crate::jobs::JobBook {
+    pub fn provider_observation(&self,id:&str,command:Observation<'_>,now:i64,revision:impl FnOnce()->u64)->Option<crate::jobs::JobRecord>{
+        use crate::jobs::{Job,JobRecord,Worker,DEFAULT_HEARTBEAT_TIMEOUT_MS};
+        if !id.starts_with("claude-task:"){return None;}
+        let before=self.get(id);
+        if before.is_some_and(|j|!j.provider_owned()){return None;}
+        let mut task=before.map(Task::from);
+        let timeline=match command{
+            Observation::Evidence{native,bound_at,action}=>observe(&mut task,native,bound_at,action,now),
+            Observation::Reconcile{ended}=>task.as_mut()?.reconcile(ended,now),
+            Observation::Exit{turn}=>task.as_mut()?.close_turn(turn,now),
+            Observation::Age{protected}=>task.as_mut()?.expire(protected,now),
+        };
+        let task=task?;
+        if !timeline && before.is_some_and(|j|j.metadata==task.metadata){return None;}
+        let at=task.updated_at;
+        let note=if timeline{task.progress_text.clone()}else{String::new()};
+        let job=Job{id:id.into(),kind:"provider-task".into(),title:task.title,detail:String::new(),status:task.status,
+            generation:1,revision:if timeline{revision()}else{before?.revision},started_at_ms:task.started_at,updated_at_ms:at,
+            heartbeat_at_ms:None,heartbeat_timeout_ms:DEFAULT_HEARTBEAT_TIMEOUT_MS,heartbeat_source:"provider_event".into(),
+            worker:Worker::none(),terminal_at_ms:task.terminal_at,terminal_reason:task.terminal_reason,cancelled_at_ms:None,
+            progress_text:task.progress_text,progress_at_ms:Some(at),log_path:String::new(),worker_cwd:String::new(),
+            started_trace_id:String::new(),metadata:task.metadata};
+        Some(JobRecord{job,at_ms:at,note,timeline})
+    }
+}
+
+/// A cursor is always scoped to its agent's native session. The offset is at
+/// a record boundary unless the rest of an oversized record is being skipped.
+#[derive(Clone,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
+pub struct Cursor {
+    pub device:u64,pub inode:u64,pub offset:u64,pub action_offset:usize,pub discarding:bool,
+}
+#[derive(Clone,Copy,Debug,Eq,PartialEq,Serialize,Deserialize)]
+pub struct Attempt{pub turn:u64,pub attempt:u32}
+#[derive(Clone,Debug,Eq,PartialEq,Serialize,Deserialize)]
+pub struct TurnLink{pub attempt:Attempt,pub exited_at:Option<i64>}
+#[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
+pub struct FinalRead{pub attempt:Attempt,pub device:u64,pub inode:u64,pub end:u64,pub exited_at:i64}
+#[derive(Clone,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
+pub struct Session{
+    pub revision:u64,pub cursor:Cursor,pub bound_at:i64,pub owner:Option<Attempt>,pub final_read:Option<FinalRead>,
+    pub links:std::collections::BTreeMap<String,TurnLink>,
+}
+#[derive(Clone,Debug,Serialize,Deserialize)]
+pub struct JournalEntry{
+    pub native:String,pub session:Session,pub records:Vec<crate::jobs::JobRecord>,
+}
+#[derive(Clone,Debug)]
+pub struct Visit {
+    pub native:String,pub expected:u64,pub cursor:Cursor,pub bound_at:i64,
+    pub owner:Option<Attempt>,pub final_read:Option<FinalRead>,pub actions:Vec<Evidence>,pub eof:bool,
+}
