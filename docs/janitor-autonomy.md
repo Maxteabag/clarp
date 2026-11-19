@@ -38,6 +38,17 @@ notification transport; current desktop-presence and APNs configuration still
 apply. Delivery receipts are retained. Retries reuse notification identity;
 an ambiguous transport result is not proof of a unique phone delivery.
 
+A notice is delivered once a device took it (sent at least one, even beside
+failures), or when nobody was meant to get it: push off, no deliverable
+device, a suppressed push. A notice that reached nobody because the transport
+failed (sent none, failed at least one) stays undelivered and is tried again
+at the keeper's later looks, no more often than its interval, until a device
+takes it, the window it speaks of resets (settled as expired), a newer
+crossing of that window replaces it (superseded), or the Janitor's generation
+changes (cancelled). Each attempt is kept in the receipt's payload
+(`delivery_retry`: attempts, the last counts, the time); the receipt's
+delivery stays empty until it is settled.
+
 Recovery options:
 
 - Notify only: no account change.
