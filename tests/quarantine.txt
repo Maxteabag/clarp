@@ -28,4 +28,3 @@ tests/integration/test_task_goal_recovery.py::test_detached_job_wakes_its_owner_
 tests/unit/test_runtime_bridge.py::test_runtime_client_waits_out_a_full_listener_backlog  # load
 tests/unit/test_turn_dispatch.py::test_queue_during_claim_to_spawn_window_stays_serial  # load
 tests/unit/test_turn_dispatch.py::test_idle_queue_request_retry_does_not_duplicate_started_turn  # load
-tests/unit/test_writer_lock_holds.py::test_slow_import_never_blocks_a_short_writer  # load

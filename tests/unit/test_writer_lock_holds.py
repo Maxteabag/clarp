@@ -257,48 +257,81 @@ def memory_backed_db():
         shutil.rmtree(folder)
 
 
+class _PlantedClock:
+    """The import writer's clock (message_import_writer.time), planted: reads advance it by the
+    read delay instead of sleeping, so a batch's hold is planted time, the same at any load. Each
+    yield runs the short writer there and then: ``yielded`` is called instead of sleeping."""
+
+    def __init__(self, yielded):
+        self.now = 1_000.0
+        self._yielded = yielded
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+        self._yielded()
+
+
+class _PlantedRecording(_Recording):
+    """_Recording on the planted clock: a slow read adds its delay to the clock, and the hold of
+    each write transaction is measured on it."""
+
+    def __init__(self, inner, read_delay: float, clock: _PlantedClock):
+        super().__init__(inner, 0.0)
+        self._planted_delay = read_delay
+        self._clock = clock
+
+    def execute(self, sql, *args):
+        verb = str(sql).split(None, 1)[0].upper()
+        if verb == "SELECT":
+            self._clock.now += self._planted_delay
+        if verb in {"COMMIT", "ROLLBACK"} and self._began is not None:
+            self.holds.append(self._clock.now - self._began)
+            self._began = None
+        result = self._inner.execute(sql, *args)
+        if " ".join(str(sql).split()).upper() == "BEGIN IMMEDIATE":
+            self.begins += 1
+            self._began = self._clock.now
+        return result
+
+
 def test_slow_import_never_blocks_a_short_writer(tmp_path, monkeypatch, memory_backed_db):
+    """Every read under the lock takes 6 ms (planted, as page faults did on the swapping host).
+    The import must commit in batches within its 25 ms budget, and at every yield between them
+    the write lock must be free: a short writer with no busy wait at all gets it there and then.
+    No wall clock: the holds are planted time and the short writer runs at each yield, so the
+    answer is the same at any load (it was quarantined as 'load' when both were seconds)."""
+    from lib import message_import_writer
     agent_id = _agent(tmp_path)
     # A WAL autocheckpoint runs in whichever COMMIT crosses the threshold,
     # after the lock is released; it is not lock time either.
     db.conn().execute("PRAGMA wal_autocheckpoint = 0")
-    recording = _record(monkeypatch, read_delay=0.006)
-    stop = threading.Event()
-    waits: list[float] = []
-    failures: list[BaseException] = []
+    other = sqlite3.connect(str(db.DB_PATH), timeout=0, isolation_level=None)
+    other.execute("PRAGMA wal_autocheckpoint = 0")
+    writes: list[int] = []
 
     def short_writer():
-        try:
-            other = sqlite3.connect(str(db.DB_PATH), timeout=30, isolation_level=None)
-            other.execute("PRAGMA wal_autocheckpoint = 0")
-            # As db.py's connections: no fsync per commit in WAL mode.
-            other.execute("PRAGMA synchronous = NORMAL")
-            while not stop.is_set():
-                started = time.monotonic()
-                other.execute("UPDATE agents SET persona=? WHERE agent_id=?",
-                              (f"tick {len(waits)}", agent_id))
-                waits.append(time.monotonic() - started)
-                time.sleep(0.005)
-            other.close()
-        except BaseException as exc:  # noqa: BLE001 - reported below
-            failures.append(exc)
-
-    thread = threading.Thread(target=short_writer)
-    thread.start()
+        # timeout=0: "database is locked" at once if the import still held the write lock.
+        other.execute("UPDATE agents SET persona=? WHERE agent_id=?", (f"tick {len(writes)}", agent_id))
+        writes.append(len(recording.holds))
+    clock = _PlantedClock(short_writer)
+    recording = _PlantedRecording(db.conn(), 0.006, clock)
+    monkeypatch.setattr(message_store, "conn", lambda: recording)
+    monkeypatch.setattr(message_import_writer, "time", clock)
     try:
         _store(agent_id, _turns(200, traced=True))
     finally:
-        stop.set()
-        thread.join(10)
+        other.close()
 
-    assert not failures
     assert len(_rows(agent_id)) == 400
-    assert waits, "the short writer never ran"
-    # Batches are budgeted at 25 ms. Before the fix the final batch alone
-    # read under the lock for ~2.5 s; the waiter's bound also covers commits'
-    # disk writes on a loaded runner.
-    assert max(recording.holds) < 0.3, f"longest import hold {max(recording.holds):.3f}s"
-    assert max(waits) < 2.0, f"short writer waited {max(waits):.3f}s"
+    # Batches are budgeted at 25 ms. Before the fix the final batch alone read under the lock
+    # for ~2.5 s.
+    assert len(recording.holds) > 10 and max(recording.holds) < 0.3, (
+        f"{len(recording.holds)} batches, longest hold {max(recording.holds):.3f}s planted")
+    # The short writer got the lock at every yield, without waiting, between batches.
+    assert len(writes) >= len(recording.holds) - 1 and writes == sorted(writes)
 
 
 def test_janitor_demand_admission_resolves_configuration_outside_the_write_lock(monkeypatch):
