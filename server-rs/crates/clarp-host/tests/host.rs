@@ -43206,7 +43206,8 @@ fn new_agent_directory_suggestions_and_frequent_paths_survive_restart() {
     let home = place.root.join("synthetic-home");
     let one = home.join("Project one");
     let two = home.join("Project two");
-    for p in [&one, &two] {
+    let fallback_only = home.join("Project twelve");
+    for p in [&one, &two, &fallback_only] {
         std::fs::create_dir_all(p).unwrap();
     }
     let program_path = place.root.join("zoxide-stand-in");
@@ -43223,7 +43224,7 @@ if "zzzzzz" in sys.argv:
     time.sleep(2)
     (home/"late").touch()
 if "--" not in sys.argv:
-    print(home/"Project two")
+    print(home/"Project twelve")
     sys.exit(3)
 if "ptw" in sys.argv:sys.exit(1)
 print(home/"Project one")
@@ -43300,8 +43301,8 @@ print(home/"Project one")
         json!(two)
     );
     assert_eq!(
-        host.get("/launch-directories?q=ptw")["matches"][0]["path"],
-        json!(two)
+        host.get("/launch-directories?q=ptw")["matches"],
+        json!([{"path":fallback_only,"label":"~/Project twelve"},{"path":two,"label":"~/Project two"}])
     );
     let empty = host.get(lookup);
     assert_eq!(
