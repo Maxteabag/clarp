@@ -20,6 +20,8 @@ from urllib.parse import urlencode, urlsplit
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from . import request_body
+
 REQ, REQ_BODY, REQ_END = 0x01, 0x02, 0x03
 RES_HEAD, RES_BODY, RES_END = 0x11, 0x12, 0x13
 WS_OPEN, WS_ACCEPT, WS_MSG, WS_CLOSE = 0x21, 0x22, 0x23, 0x24
@@ -410,6 +412,15 @@ class Connector:
     async def _serve_http(self, stream, meta):
         try:
             await asyncio.wait_for(stream.ended.wait(), timeout=60)
+            # The Host refuses a body over its cap without reading it (lib.request_body, R81), and
+            # http.client sends a body whole before it reads an answer: forwarded, it would end in a
+            # broken pipe and a 502. The relay holds the whole body here, so it answers the 413.
+            most = request_body.limit(str(meta.get('method', 'GET')), meta['path'].partition('?')[0])
+            if most is not None and len(stream.body) > most:
+                await self._send(stream, jframe(RES_HEAD, stream.sid, {'status': 413, 'headers': {'content-type': 'application/json'}}))
+                await self._send(stream, frame(RES_BODY, stream.sid, json.dumps({'error': request_body.SENTENCE}).encode()))
+                await self._send(stream, frame(RES_END, stream.sid))
+                return
             future = self._loop.run_in_executor(None, self._do_http, stream, meta, stream.body)
             stream.http_submitted = True
             future.add_done_callback(lambda done: self._http_done(stream, done))

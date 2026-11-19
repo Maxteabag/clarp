@@ -460,7 +460,9 @@ ROUTES: dict[str, tuple[Route, ...]] = {
 
 def dispatch(handler, method: str, path: str):
     """Serve `path` (bare, no query) with the first matching route, or 404."""
-    from lib import request_texts
+    from lib import request_body, request_texts
+    if request_body.refused(handler, method, path):    # R81: before any byte of the body is read
+        return None
     if request_texts.refused(handler, method, path):   # R79: one place for every kind
         return None
     for route in ROUTES[method]:
