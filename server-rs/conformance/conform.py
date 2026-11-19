@@ -1166,8 +1166,20 @@ def read_awaited(text: str) -> dict:
         ident, pr, branch, what = fields
         if ident in found:
             raise SystemExit(f'awaited.txt, line {number}: {ident} is registered twice')
-        found[ident] = {'pr': int(pr), 'branch': branch, 'scenario': what.split()[0], 'what': what}
+        found[ident] = {'pr': int(pr), 'branch': branch, 'scenario': what.split()[0], 'what': what,
+                        'line': number}
     return found
+
+
+def known_scenarios(awaited: dict, known) -> None:
+    """Every line of the register names, first, a scenario the corpus has, whichever scenarios a
+    run chose. A line is asked only where its scenario ran: one that names none would never be
+    seen and never be stale, and would pass for ever. It is an error, named by its line."""
+    unknown = sorted((line['line'], ident, line['scenario']) for ident, line in awaited.items()
+                     if line['scenario'] not in known)
+    if unknown:
+        raise SystemExit('awaited.txt names no scenario of the corpus first: '
+                         + '; '.join(f'line {number} ({ident}): {name!r}' for number, ident, name in unknown))
 
 
 def load_awaited(path) -> dict:
@@ -1959,6 +1971,7 @@ def main(argv=None) -> int:
     rust = args.rust.resolve() if args.rust else None
     intended, awaited = load_intended(args.intended), load_awaited(args.awaited)
     both_registers(intended, awaited)
+    known_scenarios(awaited, scenarios.BY_ID)
     if args.mode == 'selftest':
         print('\n'.join(selftest()))
         return 0

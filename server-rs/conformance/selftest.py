@@ -108,11 +108,23 @@ def main() -> int:
     # Nothing awaited: as it always was.
     lines, ok = conform.verdict([], [], {}, shown, ROUTER)
     check(ok and lines == ['THE RUST HOST CONFORMS'], 'with nothing awaited the verdict is as it was', failed)
-    # The register in the tree is read, and shares no id with intended.txt.
+    # A line whose first word is no scenario of the corpus is an error, named by its line: it would
+    # never be asked, so never stale.
+    slip = conform.read_awaited('# a head\n' + register(made, '[10].body.session').replace(
+        ' router / ', ' [10].body.session / router / ') + '\n')
+    said = refused(lambda: conform.known_scenarios(slip, conform.scenarios.BY_ID))
+    check('line 2' in said and ids[0] in said and "'[10].body.session'" in said,
+          'a line that names no scenario of the corpus first is an error, named by its line', failed)
+    check(not refused(lambda: conform.known_scenarios(awaited, conform.scenarios.BY_ID)),
+          'a line that names a scenario of the corpus is taken', failed)
+
+    # The register in the tree is read, names scenarios of the corpus, and shares no id with intended.txt.
     kept = conform.load_awaited(conform.HERE / 'awaited.txt')
     conform.both_registers(conform.load_intended(conform.HERE / 'intended.txt'), kept)
-    check(all(line['pr'] > 0 for line in kept.values()),
-          f'the register in the tree is read ({len(kept)} awaited) and shares no id with intended.txt', failed)
+    tree = refused(lambda: conform.known_scenarios(kept, conform.scenarios.BY_ID))
+    check(not tree and all(line['pr'] > 0 for line in kept.values()),
+          f'the register in the tree is read ({len(kept)} awaited), names scenarios of the corpus and shares no '
+          f'id with intended.txt{": " + tree if tree else ""}', failed)
 
     # The tool's other rules, as `conform.py selftest` tries them.
     for line in conform.selftest():
