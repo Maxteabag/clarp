@@ -330,19 +330,14 @@ KEY_ACCOUNTING_ACTIVATION = "heartbeat.accounting_activation_ms"
 def activate_accounting() -> int:
     """One persistent boundary: imports never account turns predating this code.
 
-    INSERT OR IGNORE also fences simultaneous Host starts. An in-flight turn
-    at the first start is deliberately excluded, including after later restarts.
+    The settings table's owner writes it (settings_store.set_text_if_blank): one
+    atomic statement in which the first non-blank stamp wins, which also fences
+    simultaneous Host starts. An in-flight turn at the first start is
+    deliberately excluded, including after later restarts.
     """
-    database = conn()
-    row = database.execute("SELECT value FROM settings WHERE key=?",
-                           (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
-    if row is None:
-        stamp = now_ms()
-        database.execute("INSERT OR IGNORE INTO settings(key,value,updated_at) VALUES(?,?,?)",
-                         (KEY_ACCOUNTING_ACTIVATION, str(stamp), stamp))
-        row = database.execute("SELECT value FROM settings WHERE key=?",
-                               (KEY_ACCOUNTING_ACTIVATION,)).fetchone()
-    return int(row["value"])
+    stamp = now_ms()
+    return int(settings_store.set_text_if_blank(KEY_ACCOUNTING_ACTIVATION, str(stamp),
+                                                updated_at=stamp))
 
 
 def record_ended_turn(agent_id: str, trace_id: str, last_answer: str, *,

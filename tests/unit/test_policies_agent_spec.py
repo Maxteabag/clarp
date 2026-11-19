@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lib.policies.agent_spec import AVATAR_MAX_BYTES, AgentSpec, RosterView, SpecError
+from lib.policies.agent_spec import NeedsContact, AVATAR_MAX_BYTES, AgentSpec, RosterView, SpecError
 
 
 class FakeBackends:
@@ -56,7 +56,7 @@ def parse(data, view=VIEW, *, janitor=False, backends=None):
     ({}, VIEW, 400, "name required"),
     ({"name": "X", "auto_contact": True, "anonymous": True}, VIEW, 400,
      "conflicting launch options"),
-    ({"auto_contact": True}, VIEW, 409, "contact_pool_empty"),
+    ({"auto_contact": True}, replace(VIEW, minted_contact=""), 409, "contact_pool_empty"),
     ({"name": "X", "anonymous": True, "replace_sid": "a"},
      replace(VIEW, agents={"a": {"name": "A"}}), 400, "anonymous launch must be fresh"),
     ({"name": "X", "avatar_base64": "!!"}, VIEW, 400, "invalid avatar"),
@@ -177,17 +177,30 @@ def test_anonymous_launch_mints_a_free_label():
     assert spec.session == "" and spec.synthesize_audio is False
 
 
-def test_auto_contact_takes_the_first_free_contact_or_mints_when_exhausted():
-    view = replace(VIEW, contact_pool=lambda backend: ["Nora", "Ivy"],
-                   mint_contact=lambda backend: "Clara")
+def test_auto_contact_takes_the_first_free_contact_or_asks_for_one_when_exhausted():
+    """Minting is IO, so the policy asks for a Contact (NeedsContact) and takes the minted name as
+    a value on the second parse; it never mints itself (rule 6)."""
+    view = replace(VIEW, contact_pool=lambda backend: ["Nora", "Ivy"])
     assert parse({"auto_contact": True}, view).persona == "Nora"
 
-    exhausted = replace(VIEW, contact_pool=lambda backend: [],
-                        mint_contact=lambda backend: f"Minted-{backend}")
-    assert parse({"auto_contact": True, "backend": "grok"}, exhausted).persona == "Minted-grok"
-    assert parse({"mint_contact": True, "backend": "claude"}, view).persona == "Clara"
+    exhausted = replace(VIEW, contact_pool=lambda backend: [])
+    assert parse({"auto_contact": True, "backend": "grok"}, exhausted) == NeedsContact("grok")
+    minted = replace(exhausted, minted_contact="Minted-grok")
+    assert parse({"auto_contact": True, "backend": "grok"}, minted).persona == "Minted-grok"
+    assert parse({"mint_contact": True, "backend": "claude"}, view) == NeedsContact("claude")
+    assert parse({"mint_contact": True, "backend": "claude"},
+                 replace(view, minted_contact="Clara")).persona == "Clara"
+    none_left = parse({"mint_contact": True}, replace(view, minted_contact=""))
+    assert isinstance(none_left, SpecError) and none_left.message == "contact_pool_empty"
     conflict = parse({"auto_contact": True, "mint_contact": True}, view)
     assert isinstance(conflict, SpecError) and conflict.message == "conflicting launch options"
+
+
+def test_the_session_id_rule_a_view_carries_is_the_lookups_rule():
+    """The policy takes R70's grammar as a value (it may not import transcript_paths); its default
+    is that grammar, and the service passes it explicitly."""
+    from lib import transcript_paths
+    assert RosterView().session_id_rule == transcript_paths.SESSION_ID.pattern
 
 
 def test_open_existing_returns_the_owner():

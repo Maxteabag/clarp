@@ -32,6 +32,8 @@ import pytest
 
 from tests.patching import logical_split_tree_map, split_origin
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 SERVER = pathlib.Path(__file__).resolve().parents[2] / "server"
 IDS = frozenset({"claude", "codex", "agy", "antigravity", "grok", "opencode", "deepseek", "muse"})
 _REFS = frozenset(i.upper() for i in IDS)

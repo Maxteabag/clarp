@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .log import log_exception
@@ -97,7 +97,8 @@ class Responder(Protocol):
 
     def send_json(self, status: int, value: Any) -> Any: ...
 
-    def send_bytes(self, status: int, body: bytes, content_type: str) -> Any: ...
+    def send_bytes(self, status: int, body: bytes, content_type: str, *,
+                   headers: Mapping[str, str] | None = None) -> Any: ...
 
     def send_error(self, status: int, message: str, *, content_type: str = "application/json") -> Any: ...
 
@@ -114,7 +115,10 @@ class HandlerResponder:
     def send_json(self, status: int, value: Any) -> Any:
         return self._handler._send(status, json.dumps(value).encode(), "application/json")
 
-    def send_bytes(self, status: int, body: bytes, content_type: str) -> Any:
+    def send_bytes(self, status: int, body: bytes, content_type: str, *,
+                   headers: Mapping[str, str] | None = None) -> Any:
+        if headers:
+            return self._handler._send(status, body, content_type, extra_headers=dict(headers))
         return self._handler._send(status, body, content_type)
 
     def send_error(self, status: int, message: str, *, content_type: str = "application/json") -> Any:

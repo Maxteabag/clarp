@@ -17,6 +17,8 @@ import pytest
 
 from lib import agents, db, message_store
 
+pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
+
 
 def _agent(name="Writer"):
     return agents.create_agent(persona=name, voice_id="", cwd="/tmp", session=name.lower())
