@@ -38,10 +38,18 @@ def upsert_phrase(*, phrase_key: str, voice_id: str, text: str,
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(phrase_key, voice_id, session) DO UPDATE SET
                text = excluded.text,
-               audio_path = COALESCE(NULLIF(excluded.audio_path, ''), audio_path),
+               -- A row's audio always belongs to its text: new words without new audio
+               -- clear the old audio rather than pair with it (issue 360, 439 review).
+               audio_path = CASE
+                   WHEN excluded.audio_path <> '' THEN excluded.audio_path
+                   WHEN orchestrator_phrase_cache.text = excluded.text THEN orchestrator_phrase_cache.audio_path
+                   ELSE '' END,
                provider = excluded.provider,
                model = excluded.model,
-               generated_at = COALESCE(excluded.generated_at, generated_at),
+               generated_at = CASE
+                   WHEN excluded.audio_path <> '' THEN excluded.generated_at
+                   WHEN orchestrator_phrase_cache.text = excluded.text THEN orchestrator_phrase_cache.generated_at
+                   ELSE NULL END,
                updated_at = excluded.updated_at""",
         (
             phrase_key,

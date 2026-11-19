@@ -72,6 +72,13 @@ def _fold(text: object) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).strip()
 
 
+def _resolved(name: str) -> str:
+    """The session a decision's target stands for: its one agent, by id, session or voice name;
+    "" for none or more than one."""
+    found = _agents_named(name.strip()) if name and name.strip() else []
+    return str(found[0]["session"]) if len(found) == 1 else ""
+
+
 def _agents_named(name: str) -> list[dict[str, Any]]:
     """The agents a spoken name stands for: the exact id or session first, else every agent
     whose session or persona name it is, case and accents aside (archived ones included, so
@@ -384,6 +391,15 @@ def _decision_row_to_dict(row) -> dict[str, Any]:
     return out
 
 
+def _answerable_status(value) -> bool:
+    """Whether a status stored in a receipt can be a replay's answer: an integer from 200 to 599
+    other than 204 and 304 (a bool is not one). A client cannot read the others as this answer:
+    0 or 99 make the status line unparseable, 1xx is skipped as interim (100 then reads the JSON
+    body as the next status line), and 1xx, 204 and 304 carry no body, so the answer is lost. The
+    Host itself stores only 200, 202 and 4xx/5xx; anything else is a corrupt receipt."""
+    return type(value) is int and 200 <= value <= 599 and value not in (204, 304)
+
+
 class OrchestratorService:
     def __init__(
         self,
@@ -541,7 +557,7 @@ class OrchestratorService:
             fallback_request=fallback_request,
             janitor_run_id=run_id,
         )
-        recipient = identity.lookup(result.session)
+        recipient = identity.lookup(result.session if result.target is None else result.target)
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
         receipt = {"summary": f"Message routing finished: {result.action}",
                    "status": result.action,
@@ -551,11 +567,34 @@ class OrchestratorService:
         if result.retry_dispatch:
             # The decision stands; a same-id retry sends it again (RTO-07).
             receipt.update(reason=DISPATCH_RETRYABLE, decision_id=result.decision_id)
-        janitor_builtins.complete_run(
-            run_id, outcome="failed" if failed else "completed",
-            result=receipt,
-            error="Message routing failed" if failed else "",
-        )
+        # What the first answer said, so a replay answers exactly this. Its status and dispatch
+        # always fit; its session is stored only when it fits the demand history's bound, never
+        # cut (a cut session name is a wrong name). Only an undelivered outcome can carry an
+        # over-long session, the requested one: a status without a session means just that.
+        said = {"answer_dispatch": result.dispatch, "answer_status": result.status}
+        if janitor_builtins.fits_metadata({**receipt, **said}):
+            receipt.update(said)
+            if janitor_builtins.fits_metadata({**receipt, "answer_session": result.session}):
+                receipt["answer_session"] = result.session
+        outcome = "failed" if failed else "completed"
+        error = "Message routing failed" if failed else ""
+        try:
+            janitor_builtins.complete_run(run_id, outcome=outcome, result=receipt, error=error)
+        except Exception as exc:  # noqa: BLE001 - the receipt never costs the answer
+            log_exception("orchestratorReceiptFail", exc, detail=f"run={run_id}")
+            # Its least receipt keeps what the first answer said (status and dispatch always fit;
+            # the session when it does), so a replay after a failed completion answers the same.
+            least = {key: receipt[key] for key in ("status", "target_agent_id", "http_status",
+                                                   "answer_status", "answer_dispatch", "answer_session")
+                     if key in receipt}
+            if not janitor_builtins.fits_metadata(least):
+                least.pop("answer_session", None)
+            if not janitor_builtins.fits_metadata(least):
+                least = {"status": result.action}
+            try:        # never leave the run claimed: close it with its least receipt (replays as main)
+                janitor_builtins.complete_run(run_id, outcome=outcome, result=least, error=error)
+            except Exception as again:  # noqa: BLE001
+                log_exception("orchestratorReceiptCloseFail", again, detail=f"run={run_id}")
         return result
 
     def _retry_routed_dispatch(self, receipt, *, requested_session, trace_id,
@@ -669,15 +708,34 @@ class OrchestratorService:
         recipient = identity.lookup(receipt.get("target_agent_id")) or {}
         pending = run.get("status") in {"queued", "running"}
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
+        stored_http = receipt.get("http_status")
+        status = (202 if pending
+                  else (stored_http if _answerable_status(stored_http) else 500) if action == FINAL_ERROR
+                  else 200)
+        # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
+        # A receipt written before it kept that answers as main did, by its recipient.
+        # A stored answer is read defensively. Its status must be one a replay can answer with
+        # (_answerable_status), else the receipt is an older one, replayed as main does. A status
+        # with no session stored means the first answer named the requested session (too long for
+        # the bound), which is this same client id's own request; a session stored but not a
+        # non-empty text is an older receipt too.
+        said_session, said_status = receipt.get("answer_session"), receipt.get("answer_status")
+        if not pending and _answerable_status(said_status) and (
+                "answer_session" not in receipt or (isinstance(said_session, str) and said_session)):
+            session = said_session if "answer_session" in receipt else requested_session
+            dispatched = receipt.get("answer_dispatch") if isinstance(receipt.get("answer_dispatch"), str) else ""
+            status = said_status
+        elif pending:
+            session, dispatched = requested_session, ""
+        else:
+            session = recipient.get("session", requested_session)
+            dispatched = recipient.get("backend", "") if action == FINAL_ROUTE else ""
         return OrchestratorOutcome(
             handled=True, ok=action != FINAL_ERROR,
-            session=recipient.get("session", requested_session),
-            dispatch=recipient.get("backend", "") if action == FINAL_ROUTE else "",
+            session=session, dispatch=dispatched,
             trace_id=trace_id, action=action,
             error="Message routing failed" if action == FINAL_ERROR else "",
-            status=(202 if pending
-                    else int(receipt.get("http_status") or 500) if action == FINAL_ERROR
-                    else 200),
+            status=status,
         )
 
     def transcribe_should_skip_herald(self, *, hands_free: bool) -> bool:
@@ -708,26 +766,31 @@ class OrchestratorService:
         error = decision.error
         dispatch_result = None
         dispatch_status = 0
+        # Voice requests are answered aloud; an app's request (a failed name delegation asking for
+        # a recipient) never is, whichever sentence it would be (issue 360, R84).
+        aloud = not fallback_request
+        command = decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}
 
         try:
             self._require_current(janitor_run_id)
-            if decision.kind in {DECISION_CONTROL, DECISION_AGENT_CONTROL}:
+            if command:
                 # A command acts only on the agent it names (or, naming none, the one
                 # spoken to), and only inside this packet, a group call's participants
                 # (RTO-03). Anything else is refused with its sentence. A command is
                 # never held: a later "yes" must not deliver its words as chat.
-                refusal, acted_on = self._command_check(
+                refusal, resolved = self._command_check(
                     decision, settings, sessions, requested_session)
+                # The row, the event and the answer carry the session the name resolved to, or
+                # nothing; the name as said stays in the model's own answer (issue 360, R83).
+                target = resolved
+                decision = OrchestratorDecision(**{**asdict(decision), "target_session": resolved})
                 if refusal:
                     decision = OrchestratorDecision(**{
                         **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": refusal,
                         "phrase_key": _FIXED_KEY[refusal]})
                     final_action = FINAL_CLARIFY
-                    if not fallback_request:
+                    if aloud:
                         self._speak_as_session(refusal, requested_session)
-                elif acted_on:
-                    decision = OrchestratorDecision(**{
-                        **asdict(decision), "target_session": acted_on})
             if fallback_request and decision.kind not in {
                 DECISION_AGENT_MESSAGE,
                 DECISION_CORRECTION,
@@ -741,11 +804,8 @@ class OrchestratorService:
                 if not target:
                     target = requested_session
                     final_action = FINAL_CLARIFY
-                    decision = self._as_clarify(
-                        decision,
-                        "I am not sure which agent that was for.",
-                    )
-                    if not fallback_request:
+                    decision = self._as_clarify(decision, PHRASES["no_valid_target"])
+                    if aloud:
                         self._hold_and_speak_clarification(
                             decision=decision,
                             packet=packet,
@@ -759,7 +819,7 @@ class OrchestratorService:
                         decision,
                         f"Was that for {self._persona_for_session(target) or target}?",
                     )
-                    if not fallback_request:
+                    if aloud:
                         self._hold_and_speak_clarification(
                             decision=decision,
                             packet=packet,
@@ -777,7 +837,8 @@ class OrchestratorService:
                         decision = OrchestratorDecision(**{
                             **asdict(decision), "kind": DECISION_CLARIFY,
                             "spoken_text": HELD_MESSAGE_GONE, "phrase_key": "held_message_gone"})
-                        self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
+                        if aloud:
+                            self._speak_as_session(HELD_MESSAGE_GONE, requested_session)
                     else:
                         routed_admission = prompt_admission
                         if held is not None:
@@ -821,7 +882,7 @@ class OrchestratorService:
                 DECISION_AMBIGUOUS,
             }:
                 final_action = FINAL_CLARIFY
-                if not fallback_request:
+                if aloud:
                     self._hold_and_speak_clarification(
                         decision=decision,
                         packet=packet,
@@ -857,6 +918,8 @@ class OrchestratorService:
                 final_action = FINAL_CONTROL
                 try:
                     target = self._run_agent_control(decision, requested_session)
+                    # What it acted on, a new agent's session for create (R83).
+                    decision = OrchestratorDecision(**{**asdict(decision), "target_session": target})
                 except Exception as refused:
                     from .agent_lifecycle import AgentLifecycleError
                     if not isinstance(refused, AgentLifecycleError):
@@ -865,6 +928,9 @@ class OrchestratorService:
                     # silent error (issue 360, R75). Nothing was done.
                     final_action = FINAL_CLARIFY
                     error = refused.code
+                    decision = OrchestratorDecision(**{
+                        **asdict(decision), "kind": DECISION_CLARIFY, "spoken_text": COMMAND_REFUSED,
+                        "phrase_key": _FIXED_KEY[COMMAND_REFUSED]})
                     self._speak_as_session(COMMAND_REFUSED, requested_session)
             if final_action == FINAL_ERROR and decision.kind == DECISION_IGNORED:
                 final_action = FINAL_IGNORED
@@ -890,6 +956,12 @@ class OrchestratorService:
             error = str(e)
             final_action = FINAL_ERROR
 
+        if final_action == FINAL_CLARIFY:
+            # A clarify delivered nothing. Its row and event name the session the decision's target
+            # resolves to, or none; the decision keeps that as its suggestion; the answer names the
+            # session spoken to (issue 360, R83, ruled for every clarify).
+            target = _resolved(decision.target_session)
+            decision = OrchestratorDecision(**{**asdict(decision), "target_session": target})
         decision_id = self._log_decision(
             decision=decision,
             packet=packet,
@@ -921,7 +993,13 @@ class OrchestratorService:
         return OrchestratorOutcome(
             handled=True,
             ok=final_action != FINAL_ERROR,
-            session=target,
+            # Nothing was delivered, or a command did nothing (refused, a question, or an error after
+            # it was accepted): the answer names the agent spoken to, so a client that acts on this
+            # session (a cancelled send's stop) never acts on another agent (issue 360, R83).
+            session=(requested_session
+                     if final_action == FINAL_CLARIFY or (command and final_action != FINAL_CONTROL)
+                     else target),
+            target=target,
             trace_id=trace_id,
             action=final_action,
             decision_id=decision_id,
@@ -933,16 +1011,19 @@ class OrchestratorService:
 
     def _command_check(self, decision: OrchestratorDecision, settings: OrchestratorSettings,
                        sessions: set[str], requested_session: str) -> tuple[str, str]:
-        """(the sentence a command is refused with, or ""; the session it acts on).
+        """(the sentence a command is refused with, or ""; the session its name resolved to).
 
         A name given anywhere, in target_session or in the payload, is the target; the agent
         spoken to is the target only when no name is given at all. Names resolve as voice
-        names. Create acts on no existing agent, and fork is said in the app."""
+        names. Create acts on no existing agent, and fork is said in the app. A refused command
+        still answers the session its name resolved to (one out of reach), and "" when it
+        resolved to none."""
         action = (decision.control_action or "").strip().lower()
         if not self._route_confidently(decision, settings):
-            return UNSURE_COMMAND, ""
+            return UNSURE_COMMAND, self._named_session(decision)
         if decision.kind == DECISION_AGENT_CONTROL and action == "fork":
-            return FORK_IN_APP, ""      # no fork source is trusted from the router (RTO-03)
+            # No fork source is trusted from the router (RTO-03); a real agent it names is recorded.
+            return FORK_IN_APP, self._named_session(decision)
         if decision.kind == DECISION_AGENT_CONTROL and action == "create":
             # A new agent never takes a name the voice already gives an agent (archived ones
             # count): the lifecycle compares exact names only (issue 360, R75).
@@ -972,10 +1053,21 @@ class OrchestratorService:
         if agent is None:
             return NO_SUCH_AGENT, ""
         if not agents_db.interaction_capabilities(agent)["can_voice_target"]:
-            return NO_VOICE_COMMANDS, ""
-        if agent.get("archived_at") or agent["session"] not in sessions:
-            return CANNOT_COMMAND, ""
+            return NO_VOICE_COMMANDS, agent["session"]
+        if agent["session"] not in sessions:      # the packet holds no archived agent either
+            return CANNOT_COMMAND, agent["session"]
         return "", agent["session"]
+
+    @staticmethod
+    def _named_session(decision: OrchestratorDecision) -> str:
+        """The session every name the command gives resolves to, one agent; "" for none, more
+        than one, names that disagree, or no name at all (R83: "" only when nothing resolved)."""
+        names = [decision.target_session.strip()]
+        if decision.kind == DECISION_AGENT_CONTROL:
+            given = (decision.control_payload or {}).get("name")
+            names.append(given.strip() if isinstance(given, str) else "")
+        sessions = {_resolved(name) for name in names if name}
+        return sessions.pop() if len(sessions) == 1 else ""
 
     def _route_confidently(
         self,
@@ -1165,20 +1257,23 @@ class OrchestratorService:
         return f"{persona} is active, but I do not have recent work details yet."
 
     @staticmethod
-    def _clip_key(text: str, phrase_key: str) -> str:
-        """The cache key to try: the one given (the model's, _as_clarify's default), else the
-        router's own key for one of its fixed sentences (lib.orchestrator_phrases, R76). Whoever
-        chose it, its clip plays only when it is this very text (R80)."""
-        return phrase_key or _FIXED_KEY.get(text, "")
+    def _clip_key(text: str, phrase_key: str) -> tuple[str, bool]:
+        """The cache key to try, and whether it is the table's. One of the router's own sentences
+        (lib.orchestrator_phrases) always uses its own key, whatever key was given; a given key
+        (the model's, _as_clarify's default) is used only for a sentence outside the table.
+        Whoever chose it, its clip plays only when it is this very text (R76, R80)."""
+        own = _FIXED_KEY.get(text, "")
+        return (own, True) if own else (phrase_key, False)
 
     def _speak_orchestrator(self, text: str, settings: OrchestratorSettings,
                             *, phrase_key: str = "") -> None:
-        key = self._clip_key(text, phrase_key)
+        key, own = self._clip_key(text, phrase_key)
         if key and self._play_cached_phrase(
             phrase_key=key,
             session="",
             voice_id=settings.voice_id,
             expected_text=text,
+            stale_is_news=own,
         ):
             return
         self.ctx.speak_announcement(text, settings.voice_id, session=None)
@@ -1187,18 +1282,19 @@ class OrchestratorService:
                           *, phrase_key: str = "") -> None:
         agent = identity.lookup(session)
         if agent:
-            key = self._clip_key(text, phrase_key)
+            key, own = self._clip_key(text, phrase_key)
             if key and self._play_cached_phrase(
                 phrase_key=key,
                 session=session,
                 voice_id=agent.get("voice_id") or "",
                 expected_text=text,
+                stale_is_news=own,
             ):
                 return
             self.ctx.speak_announcement(text, agent.get("voice_id"), session=session)
 
     def _play_cached_phrase(self, *, phrase_key: str, session: str,
-                            voice_id: str, expected_text: str) -> bool:
+                            voice_id: str, expected_text: str, stale_is_news: bool = False) -> bool:
         """Play the cached clip of ``expected_text`` under ``phrase_key``, if there is one: only a
         row whose text is that very sentence plays (R80: a clip never says other words than the
         ones meant, whoever chose the key)."""
@@ -1221,7 +1317,10 @@ class OrchestratorService:
             return False
         if row["text"] != expected_text:
             # A clip of another text never stands in for the sentence (R76, R80): spoken instead.
-            log("orchestratorPhraseMismatch", f"key={phrase_key}")
+            # Logged only when one of the router's own sentences meets a stale clip; a free-text
+            # question under a default key is no news.
+            if stale_is_news:
+                log("orchestratorPhraseMismatch", f"key={phrase_key}")
             return False
         path = str(row["audio_path"])
         if not path.startswith("/audio/") and not os.path.exists(path):
@@ -1330,6 +1429,9 @@ class OrchestratorService:
             detail={
                 "decision_id": decision_id,
                 "kind": decision.kind,
+                # The session decided on, "" when none was (R83); the row's session above is
+                # where the request was made when no agent was decided on.
+                "target_session": target_session,
                 "final_action": final_action,
                 "confidence": decision.confidence,
                 "reason": decision.reason,
