@@ -32944,7 +32944,10 @@ fn the_controller_speaks_a_short_line_and_keeps_only_its_primary_voice() {
     let place = Place::new("controller-narration");
     let sound = b"press".repeat(300);
     let primary = cartesia_stand_in(sound.clone());
-    let (fallback, calls) = answers(vec![("/v2/speak?", "200 OK", "second voice".into())]);
+    let (fallback, calls) = answers(vec![
+        ("/v2/speak?model=flux-declined", "503 Busy", "declined".into()),
+        ("/v2/speak?", "200 OK", "second voice".into()),
+    ]);
     let owners = place.root.join("speech.toml");
     let settings = |voice: &str, model: &str, key: &str, other: &str| {
         std::fs::write(&owners, format!("[tts]\nprovider='none'\nfallback='{other}'\n[cartesia]\napi_key='{key}'\nmodel='{model}'\n[cartesia.voices]\nRachel='{voice}'\n[deepgram]\napi_key='test-dg'\nmodel='flux-haley-en'\n")).unwrap();
@@ -33015,11 +33018,15 @@ fn the_controller_speaks_a_short_line_and_keeps_only_its_primary_voice() {
     assert_eq!(get(query,&[]).text(),"second voice");
     assert_eq!(std::fs::read_dir(&cache).unwrap().count(),1);
     assert_eq!(calls.lock().unwrap().len(),2);
+    let failing = std::fs::read_to_string(&owners).unwrap().replace("flux-haley-en", "flux-declined");
+    std::fs::write(&owners, failing).unwrap();
+    refusal(query,502,"narration unavailable");
+    assert_eq!(calls.lock().unwrap().len(),3);
     settings("tutorial-b","model-b","fixture","unbuilt-adapter");
     refusal(query,502,"narration unavailable");
     settings("tutorial-b","model-b","fixture","none");
     refusal(query,502,"narration unavailable");
-    assert_eq!(calls.lock().unwrap().len(),2);
+    assert_eq!(calls.lock().unwrap().len(),3);
     primary.down.store(false,Ordering::SeqCst);
     let maximum = format!("text={}", "%C3%A9".repeat(240));
     assert_eq!(get(&maximum,&[]).status,200);
