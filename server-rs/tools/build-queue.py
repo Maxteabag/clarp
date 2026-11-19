@@ -28,23 +28,44 @@ def executable(pid):
         return '<exited>'
 
 
-def test_place(pid):
-    try:
-        cwd = Path(os.readlink(f'/proc/{pid}/cwd').removesuffix(' (deleted)'))
-    except OSError:
-        return None
-    if cwd.is_relative_to(QUEUE):
+def place_in(path):
+    if path.is_relative_to(QUEUE):
         return None
     # Host tests usually run in "work" below a named fixture. Pytest
     # inserts a per-user parent above its fixtures; never print that parent.
     for root in (os.getenv('TMPDIR'), os.getenv('TEMP'), os.getenv('TMP'), '/tmp', '/var/tmp'):
-        if not root or not cwd.is_relative_to(root):
+        if not root or not path.is_relative_to(root):
             continue
-        parts = cwd.relative_to(root).parts
+        parts = path.relative_to(root).parts
         if parts and parts[0].startswith('clarp-'):
             return parts[0]
         if len(parts) >= 3 and parts[0].startswith('pytest-of-') and parts[1].startswith('pytest-'):
             return parts[2]
+    return None
+
+
+def test_place(pid, name):
+    proc = Path('/proc') / str(pid)
+    try:
+        place = place_in(Path(os.readlink(proc / 'cwd').removesuffix(' (deleted)')))
+    except OSError:
+        place = None
+    if place or name != 'clarp-shim':
+        return place
+    # The shim retains its turn spool even after the test removes the place.
+    # Its own cwd can be the checkout. Never read or report its command line.
+    try:
+        for fd in (proc / 'fd').iterdir():
+            try:
+                path = Path(os.readlink(fd).removesuffix(' (deleted)'))
+            except OSError:
+                continue
+            if path.parent.name == 'spool' and path.suffix == '.jsonl':
+                place = place_in(path)
+                if place:
+                    return place
+    except OSError:
+        pass
     return None
 
 
@@ -59,7 +80,7 @@ def clean_children():
                 continue
             name = quote(executable(pid), safe='')
             counts[name] += 1
-            place = test_place(pid)
+            place = test_place(pid, name)
             if place is not None:
                 places.append((name, quote(place, safe='')))
             os.kill(pid, signal.SIGKILL)
