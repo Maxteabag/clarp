@@ -3456,6 +3456,31 @@ def test_stop_records_its_actor_and_reason_and_still_pauses(running_server):
     assert turn_queue.get("queue-held") is not None
 
 
+def test_a_stop_settles_the_turn_it_stopped_while_a_newer_turn_is_admitted(running_server, monkeypatch):
+    """The Stop names the trace it took from the slot (R92): a second turn of another trace already
+    has its row, and on main the untraced Stop settled the agent's newest row, that one."""
+    from lib import agents as agents_db, db, turn_dispatch, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+    base, _ctx, _srv = running_server
+    agent_id = agents_db.get_by_session("claude")["agent_id"]
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-stopped")
+    turn_lifecycle.transition(agent_id, TurnEvent.PROMPT_ADMITTED, {"source": "pwa", "trace_id": "trace-stopped"})
+    db.conn().execute("UPDATE turns SET started_at = started_at - 1000 WHERE trace_id = 'trace-stopped'")
+    turn_lifecycle.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-next")
+    real = turn_dispatch.snapshot_stop_state
+    monkeypatch.setattr(turn_dispatch, "snapshot_stop_state",
+                        lambda agent: {**real(agent), "trace_id": "trace-stopped"})
+    monkeypatch.setattr("lib.backends.interrupt", lambda *a, **k: 1)
+
+    status, _body = _post(base + "/stop", {"session": "claude"})
+
+    assert status == 200
+    rows = [tuple(row) for row in db.conn().execute(
+        "SELECT trace_id, outcome FROM turns WHERE agent_id = ? ORDER BY turn_id", (agent_id,))]
+    assert rows == [("trace-stopped", "interrupted"), ("trace-next", None)]
+    assert agents_db.latest_state(agent_id)["detail"]["trace_id"] == "trace-stopped"
+
+
 def test_a_stop_whose_record_cannot_be_written_fails_visibly_and_releases_its_barrier(
         running_server, monkeypatch):
     """TP-N1b review: a Stop whose terminal write still fails after its bounded

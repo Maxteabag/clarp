@@ -5,9 +5,9 @@ Fires when claude-code finishes its turn. We record an explicit `done`
 state so the PWA can light the dock badge ONLY on real turn completion —
 not on every interim assistant chunk or tool result.
 
-turn_dispatch records DONE too, from the CLI's own `result` event. This hook
-is the fallback that covers turns the server did not dispatch: an interactive
-/terminal session, or a bare `claude` run in a shell.
+turn_dispatch records DONE too, from the CLI's own `result` event, and settles a
+dispatched turn's row. This hook settles only the turns the server did not
+dispatch: an interactive /terminal session, or a bare `claude` run in a shell.
 """
 from __future__ import annotations
 
@@ -53,7 +53,10 @@ def main() -> int:
     try:
         turn_lifecycle.hook_transition(
             agent_id, turn_lifecycle.TurnEvent.HOOK_STOP,
-            {"backend_session_id": backend_session_id, "source": "stop_hook"},
+            # In a process the dispatcher started (it alone sets CLAUDE_PWA_SESSION) the runner
+            # settles the turn, after the CLI has exited: this done is the visible state only (R92).
+            {"backend_session_id": backend_session_id, "source": "stop_hook",
+             "dispatched": bool(session)},
         )
         _emit("stop_hook", "done",
               session=session or None,

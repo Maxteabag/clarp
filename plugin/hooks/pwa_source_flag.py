@@ -153,6 +153,11 @@ def main() -> int:
         # made the runtime take its own running turn for superseded.
         current = _agents.get_trace(
             agent_id, max_age_ms=None if env_session else _agents.TRACE_TTL_MS)
+        if (current and not env_session and not marker_info.trace_id
+                and turn_lifecycle.trace_settled(agent_id, current)):
+            # A prompt typed in a terminal after the agent's last turn settled is a turn of its
+            # own, so it gets a trace of its own: one turn row per trace (R92).
+            current = None
         trace_id = (
             marker_info.trace_id
             or current
@@ -166,10 +171,14 @@ def main() -> int:
                                          "reason": "no trace for a Clarp-started turn"})
                 except Exception as exc: report("userprompt_hook", "traceMintedEmitFail", exc)
             _agents.set_trace(agent_id, trace_id)
-        turn_lifecycle.open_turn(agent_id=agent_id,
-                                 source=source,
-                                 trace_id=trace_id,
-                                 synthesize_audio=marker_info.synthesize_audio)
+        # One turn row per trace (R92): a dispatched turn has its row from admission or the queue
+        # hand-off, committed before this process was spawned, and a prompt that arrives inside a
+        # running turn (a background-task notification, a retried attempt) is part of it. Only a
+        # trace with no row yet, a prompt typed in the terminal, gets one here.
+        turn_lifecycle.open_turn_once(agent_id=agent_id,
+                                      source=source,
+                                      trace_id=trace_id,
+                                      synthesize_audio=marker_info.synthesize_audio)
         turn_lifecycle.hook_transition(
             agent_id, turn_lifecycle.TurnEvent.PROMPT_ADMITTED,
             {"source": source, "backend_session_id": backend_session_id})
