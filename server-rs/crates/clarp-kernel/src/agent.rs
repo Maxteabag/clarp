@@ -245,6 +245,7 @@ pub struct Agent {
     last: Option<Settled>,
     /// The tool's own session, as the tool last named it: where the next turn continues.
     backend_session: Option<String>,
+    refused_live_binding: bool,
     /// What the agent says it is busy with beyond its turns. Empty: nothing.
     label: String,
     /// When it said so, while it says so.
@@ -280,6 +281,7 @@ impl Default for Agent {
             unheld: BTreeSet::new(),
             last: None,
             backend_session: None,
+            refused_live_binding: false,
             label: String::new(),
             label_at: None,
             resting: None,
@@ -333,6 +335,11 @@ impl Agent {
     /// The tool's own session, where the agent's next turn continues.
     pub fn backend_session(&self) -> Option<&str> {
         self.backend_session.as_deref()
+    }
+
+    /// Whether a live tool ever named a session that this agent could not bind.
+    pub fn refused_live_binding(&self) -> bool {
+        self.refused_live_binding
     }
 
     // Old events remain readable. A refused binding leaves the next launch fresh.
@@ -775,6 +782,7 @@ impl Agent {
             };
             if let TurnEvent::Bound { backend_session } = change {
                 self.bind_session(Some(backend_session));
+                self.refused_live_binding |= self.backend_session.is_none();
             }
             match live.apply(change)? {
                 Turn::Settled(ended) => {
