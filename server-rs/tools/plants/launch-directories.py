@@ -95,9 +95,11 @@ for why,old,new in [
     ('lose normalized empty path','".".into()','"".into()'),
     ('erase parent traversals','*part != "."','*part != "." && *part != ".."'),
     ('leave query case untouched','python::casefold(query)','query.to_owned()'),
-    ('lose non-ASCII decimal digits','char::from_digit(d, 10)','char::from_digit(d,2)'),
-    ('ignore the Python integer input limit','count() > 4300','count()>9999'),
 ]:
     plant(K,'vectors',why,old,new)
+RUNS['int']=['test','--test','python_int_vectors']
+P='clarp-kernel/src/python.rs'
+plant(P,'int','lose non-ASCII decimal digits','(digit < 10).then_some(digit)','(digit < 2).then_some(digit)')
+plant(P,'int','ignore the Python integer input limit','if count > 4300 {','if count > 9999 {')
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
