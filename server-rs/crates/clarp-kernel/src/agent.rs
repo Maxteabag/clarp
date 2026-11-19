@@ -219,6 +219,7 @@ impl std::error::Error for Refusal {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
+    latest_turn_start: Option<i64>,
     next_turn: u64,
     mailbox: VecDeque<Queued>,
     /// The turn that holds the agent: starting or running, never anything else.
@@ -267,6 +268,7 @@ pub enum Rest {
 impl Default for Agent {
     fn default() -> Self {
         Self {
+            latest_turn_start: None,
             next_turn: 1,
             mailbox: VecDeque::new(),
             live: None,
@@ -303,6 +305,11 @@ impl Agent {
 
     pub fn is_paused(&self) -> bool {
         self.paused
+    }
+
+    /// Maximum committed turn start, rebuilt by the same event fold on open.
+    pub fn latest_turn_start(&self) -> i64 {
+        self.latest_turn_start.unwrap_or(0)
     }
 
     /// How many turns have ended, however they ended.
@@ -815,6 +822,10 @@ impl Agent {
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(_) => self.settled += 1,
             next => {
+                if let TurnEvent::Started { at_ms } = change {
+                    self.latest_turn_start =
+                        Some(self.latest_turn_start.map_or(*at_ms, |old| old.max(*at_ms)));
+                }
                 self.live = Some(next);
                 self.live_from_queue = waited;
                 // A turn runs: what the agent rested in before is over.
@@ -1038,6 +1049,25 @@ mod tests {
         fn live(&self) -> Option<u64> {
             self.agent.live().map(|turn| turn.id().0)
         }
+    }
+
+    #[test]
+    fn guidance_recency_is_the_maximum_committed_start_even_after_replay() {
+        let mut a = Driven::new();
+        assert_eq!(a.agent.latest_turn_start(), 0);
+        for (turn, now, expected) in [(1, 50, 60), (2, 10, 60), (3, 80, 90)] {
+            a.now_ms = now;
+            a.user(turn);
+            assert_eq!(a.agent.latest_turn_start(), expected);
+            a.send(Command::TurnStarted { turn: TurnId(turn) }).unwrap();
+            a.finish(turn);
+            assert_eq!(a.agent.latest_turn_start(), expected);
+        }
+        let mut replay = Agent::new();
+        for event in &a.history {
+            replay.apply(event).unwrap();
+        }
+        assert_eq!(replay.latest_turn_start(), 90);
     }
 
     /// The connection of the live turn's tool drops: the turn waits a moment for its next attempt.

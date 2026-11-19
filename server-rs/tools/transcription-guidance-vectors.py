@@ -25,11 +25,21 @@ def record():
         cases = []
         def case(names, switch, glossary, change):
             conn = db.conn()
+            conn.execute('DELETE FROM turns')
             conn.execute('DELETE FROM agents')
-            for i, (name, created, role, deleted) in enumerate(names):
-                conn.execute('INSERT INTO agents(agent_id,persona,session,created_at,voice_id,cwd,is_janitor,deleted_at,role) VALUES(?,?,?,?,?,?,?,?,?)',
-                             (f'a{i}', name, f's{i}', created, '', '/test', int(role=='janitor'), 1 if deleted else None,
-                              'helper' if role=='helper' else 'agent'))
+            inputs = []
+            for i, row in enumerate(names):
+                name, created, role, deleted, *extra = row
+                identity, turns, parent, archived = extra or (f'a{i}', [], None, False)
+                state = 'completed' if identity == 'r' else None
+                inputs.append(dict(name=name, created=created, role=role, deleted=deleted,
+                                   id=identity, turns=turns, parent=parent, archived=archived, helper_state=state))
+                conn.execute('INSERT INTO agents(agent_id,persona,session,created_at,voice_id,cwd,is_janitor,deleted_at,role,parent_agent_id,archived_at,helper_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                             (identity, name, f's{i}', created, '', '/test', int(role=='janitor'),
+                              1 if deleted else None, role, parent, 1 if archived else None, state))
+                for started in turns:
+                    conn.execute('INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,?,?,?)',
+                                 (identity, 'user', 'test', started))
             conn.execute('DELETE FROM settings WHERE key IN (?,?)',(vocab._DELEGATION_NAMES_KEY,vocab._GLOSSARY_KEY))
             if switch is not None:
                 settings_store.set_text(vocab._DELEGATION_NAMES_KEY,switch)
@@ -41,7 +51,7 @@ def record():
                 error = None
             except ValueError as e:
                 updated,error = None,str(e)
-            cases.append(dict(agents=names,switch=switch,glossary=glossary,change=change,before=before,
+            cases.append(dict(agents=inputs,switch=switch,glossary=glossary,change=change,before=before,
                               updated=updated,error=error,after=vocab.settings_payload(active)))
         agents=[(' second ',3,'helper',False),('Stra'+chr(223)+'e',1,'agent',False),('STRASSE',4,'agent',False),
                 ('gone',0,'agent',True),('cleaner',2,'janitor',False),(' ; , ',5,'agent',False)]
@@ -56,6 +66,23 @@ def record():
         for length in [0,1,218,219,220,585,586,587,588,599,600,601]:
             for char in ('x','!',chr(0x4e00)):
                 case([('old',0,'agent',False),(char*length,1,'helper',False)],None,char*length,{})
+        mixed = [
+            ('Role helper', 1, 'helper', False, 'r', [2000], None, False),
+            ('Parent helper', 2, 'agent', False, 'p', [2500], 'owner', False),
+            ('Never used', 1, 'agent', False, 'n', [], None, False),
+            ('Tie Z', 5, 'agent', False, 'z', [30], None, False),
+            ('Tie A', 5, 'agent', False, 'a', [30], None, False),
+            ('Older creation', 3, 'agent', False, 'o', [30], '', False),
+            ('Most recent', 8, 'agent', False, 'm', [1, 90, 4], None, False),
+            ('MOST RECENT', 0, 'agent', False, 'c', [20], None, False),
+            ('Archived', 0, 'agent', False, 'h', [5000], None, True),
+            ('Janitor', 0, 'janitor', False, 'j', [6000], None, False),
+        ]
+        case(mixed, None, '', {})
+        case(list(reversed(mixed)), None, '', {})
+        for words in [('x'*587,'two','three'), ('One','x'*590,'Three'), ('One','Two','!'*221,'Four'),
+                      ('x'*586,), ('x'*587,), ('!'*219,), ('!'*220,)]:
+            case([(word, i, 'agent', False) for i,word in enumerate(words)], None, '', {})
         return cases
 
 

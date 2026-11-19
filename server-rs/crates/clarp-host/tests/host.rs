@@ -39650,13 +39650,21 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
     assert_eq!(empty["active_agent_names"], json!([]));
     let retired = host.new_agent("Retired");
     host.new_agent("Orchid");
-    host.new_agent("Sequoia");
+    let sequoia = host.new_agent("Sequoia");
     host.post("/agent-archive", json!({"session":retired,"archived":true}));
+    assert_eq!(
+        host.get(ROUTE)["active_agent_names"],
+        json!(["Orchid", "Sequoia"])
+    );
+    host.send(&sequoia, "test turn", "roster-use");
+    wait_for("latest turn published to guidance", || {
+        host.get(ROUTE)["active_agent_names"][0] == "Sequoia"
+    });
     let before = host.get(ROUTE);
-    assert_eq!(before["active_agent_names"], json!(["Orchid", "Sequoia"]));
+    assert_eq!(before["active_agent_names"], json!(["Sequoia", "Orchid"]));
     assert_eq!(
         before["delegation_effective_prompt"],
-        "Agent names: Orchid, Sequoia."
+        "Agent names: Sequoia, Orchid."
     );
     assert_eq!(
         host.ask_as(&limited, "GET", ROUTE, None),
@@ -39694,8 +39702,29 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
     assert_eq!(host.get(ROUTE), saved);
     host.kill();
     let host = start();
+    wait_for("latest turn replayed into guidance", || {
+        host.get(ROUTE)["active_agent_names"][0] == "Sequoia"
+    });
     assert_eq!(host.get(ROUTE), saved);
     assert_eq!(host.get("/vocab/runs")["runs"], json!([]));
+    // Each persona fits a Scribe keyterm. Together they exceed the settings preview.
+    for n in 0..16 {
+        host.new_agent(&format!("Transcription roster participant number {n:02}"));
+    }
+    let ranked = host.get(ROUTE);
+    let last = ranked["active_agent_names"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .as_str()
+        .unwrap();
+    assert!(
+        !ranked["delegation_effective_prompt"]
+            .as_str()
+            .unwrap()
+            .contains(last)
+    );
     for (hands_free, wanted, absent) in [("0", "Kestrelite", "Retired"), ("1", "Orchid", "Retired")]
     {
         let reply = fetch(
@@ -39713,6 +39742,15 @@ fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
         assert!(!request.contains(&term(absent)));
         assert_eq!(request.contains(&term("Mosswort")), hands_free == "0");
         assert_eq!(request.contains(&term("Sequoia")), hands_free == "1");
+        if hands_free == "1" {
+            let positions: Vec<_> = ranked["active_agent_names"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|name| request.find(&term(name.as_str().unwrap())).unwrap())
+                .collect();
+            assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        }
     }
 }
 

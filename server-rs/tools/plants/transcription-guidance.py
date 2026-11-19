@@ -3,6 +3,7 @@
 import runner
 
 RUNS = {'kernel':['test','--test','transcription_guidance_vectors'],
+        'fold':['test','-p','clarp-kernel','--lib','guidance_recency_is_the_maximum'],
         'host':['test','--test','host','--','transcription_guidance_reaches_the_phone']}
 K='clarp-kernel/src/vocabulary/guidance.rs'
 H='clarp-host/src/heard/guidance.rs'
@@ -34,7 +35,11 @@ change(K,'kernel',[
     ('!a.archived && !a.deleted','!a.deleted'),
     ('!a.deleted && !a.janitor','!a.janitor'),
     ('!a.deleted && !a.janitor','!a.deleted'),
-    ('sort_by_key(|a| a.created)','sort_by_key(|a| std::cmp::Reverse(a.created))'),
+    ('a.role == "helper" || !a.parent.is_empty()', '!a.parent.is_empty()'),
+    ('a.role == "helper" || !a.parent.is_empty()', 'a.role == "helper"'),
+    ('std::cmp::Reverse(a.latest_start)', 'a.latest_start'),
+    ('a.created,','std::cmp::Reverse(a.created),'),
+    ('a.id,','std::cmp::Reverse(a.id),'),
     ('seen.insert(python::casefold(s))','seen.insert(s.to_string())'),
     ('!s.is_empty() && seen.insert','seen.insert'),
     ('None => enabled','None => !enabled'),
@@ -43,16 +48,17 @@ change(K,'kernel',[
     ('Some(Value::String(s)) => clean(s)','Some(Value::String(s)) => s.clone()'),
     ('Some(v) if python::truthy(v)','Some(v) if !python::truthy(v)'),
     ('Some(_) => String::new()', 'Some(_) => "null".into()'),
-    ('names.iter().rev()','names.iter()'),
-    ('format!("{name}, {kept}")','format!("{kept}, {name}")'),
-    ('prompt.chars().count() > CHAR_LIMIT','prompt.chars().count() >= CHAR_LIMIT'),
-    ('estimate_tokens(&prompt) > TOKEN_LIMIT','estimate_tokens(&prompt) >= TOKEN_LIMIT'),
+    ('if any { ", " } else { "" }','if any { "; " } else { "" }'),
+    ('if size + 1 > CHAR_LIMIT','if size + 1 >= CHAR_LIMIT'),
+    ('if estimate_tokens(&prompt) > TOKEN_LIMIT','if estimate_tokens(&prompt) >= TOKEN_LIMIT'),
+    ('if size + 1 > CHAR_LIMIT {\n            continue;', 'if size + 1 > CHAR_LIMIT {\n            break;'),
+    ('prompt.truncate(before);\n            continue;', 'prompt.truncate(before);\n            break;'),
     ('CHAR_LIMIT: usize = 600','CHAR_LIMIT: usize = 601'),
     ('TOKEN_LIMIT: usize = 223','TOKEN_LIMIT: usize = 224'),
     ('"Technical vocabulary: "', '"Technical terms: "'),
     ('let glossary = python::splitlines(&clean(glossary)).join(" ");','let glossary = clean(glossary);'),
     ('CHAR_LIMIT - prefix.len() - 2','CHAR_LIMIT - prefix.len() - 1'),
-    ('estimate_tokens(&prompt) <= TOKEN_LIMIT','estimate_tokens(&prompt) < TOKEN_LIMIT'),
+    ('if estimate_tokens(&prompt) <= TOKEN_LIMIT {\n            return prompt;', 'if estimate_tokens(&prompt) < TOKEN_LIMIT {\n            return prompt;'),
     ('saturating_sub(8)','saturating_sub(1)'),
     ('let delegation = if enabled', 'let delegation = if !enabled'),
     ('"delegation_agent_names_enabled":true','"delegation_agent_names_enabled":false'),
@@ -61,7 +67,12 @@ change(K,'kernel',[
     ('"regular_estimated_prompt_tokens":estimate_tokens(&regular)','"regular_estimated_prompt_tokens":0'),
     ('"delegation_estimated_prompt_tokens":estimate_tokens(&delegation)','"delegation_estimated_prompt_tokens":0'),
 ])
+change('clarp-kernel/src/agent.rs','fold',[
+    ('old.max(*at_ms)', 'old.min(*at_ms)'),
+    ('old.max(*at_ms)', '*at_ms'),
+])
 change(H,'host',[
+    ('latest_start: m.agent.view().latest_turn_start', 'latest_start: 0'),
     ('archived: r.archived_at_ms.is_some()', 'archived: false'),
     ('directory.setting(GLOSSARY_KEY).unwrap_or(""),\n        &active_names(directory)', 'directory.setting(NAMES_KEY).unwrap_or(""),\n        &active_names(directory)'), # narrow the read below
     ('(GLOSSARY_KEY.into(), glossary)', '(GLOSSARY_KEY.into(), String::new())'),

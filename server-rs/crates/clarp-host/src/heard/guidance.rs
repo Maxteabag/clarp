@@ -6,6 +6,10 @@ pub(crate) fn active_names(directory: &Directory) -> Vec<String> {
         let r = &m.record;
         Agent {
             persona: &r.persona,
+            id: &r.agent_id,
+            role: &r.role,
+            parent: r.parent_agent_id.as_deref().unwrap_or(""),
+            latest_start: m.agent.view().latest_turn_start,
             created: r.created_at_ms,
             archived: r.archived_at_ms.is_some(),
             deleted: r.deleted_at_ms.is_some(),
