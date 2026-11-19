@@ -290,7 +290,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 /// Everything a handler can reach.
 #[derive(Clone)]
 pub struct App {
-    pub capture:Arc<crate::diagnostics::Capture>,
+    pub capture: Arc<crate::diagnostics::Capture>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
@@ -602,7 +602,10 @@ pub fn router(app: App) -> Router {
         .layer(middleware::from_fn(json_body))
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .layer(middleware::from_fn(declared_framing))
-        .layer(middleware::from_fn_with_state(app.clone(),crate::diagnostics::request))
+        .layer(middleware::from_fn_with_state(
+            app.clone(),
+            crate::diagnostics::request,
+        ))
         .with_state(app)
 }
 

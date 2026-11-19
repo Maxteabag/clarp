@@ -59,7 +59,7 @@ impl Shown {
 }
 
 pub struct Hub {
-    pub capture:Option<Arc<crate::diagnostics::Capture>>,
+    pub capture: Option<Arc<crate::diagnostics::Capture>>,
     recent: Mutex<Recent>,
     live: broadcast::Sender<Arc<Published>>,
     /// What agents' turns show as they run, for the connections that asked for it.
@@ -85,7 +85,7 @@ impl Hub {
         let (badge, _) = tokio::sync::watch::channel(0);
         let seconds = u64::try_from(now_ms / 1_000).unwrap_or(0);
         Self {
-            capture:None,
+            capture: None,
             shown,
             statuses,
             badge,
