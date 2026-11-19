@@ -21,6 +21,7 @@ pub mod control;
 pub mod controller_actions;
 pub mod controller_narration;
 pub mod conversation;
+pub mod delivery;
 pub mod desk;
 pub mod devices;
 pub mod difflib;
