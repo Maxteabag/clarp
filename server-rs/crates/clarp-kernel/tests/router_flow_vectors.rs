@@ -797,9 +797,10 @@ fn a_held_message_belongs_to_the_session_it_was_made_in() {
     // Given, it is no longer renewed: the question holds the new message.
     stage.send(&messages["h-6"]);
     assert_eq!(held_row(&stage, "held-h-6")["utterance"], "and again?");
-    // Said even where an app asked: the other's hold is not released from here.
+    // Where an app asked, nothing is said, as of any sentence; the other's hold is not released
+    // from here.
     let seen = stage.send(&messages["h-7"]);
-    assert_eq!(seen.said[0]["text"], gone);
+    assert!(seen.said.is_empty(), "{:?}", seen.said);
     assert_eq!(held_row(&stage, "held-h-3")["status"], "pending");
 }
 
