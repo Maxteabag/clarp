@@ -67,7 +67,7 @@ PLANTS = [
     ('clarp-host/src/diagnostics.rs', 'request', 'record the wrong HTTP method', '"method":method', '"method":"PUT"'),
     ('clarp-host/src/diagnostics.rs', 'request', 'transcription size lost', '"size":size', '"size":0'),
     ('clarp-host/src/diagnostics.rs', 'request', 'transcription failure marked successful', '"ok":ok', '"ok":true'),
-    ('clarp-host/src/diagnostics.rs', 'request', 'a later success erases prior failures', 'entry.success=Some(at);', 'entry.success=Some(at);entry.error=None;'),
+    ('clarp-host/src/diagnostics.rs', 'request', 'a later success erases prior failures', 'entry.success = Some(at);', 'entry.success=Some(at);entry.error=None;'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'capture private process name', '("VmHWM:", "process_rss_kb")', '("Name:", "process_rss_kb")'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'sample a different store', 'dir.join("fleet.db")', 'dir.join("other.db")'),
     ('clarp-host/src/diagnostics.rs', 'resource', 'sample a different load window', 's.split_whitespace().next()?.parse::<f64>()', 's.split_whitespace().nth(1)?.parse::<f64>()'),
