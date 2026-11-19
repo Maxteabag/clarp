@@ -133,6 +133,11 @@ pub enum Ask {
         plan_id: String,
         limit: Option<i64>,
     },
+    Subgoal {
+        plan_id: String,
+        action: String,
+        data: Value,
+    },
     /// A verb this Host does not have yet.
     NotHere {
         verb: String,
@@ -160,7 +165,8 @@ impl Ask {
             Self::Create { session, .. } | Self::List { session } | Self::Show { session } => {
                 About::Session(session)
             }
-            Self::Ledger { plan_id, .. }
+            Self::Subgoal { plan_id, .. }
+            | Self::Ledger { plan_id, .. }
             | Self::Get { plan_id }
             | Self::Step { plan_id, .. }
             | Self::Finish { plan_id, .. }
@@ -176,6 +182,30 @@ impl Ask {
 
 fn refused(why: impl Display) -> ToolAnswer {
     ToolAnswer::said(1, format!("agent_tasks: {why}"))
+}
+
+pub(crate) fn subgoal(
+    book: &GoalBook,
+    plan_id: &str,
+    action: &str,
+    data: &Value,
+    verified: Option<&str>,
+    now: i64,
+) -> (
+    ToolAnswer,
+    Option<(Change, clarp_kernel::goals::ledger::Event)>,
+) {
+    match book.owner_subgoal(plan_id, action, data, verified, now) {
+        Ok((change, event)) => {
+            let said =
+                printed(&serde_json::json!({"plan_id":plan_id,"subgoals":*change.plan.subgoals}));
+            (said, Some((change, event)))
+        }
+        Err(why) => (
+            ToolAnswer::said(why.tool_exit(), format!("agent_tasks: {why}")),
+            None,
+        ),
+    }
 }
 
 fn printed(value: &Value) -> ToolAnswer {
@@ -211,7 +241,12 @@ pub fn parse(argv: &[String]) -> Result<Ask, ToolAnswer> {
             plan_id: text(plan_id),
             after: rest.first().map(|v| integer(v)).transpose()?.unwrap_or(0),
         },
-        ("bookkeeping", _) | ("subgoal", [_, _, _]) => Ask::NotHere {
+        ("subgoal", [plan_id, action, data]) => Ask::Subgoal {
+            plan_id: text(plan_id),
+            action: text(action),
+            data: json(data)?,
+        },
+        ("bookkeeping", _) => Ask::NotHere {
             verb: verb.to_string(),
         },
         ("create" | "goal", [session, alias, title, items, goal]) => Ask::Create {
@@ -294,6 +329,14 @@ pub fn answer(
 ) -> (ToolAnswer, Option<Change>) {
     let now = world.now_ms;
     let changed = match ask {
+        Ask::Subgoal {
+            plan_id,
+            action,
+            data,
+        } => {
+            let (said, written) = subgoal(book, plan_id, action, data, None, now);
+            return (said, written.map(|(change, _)| change));
+        }
         Ask::Ledger { plan_id, after } => {
             return (
                 printed(

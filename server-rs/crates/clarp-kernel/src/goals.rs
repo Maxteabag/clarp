@@ -28,6 +28,7 @@ use crate::jobs::parse_handle;
 
 pub mod keeper;
 pub mod ledger;
+pub mod subgoals;
 mod wake;
 
 pub use wake::{Looked, Seen, TurnSeen, WAKE_PREFIX};
@@ -204,6 +205,7 @@ pub struct Plan {
     pub recovery_enabled: i64,
     /// `None` for a plan that is only a list of steps.
     pub goal: Option<Goal>,
+    pub subgoals: std::sync::Arc<Vec<Value>>,
     /// What happened to a plan without a goal.
     pub history: Vec<Value>,
     /// The steps, in the order they were made.
@@ -298,6 +300,9 @@ pub struct GoalRecord {
     pub recovery_enabled: i64,
     pub event_count: i64,
     pub last_event_at: Option<i64>,
+    /// Subgoal rows this write added or replaced.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subgoals: Vec<Value>,
     /// Whether the plan has a goal.
     pub goal: bool,
     /// The goal's fields the change set.
@@ -749,6 +754,27 @@ impl GoalBook {
             recovery_enabled: new.recovery_enabled,
             event_count: new.event_count,
             last_event_at: new.last_event_at,
+            subgoals: match old {
+                Some(p) if std::sync::Arc::ptr_eq(&p.subgoals, &new.subgoals) => vec![],
+                Some(p) => {
+                    // Subgoal revisions advance on every edit. Do not compare evidence
+                    // bodies against every other row in the plan to find the delta.
+                    let revisions: BTreeMap<_, _> = p
+                        .subgoals
+                        .iter()
+                        .map(|r| (r["subgoal_id"].as_str(), r["revision"].as_i64()))
+                        .collect();
+                    new.subgoals
+                        .iter()
+                        .filter(|r| {
+                            revisions.get(&r["subgoal_id"].as_str())
+                                != Some(&r["revision"].as_i64())
+                        })
+                        .cloned()
+                        .collect()
+                }
+                None => (*new.subgoals).clone(),
+            },
             goal: new.goal.is_some(),
             set,
             unset,
@@ -852,6 +878,7 @@ impl GoalBook {
             revision: whole("revision").unwrap_or(1),
             recovery_enabled: whole("recovery_enabled").unwrap_or(0),
             goal,
+            subgoals: subgoals::imported(&shown["subgoals"])?,
             history: shown
                 .get("history")
                 .and_then(Value::as_array)
@@ -874,9 +901,9 @@ impl GoalBook {
         let known = self.plans.remove(&record.plan_id);
         let order = known.as_ref().map_or(self.made + 1, |plan| plan.order);
         self.made = self.made.max(order);
-        let (old_goal, mut history, mut items) = match known {
-            Some(plan) => (plan.goal, plan.history, plan.items),
-            None => (None, Vec::new(), Vec::new()),
+        let (old_goal, mut history, mut items, mut subgoals) = match known {
+            Some(plan) => (plan.goal, plan.history, plan.items, plan.subgoals),
+            None => (None, Vec::new(), Vec::new(), Default::default()),
         };
         let goal = record.goal.then(|| {
             let mut goal = old_goal.unwrap_or_default();
@@ -903,7 +930,22 @@ impl GoalBook {
                 None => items.push(item.clone()),
             }
         }
+        if !record.subgoals.is_empty() {
+            let rows = std::sync::Arc::make_mut(&mut subgoals);
+            for row in &record.subgoals {
+                if let Some(prior) = rows
+                    .iter_mut()
+                    .find(|r| r["subgoal_id"] == row["subgoal_id"])
+                {
+                    prior.clone_from(row);
+                } else {
+                    rows.push(row.clone());
+                }
+            }
+            subgoals::sort_rows(rows);
+        }
         let plan = Plan {
+            subgoals,
             plan_id: record.plan_id.clone(),
             agent_id: record.agent_id.clone(),
             session: record.session.clone(),
@@ -1011,7 +1053,7 @@ impl GoalBook {
             let mut whole = goal.document();
             whole["documents"] = json!(self.document_index(&plan.plan_id, added));
             data["goal"] = whole;
-            data["subgoals"] = json!([]);
+            data["subgoals"] = json!(*plan.subgoals);
             data["ledger"] = json!({
                 "event_count": plan.event_count, "last_event_at": plan.last_event_at,
                 "delegation": null, "accounting": [],
@@ -1187,6 +1229,7 @@ impl GoalBook {
                 recovery_enabled: i64::from(enrolled),
                 goal,
                 history: Vec::new(),
+                subgoals: Default::default(),
                 items: made,
                 event_count: i64::from(has_goal),
                 last_event_at: has_goal.then_some(now),

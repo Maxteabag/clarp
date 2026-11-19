@@ -288,12 +288,9 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                 compared += 1;
                 continue;
             }
-            // The delegate's bookkeeping and owner subgoals are later pieces.
-            if matches!(verb, "subgoal" | "receipts" | "bookkeeping") {
+            // The delegate's bookkeeping is a later piece.
+            if matches!(verb, "receipts" | "bookkeeping") {
                 assert_eq!(said.exit, NOT_HERE, "{context}");
-                if verb == "subgoal" {
-                    break;
-                }
                 continue;
             }
             compared += 1;
