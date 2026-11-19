@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from lib import agents as agents_db
-from lib import db, goal_keeper, janitor_autonomy, janitor_builtins, janitors, task_goal_state, task_plans
+from lib import db, goal_keeper, janitor_autonomy, janitor_builtins, janitors, model_fallbacks, task_goal_state, task_plans
 
 MIN = 60_000
 
@@ -1344,3 +1344,13 @@ def test_delta_reads_messages_in_timestamp_then_seq_order(owner):
              "user", None, "final"))
     _text, refs = goal_keeper.delta(db.conn(), [owner], {owner: "Jonatan"}, base - 1, db.now_ms())
     assert refs == ["message:m-early", "message:m-same-a", "message:m-same-b", "message:m-late"]
+
+
+@pytest.mark.parametrize("failure,code", [
+    # What model_fallbacks.execute() raises today (issue 360, R88): a CLI's TimeoutExpired
+    # converted by R82, and the isolated agy run's failure wrapped by janitor_autonomy.model_json.
+    (model_fallbacks.ProviderFailure("claude timed out after 30 s", "timeout"), "timeout"),
+    (model_fallbacks.provider_error("agy exited 2 without JSON: no answer"), "agy_exit_2"),
+])
+def test_a_keepers_error_code_reads_what_comes_out_of_the_fallback_chain(failure, code):
+    assert goal_keeper.error_code(failure) == code

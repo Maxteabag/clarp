@@ -1,4 +1,5 @@
 """Shared narration never runs a tool or rewrites the transcript."""
+import subprocess
 import threading
 import time
 
@@ -232,3 +233,25 @@ def test_one_bad_payload_fails_its_job_and_the_drain_keeps_serving(monkeypatch):
         assert service._thread.is_alive()
         clock[0] += 60_000
         assert wait_ready(service)["status"] == "ready"
+
+
+# ---- R88: a failure's reason is what the failure says it is, after model_fallbacks.execute() ----
+
+from lib import model_fallbacks  # noqa: E402
+
+def _failing_with(error):
+    def translate(*_args):
+        raise error
+    return translate
+
+
+@pytest.mark.parametrize("error, reason", [
+    (subprocess.TimeoutExpired(["codex", "exec", "the prompt"], 30), "timeout"),
+    (model_fallbacks.ProviderFailure("fallback model timed out", "timeout"), "timeout"),
+    (FileNotFoundError("codex"), "codex_unavailable"),
+    (ValueError("not a JSON object"), "invalid_response"),
+    (RuntimeError("anything else"), "translator_failed"),
+])
+def test_a_failed_explanation_is_told_by_what_its_failure_is(error, reason):
+    with ToolExplanations(translate=_failing_with(error), debounce=.001) as service:
+        assert wait_ready(service) == {"id": "phone", "status": "failed", "reason": reason}
