@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Own the remote build slot until the command and its remaining children are gone."""
+from collections import Counter
 import ctypes
 import datetime
 import fcntl
@@ -9,6 +10,7 @@ import signal
 import subprocess
 import sys
 import time
+from urllib.parse import quote
 
 QUEUE = Path('/var/tmp/clarp-build')
 LOCK = QUEUE / 'lock'
@@ -26,18 +28,46 @@ def executable(pid):
         return '<exited>'
 
 
+def test_place(pid):
+    try:
+        cwd = Path(os.readlink(f'/proc/{pid}/cwd').removesuffix(' (deleted)'))
+    except OSError:
+        return None
+    if cwd.is_relative_to(QUEUE):
+        return None
+    # Host tests usually run in "work" below a named fixture. Pytest
+    # inserts a per-user parent above its fixtures; never print that parent.
+    for root in (os.getenv('TMPDIR'), os.getenv('TEMP'), os.getenv('TMP'), '/tmp', '/var/tmp'):
+        if not root or not cwd.is_relative_to(root):
+            continue
+        parts = cwd.relative_to(root).parts
+        if parts and parts[0].startswith('clarp-'):
+            return parts[0]
+        if len(parts) >= 3 and parts[0].startswith('pytest-of-') and parts[1].startswith('pytest-'):
+            return parts[2]
+    return None
+
+
 def clean_children():
     # Only this supervisor waits on its children, so their PIDs cannot be reused
     # before our waitpid. Killing a child may give us its children in turn.
-    names = []
+    counts = Counter()
+    places = []
     while children := CHILDREN.read_text().split():
         for pid in map(int, children):
             if os.waitpid(pid, os.WNOHANG)[0]:
                 continue
-            names.append(executable(pid))
+            name = quote(executable(pid), safe='')
+            counts[name] += 1
+            place = test_place(pid)
+            if place is not None:
+                places.append((name, quote(place, safe='')))
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-    print(f'Build leftovers: {len(names)}' + ''.join(f' {name}' for name in names), flush=True)
+    for name, place in places:
+        print(f'leftover={name} place={place}')
+    summary = [f'{name}:{counts[name]}' for name in sorted(counts)]
+    print(f'leftovers={sum(counts.values())}', *summary, flush=True)
 
 
 def recorded_holder(identity):
