@@ -29,7 +29,10 @@ def _exchange(base, method, path, headers, body=b"", *, then=b""):
     with socket.create_connection((host, int(port)), timeout=WAIT) as sock:
         head = f"{method} {path} HTTP/1.1\r\nHost: {host}\r\n" + "".join(
             f"{name}: {value}\r\n" for name, value in headers.items()) + "\r\n"
-        sock.sendall(head.encode() + body + then)
+        try:
+            sock.sendall(head.encode() + body + then)
+        except (BrokenPipeError, ConnectionResetError):
+            return "reset", {}, b"", None        # the Host closed while the body was still coming
         reader = sock.makefile("rb")
         try:
             status = int(reader.readline().split()[1])
@@ -68,7 +71,7 @@ def test_a_body_of_exactly_16_mib_is_read_and_logged_by_its_family_and_size(guar
     assert len(body) == 16 * MiB
     status, _headers, _text, _rest = _exchange(
         base, "POST", "/voice-events?secret=1", {**OWNER, "Content-Length": str(len(body))}, body)
-    assert status != 413
+    assert status not in (413, "reset", None), status        # read and answered, not refused
     err = capfd.readouterr().err
     assert f"requestBodyLarge family=/voice-events bytes={16 * MiB}" in err
     assert "secret" not in "".join(line for line in err.splitlines() if "requestBody" in line)
