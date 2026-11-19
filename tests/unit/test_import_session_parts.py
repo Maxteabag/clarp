@@ -43,6 +43,14 @@ def _insert(connection, agent, rows):
         [(row["message_id"], agent, row["session"], row["source"], row["seq"], row["role"],
           row["timestamp"], row["text"], row["updated_at"], row["revision"], row["origin"],
           row["sender"]) for row in rows])
+    # As every writer of a message row does (test_message_writers_move_the_head): the
+    # conversation's head moves with it, which is what the import's locked pass checks (R119).
+    for session in {row["session"] for row in rows} - {None}:
+        connection.execute(
+            """INSERT INTO conversation_heads(agent_id, backend_session_id, revision, replace_revision)
+               VALUES (?, ?, 1, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = conversation_heads.revision + 1""", (agent, session))
 
 
 def _generated(seed, *, count=140, odd_kinds=False):
