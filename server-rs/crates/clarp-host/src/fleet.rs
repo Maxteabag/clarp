@@ -1538,15 +1538,21 @@ impl Fleet {
 
     /// Writes settings and publishes them. Only what has a dot in its key is a setting.
     fn set(&mut self, settings: Vec<(String, String)>) -> Result<(), Unavailable> {
-        for (key, text) in settings {
+        let mut writes = Vec::with_capacity(settings.len());
+        for (key, text) in &settings {
             if !key.contains('.') {
                 return Err(Unavailable(format!("`{key}` is no setting")));
             }
-            self.store
-                .put(SETTINGS, &key, text.as_bytes())
-                .map_err(|error| Unavailable(error.to_string()))?;
-            self.settings.insert(key, text);
+            writes.push((
+                SETTINGS.to_string(),
+                key.clone(),
+                Some(text.as_bytes().to_vec()),
+            ));
         }
+        self.store
+            .put_together(&writes)
+            .map_err(|error| Unavailable(error.to_string()))?;
+        self.settings.extend(settings);
         self.publish();
         Ok(())
     }

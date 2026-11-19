@@ -170,7 +170,7 @@ async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
         desk.record(&fleet, clip("A", "voice", "")).await.unwrap(),
         1
     );
-    desk.finish(&fleet, 1, "one".into(), 7).await.unwrap();
+    desk.finish(&fleet, 1, "one".into(), 7, None).await.unwrap();
     assert_eq!(
         place.take(),
         vec![
@@ -198,7 +198,9 @@ async fn a_clip_and_a_restart_use_only_bounded_keyed_records() {
     desk.record(&fleet, clip("A", "voice", "four"))
         .await
         .unwrap();
-    desk.finish(&fleet, late, "two".into(), 1).await.unwrap();
+    desk.finish(&fleet, late, "two".into(), 1, None)
+        .await
+        .unwrap();
     for _ in 0..201 {
         desk.record(&fleet, clip("A", "", "")).await.unwrap();
     }
@@ -344,7 +346,11 @@ async fn interrupted_finish_keeps_the_unanswered_clip_out_of_recent_speech() {
         .unwrap();
     let id = desk.record(&fleet, clip("A", "clip", "")).await.unwrap();
     place.cut(Some(RUNS));
-    assert!(desk.finish(&fleet, id, "partial".into(), 5).await.is_err());
+    assert!(
+        desk.finish(&fleet, id, "partial".into(), 5, None)
+            .await
+            .is_err()
+    );
     drop(fleet);
     drop(desk);
     let fleet = place.start();
@@ -359,11 +365,57 @@ async fn interrupted_finish_keeps_the_unanswered_clip_out_of_recent_speech() {
     let index: Session = load(&fleet, SESSIONS, "A").await.unwrap().unwrap();
     assert_eq!(index.spoken, [1]);
     place.cut(None);
-    desk.finish(&fleet, id, "completed".into(), 8)
+    desk.finish(&fleet, id, "completed".into(), 8, None)
         .await
         .unwrap();
     assert_eq!(
         desk.inputs(&fleet, "A").await.unwrap().1,
         ["completed", "prior"]
     );
+}
+
+#[tokio::test]
+async fn refused_settings_batch_preserves_the_directory_and_store() {
+    let place = Place::new();
+    let fleet = place.start();
+    let settings = |a: &str, b: &str| {
+        vec![
+            ("transcription.call_languages".into(), a.into()),
+            ("transcription.call_engines".into(), b.into()),
+        ]
+    };
+    fleet.set(settings("en", "old")).await.unwrap();
+    place.take();
+    place.counts.lock().unwrap().fail_write = Some("setting".into());
+    for changed in [
+        settings("de", "new"),
+        vec![("transcription.call_engines".to_string(), "new".to_string())],
+    ] {
+        let expected = Op::Batch(
+            changed
+                .iter()
+                .map(|(k, _)| Op::Write("setting".into(), k.clone()))
+                .collect(),
+        );
+        let snapshot = fleet.directory();
+        assert!(fleet.set(changed).await.is_err());
+        assert_eq!(place.take(), vec![expected]);
+        assert!(Arc::ptr_eq(&snapshot, &fleet.directory()));
+    }
+    place.cut(None);
+    fleet
+        .set(vec![("other.setting".into(), "next".into())])
+        .await
+        .unwrap();
+    for reader in [&fleet, &place.start()] {
+        assert_eq!(
+            reader.directory().setting("transcription.call_languages"),
+            Some("en")
+        );
+        assert_eq!(
+            reader.directory().setting("transcription.call_engines"),
+            Some("old")
+        );
+        assert_eq!(reader.directory().setting("other.setting"), Some("next"));
+    }
 }

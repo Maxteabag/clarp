@@ -282,3 +282,41 @@ impl Blobs for MemFiles {
         Ok(bytes[from..to].to_vec())
     }
 }
+
+#[cfg(test)]
+mod batch_failure {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn a_refused_batch_leaves_memory_intact() {
+        // Acquiring the shared map is the only fallible step; all rows change under that lock.
+        let tables = Tables::default();
+        let mut store = MemTables {
+            tables: tables.clone(),
+        };
+        store.put("settings", "first", b"old").unwrap();
+        let shared = tables.clone();
+        assert!(
+            std::thread::spawn(move || {
+                let _held = shared.lock().unwrap();
+                panic!("poison the store lock");
+            })
+            .join()
+            .is_err()
+        );
+        assert!(
+            store
+                .put_together(&[
+                    ("settings".into(), "first".into(), None),
+                    ("settings".into(), "next".into(), Some(vec![1]))
+                ])
+                .is_err()
+        );
+        tables.clear_poison();
+        assert_eq!(
+            store.list("settings").unwrap(),
+            vec![("first".to_owned(), b"old".to_vec())]
+        );
+    }
+}

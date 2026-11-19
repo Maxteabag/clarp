@@ -15519,10 +15519,9 @@ fn a_person_speaks_and_the_clip_becomes_text() {
         hear(&[("X-Transcription-ID", "has space")], b"a clip"),
         (400, json!({ "error": "invalid transcription id" }))
     );
-    // A clip that says it belongs to a call is heard by its call's rules or not at all, and
-    // this Host has no rules of a call's own for hearing yet.
+    // A present call header must name a valid call.
     let (status, call) = hear(&[("X-Clarp-Call-Id", "call-1")], b"a clip");
-    assert_eq!((status, &call["ok"]), (409, &json!(false)));
+    assert_eq!((status, &call["ok"]), (400, &json!(false)));
     // Without the token nothing is heard.
     assert_eq!(
         fetch(&host, "", "POST", "/transcribe", &[], b"a clip").status,
@@ -16821,18 +16820,9 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
         );
     }
     assert_eq!(set(json!([1])), (400, json!({ "error": "bad json" })));
-    // What this Host has not built is refused, and says so.
-    for change in [
-        json!({ "long_form_model": "elevenlabs:scribe_v2" }),
-        json!({ "call_engines": "google:chirp_3" }),
-    ] {
-        let (status, why) = set(change.clone());
-        assert_eq!(status, 400, "{change}");
-        assert!(
-            why["error"].as_str().unwrap().contains("on this Host yet"),
-            "{why}"
-        );
-    }
+    let (status, why) = set(json!({ "long_form_model": "elevenlabs:scribe_v2" }));
+    assert_eq!(status, 400);
+    assert!(why["error"].as_str().unwrap().contains("on this Host yet"));
     // A save that names what is as it is, and one that takes an agent's entries away.
     let (status, _) =
         set(json!({ "turn_taking": "native", "retain_audio": false, "long_form_model": "" }));
@@ -35057,6 +35047,351 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
             "Gemini connection information in Host output"
         );
     }
+}
+
+#[test]
+fn a_call_clip_is_heard_for_its_captured_participant() {
+    let place = Place::new("call-transcription");
+    let (nova, requests) = scribe_stand_in(
+        r#"{"results":{"channels":[{"alternatives":[{"transcript":"the pump is ready"}]}]}}"#,
+    );
+    let (scribe, failed) = scribe_stand_in(r#"{"error":"no transcript"}"#);
+    let world = [
+        ("CLARP_NOVA_ENDPOINT", nova.as_str()),
+        ("CLARP_SCRIBE_ENDPOINT", scribe.as_str()),
+        ("DEEPGRAM_API_KEY", "test-deepgram"),
+        ("ELEVEN_API_KEY", "test-scribe"),
+        ("CARTESIA_API_KEY", ""),
+    ];
+    let host = place.start_in("admin", &[], &world);
+    let first = host.new_agent("Theo");
+    let second = host.new_agent("Mike");
+    let (phone, _) = pair(&host, "Phone", "full");
+    let (other, _) = pair(&host, "Other", "full");
+    let (limited, _) = pair(&host, "Watch", "limited");
+    let change = |body: Value| host.ask_as(&phone, "POST", "/transcription-providers", Some(&body));
+    let action = |path: &str, data: Value| host.ask_as(&phone, "POST", path, Some(&data));
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["call_transcription_policy"],
+        74
+    );
+    let empty = host.get("/transcription-providers");
+    assert_eq!(empty["call_engines"], "");
+    assert_eq!(empty["call_languages"], "");
+    let started = action("/calls", json!({"agents":[first,second]})).1;
+    let id = started["call"]["call_id"].as_str().unwrap();
+    assert!(started["call"].get("transcription").is_none());
+    let snap = || host.ask_as(&phone, "GET", "/calls", None).1["call"].clone();
+    let (status, settings) = change(
+        json!({"call_languages":" NO, en,NO ","call_engines":"google:chirp_3","agent_engines":{"mike":"elevenlabs:scribe_v2,deepgram:nova-3"}}),
+    );
+    assert_eq!(status, 200, "{settings}");
+    assert_eq!(settings["call_languages"], "no,en");
+    assert_eq!(settings["call_engines"], "google:chirp_3");
+    let bad = change(json!({"call_engines":"deepgram:nova-3"}));
+    assert_eq!(bad.0, 400);
+    assert_eq!(
+        host.get("/transcription-providers")["call_engines"],
+        "google:chirp_3"
+    );
+    assert_eq!(
+        host.ask_as(
+            &limited,
+            "POST",
+            "/transcription-providers",
+            Some(&json!({"call_languages":""}))
+        )
+        .0,
+        403
+    );
+    let view = &snap()["transcription"];
+    assert_eq!(
+        view[&first]["engines"],
+        json!({"value":["google:chirp_3"],"source":"call_policy"})
+    );
+    assert_eq!(
+        view[&second]["engines"],
+        json!({"value":["elevenlabs:scribe_v2","deepgram:nova-3"],"source":"agent"})
+    );
+    let hear = |who: &str, id: &str, session: &str, job: &str| {
+        let result = fetch(
+            &host,
+            who,
+            "POST",
+            "/transcribe",
+            &[
+                ("X-Clarp-Call-Id", id),
+                ("X-Transcription-Session", session),
+                ("X-Transcription-ID", job),
+                ("X-Transcription-Model", "local"),
+            ],
+            b"test clip",
+        );
+        (
+            result.status,
+            serde_json::from_slice::<Value>(&result.body).unwrap(),
+        )
+    };
+    let tools = clarp_host::tool_token("admin");
+    let denied = hear(&tools, id, &second, "clip-1");
+    assert_eq!(denied.0, 403);
+    assert_eq!(denied.1["error"], "an agent's tools may ask for tools only");
+    assert_eq!(hear("", id, &second, "clip-1").0, 401);
+    assert_eq!(
+        hear("admin", id, &second, "clip-1").1["error"],
+        "not your call"
+    );
+    assert_eq!(
+        hear(&limited, id, &second, "clip-1").1["error"],
+        "not your call"
+    );
+    for (who, call, session, status, error) in [
+        (&phone, "", second.as_str(), 400, "bad call id"),
+        (
+            &phone,
+            "gcl_00000000000000000000000000000000",
+            second.as_str(),
+            404,
+            "unknown call",
+        ),
+        (&other, id, second.as_str(), 403, "not your call"),
+        (&phone, id, "", 409, "not a call participant"),
+        (&phone, id, "missing", 409, "not a call participant"),
+    ] {
+        let got = hear(who, call, session, "clip-1");
+        assert_eq!((got.0, &got.1["error"]), (status, &json!(error)));
+    }
+    assert!(requests.lock().unwrap().is_empty() && failed.lock().unwrap().is_empty());
+    let (status, heard) = hear(&phone, id, &second, "clip-1");
+    assert_eq!(status, 200, "{heard}");
+    let runs = || {
+        host.get(&format!("/vocab/runs?session={second}"))["runs"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    assert_eq!(runs(), 1);
+    let audit = host.get(&format!(
+        "/vocab/run?trace_id={}",
+        heard["trace_id"].as_str().unwrap()
+    ));
+    assert_eq!(audit["session"], second);
+    assert_eq!(audit["provider"], "deepgram");
+    assert_eq!(audit["model"], "nova-3");
+    assert_eq!(audit["stt"], heard["stt"]);
+    assert_eq!(audit["run_id"], heard["vocab_run_id"]);
+    let report = &heard["stt"];
+    assert_eq!(
+        report["language"],
+        json!({"value":"no,en","source":"call_policy"})
+    );
+    assert_eq!(
+        report["requested_model"],
+        json!({"value":"local","applied":false,"reason":"agent"})
+    );
+    assert_eq!(
+        report["attempts"][0],
+        json!({"engine":"elevenlabs:scribe_v2","outcome":"skipped","reason":"language_incompatible"})
+    );
+    assert_eq!(report["attempts"][1]["outcome"], "ok");
+    assert_eq!(report["attempts"][1]["language"], "no");
+    assert_eq!(report["language_adapted"], "first_code");
+    assert_eq!(report["effective_engine"], "deepgram:nova-3");
+    assert!(requests.lock().unwrap()[0].contains("language=no"));
+    assert!(failed.lock().unwrap().is_empty());
+    let collision = json!({"error":"transcription id reused for different audio"});
+    assert_eq!(hear(&phone, id, &first, "clip-1"), (409, collision.clone()));
+    let chat = fetch(
+        &host,
+        &phone,
+        "POST",
+        "/transcribe",
+        &[
+            ("X-Transcription-ID", "clip-1"),
+            ("X-Transcription-Model", "local"),
+        ],
+        b"test clip",
+    );
+    assert_eq!(chat.status, 409);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&chat.body).unwrap(),
+        collision
+    );
+    assert!(failed.lock().unwrap().is_empty());
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    let cached = hear(&phone, id, &second, "clip-1").1;
+    assert_eq!(runs(), 1);
+    assert_eq!(cached["cached"], true);
+    assert_eq!(cached["stt"], heard["stt"]);
+    assert_eq!(requests.lock().unwrap().len(), 1);
+    assert_eq!(change(json!({"agent_languages":{"mike":"da"}})).0, 200);
+    assert_eq!(
+        snap()["transcription"][&second]["language"]["source"],
+        "agent"
+    );
+    let (_, again) = hear(&phone, id, &second, "clip-2");
+    assert_eq!(again["stt"]["attempts"][0]["outcome"], "error");
+    assert_eq!(again["stt"]["attempts"][0]["language"], "da");
+    assert_eq!(again["stt"]["attempts"][1]["language"], "da");
+    assert!(failed.lock().unwrap()[0].contains("name=\"language_code\"\r\n\r\nda"));
+    // Only skipped engines, and provider failures, explain themselves differently.
+    assert_eq!(change(json!({"agent_languages":{"mike":"en,no"},"agent_engines":{"mike":"elevenlabs:scribe_v2"}})).0,200);
+    let (code, skipped) = hear(&phone, id, &second, "incompatible");
+    assert_eq!(code, 409);
+    assert_eq!(
+        skipped,
+        json!({"ok":false,"error":"no compatible engine","language":"en,no","engines":["elevenlabs:scribe_v2"],
+                              "attempts":[{"engine":"elevenlabs:scribe_v2","outcome":"skipped","reason":"language_incompatible"}]})
+    );
+    assert_eq!(change(json!({"agent_languages":{"mike":"en"}})).0, 200);
+    let (code, last) = hear(&phone, id, &second, "failed");
+    assert_eq!(code, 500);
+    assert_eq!(last["stt"]["effective_engine"], Value::Null);
+    assert_eq!(last["stt"]["attempts"][0]["outcome"], "error");
+    assert_eq!(last["stt"]["attempts"][0]["language"], "en");
+    assert_eq!(
+        action("/calls/hold", json!({"agent":second,"call_id":id})).0,
+        200
+    );
+    assert_eq!(
+        hear(&phone, id, &second, "clip-1").1["error"],
+        "not a call participant"
+    );
+    assert_eq!(action("/calls/end", json!({"call_id":id})).0, 200);
+    let ended = hear(&phone, id, &second, "clip-1");
+    assert_eq!(ended.0, 409);
+    assert_eq!(ended.1["error"], "call ended");
+    assert!(ended.1["reason"].is_string());
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    host.kill();
+    use clarp_ports::kv::KeyValueEngine as _;
+    let open_store = || {
+        clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap()
+    };
+    {
+        let mut store = open_store();
+        assert_eq!(
+            store
+                .get("setting", "transcription.call_languages")
+                .unwrap()
+                .as_deref(),
+            Some(b"no,en".as_slice())
+        );
+        store
+            .put("setting", "transcription.call_engines", b"bad:missing")
+            .unwrap();
+    }
+    let invalid = place.start_in("admin", &[], &world);
+    let status = invalid.get("/transcription-providers");
+    assert_eq!(
+        status["call_policy_error"],
+        "unknown transcription engine: bad:missing"
+    );
+    let started = invalid
+        .ask_as(&phone, "POST", "/calls", Some(&json!({"agents":[second]})))
+        .1;
+    let invalid_call = &started["call"];
+    assert!(invalid_call.get("transcription").is_none());
+    let got = fetch(
+        &invalid,
+        &phone,
+        "POST",
+        "/transcribe",
+        &[
+            ("X-Clarp-Call-Id", invalid_call["call_id"].as_str().unwrap()),
+            ("X-Transcription-Session", &second),
+        ],
+        b"test clip",
+    );
+    let body: Value = serde_json::from_slice(&got.body).unwrap();
+    assert_eq!(got.status, 409);
+    assert_eq!(body["error"], "call policy invalid");
+    assert_eq!(body["call_policy_error"], status["call_policy_error"]);
+    assert_eq!(body["attempts"], json!([]));
+    assert_eq!(requests.lock().unwrap().len(), 2);
+    // Clearing the pair restores ordinary dispatch. An agent override alone is hidden on
+    // a say-path call, while the same stored participant is shown on a listen-first call.
+    assert_eq!(invalid.ask("POST","/transcription-providers",Some(&json!({
+        "call_languages":"","call_engines":"","engine":"deepgram:nova-3","agent_engines":{"mike":null}
+    }))).0,200);
+    let snapshot = |host: &Host| host.ask_as(&phone, "GET", "/calls", None).1["call"].clone();
+    assert!(snapshot(&invalid).get("transcription").is_none());
+    let got = fetch(
+        &invalid,
+        &phone,
+        "POST",
+        "/transcribe",
+        &[
+            ("X-Clarp-Call-Id", invalid_call["call_id"].as_str().unwrap()),
+            ("X-Transcription-Session", &second),
+        ],
+        b"unbound language",
+    );
+    let spoken: Value = serde_json::from_slice(&got.body).unwrap();
+    assert_eq!(got.status, 200, "{spoken}");
+    assert_eq!(spoken["stt"]["engines"]["source"], "global");
+    assert_eq!(spoken["stt"]["language"]["source"], "agent");
+    assert_eq!(spoken["stt"]["attempts"][0]["language"], "en");
+    assert!(spoken["stt"]["requested_model"].is_null());
+    invalid.kill();
+    {
+        let mut store = open_store();
+        let mut changed = 0;
+        for (owner, bytes) in store.list("kept.call").unwrap() {
+            let mut rows: Vec<Value> = serde_json::from_slice(&bytes).unwrap();
+            for record in &mut rows {
+                assert!(record.get("transcription").is_none());
+                if record["call_id"] == invalid_call["call_id"] && record["state"] == "live" {
+                    record["_ring"] = json!({"opening_mode":"listen_first"});
+                    changed += 1;
+                }
+            }
+            store
+                .put("kept.call", &owner, &serde_json::to_vec(&rows).unwrap())
+                .unwrap();
+        }
+        assert_eq!(changed, 1);
+    }
+    let listen = place.start_in("admin", &[], &world);
+    let shown = snapshot(&listen);
+    assert_eq!(
+        shown["transcription"][&second]["language"],
+        json!({"value":"en","source":"agent"})
+    );
+    assert_eq!(
+        shown["transcription"][&second]["engines"]["source"],
+        "global"
+    );
+    assert!(shown.get("_ring").is_none());
+    let chat = || {
+        fetch(
+            &listen,
+            &phone,
+            "POST",
+            "/transcribe",
+            &[
+                ("X-Transcription-ID", "chat-audit"),
+                ("X-Transcription-Model", "deepgram:nova-3"),
+            ],
+            b"ordinary clip",
+        )
+    };
+    let reply = chat();
+    assert_eq!(reply.status, 200);
+    let reply: Value = serde_json::from_slice(&reply.body).unwrap();
+    let audit = listen.get(&format!(
+        "/vocab/run?trace_id={}",
+        reply["trace_id"].as_str().unwrap()
+    ));
+    assert_eq!(audit["run_id"], reply["vocab_run_id"]);
+    assert!(reply["vocab_run_id"].as_i64().is_some_and(|id| id > 0));
+    assert!(reply.get("stt").is_none() && audit.get("stt").is_none());
+    let before = listen.get("/vocab/runs");
+    let retry: Value = serde_json::from_slice(&chat().body).unwrap();
+    assert_eq!(retry["cached"], true);
+    assert_eq!(listen.get("/vocab/runs"), before);
 }
 
 #[test]

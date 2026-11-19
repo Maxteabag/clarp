@@ -76,6 +76,17 @@ pub trait Listener: Send + Sync {
     /// called where nothing may wait.
     fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf>;
 
+    /// A call report records the constraint at the adapter boundary, also when it fails.
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Option<String>,
+    ) -> Result<Heard, Deaf> {
+        *observed = Some(asked.language.unwrap_or("auto").to_string());
+        self.hear(clip, asked)
+    }
+
     /// Whether the engine could hear a clip now.
     fn ready(&self) -> bool {
         true

@@ -78,6 +78,9 @@ impl Run {
         ] {
             row[key] = self.audit[key].clone();
         }
+        if let Some(stt) = self.audit.get("stt") {
+            row["stt"] = stt.clone();
+        }
         row
     }
 }
@@ -193,6 +196,7 @@ impl Desk {
         id: i64,
         transcript: String,
         latency: i64,
+        stt: Option<&Value>,
     ) -> Result<()> {
         let _lock = self.guard.lock().await;
         let mut r = run(fleet, id).await?;
@@ -201,6 +205,9 @@ impl Desk {
             let mut session: Session = load(fleet, SESSIONS, &r.session).await?.unwrap_or_default();
             remember(&mut session.spoken, id, RECENT);
             writes.push((SESSIONS, r.session.clone(), encode(&session)?));
+        }
+        if let Some(report) = stt {
+            r.audit["stt"] = report.clone();
         }
         r.transcript = transcript;
         r.latency = latency;

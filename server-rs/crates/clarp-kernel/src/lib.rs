@@ -12,6 +12,7 @@ pub mod agent;
 pub mod alert_routes;
 pub mod artifacts;
 pub mod calendar;
+pub mod call_transcription;
 pub mod calls;
 pub mod chip;
 pub mod connector;

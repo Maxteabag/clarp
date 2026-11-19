@@ -165,6 +165,18 @@ impl Desk {
         .await
     }
 
+    pub(crate) async fn ask_public(
+        &self,
+        app: &App,
+        ask: impl FnOnce(&mut Calls, At, (&[Contact], &str), &mut Effects) -> Result<Value, Refused>,
+    ) -> Result<Result<Value, Refused>, Unavailable> {
+        self.ask(app, |calls, at, roster, out| {
+            ask(calls, at, roster, out)
+                .map(|answer| crate::heard::call::project(app, calls, answer))
+        })
+        .await
+    }
+
     /// The books, read where they are kept when this is the first request since the Host
     /// started. A ring that rang when the Host stopped is given its timer again.
     async fn read<'a>(
@@ -954,7 +966,7 @@ async fn snapshot(
     };
     let desk = app.calls.clone();
     answered(
-        desk.ask(&app, |calls, at, _, out| calls.snapshot(asker, at, out))
+        desk.ask_public(&app, |calls, at, _, out| calls.snapshot(asker, at, out))
             .await,
     )
 }
@@ -994,7 +1006,7 @@ async fn start(
         ..Asker::default()
     };
     let desk = app.calls.clone();
-    let asked = desk.ask(&app, |calls, at, with, out| {
+    let asked = desk.ask_public(&app, |calls, at, with, out| {
         calls.start(asker, (&agents, &request_id, None), with, at, out)
     });
     answered(asked.await)
@@ -1029,7 +1041,7 @@ async fn change(
         by: &by,
     };
     let desk = app.calls.clone();
-    let asked = desk.ask(&app, |calls, at, (roster, _), out| match action.as_str() {
+    let asked = desk.ask_public(&app, |calls, at, (roster, _), out| match action.as_str() {
         "end" => calls.end(asker, at, out),
         action => calls.change(asker, (action, &agent), roster, at, out),
     });
@@ -1116,7 +1128,9 @@ async fn ring_answer(
             new_id: with.new_id,
             minted: names.minted(),
         };
-        rings.answer(calls, &asked, given, &with.world, with.at, effects)
+        rings
+            .answer(calls, &asked, given, &with.world, with.at, effects)
+            .map(|answer| crate::heard::call::project(&app, calls, answer))
     });
     answered(taken.await)
 }

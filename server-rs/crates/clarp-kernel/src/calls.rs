@@ -603,11 +603,18 @@ impl Calls {
         Ok(())
     }
 
+    pub fn record(&self, id: &str) -> Option<(&str, &Call)> {
+        self.books.iter().find_map(|(owner, calls)| {
+            calls
+                .iter()
+                .find(|call| call.call_id == id)
+                .map(|call| (owner.as_str(), call))
+        })
+    }
+
     /// Any call, up or over, by its id, as an app reads it.
     pub fn by_id(&self, call_id: &str, now_ms: i64) -> Option<Value> {
-        let mut all = self.books.values().flatten();
-        all.find(|call| call.call_id == call_id)
-            .map(|call| call.told(now_ms))
+        self.record(call_id).map(|(_, call)| call.told(now_ms))
     }
 
     /// The call a turn of this session's agent belongs to: one that is up, in which the
