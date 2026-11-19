@@ -20,12 +20,12 @@
 # The queue sources this function on the build machine with the build directory as its cwd.
 build_has_space() (
     set -euo pipefail
-    local floor=$1 build_dir=$PWD free incremental=0 removed=0 stale exe
+    local floor=$1 build_dir=$PWD free incremental=no removed=0 stale exe
     free=$(df -B1 --output=avail "$build_dir" | tail -1)
     if (( free < floor )) && [[ ! -L target && ! -L target/debug ]]; then
         if [[ -d target/debug/incremental && ! -L target/debug/incremental ]]; then
             rm -rf -- target/debug/incremental
-            incremental=1
+            incremental=yes
             free=$(df -B1 --output=avail "$build_dir" | tail -1)
         fi
         if (( free < floor )) && [[ -d target/debug/deps && ! -L target/debug/deps ]]; then
@@ -42,7 +42,7 @@ build_has_space() (
             done
         fi
     fi
-    printf 'Build disk: removed %d incremental directories and %d stale test executables; %d bytes free.\n' \
+    printf 'Build disk: incremental cache removed=%s, stale test executables removed=%d, free=%d bytes.\n' \
         "$incremental" "$removed" "$free"
     if (( free < floor )); then
         echo "Build stopped before cargo because less than $floor bytes are free." >&2
