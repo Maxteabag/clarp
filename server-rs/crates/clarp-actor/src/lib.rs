@@ -477,6 +477,7 @@ pub struct Status {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Kept<'a> {
     pub author: Author<'a>,
+    pub subgoal_event: Option<&'a LedgerEvent>,
     pub imported_events: Option<&'a [LedgerEvent]>,
     pub entry_source: Option<&'a str>,
     pub import_high: i64,
@@ -2095,6 +2096,9 @@ impl Actor {
             let plan = &change.plan;
             let (mut events, imported) = match kept.imported_events {
                 Some(imports) => (imports.to_vec(), imports.len()),
+                None if kept.subgoal_event.is_some() => {
+                    (kept.subgoal_event.into_iter().cloned().collect(), 0)
+                }
                 None if matches!(kept.author, Author::Legacy) => (ledger::legacy(plan), 0),
                 None => (
                     ledger::changes(self.goals.plan(&plan.plan_id), plan, kept.author)

@@ -1341,7 +1341,9 @@ agent brings the events of each goal with their source IDs. The keeper uses thes
 in its source references. A goal already updated at upgrade gets the ID of its own legacy baseline
 as its keeper cursor in the same append. A moved goal retains the cursor up to its source tail.
 The keeper bounds its initial page by the owner's committed high-water inside the same actor ask.
-Bookkeeping delegations and explicit subgoals remain separate work.
+An owner can add, update and retire explicit subgoals. Each edit keeps the changed subgoal and its
+ledger event in the same append. The subgoal has its own revision and evidence accumulates across edits.
+Bookkeeping delegations remain separate work.
 
 **The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
 runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's

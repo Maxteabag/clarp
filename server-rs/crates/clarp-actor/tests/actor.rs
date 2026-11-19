@@ -2328,6 +2328,36 @@ fn incoming_goal_events_keep_disjoint_ids_and_reject_a_collision_atomically() {
         40
     );
     assert_eq!(actor.next_goal_event_id().unwrap(), 41);
+    // A failed explicit subgoal edit cannot consume an event ID, change its
+    // summary, or appear in either the log or the book.
+    let (proposed, subgoal_event) = actor
+        .goals()
+        .owner_subgoal(
+            "a1:first",
+            "add",
+            &json!({"subgoal_id":"child","title":"Child"}),
+            None,
+            201,
+        )
+        .unwrap();
+    let before = actor.goals().get("a1:first", 201).unwrap();
+    let seq = disk.last_seq().unwrap();
+    fail.store(true, Ordering::SeqCst);
+    assert!(
+        actor
+            .keep(
+                &Kept {
+                    goal: Some(&proposed),
+                    subgoal_event: Some(&subgoal_event),
+                    ..Default::default()
+                },
+                201
+            )
+            .is_err()
+    );
+    assert_eq!(disk.last_seq().unwrap(), seq);
+    assert_eq!(actor.goals().get("a1:first", 201).unwrap(), before);
+    assert_eq!(actor.next_goal_event_id().unwrap(), 41);
     let second = make("a1:second");
     let mut enters = vec![event(7, "a1:second"), event(40, "a1:second")];
     let open_log = || {

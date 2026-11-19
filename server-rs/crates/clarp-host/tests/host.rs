@@ -1428,6 +1428,25 @@ print(json.dumps({{"event":"result","result":{{"conversation_id":sid,"status":"S
         plan = create(&owner, token);
         ledger_actor(&host, &plan, "created", who, id, json!(proof));
     }
+    // The same Host-issued token identifies the peer that added a subgoal.
+    let sub = call(
+        "clarp-goal",
+        &[
+            "subgoal",
+            &plan,
+            "add",
+            r#"{"subgoal_id":"handoff","title":"Handoff"}"#,
+        ],
+        Some(theirs.as_str()),
+    );
+    assert_eq!(sub["exit"], 0, "{sub}");
+    let sub: Value = serde_json::from_str(sub["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        sub["subgoals"][0]["created_by"],
+        json!({"actor_kind":"peer","agent_id":peer_id})
+    );
+    let row = ledger_actor(&host, &plan, "subgoal_added", "peer", &peer_id, Value::Null);
+    assert_eq!(row["subject"], "subgoal:handoff");
     let revision = |plan: &str| goal(&host, &place.root, &["get", plan])["revision"].clone();
     for (action, token, who, id, proof) in [
         (

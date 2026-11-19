@@ -1845,6 +1845,42 @@ impl Worker {
             agent_id: &self.setup.record.agent_id,
             session: &self.setup.record.session,
         };
+        if let goaltool::Ask::Subgoal {
+            plan_id,
+            action,
+            data,
+        } = ask
+        {
+            let verified = match &caller {
+                GoalCaller::Verified(id) => Some(id.as_str()),
+                _ => None,
+            };
+            let (said, written) =
+                goaltool::subgoal(actor.goals(), plan_id, action, data, verified, now);
+            let Some((change, event)) = written else {
+                let _ = answer.send(Ok(said));
+                return Ok(());
+            };
+            let out = actor.keep(
+                &Kept {
+                    goal: Some(&change),
+                    subgoal_event: Some(&event),
+                    ..Kept::default()
+                },
+                now,
+            );
+            match out {
+                Ok(out) => {
+                    self.after(out);
+                    let _ = answer.send(Ok(said));
+                    return Ok(());
+                }
+                Err(error) => {
+                    let _ = answer.send(Err(unavailable(&error)));
+                    return Err(error);
+                }
+            }
+        }
         let (said, change) = with_goals(actor, now, |book, world| {
             goaltool::answer(book, owner, ask, world)
         });
