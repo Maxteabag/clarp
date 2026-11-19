@@ -642,10 +642,18 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         row.map_or(Value::Null, |row| row["delivery"].clone())
     };
     let before = log("");
-    assert_eq!(delivery(&before, "u-m1")["state"], "handed_over", "{before}");
+    assert_eq!(
+        delivery(&before, "u-m1")["state"],
+        "handed_over",
+        "{before}"
+    );
     let queued = delivery(&before, "u-m2");
     assert_eq!(
-        (&queued["state"], &queued["rev"], &queued["for"]["client_msg_id"]),
+        (
+            &queued["state"],
+            &queued["rev"],
+            &queued["for"]["client_msg_id"]
+        ),
         (&json!("pending_launch"), &json!(1), &json!("m2")),
         "{before}"
     );
@@ -666,10 +674,21 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         ("X-Clarp-Turn", desk_token.as_str()),
         ("Content-Type", "application/json"),
     ];
-    let answered = fetch(&host, &host.token, "POST", "/stop", &headers, body.as_bytes());
+    let answered = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/stop",
+        &headers,
+        body.as_bytes(),
+    );
     let by_desk: Value = serde_json::from_slice(&answered.body).unwrap();
     assert_eq!(
-        (answered.status, &by_desk["stop_actor"], &by_desk["stop_actor_verified"]),
+        (
+            answered.status,
+            &by_desk["stop_actor"],
+            &by_desk["stop_actor_verified"]
+        ),
         (200, &json!("agent:desk"), &json!(true)),
         "{by_desk}"
     );
@@ -732,7 +751,10 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         .collect();
     assert_eq!(told, ["u-m1", "u-m2", "u-m2"], "{:?}", hints());
     for hint in hints() {
-        assert!(hint.get("delivery").is_none() && hint["session"] == session, "{hint}");
+        assert!(
+            hint.get("delivery").is_none() && hint["session"] == session,
+            "{hint}"
+        );
     }
 
     let (status, refused) = host.ask(
@@ -740,7 +762,10 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         &format!("/log?session={session}&delivery_since=x"),
         None,
     );
-    assert_eq!((status, &refused["error"]), (400, &json!("bad delivery_since")));
+    assert_eq!(
+        (status, &refused["error"]),
+        (400, &json!("bad delivery_since"))
+    );
 }
 
 /// A Stop while another message waits (R92, the Python Host's PR 451): the turn that ran is
