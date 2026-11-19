@@ -11243,21 +11243,22 @@ else:
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
     };
-    // Twenty-four agents, the oldest first: Mike, Rachel, and twenty-two more. Rachel is open, and the
-    // first of the twenty-two is told something, which makes it the one most recently active.
+    // Twenty-four agents, the oldest first: Mike, Rachel, and twenty-two more. The first of the
+    // twenty-two is told something, which makes it the one most recently active; then Rachel is opened
+    // (a message sent to an agent opens that agent).
     let (mike, rachel) = (host.new_agent("Mike"), host.new_agent("Rachel"));
     let others: Vec<String> = (1..=22)
         .map(|n| host.new_agent(&format!("Agent {n:02}")))
         .collect();
     assert_eq!(others[0], "agent-01");
-    let (status, _) = host.ask("POST", "/select", Some(&json!({ "session": rachel })));
-    assert_eq!(status, 200);
     host.send(&others[0], "the first of them is told", "t-0");
     wait_for("its answer", || {
         host.conversation(&others[0])
             .iter()
             .any(|(role, _)| role == "assistant")
     });
+    let (status, _) = host.ask("POST", "/select", Some(&json!({ "session": rachel })));
+    assert_eq!(status, 200);
     let roster = || {
         host.get("/agents/snapshot")["agents"]
             .as_array()
