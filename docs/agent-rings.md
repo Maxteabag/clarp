@@ -152,7 +152,15 @@ lists every field and fixed string.
   (`profile.json` binds `agent_session`, a `display_name`, the approved
   `stories` and each file's sha256), and freezes profile texts, event and
   opening in a snapshot on the ring. Nothing is trimmed: a ring that cannot be
-  built is refused with a fixed `live_*` code. The same event retried with the
+  built is refused with a fixed `live_*` code. The event's `time` is one
+  stated grammar, RFC 3339 date-time, strict:
+  `YYYY-MM-DD 'T' HH:MM:SS [ '.' 1 to 9 digits ] ( 'Z' | ('+'|'-') HH:MM )`,
+  ASCII digits, capital T and Z, year 0001 to 9999 and a real calendar day,
+  hours 00 to 23, minutes and seconds 00 to 59, zone hours 00 to 23, nothing
+  before or after. Anything else is 400 `live_context_invalid`. This is
+  stricter than Python's `datetime.fromisoformat` on purpose: each CPython
+  version accepts different extra forms (3.12 an empty fraction, 3.14 hour 24),
+  and the grammar keeps every Host, the Rust one included, the same. The same event retried with the
   same content gets the same ring back. Nothing is pre-voiced.
 - **Delivery.** A Live ring goes only to phones that declared
   `supported_conversation_modes` with `agent_live_v1`: an iPhone with its VoIP
