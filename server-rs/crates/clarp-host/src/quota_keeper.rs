@@ -55,6 +55,8 @@ use crate::pusher::TurnDone;
 const WINDOWS: &str = "quota-keeper-window";
 const RECEIPTS: &str = "quota-keeper-receipt";
 const LANE: &str = "quota-keeper-lane";
+/// What a look writes in one: its run in the janitors' book, its windows, receipts and lane.
+const LOOK: &str = "quota-keeper-look";
 /// The one lane there is.
 const THE_LANE: &str = "quota-keeper";
 /// How long a receipt delivered or cancelled is kept.
@@ -420,7 +422,8 @@ async fn pass(app: &App) {
     });
     let next = match looked.await {
         Ok(next) => next,
-        Err(why) => return desk.failed("the janitors' book to keep its look", &why),
+        // A write that failed is said as the Host says every one (`FleetHandle::unkept`).
+        Err(why) => return app.fleet.unkept(LOOK, &why.0),
     };
     desk.read_well();
     // The keeper changed while it looked: the next look finds out how it stands.
@@ -482,9 +485,6 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
     }
     let gone: Vec<Gone> = Vec::new();
     if let Err(why) = app.fleet.change_together(rows, gone).await {
-        eprintln!(
-            "clarp-host: the Quota keeper's receipts were not kept: {}",
-            why.0
-        );
+        app.fleet.unkept(RECEIPTS, &why.0);
     }
 }
