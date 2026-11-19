@@ -15902,7 +15902,10 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     let sid = phone.ask_sized("POST", "/voice-events", &[], &relay_body, 64 * 1024);
     let relay_refused = phone.answer(sid);
     assert_eq!(relay_refused.status, 413);
-    assert_eq!(relay_refused.json(), json!({"error":"request body too large"}));
+    assert_eq!(
+        relay_refused.json(),
+        json!({"error":"request body too large"})
+    );
     assert!(relay_refused.ended);
     // Invalid HTTP framing is refused by Hyper; a missing length reaches the JSON policy.
     for (extra, router_error) in [
