@@ -6,8 +6,8 @@
 //! `/var/tmp`. A link anywhere in the path cannot lead it elsewhere: the path is resolved
 //! first, and its last part is opened without following a link.
 
-use std::io::{Read, Seek, SeekFrom};
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -57,33 +57,45 @@ pub fn forbidden() -> Value {
 
 // Pin each directory before opening the next component. A replaced
 // ancestor cannot redirect an already-resolved log path.
-fn open_resolved(path:&Path)->std::io::Result<File>{
-    let mut at=crate::files::open(Path::new("/"),true)?;
-    let mut names=path.strip_prefix("/").map_err(std::io::Error::other)?.iter().peekable();
-    while let Some(name)=names.next(){
+fn open_resolved(path: &Path) -> std::io::Result<File> {
+    let mut at = crate::files::open(Path::new("/"), true)?;
+    let mut names = path
+        .strip_prefix("/")
+        .map_err(std::io::Error::other)?
+        .iter()
+        .peekable();
+    while let Some(name) = names.next() {
         use std::os::fd::AsRawFd;
-        let child=PathBuf::from(format!("/proc/self/fd/{}",at.as_raw_fd())).join(name);
-        at=crate::files::open(&child,names.peek().is_some())?;
+        let child = PathBuf::from(format!("/proc/self/fd/{}", at.as_raw_fd())).join(name);
+        at = crate::files::open(&child, names.peek().is_some())?;
     }
     Ok(at)
 }
 
-pub fn provider_output(metadata:&Value)->Value{
-    let base=Path::new("/tmp").join(format!("claude-{}",nix::unistd::getuid().as_raw()));
-    provider_output_in(&base,metadata)
+pub fn provider_output(metadata: &Value) -> Value {
+    let base = Path::new("/tmp").join(format!("claude-{}", nix::unistd::getuid().as_raw()));
+    provider_output_in(&base, metadata)
 }
 
-fn provider_output_in(base:&Path,metadata:&Value)->Value{
-    use clarp_kernel::provider_tasks::{safe_text,valid_id};
-    let component=|field:&str| metadata[field].as_str().filter(|name|valid_id(name));
-    let (Some(project),Some(native),Some(task))=(component("provider_project"),component("native_session_id"),component("provider_task_id")) else{
-        return tail("",&[],TAIL_BYTES);
+fn provider_output_in(base: &Path, metadata: &Value) -> Value {
+    use clarp_kernel::provider_tasks::{safe_text, valid_id};
+    let component = |field: &str| metadata[field].as_str().filter(|name| valid_id(name));
+    let (Some(project), Some(native), Some(task)) = (
+        component("provider_project"),
+        component("native_session_id"),
+        component("provider_task_id"),
+    ) else {
+        return tail("", &[], TAIL_BYTES);
     };
-    let dir=base.join(project).join(native).join("tasks");
-    if resolved(&dir)!=dir{return withheld("","outside_allowed_roots");}
-    let path=dir.join(format!("{task}.output"));
-    let mut result=tail(&path.to_string_lossy(),&[dir],TAIL_BYTES);
-    if let Some(text)=result["text"].as_str(){result["text"]=json!(safe_text(text));}
+    let dir = base.join(project).join(native).join("tasks");
+    if resolved(&dir) != dir {
+        return withheld("", "outside_allowed_roots");
+    }
+    let path = dir.join(format!("{task}.output"));
+    let mut result = tail(&path.to_string_lossy(), &[dir], TAIL_BYTES);
+    if let Some(text) = result["text"].as_str() {
+        result["text"] = json!(safe_text(text));
+    }
     result
 }
 
@@ -171,38 +183,53 @@ mod tests {
     }
 
     #[test]
-    fn a_provider_log_comes_only_from_the_receipted_task_and_secrets_are_redacted(){
-        let place=scratch("provider-output");
-        let store=place.join("claude-fixture");
-        let dir=store.join("project/native/tasks");
+    fn a_provider_log_comes_only_from_the_receipted_task_and_secrets_are_redacted() {
+        let place = scratch("provider-output");
+        let store = place.join("claude-fixture");
+        let dir = store.join("project/native/tasks");
         std::fs::create_dir_all(&dir).unwrap();
-        let path=dir.join("job.output");
-        let fixtures:Vec<(String,Value,Value)>=serde_json::from_str(include_str!("../../clarp-kernel/tests/fixtures/provider-output.json")).unwrap();
-        let mut count=0;
-        for (case,metadata,mut expected) in fixtures{
-            match case.as_str(){
-                "invalid"|"missing"=>{}
-                "directory"=>std::fs::create_dir(&path).unwrap(),
-                "small"=>{std::fs::remove_dir(&path).unwrap();std::fs::write(&path,"first\npassword=fixture\n").unwrap();}
-                "truncated"=>std::fs::write(&path,format!("{}\ntoken=fixture\nend\n","x".repeat(65536))).unwrap(),
-                "outside-file"=>{
-                    let outside=place.join("outside");
-                    std::fs::write(&outside,"outside fixture").unwrap();
+        let path = dir.join("job.output");
+        let fixtures: Vec<(String, Value, Value)> = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/provider-output.json"
+        ))
+        .unwrap();
+        let mut count = 0;
+        for (case, metadata, mut expected) in fixtures {
+            match case.as_str() {
+                "invalid" | "missing" => {}
+                "directory" => std::fs::create_dir(&path).unwrap(),
+                "small" => {
+                    std::fs::remove_dir(&path).unwrap();
+                    std::fs::write(&path, "first\npassword=fixture\n").unwrap();
+                }
+                "truncated" => std::fs::write(
+                    &path,
+                    format!("{}\ntoken=fixture\nend\n", "x".repeat(65536)),
+                )
+                .unwrap(),
+                "outside-file" => {
+                    let outside = place.join("outside");
+                    std::fs::write(&outside, "outside fixture").unwrap();
                     std::fs::remove_file(&path).unwrap();
-                    std::os::unix::fs::symlink(outside,&path).unwrap();
+                    std::os::unix::fs::symlink(outside, &path).unwrap();
                 }
-                "linked-root"=>{
-                    let moved=store.join("moved");
-                    std::fs::rename(&dir,&moved).unwrap();
-                    std::os::unix::fs::symlink(moved,&dir).unwrap();
+                "linked-root" => {
+                    let moved = store.join("moved");
+                    std::fs::rename(&dir, &moved).unwrap();
+                    std::os::unix::fs::symlink(moved, &dir).unwrap();
                 }
-                other=>panic!("unknown output case {other}"),
+                other => panic!("unknown output case {other}"),
             }
-            expected["path"]=json!(expected["path"].as_str().unwrap().replace("STORE",store.to_str().unwrap()));
-            assert_eq!(provider_output_in(&store,&metadata),expected,"{case}");
-            count+=1;
+            expected["path"] = json!(
+                expected["path"]
+                    .as_str()
+                    .unwrap()
+                    .replace("STORE", store.to_str().unwrap())
+            );
+            assert_eq!(provider_output_in(&store, &metadata), expected, "{case}");
+            count += 1;
         }
-        assert_eq!(count,24);
+        assert_eq!(count, 24);
         std::fs::remove_dir_all(place).unwrap();
     }
 

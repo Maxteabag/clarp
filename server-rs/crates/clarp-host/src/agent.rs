@@ -290,7 +290,10 @@ pub enum Ask {
         answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
-    JobRecord { id:String,answer:Answer<Option<Job>> },
+    JobRecord {
+        id: String,
+        answer: Answer<Option<Job>>,
+    },
     JobTimeline {
         id: String,
         limit: usize,
@@ -413,7 +416,7 @@ pub struct View {
     pub backend: &'static str,
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
-    pub provider_mirrors:BTreeMap<String,Option<String>>,
+    pub provider_mirrors: BTreeMap<String, Option<String>>,
     /// Idle native bindings and the last known runtime end, for the shared runner.
     pub provider_bindings: Vec<(String, Option<i64>, Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
@@ -425,7 +428,7 @@ pub struct View {
 }
 
 impl View {
-    pub fn mirrored_provider(&self,id:&str)->bool{
+    pub fn mirrored_provider(&self, id: &str) -> bool {
         self.provider_mirrors.get(id).is_some_and(Option::is_some)
     }
 }
@@ -694,15 +697,24 @@ impl AgentHandle {
         &self,
         command: JobCommand,
     ) -> Result<Result<JobChange, JobRefusal>, Unavailable> {
-        self.job_with_origin(command,None).await
+        self.job_with_origin(command, None).await
     }
 
-    pub async fn job_with_origin(&self,command:JobCommand,origin:Option<clarp_kernel::provider_tasks::RegistrationOrigin>)->Result<Result<JobChange,JobRefusal>,Unavailable>{
-        self.ask(|answer| Ask::Job { command, origin, answer }).await
+    pub async fn job_with_origin(
+        &self,
+        command: JobCommand,
+        origin: Option<clarp_kernel::provider_tasks::RegistrationOrigin>,
+    ) -> Result<Result<JobChange, JobRefusal>, Unavailable> {
+        self.ask(|answer| Ask::Job {
+            command,
+            origin,
+            answer,
+        })
+        .await
     }
 
-    pub async fn job_record(&self,id:String)->Result<Option<Job>,Unavailable>{
-        self.ask(|answer| Ask::JobRecord{id,answer}).await
+    pub async fn job_record(&self, id: String) -> Result<Option<Job>, Unavailable> {
+        self.ask(|answer| Ask::JobRecord { id, answer }).await
     }
     pub async fn job_timeline(
         &self,
@@ -988,7 +1000,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         finished: None,
         backend: setup.backend.id(),
         jobs: Vec::new(),
-        provider_mirrors:BTreeMap::new(),
+        provider_mirrors: BTreeMap::new(),
         provider_bindings: Vec::new(),
         books: Arc::default(),
         speech: Arc::default(),
@@ -1079,7 +1091,7 @@ struct Worker {
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
     /// The revision of each job the clients were last told.
-    jobs_told: BTreeMap<String, (u64,String)>,
+    jobs_told: BTreeMap<String, (u64, String)>,
     /// When the running jobs were last looked at.
     jobs_checked: Instant,
     helper_rows: clarp_actor::helper_cells::HelperRows,
@@ -1688,7 +1700,9 @@ impl Worker {
 
         // Nor are the jobs it has: only what changes from here on is told.
         self.jobs_told.clear();
-        if let Some(actor)=self.actor.as_mut(){actor.take_job_events();}
+        if let Some(actor) = self.actor.as_mut() {
+            actor.take_job_events();
+        }
         self.newest = self.newest_row();
         self.ended = self.last_end();
         self.finished = self.last_finished();
@@ -2401,12 +2415,31 @@ impl Worker {
             Ask::RetireLabel { set_at_ms, answer } => {
                 answered(actor.retire_label(set_at_ms, now), answer)?
             }
-            Ask::Job { mut command, origin, answer } => {
-                if let (JobCommand::Register{metadata,..},Some(origin))=(&mut command,origin) {
-                    let bound=actor.helper_context().1.filter(|native|actor.provider_session(native).is_some_and(|s|s.ended_at.is_none() || s.newest_owner().is_some()));
-                    *metadata=origin.metadata(&self.setup.record.agent_id,&self.setup.record.backend,bound).unwrap_or(Value::Null);
+            Ask::Job {
+                mut command,
+                origin,
+                answer,
+            } => {
+                if let (JobCommand::Register { metadata, .. }, Some(origin)) =
+                    (&mut command, origin)
+                {
+                    let bound = actor.helper_context().1.filter(|native| {
+                        actor
+                            .provider_session(native)
+                            .is_some_and(|s| s.ended_at.is_none() || s.newest_owner().is_some())
+                    });
+                    *metadata = origin
+                        .metadata(
+                            &self.setup.record.agent_id,
+                            &self.setup.record.backend,
+                            bound,
+                        )
+                        .unwrap_or(Value::Null);
                 }
-                answered(actor.job(command, now, ||self.setup.revisions.next(now)), answer)?
+                answered(
+                    actor.job(command, now, || self.setup.revisions.next(now)),
+                    answer,
+                )?
             }
             Ask::Publish { asset, answer } => {
                 let kept = Kept {
@@ -2415,7 +2448,9 @@ impl Worker {
                 };
                 answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
             }
-            Ask::JobRecord{id,answer} => return read(Ok(actor.jobs().get(&id).cloned()),answer),
+            Ask::JobRecord { id, answer } => {
+                return read(Ok(actor.jobs().get(&id).cloned()), answer);
+            }
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
             }
@@ -2718,8 +2753,12 @@ impl Worker {
         let spawned = match action {
             Action::Launch(mut order) => {
                 if self.setup.record.backend == "claude" {
-                    if let Some(settings)=self.setup.launcher.claude_settings(&self.setup.record.agent_id){
-                        order.args.extend(["--settings".into(),settings]);
+                    if let Some(settings) = self
+                        .setup
+                        .launcher
+                        .claude_settings(&self.setup.record.agent_id)
+                    {
+                        order.args.extend(["--settings".into(), settings]);
                     }
                     let at = self.now_ms();
                     if let Some(actor) = self.actor.as_mut() {
@@ -2965,7 +3004,7 @@ impl Worker {
             .overdue(now, JOB_STALE_AFTER_MS, JOB_LOST_AFTER_MS, &alive);
         let mut all = Outputs::default();
         for command in overdue {
-            let (_, out) = actor.job(command, now, ||self.setup.revisions.next(now))?;
+            let (_, out) = actor.job(command, now, || self.setup.revisions.next(now))?;
             all.changed.jobs |= out.changed.jobs;
         }
         self.after(all);
@@ -3027,7 +3066,17 @@ impl Worker {
                     )
                 })
                 .collect(),
-            provider_mirrors:actor.jobs().jobs().filter(|j|j.provider_owned()).map(|j|(j.id.clone(),actor.jobs().provider_replacement(j).map(str::to_owned))).collect(),
+            provider_mirrors: actor
+                .jobs()
+                .jobs()
+                .filter(|j| j.provider_owned())
+                .map(|j| {
+                    (
+                        j.id.clone(),
+                        actor.jobs().provider_replacement(j).map(str::to_owned),
+                    )
+                })
+                .collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -3048,7 +3097,11 @@ impl Worker {
         if !(changed.conversation || changed.status || changed.queue || changed.jobs) {
             return;
         }
-        let job_events=self.actor.as_mut().map(Actor::take_job_events).unwrap_or_default();
+        let job_events = self
+            .actor
+            .as_mut()
+            .map(Actor::take_job_events)
+            .unwrap_or_default();
         let Some(actor) = &self.actor else {
             return;
         };
@@ -3301,20 +3354,24 @@ impl Worker {
             }
         }
         // A job changed: the clients are told the job as it now stands, once for each change.
-        for event in job_events{
-            if let Some(job)=actor.jobs().get(&event.id){
-                let replacement=actor.jobs().provider_replacement(job);
-                let mut told=wire::job_updated(&record,job,event.at);
-                told["job"]=clarp_kernel::provider_tasks::projected_event(&told["job"],replacement,event.at);
-                told["status"]=told["job"]["status"].clone();
-                told["change_revision"]=json!(event.revision);
-                let status=told["status"].as_str().unwrap_or_default().to_owned();
-                hub.publish(told,now);
-                if job.provider_owned() || job.metadata.get("tool_use_id").is_some(){
-                    let key=(job.generation,status);
-                    if self.jobs_told.get(&job.id)!=Some(&key){
-                        self.jobs_told.insert(job.id.clone(),key);
-                        hub.publish(json!({"type":"agent-roster","kind":"background-job"}),now);
+        for event in job_events {
+            if let Some(job) = actor.jobs().get(&event.id) {
+                let replacement = actor.jobs().provider_replacement(job);
+                let mut told = wire::job_updated(&record, job, event.at);
+                told["job"] = clarp_kernel::provider_tasks::projected_event(
+                    &told["job"],
+                    replacement,
+                    event.at,
+                );
+                told["status"] = told["job"]["status"].clone();
+                told["change_revision"] = json!(event.revision);
+                let status = told["status"].as_str().unwrap_or_default().to_owned();
+                hub.publish(told, now);
+                if job.provider_owned() || job.metadata.get("tool_use_id").is_some() {
+                    let key = (job.generation, status);
+                    if self.jobs_told.get(&job.id) != Some(&key) {
+                        self.jobs_told.insert(job.id.clone(), key);
+                        hub.publish(json!({"type":"agent-roster","kind":"background-job"}), now);
                     }
                 }
             }

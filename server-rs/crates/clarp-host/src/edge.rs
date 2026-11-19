@@ -1226,7 +1226,10 @@ pub(crate) fn agent_row(
         .jobs
         .iter()
         .filter(|job| job.status.is_active())
-        .filter(|job| !view.mirrored_provider(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none())
+        .filter(|job| {
+            !view.mirrored_provider(&job.id)
+                && wire::mirrored_helper(job, &helper_sessions).is_none()
+        })
         .map(|job| helpers::Process {
             title: job.title.clone(),
             progress: job.progress_text.clone(),
@@ -2584,7 +2587,7 @@ async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job
             .map(|job| (None, job, false)),
     );
     // What runs first, then what ended; within each, the last changed first.
-    jobs.sort_by_key(|(_, job,_)| {
+    jobs.sort_by_key(|(_, job, _)| {
         (
             job.status.is_terminal(),
             std::cmp::Reverse(job.updated_at_ms),
@@ -2598,7 +2601,7 @@ async fn background_jobs(State(app): State<App>) -> Result<Json<Value>, ApiError
     let now = app.clock.now_ms();
     let jobs = shown_jobs(&app, now).await?;
     let (active, ended): (Vec<_>, Vec<_>) =
-        jobs.iter().partition(|(_, job,_)| job.status.is_active());
+        jobs.iter().partition(|(_, job, _)| job.status.is_active());
     let listed: Vec<Value> = active
         .iter()
         .chain(ended.iter().take(100))
@@ -2632,8 +2635,8 @@ async fn job_and_owner(app: &App, job_id: &str) -> Result<Option<(Arc<Member>, J
     else {
         return Ok(None);
     };
-    let job=member.agent.job_record(job_id.to_owned()).await?;
-    Ok(job.map(|job|(member.clone(),job)))
+    let job = member.agent.job_record(job_id.to_owned()).await?;
+    Ok(job.map(|job| (member.clone(), job)))
 }
 
 /// `GET /background-jobs/<id>`: one job with its timeline, its progress and the end of its log.
@@ -2663,7 +2666,7 @@ async fn background_job(
     );
     let log = if limited {
         joblog::forbidden()
-    } else if job.provider_owned(){
+    } else if job.provider_owned() {
         joblog::provider_output(&job.metadata)
     } else {
         let roots = joblog::roots(&job.worker_cwd, owner.map_or("", |r| &r.cwd));
@@ -2732,17 +2735,21 @@ async fn cancel_background_job(
         return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
     };
     let owned = job_and_owner(&app, &job_id).await?;
-    if let Some((member, current)) = &owned {
-    if current.provider_owned(){
-        let job=wire::job(&member.record,&current,app.clock.now_ms());
-        let (status,mut receipt)=clarp_kernel::provider_tasks::cancel_refusal(&job);
-        if let Some(expected)=expected.filter(|generation|*generation!=current.generation){
-            receipt["error"]=json!("generation_mismatch");
-            receipt["expected_generation"]=json!(expected);
-            receipt["current_generation"]=json!(current.generation);
+    if let Some((member, current)) = &owned
+        && current.provider_owned()
+    {
+        let job = wire::job(&member.record, current, app.clock.now_ms());
+        let (status, mut receipt) = clarp_kernel::provider_tasks::cancel_refusal(&job);
+        if let Some(expected) = expected.filter(|generation| *generation != current.generation) {
+            receipt["error"] = json!("generation_mismatch");
+            receipt["expected_generation"] = json!(expected);
+            receipt["current_generation"] = json!(current.generation);
         }
-        return Ok((StatusCode::from_u16(status).unwrap_or(StatusCode::CONFLICT),Json(receipt)).into_response());
-    }
+        return Ok((
+            StatusCode::from_u16(status).unwrap_or(StatusCode::CONFLICT),
+            Json(receipt),
+        )
+            .into_response());
     }
     let member = owned.map(|(m, _)| m);
     let command = JobCommand::Cancel {
