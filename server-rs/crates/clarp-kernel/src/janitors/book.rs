@@ -147,6 +147,9 @@ pub struct Book {
     pub progress: BTreeMap<String, Progress>,
     /// The requests for a janitor that is made as a new agent, by the id each came under.
     pub creations: BTreeMap<String, Creation>,
+    /// What reached the owner of a janitor that failed again and again, by the item's id
+    /// (`attention.rs`): kept also when it is over, so that it is never made again.
+    pub alerts: BTreeMap<String, crate::artifacts::Artifact>,
 }
 
 /// A change a request asks for: the fields it names. One it does not name, or names as
