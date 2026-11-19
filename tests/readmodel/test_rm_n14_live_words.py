@@ -200,13 +200,13 @@ def test_a_compaction_inside_a_running_turn_and_the_turn_streams_on(tmp_path, ba
 
 @BY_WORDS
 @BACKENDS
-def test_the_last_reply_of_a_turn_that_is_given_the_next_turns_trace(tmp_path, backend, by_words):
-    """A reply that follows no linked prompt is given the trace of the turn
-    that was running at its time, and a turn counts as running from two
-    seconds before it began. So the last reply of one turn, written within
-    those two seconds, carries the next turn's trace, and lies before the
-    boundary at that turn's prompt. Every delta of the next turn was a full
-    import; by words it is a tail."""
+def test_the_last_reply_written_just_before_the_next_turn_keeps_its_own_turn(tmp_path, backend, by_words):
+    """R91 replaced this shape. It was issue 352's second: a reply that follows no linked prompt
+    was given the turn that began up to two seconds after it, so the last reply of one turn,
+    written within those two seconds, carried the next turn's trace, lay before the boundary at
+    that turn's prompt, and every delta of the next turn was a full import by the trace alone. A
+    reply is now the latest turn's that had begun by its time: it never carries the next turn's
+    trace, and the next turn's live row streams as a tail whether words are compared or not."""
     with World(tmp_path, backend, _history(backend), settings=WORDS if by_words else LIVE) as world:
         ordinal = world.started(6)
         world.grow(_turn(backend, ordinal, answer=OLD))
@@ -214,13 +214,14 @@ def test_the_last_reply_of_a_turn_that_is_given_the_next_turns_trace(tmp_path, b
         assert world.imported()[0] in ("tail_applied", "full_carry_inputs_changed")
         world.grow(_turn(backend, ordinal + 2))
         assert _audited(world) == ("full_audit", [])
-        assert _rows(world, "role='assistant' AND text=? AND trace_id='next'", (OLD,))
+        assert _rows(world, "role='assistant' AND text=?", (OLD,))
+        assert not _rows(world, "role='assistant' AND text=? AND trace_id='next'", (OLD,))
         world.live("stream", "Something else entirely", at=FAR, trace="next")
         world.grow(_turn(backend, ordinal + 3))
-        assert world.imported() == (TAIL if by_words else BY_TRACE)
+        assert world.imported() == TAIL
         world.live_change("stream", "text=?", ("Something else entirely, and more",))
         world.grow(_turn(backend, ordinal + 4))
-        assert world.imported() == (TAIL if by_words else BY_TRACE)
+        assert world.imported() == TAIL
 
 
 # ---- what the carry keeps, and what it does not ------------------------------------------
@@ -307,11 +308,12 @@ def test_only_the_newest_turns_before_the_boundary_have_their_words_kept(tmp_pat
     row of an older turn that has replies there is refused as before."""
     with World(tmp_path, backend, _history(backend), settings=WORDS) as world:
         for number in range(5):
-            # One turn row a transcript turn: a turn counts as running from
-            # two seconds before it began, so this one takes the turn at
-            # second ``number`` and none before it.
-            world.turn_row(f"turn{number}", at=number * 1000 + 1900,
-                           settled=number * 1000 + 2800, outcome="completed")
+            # One turn row a transcript turn, beginning at its second: a reply
+            # is the latest turn's that had begun by its time. (R91: these rows
+            # began 1.9 s after their turns, which the replies took through the
+            # two seconds of slack a reply no longer has.)
+            world.turn_row(f"turn{number}", at=number * 1000,
+                           settled=number * 1000 + 800, outcome="completed")
         ordinal = world.started(6)
         for number in range(5):
             assert _rows(world, "role='assistant' AND text=? AND trace_id=?",

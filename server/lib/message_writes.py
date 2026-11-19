@@ -1383,7 +1383,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             initial_provenance_used = True
         reply_trace = ""
         if role == "assistant":
-            reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"))
+            reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"), reply=True)
         if role == "user":
             agy.close_open()
         if role == "assistant" and not turn.get("failed"):

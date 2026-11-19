@@ -158,7 +158,11 @@ def test_it_is_the_old_replies_that_carry_the_trace_not_the_old_prompts(tmp_path
     """An old turn whose prompts were /send rows: they have no transcript
     rows, so before the boundary only that turn's replies carry its trace. A
     live row of that trace with an old reply's words is removed by a full
-    replay all the same."""
+    replay all the same. (R91: the replies written after that turn settled
+    and before the next began are now that turn's too, so the old reply is no
+    longer its last; a live row takes over an occupied slot only for its
+    turn's last reply, so the live row is removed as the reply's twin instead
+    of taking over its slot: one row with those words either way.)"""
     old = "an old reply that nothing else resembles"
     with World(tmp_path, backend, _history(backend, answer2=old), settings=ON) as world:
         for number in (0, 1, 2):          # one message and two steered into its turn
@@ -176,7 +180,9 @@ def test_it_is_the_old_replies_that_carry_the_trace_not_the_old_prompts(tmp_path
         world.live("left", old, at=2400, trace="an-old-turn", settled=True)
         world.grow(_turn(backend, ordinal))
         assert world.imported() == ("full_carry_inputs_changed", ["live_row_of_old_reply"])
-        assert _rows(world, "source_file=? AND seq=8", (str(world.transcript),)) == [("live-left", str(world.transcript), "an-old-turn", old)]
+        [(row_id, source, trace, text)] = _rows(world, "role='assistant' AND text=?", (old,))
+        assert row_id.startswith("msg-") and (source, trace) == (str(world.transcript), "an-old-turn")
+        assert not _rows(world, "message_id='live-left'")
 
 
 # ---- 3: a live row that is not the running turn's ----------------------------------
