@@ -237,6 +237,8 @@ impl Recorder {
     /// Opens an agent from its log: the state is whatever its history says.
     pub fn open(log: Box<dyn AgentLog>) -> Result<Self, JournalError> {
         let mut agent = Agent::new();
+        // What changed of a send's delivery before the Host started is not told again.
+        agent.deliveries_mut().folding(true);
         let mut cursor = None;
         let mut after = 0;
         let mut floor = 0;
@@ -256,6 +258,7 @@ impl Recorder {
                         if matches!(event, AgentEvent::StartedAgain { .. }) {
                             floor = item.seq;
                         }
+                        agent.at(item.seq);
                         agent
                             .apply(&event)
                             .map_err(|transition| JournalError::Illegal {
@@ -271,6 +274,7 @@ impl Recorder {
                 }
             }
         }
+        agent.deliveries_mut().folding(false);
         let last_seq = log.last_seq()?;
         let conversation_seq = log
             .read_before(Seq::MAX, kind::CONVERSATION, 1)?
@@ -351,6 +355,11 @@ impl Recorder {
 
     pub fn agent(&self) -> &Agent {
         &self.agent
+    }
+
+    /// What changed of the user sends' delivery since this was last asked (send_delivery_state).
+    pub fn take_deliveries(&mut self) -> Vec<crate::delivery::Send> {
+        self.agent.deliveries_mut().take()
     }
 
     /// The log, for reading. Only a [`Batch`] writes to it.
@@ -544,6 +553,9 @@ impl Batch<'_> {
                         self.started_again = Some(self.items.len());
                     }
                     self.items.push(item);
+                    // Its position once the batch is written: the next ones after the log's last.
+                    self.work
+                        .at(self.recorder.last_seq + self.items.len() as Seq);
                 }
                 Err(error) => {
                     self.failed.get_or_insert(error);

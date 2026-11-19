@@ -199,6 +199,73 @@
    "what": "from the first"
   },
   {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 4,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 1,
+       "seq": 3,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 4,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 1,
+   "stop_generation": 0,
+   "until": 3,
+   "what": "a normal page given an until"
+  },
+  {
    "agent_id": "other",
    "bootstrap": false,
    "cap": 200,
@@ -3799,7 +3866,8 @@
     "receipts": {
      "broken": "{",
      "elsewhere": "{\"state\": \"pending\", \"agent_id\": \"other\", \"trace_id\": \"elsewhere\", \"client_msg_id\": \"e\", \"rev\": 1, \"seq\": 903, \"user_stop_gen\": 0}",
-     "legacy": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"legacy\", \"client_msg_id\": \"l\"}"
+     "legacy": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"legacy\", \"client_msg_id\": \"l\"}",
+     "tz": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"tq\", \"client_msg_id\": \"z\", \"origin\": \"user\", \"sender_agent_id\": \"\", \"rev\": 1, \"seq\": 2, \"user_stop_gen\": 3}"
     }
    },
    "rows": [
@@ -3817,6 +3885,11 @@
      "id": "u-x",
      "role": "user",
      "trace_id": "broken"
+    },
+    {
+     "id": "u-z",
+     "role": "user",
+     "trace_id": "tz"
     }
    ],
    "turns": [
@@ -3834,9 +3907,14 @@
      "id": "u-x",
      "role": "user",
      "trace_id": "broken"
+    },
+    {
+     "id": "u-z",
+     "role": "user",
+     "trace_id": "tz"
     }
    ],
-   "what": "a legacy receipt"
+   "what": "a legacy receipt, one filed under another trace"
   },
   {
    "agent_id": "ag",

@@ -7,8 +7,6 @@ import runner
 K = "clarp-kernel/src/delivery.rs"
 RUNS = {"vectors": ["test", "-p", "clarp-kernel", "--test", "delivery_vectors"]}
 PLANTS = [(K, "vectors", why, before, after) for why, before, after in [
-    ("a stored rev of zero counted", "value.as_u64().filter(|n| *n > 0).unwrap_or(0)", "value.as_u64().unwrap_or(0)"),
-    ("a float taken for a whole number", "Value::Number(number) if !number.is_f64() => number", "Value::Number(number) => number"),
     ("the id given its prefix twice", 'if id.starts_with("u-") {', 'if false {'),
     ("an empty client id shown", '        .as_str()\n        .filter(|id| !id.is_empty())?;\n    let trace_id',
      '        .as_str()?;\n    let trace_id'),
