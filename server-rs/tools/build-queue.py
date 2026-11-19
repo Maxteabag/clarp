@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Own the remote build slot until the command and its remaining children are gone."""
 from collections import Counter
+from contextlib import contextmanager
 import ctypes
 import datetime
 import fcntl
 import os
 from pathlib import Path
+import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -15,7 +18,6 @@ from urllib.parse import quote
 QUEUE = Path('/var/tmp/clarp-build')
 LOCK = QUEUE / 'lock'
 HOLDER = QUEUE / 'holder'
-STALE_SECONDS = 15 * 60
 RETRY_SECONDS = 0.2
 CHILDREN = Path(f'/proc/self/task/{os.getpid()}/children')
 
@@ -93,53 +95,122 @@ def recorded_holder(identity):
 def process_start(pid):
     try:
         # Field 22 begins after the parenthesized comm and 19 other fields.
-        return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+        fields = Path(f'/proc/{pid}/stat').read_bytes().rsplit(b')', 1)[1].split()
+        return None if fields[0] in (b'Z', b'X') else fields[19].decode()
     except (FileNotFoundError, ProcessLookupError):
         return None
 
 
 def waiting_landings():
-    waiting = []
+    waiting = {}
     for marker in sorted(QUEUE.glob('first-*-*')):
         _, pid, start = marker.name.split('-', 2)
         try:
-            age = time.time() - marker.stat().st_mtime
-            if age > STALE_SECONDS and process_start(pid) != start:
+            if process_start(pid) != start:
                 marker.unlink(missing_ok=True)
             else:
-                waiting.append(marker.read_text().strip())
+                waiting[f'{pid}-{start}'] = marker.read_text().strip()
         except FileNotFoundError:
             continue
     return waiting
 
 
-def take_slot(lock, landing, description):
+@contextmanager
+def marker_for(description):
+    pid = os.getpid()
+    identity = f'{pid}-{process_start(pid)}'
+    marker = QUEUE / f'first-{identity}'
+    # Publish the fully written description, including its reservation type.
+    # Keep staging files outside the first-* namespace inspected by waiters.
+    temporary = QUEUE / f'.waiting-{identity}'
+    try:
+        temporary.write_text(description + '\n')
+        temporary.replace(marker)
+        yield identity
+    finally:
+        marker.unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
+
+
+def try_lock(lock):
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+
+
+def admitted(landing, lease):
+    markers = waiting_landings()
+    if lease:
+        if not markers.get(lease, '').startswith('lease '):
+            raise SystemExit('The landing lease has ended.')
+        return True
     if landing:
-        pid = os.getpid()
-        marker = QUEUE / f'first-{pid}-{process_start(pid)}'
-        try:
-            marker.write_text(description + '\n')
-            fcntl.flock(lock, fcntl.LOCK_EX)
-        finally:
-            marker.unlink(missing_ok=True)
-        return
+        return not any(text.startswith('lease ') for text in markers.values())
+    return not markers
+
+
+def acquire_slot(lock, landing, lease):
     while True:
-        if not waiting_landings():
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                pass
-            else:
-                # A landing may have registered while we were acquiring.
-                if not waiting_landings():
-                    return
-                fcntl.flock(lock, fcntl.LOCK_UN)
+        if admitted(landing, lease) and try_lock(lock):
+            if admitted(landing, lease):
+                return
+            fcntl.flock(lock, fcntl.LOCK_UN)
         time.sleep(RETRY_SECONDS)
 
 
+def take_slot(lock, landing, description):
+    lease = os.getenv('CLARP_BUILD_LEASE')
+    if landing and not lease:
+        with marker_for(description):
+            acquire_slot(lock, landing, None)
+    else:
+        acquire_slot(lock, landing, lease)
+
+
+def reserve(description):
+    # The local wrapper alone owns the writing end of SSH stdin. EOF also
+    # cancels a driver that dies while waiting behind another reservation.
+    with (QUEUE / 'lease-lock').open('a') as serial:
+        while not try_lock(serial):
+            if select.select([sys.stdin], [], [], RETRY_SECONDS)[0]:
+                return
+        with marker_for('lease ' + description) as identity:
+            print(identity, flush=True)
+            sys.stdin.buffer.read()
+
+
+def drive(host, checkout, who, command):
+    if not command or os.getenv('CLARP_BUILD_LEASE'):
+        raise SystemExit('usage: build lease COMMAND [ARG ...] (one lease per driver)')
+    # Hold the checkout lock before registering remotely. Otherwise an ordinary
+    # caller could own the checkout while its remote build waits for our lease.
+    with open(f'/var/tmp/clarp-build-{checkout}.lock', 'a') as local:
+        fcntl.flock(local, fcntl.LOCK_EX)
+        remote = shlex.join(['python3', '-c', Path(__file__).read_text(), '--reserve', who])
+        with subprocess.Popen(['ssh', '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15',
+                               host, remote], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              text=True) as keeper:
+            try:
+                identity = keeper.stdout.readline().strip()
+                pid, separator, start = identity.partition('-')
+                if not separator or not pid.isdecimal() or not start.isdecimal():
+                    raise SystemExit('Could not acquire the landing lease.')
+                env = dict(os.environ, CLARP_BUILD_LEASE=identity, CLARP_BUILD_LEASE_CHECKOUT=checkout)
+                result = subprocess.run(command, env=env).returncode
+                return result if result >= 0 else 128 - result
+            finally:
+                keeper.stdin.close()
+
+
 def status(lock):
-    for waiting in waiting_landings():
-        print(f'landing waiting: {waiting}')
+    markers = waiting_landings()
+    for waiting in markers.values():
+        if waiting.startswith('lease '):
+            print(f'landing lease: {waiting[6:]}')
+        else:
+            print(f'landing waiting: {waiting}')
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -154,7 +225,7 @@ def status(lock):
             names = [executable(pid) for pid in users.stdout.split() if pid.isdecimal() and int(pid) != os.getpid()]
             print('queue: held without a current holder record; file users:', *names)
     else:
-        print('queue: free')
+        print('queue: reserved' if any(m.startswith('lease ') for m in markers.values()) else 'queue: free')
 
 
 def cancelled(signum, frame):
@@ -169,7 +240,7 @@ def run(lock, who, command):
         raise OSError(ctypes.get_errno(), 'cannot supervise build children')
     for sig in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, cancelled)
-    landing = os.environ.get('CLARP_BUILD_FIRST') == '1'
+    landing = os.environ.get('CLARP_BUILD_FIRST') == '1' or bool(os.getenv('CLARP_BUILD_LEASE'))
     since = datetime.datetime.now().strftime('%H:%M:%S')
     take_slot(lock, landing, f'{who} since {since}')
     try:
@@ -190,7 +261,12 @@ def run(lock, who, command):
 
 
 if __name__ == '__main__':
+    if sys.argv[1] == '--drive':
+        sys.exit(drive(*sys.argv[2:5], sys.argv[5:]))
     QUEUE.mkdir(exist_ok=True)
+    if sys.argv[1] == '--reserve':
+        reserve(sys.argv[2] + ' since ' + datetime.datetime.now().strftime('%H:%M:%S'))
+        sys.exit(0)
     # Python opens the lock close-on-exec; Popen also closes other descriptors.
     with LOCK.open('a') as slot:
         if sys.argv[1] == 'status':
