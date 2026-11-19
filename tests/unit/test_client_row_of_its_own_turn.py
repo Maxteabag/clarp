@@ -222,3 +222,68 @@ def test_the_same_words_sent_twice_by_the_user_link_each_copy_to_its_own_row(tmp
         rows = message_store.list_messages(agent_id=aid, backend_session_id='native')
         assert [row["id"] for row in rows if row["role"] == "user"] == ["u-first", "u-again"]
         assert {row["text"]: row["trace_id"] for row in rows if row["role"] == "assistant"} == expected
+
+
+@pytest.mark.parametrize("sent, chosen", [
+    ((("steered-a", 40_500), ("steered-b", 40_800)), 0),             # both before the copy: the older
+    ((("steered-a", 40_500), ("steered-b", 41_500)), 0),             # one before, one in the 2 s after
+    ((("stale", 30_000), ("steered-b", 40_800)), 1),                 # sent after this turn began first
+    ((("stale", 30_000),), 0),                                       # else the oldest left
+], ids=["two before the copy", "before and just after", "after the turn began first", "only an older one"])
+def test_of_several_rows_that_could_be_the_copys_the_oldest_sent_since_its_turn_began_is_taken(sent, chosen):
+    """Sends reach the provider in the order they were sent, so the first copy is the oldest send
+    still unlinked: the row sent closest to the copy would swap two sends of the same words."""
+    index = _index(("turn-2", 40_000, 55_000))
+    rows = _rows(*sent)
+    traces = {row[0]: trace for row, (trace, _at) in zip(rows, sent)}
+    copy_at = clock.iso_from_ms(BASE + 41_000)
+    assert message_import_rows._own_turns_row(
+        None, rows, "turn-2", BASE + 40_000, trace_ids=traces, written_at=copy_at,
+        ended_before=lambda trace: index.ended_before(trace, copy_at)) == chosen
+
+
+def test_two_sends_of_the_same_words_into_a_running_turn_link_in_the_order_they_were_sent(tmp_path, monkeypatch):
+    """The user says 'yes', then another agent sends 'yes', both steered into the running turn;
+    the provider writes both copies after them. Each copy takes the row sent first, so the reply
+    after the second copy is the other agent's; the same in a tail as in a full import."""
+    from lib import transcript_incremental as inc
+    now = [BASE]
+    monkeypatch.setattr(time, 'time', lambda: now[0] / 1000)
+    aid = agents.create_agent(persona='Ann', session='ann', voice_id='v', cwd=str(tmp_path), backend='claude')
+    other = agents.create_agent(persona='Bob', session='bob', voice_id='v2', cwd=str(tmp_path), backend='claude')
+    agents.bind_backend_session(aid, 'native')
+    path = tmp_path / 'native.jsonl'
+    path.write_text('')
+
+    def line(role, content, at):
+        with path.open('a') as stream:
+            stream.write(json.dumps({'type': role, 'uuid': f'{role}-{at}', 'timestamp': clock.iso_from_ms(at),
+                                     'message': {'role': role, 'model': 'synthetic-fixture', 'content': content}}) + '\n')
+
+    agents.record_user_message(agent_id=aid, backend_session_id='native', client_msg_id="start", text="begin",
+                               trace_id="turn-a", origin="user")
+    agents.open_turn(agent_id=aid, source='pwa', trace_id="turn-a")
+    line('user', "begin", BASE + 300)
+    now[0] = BASE + 5000
+    agents.record_user_message(agent_id=aid, backend_session_id='native', client_msg_id="from-user", text="yes",
+                               trace_id="steer-1", origin="user")
+    now[0] = BASE + 10_000
+    agents.record_user_message(agent_id=aid, backend_session_id='native', client_msg_id="from-bob", text="yes",
+                               trace_id="steer-2", origin="agent", sender_agent_id=other)
+    line('user', "yes", BASE + 12_000)
+    line('user', "yes", BASE + 12_100)
+    line('assistant', [{'type': 'text', 'text': "Both answers noted."}], BASE + 14_000)
+
+    def reply_sender():
+        now[0] += 5
+        transcript_incremental.import_transcript(backend='claude', path=path, agent_id=aid,
+                                                 backend_session_id='native')
+        db.close_local()
+        rows = message_store.list_messages(agent_id=aid, backend_session_id='native')
+        return [row.get("origin") for row in rows if row["role"] == "assistant"]
+
+    # Linked the other way round (the row sent closest to each copy), the reply would be the user's.
+    assert reply_sender() == ["agent"]
+    assert reply_sender() == ["agent"]                              # again, as a tail
+    monkeypatch.setattr(inc, "parser_version", lambda backend: "a-new-importer")
+    assert reply_sender() == ["agent"]                              # a full import decides the same
