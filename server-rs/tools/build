@@ -76,7 +76,7 @@ ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 cmd="${1:-check}"; shift || true
 
 if [ "$cmd" = status ]; then
-    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; if [ -s /var/tmp/clarp-build/holder ] && ! flock -n /var/tmp/clarp-build/lock true 2>/dev/null; then echo "building: $(cat /var/tmp/clarp-build/holder)"; else echo "queue: free"; fi; d=/var/tmp/clarp-build; [ -d "$d" ] || d=/var/tmp; df -h --output=avail "$d" | tail -1 | xargs printf "build disk: %s free\n"'
+    exec ssh "${ssh_opts[@]}" "$HOST" 'echo "load: $(cut -d" " -f1-3 /proc/loadavg)"; python3 - status && df -h --output=avail /var/tmp/clarp-build | tail -1 | xargs printf "build disk: %s free\n"' < "$here/tools/build-queue.py"
 fi
 
 if ! [[ "$floor" =~ ^(0|[1-9][0-9]*)$ ]] || ! [ "$floor" -ge 0 ] 2>/dev/null; then
@@ -120,17 +120,11 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 set +e
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec flock /var/tmp/clarp-build/lock bash -c '
-    echo \"$who since \$(date +%H:%M:%S)\" > /var/tmp/clarp-build/holder
+printf -v queued '%q ' python3 tools/build-queue.py "$who" bash -c "
     source tools/build
-    build_has_space $floor
-    code=\$?
-    if [ \$code -eq 0 ]; then
-        CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd
-        code=\$?
-    fi
-    : > /var/tmp/clarp-build/holder
-    exit \$code'"
+    build_has_space $floor || exit \$?
+    CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec $queued"
 code=$?
 set -e
 if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
