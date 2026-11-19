@@ -42,13 +42,14 @@ def family(path: str) -> str:
     return "/" + path.lstrip("/").split("/", 1)[0]
 
 
-def refused(handler, method: str, path: str) -> bool:
-    """Answer a body over its cap with 413 before the handler reads it; True when answered."""
+def refused(responder, headers, method: str, path: str) -> bool:
+    """Answer a body over its cap with 413 before the handler reads it; True when answered.
+    ``responder`` answers (http_utils.Responder, rule 8); ``headers`` are the request's."""
     most = limit(method, path)
     if most is None:
         return False
     try:
-        size = int(handler.headers.get("Content-Length", ""))
+        size = int(headers.get("Content-Length", ""))
     except ValueError:
         return False
     from .log import log
@@ -56,8 +57,8 @@ def refused(handler, method: str, path: str) -> bool:
         log("requestBodyTooLarge", f"family={family(path)} bytes={size}")
         # Answering drains the body first (Handler.send_response), or closes above DRAINED_MOST.
         closes = {"Connection": "close"} if size > DRAINED_MOST else None
-        handler._send(413, json.dumps({"error": SENTENCE}).encode(), "application/json",
-                      extra_headers=closes)
+        responder.send_bytes(413, json.dumps({"error": SENTENCE}).encode(), "application/json",
+                             headers=closes)
         return True
     if size > LARGE:
         log("requestBodyLarge", f"family={family(path)} bytes={size}")
