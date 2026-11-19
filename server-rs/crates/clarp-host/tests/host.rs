@@ -39197,6 +39197,103 @@ def open(file,mode,options):
 }
 
 #[test]
+fn transcription_guidance_reaches_the_phone_and_the_speech_engine() {
+    let place = Place::new("transcription-guidance");
+    let (endpoint, requests) = scribe_stand_in(r#"{"text":"heard."}"#);
+    let world = [
+        ("CLARP_SCRIBE_ENDPOINT", endpoint.as_str()),
+        ("ELEVEN_API_KEY", "test-scribe"),
+    ];
+    let start = || {
+        place.start_in(
+            "admin",
+            &["--transcription-engine", "elevenlabs:scribe_v2"],
+            &world,
+        )
+    };
+    let host = start();
+    let (full, _) = pair(&host, "Phone", "full");
+    let (limited, _) = pair(&host, "Viewer", "limited");
+    const ROUTE: &str = "/transcription-guidance";
+    let names = "delegation_agent_names_enabled";
+    let glossary = "technical_glossary";
+    let empty = host.get(ROUTE);
+    assert_eq!(
+        empty["settings"],
+        json!({"delegation_agent_names_enabled":true,"technical_glossary":""})
+    );
+    assert_eq!(empty["defaults"], empty["settings"]);
+    assert_eq!(empty["prompt_token_limit"], 223);
+    assert_eq!(empty["active_agent_names"], json!([]));
+    let retired = host.new_agent("Retired");
+    host.new_agent("Orchid");
+    host.new_agent("Sequoia");
+    host.post("/agent-archive", json!({"session":retired,"archived":true}));
+    let before = host.get(ROUTE);
+    assert_eq!(before["active_agent_names"], json!(["Orchid", "Sequoia"]));
+    assert_eq!(
+        before["delegation_effective_prompt"],
+        "Agent names: Orchid, Sequoia."
+    );
+    assert_eq!(
+        host.ask_as(&limited, "GET", ROUTE, None),
+        (200, before.clone())
+    );
+    assert_eq!(
+        host.ask_as(&limited, "POST", ROUTE, Some(&json!({}))).0,
+        403
+    );
+    let save = |data: Value| host.ask_as(&full, "POST", ROUTE, Some(&data));
+    assert_eq!(save(json!([])), (400, json!({"error":"bad json"})));
+    let (status, off) = save(json!({"delegation_agent_names_enabled":false}));
+    assert_eq!(status, 200);
+    assert_eq!(off["ok"], true);
+    assert_eq!(off["delegation_effective_prompt"], "");
+    assert_eq!(off["delegation_estimated_prompt_tokens"], 0);
+    assert_eq!(off["active_agent_names"], before["active_agent_names"]);
+    let (_, saved) = save(json!({"technical_glossary":" ; Kestrelite, # note\n\tMosswort; "}));
+    assert_eq!(saved["settings"][names], false);
+    assert_eq!(saved["settings"][glossary], "Kestrelite\nMosswort");
+    assert_eq!(
+        saved["regular_effective_prompt"],
+        "Technical vocabulary: Kestrelite Mosswort."
+    );
+    assert_eq!(saved["regular_estimated_prompt_tokens"], 14);
+    assert_eq!(
+        save(json!({"technical_glossary":"lost","delegation_agent_names_enabled":null})),
+        (
+            400,
+            json!({"error":"delegation_agent_names_enabled must be boolean"})
+        )
+    );
+    let (_, mut saved) = save(json!({"delegation_agent_names_enabled":true}));
+    saved.as_object_mut().unwrap().remove("ok");
+    assert_eq!(host.get(ROUTE), saved);
+    host.kill();
+    let host = start();
+    assert_eq!(host.get(ROUTE), saved);
+    assert_eq!(host.get("/vocab/runs")["runs"], json!([]));
+    for (hands_free, wanted, absent) in [("0", "Kestrelite", "Retired"), ("1", "Orchid", "Retired")]
+    {
+        let reply = fetch(
+            &host,
+            &full,
+            "POST",
+            "/transcribe",
+            &[("X-Hands-Free", hands_free)],
+            b"synthetic clip",
+        );
+        assert_eq!(reply.status, 200, "{}", reply.text());
+        let request = requests.lock().unwrap().last().unwrap().clone();
+        let term = |s: &str| format!("name=\"keyterms\"\r\n\r\n{s}\r\n");
+        assert!(request.contains(&term(wanted)));
+        assert!(!request.contains(&term(absent)));
+        assert_eq!(request.contains(&term("Mosswort")), hands_free == "0");
+        assert_eq!(request.contains(&term("Sequoia")), hands_free == "1");
+    }
+}
+
+#[test]
 fn a_call_clip_is_heard_for_its_captured_participant() {
     let place = Place::new("call-transcription");
     let (nova, requests) = scribe_stand_in(

@@ -18,6 +18,7 @@
 //! owner makes from an app (`POST /transcription-providers`), kept with the fleet.
 
 pub(crate) mod call;
+pub(crate) mod guidance;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -1068,6 +1069,10 @@ async fn set_providers(
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/transcribe", post(transcribe))
+        .route(
+            "/transcription-guidance",
+            get(guidance::get_guidance).post(guidance::set_guidance),
+        )
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
         .route("/vocab/budgets", get(vocabulary_budgets))

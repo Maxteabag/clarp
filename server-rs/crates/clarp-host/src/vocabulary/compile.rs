@@ -27,18 +27,8 @@ struct Context {
 }
 
 fn glossary(raw: &str) -> Vec<Pack> {
-    let lines: Vec<_> = python::splitlines(raw)
-        .into_iter()
-        .map(|s| {
-            s.split('#')
-                .next()
-                .unwrap_or("")
-                .trim_matches([' ', ',', ';', '\t'])
-        })
-        .filter(|s| !s.is_empty())
-        .collect();
-    let text = lines.join("\n");
-    let terms: Vec<_> = python::first(&text, 2000)
+    let clean = clarp_kernel::vocabulary::guidance::clean(raw);
+    let terms: Vec<_> = clean
         .lines()
         .map(python::strip)
         .filter(|s| !s.is_empty())
@@ -108,20 +98,9 @@ pub async fn compile(
 ) -> Result<(Value, i64)> {
     let dir = app.fleet.directory();
     let record = dir.by_session(session).map(|m| &m.record);
-    let names_on = dir
-        .setting("transcription.guidance.delegation_names")
-        .is_none_or(|s| {
-            matches!(
-                s.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        });
-    let names = if delegated && names_on {
-        dir.members
-            .iter()
-            .filter(|m| m.record.deleted_at_ms.is_none() && m.record.archived_at_ms.is_none())
-            .map(|m| m.record.persona.clone())
-            .collect()
+    use clarp_kernel::vocabulary::guidance;
+    let names = if delegated && guidance::names_enabled(dir.setting(guidance::NAMES_KEY)) {
+        crate::heard::guidance::active_names(&dir)
     } else {
         Vec::new()
     };
@@ -143,9 +122,7 @@ pub async fn compile(
         glossary: if delegated {
             String::new()
         } else {
-            dir.setting("transcription.guidance.glossary")
-                .unwrap_or("")
-                .into()
+            dir.setting(guidance::GLOSSARY_KEY).unwrap_or("").into()
         },
     };
     let audit = tokio::task::spawn_blocking(move || ctx.compile())

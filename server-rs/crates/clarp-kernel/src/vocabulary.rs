@@ -226,6 +226,7 @@ pub fn compile(packs: &[Pack], budget: &Budget) -> Value {
         "headroom":capacity-selection.used,"rarity_floor":floor,"included":included,"dropped":selection.dropped})
 }
 pub mod book;
+pub mod guidance;
 pub mod sources;
 
 #[allow(clippy::expect_used)]
