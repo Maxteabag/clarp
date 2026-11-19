@@ -9793,6 +9793,13 @@ fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_
         (503, &json!("janitor_runtime_unavailable")),
         "{refused}"
     );
+    // It is told which jobs do not run here: the switcher of seats among them, on a Host
+    // that does not keep the logins.
+    assert_eq!(
+        refused["error"],
+        clarp_kernel::janitors::cannot_run(false).as_str()
+    );
+    assert!(refused["error"].as_str().unwrap().contains("Label checker"));
     let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
     let (status, on) = post(
         "/janitors/clarp-tool-explainer/enabled",
@@ -25283,8 +25290,12 @@ else:sys.exit(2)
             Some(&json!({"enabled":true,"expected_revision":revision})),
         );
         assert_eq!(
-            (code, &reply["code"]),
-            (503, &json!("janitor_runtime_unavailable"))
+            (code, &reply["code"], reply["error"].as_str()),
+            (
+                503,
+                &json!("janitor_runtime_unavailable"),
+                Some(clarp_kernel::janitors::cannot_run(false).as_str())
+            )
         );
         for provider in ["claude", "codex"] {
             let (code, body) = switch(&h, provider, "backup");
