@@ -63,17 +63,15 @@ for why,a,b in [
     ('misname the matches field','"matches":matches','"rows":matches'),
     ('misname result label','"label":label','"name":label')]:
     plant(K,'vectors',why,a,b)
-for why,a,b in [
-    ('let a limited device enumerate directories','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/favorite-paths"'),
-    ('let a limited device read project paths','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/launch-directories"'),
-    ('close launch directory descendants too','matches!(path, "/launch-directories" | "/favorite-paths")','path.starts_with("/launch-directories") || path == "/favorite-paths"'),
-    ('close favorite path descendants too','matches!(path, "/launch-directories" | "/favorite-paths")','path == "/launch-directories" || path.starts_with("/favorite-paths")')]:
-    plant(D,'scope',why,a,b)
+protected='"/dirs" | "/past-sessions" | "/launch-directories" | "/favorite-paths"'
+for path in ("/launch-directories", "/favorite-paths"):
+    plant(D,'scope',f'open {path} to a limited device',protected,protected.replace(' | "'+path+'"',''))
+    plant(D,'scope',f'close descendants of {path}',protected,protected+' | "'+path+'/x"')
 for why,a,b in [
     ('keep zoxide alive past the timeout','.kill_on_drop(true)','.kill_on_drop(false)'),
     ('wait too long for zoxide','Duration::from_millis(500)','Duration::from_secs(3)'),
-    ('leak Host credentials','for name in crate::OWN_SECRETS {','for name in crate::OWN_SECRETS.iter().take(0) {'),
-    ('inherit caller session identity','cmd.env_remove(name);\n        }','let _ = name;\n        }'),
+    ('bypass the shared child policy','crate::child::asynchronous(program)','tokio::process::Command::new(program)'),
+    ('discard zoxide output','.stdout(Stdio::piped())','.stdout(Stdio::null())'),
     ('lose the option terminator','["query", "--list", "--"]','["query", "--list", "-"]'),
     ('lose fallback argv','zoxide(&["query", "--list"])','zoxide(&["query", "--"])'),
     ('ignore nonzero fallback stdout','|(_, stdout)| rules::ranked(&stdout, query, true)','|(ok, stdout)| if ok {rules::ranked(&stdout,query,true)}else{vec![]}'),
