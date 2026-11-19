@@ -104,7 +104,7 @@ WAITS = [('claude', ''), ('codex', ''), ('claude', 'claude-opus-5-5'), ('claude'
 
 
 # The texts of the two functions `told` was read against (sha256, the first sixteen digits).
-READ = {'_mark_interrupted': '88eb16f08481d8ee', '_record_failure_row': '5bd7846a4ff13062'}
+READ = {'_mark_interrupted': '67fc07f0d7ff7499', '_record_failure_row': '5bd7846a4ff13062'}
 
 
 def sentences(rules):
