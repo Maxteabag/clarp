@@ -1485,10 +1485,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                        source_file, seq)
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
+            own = None
             if rows:
                 running, began = turn_index.running_at(turn.get("timestamp"))
+                own = _own_turns_row(database, rows, running, began, ran_at=(
+                    lambda sent, at=turn.get("timestamp"): turn_index.ran_at(sent, at)))
+            if own is not None:
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
-                    provenance.take(key, rows, _own_turns_row(database, rows, running, began))
+                    provenance.take(key, rows, own)
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
