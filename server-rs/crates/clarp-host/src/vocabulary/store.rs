@@ -181,7 +181,7 @@ impl Desk {
             writes.push((TRACES, record.trace.clone(), encode(&id)?));
         }
         fleet
-            .keep_together(writes)
+            .change_together(writes, Vec::new())
             .await
             .map_err(|_| unavailable())?;
         Ok(id)
@@ -205,7 +205,10 @@ impl Desk {
         r.transcript = transcript;
         r.latency = latency;
         writes.push((RUNS, id.to_string(), encode(&r)?));
-        fleet.keep_together(writes).await.map_err(|_| unavailable())
+        fleet
+            .change_together(writes, Vec::new())
+            .await
+            .map_err(|_| unavailable())
     }
 
     pub(super) async fn report(
