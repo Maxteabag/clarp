@@ -41,18 +41,6 @@ from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispat
 _RUNTIME_CLIENT: Any | None = None
 
 
-def _can_steer(registry, backend: str) -> bool:
-    """The backend catalogue's ``supports_steer``. A registry that cannot say
-    (no ``by_id``, an unknown backend) keeps the steer path as it was."""
-    by_id = getattr(registry, "by_id", None)
-    if by_id is None:
-        return True
-    try:
-        return bool(getattr(by_id(backend), "supports_steer", True))
-    except Exception:  # noqa: BLE001 - unknown: the steer path as before
-        return True
-
-
 def configure_runtime_client(client: Any | None) -> None:
     global _RUNTIME_CLIENT
     _RUNTIME_CLIENT = client
@@ -96,7 +84,7 @@ from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-modu
     DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
     _park, _park_at_head, DispatchError, _refuse_oversized, JanitorDispatchError,
     _LaunchReceiptUnrecorded, UNCONFIRMED_DELIVERY, _LaunchReceiptRefused, DELIVERY_HINT_BUSY_MS,
-    _record_launch_attempt, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
+    _record_launch_attempt, _can_steer, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
     _admission_facts, _admit, _validate_janitor_target, _recovered_janitor_run, _janitor_spawn_lock,
     _REGENERATED_ORIGINS, _UNLAUNCHED_MARKER_RETRY_SEC, _unlaunched_marked, _remove_queued_run,
     _default_retry_scheduler, OPENING_NOT_CONFIRMED, OPENING_WITHDRAWN, _AdmissionRefused,

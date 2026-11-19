@@ -204,3 +204,60 @@ def test_codex_answers_false_to_a_steer_only_before_it_sends_anything():
     started.steer_ready.set()
     client._actives = {"agent-1": started}
     assert client.steer("words", agent_id="agent-1") is True and sent == ["turn/steer"]
+
+
+# ---- the one-time pass for rows the defect left (Arnold's rule) ----------------------------------
+
+def _plant_stuck_send(world, cid, *, age_ms):
+    """What the defect left: a queued user send, its receipt ATTEMPTED, no turn ever for its trace."""
+    trace = f"t-{cid}"
+    turn_queue.enqueue(queue_id=cid, agent_id=world.agent, session="mike", text=cid, trace_id=trace,
+                       client_msg_id=cid, synthesize_audio=False, origin="user", sender_agent_id="")
+    launch_receipts.record_pending(agent_id=world.agent, trace_id=trace, client_msg_id=cid, origin="user")
+    assert launch_receipts.mark_attempted(trace) == "attempted"
+    db.conn().execute("UPDATE queued_turns SET enqueued_at=? WHERE queue_id=?", (db.now_ms() - age_ms, cid))
+    db.conn().commit()
+
+
+def _status(cid):
+    return db.conn().execute("SELECT status FROM queued_turns WHERE queue_id=?", (cid,)).fetchone()[0]
+
+
+def _notices(world):
+    return [row["text"] for row in db.conn().execute(
+        "SELECT text FROM messages WHERE agent_id=? AND origin='system' AND message_id LIKE 'notice:held_send_not_run:%'",
+        (world.agent,))]
+
+
+def test_a_stuck_send_younger_than_ten_minutes_runs_after_the_next_runtime_start(tmp_path):
+    world = _World(tmp_path)
+    _plant_stuck_send(world, "young", age_ms=60_000)
+    world.restart()
+    assert world.started == ["young"] and _status("young") != "failed" and _notices(world) == []
+
+
+def test_an_older_stuck_send_ends_failed_and_its_sender_is_told(tmp_path):
+    world = _World(tmp_path)
+    _plant_stuck_send(world, "old", age_ms=9 * 3600_000)
+    world.restart()
+    assert world.started == [] and _status("old") == "failed"
+    assert _notices(world) == [turn_queue.HELD_SEND_NOTICE]
+    world.restart()                                                  # once: no second notice
+    assert len(_notices(world)) == 1
+
+
+def test_a_stuck_send_on_a_steerable_backend_is_left_and_logged(tmp_path):
+    world = _CodexWorld(tmp_path)
+    _plant_stuck_send(world, "codex-old", age_ms=9 * 3600_000)
+    world.restart()
+    assert world.started == [] and _status("codex-old") == "queued" and _notices(world) == []
+    assert launch_receipts.get("t-codex-old")["state"] == launch_receipts.ATTEMPTED
+
+
+def test_a_send_whose_trace_has_a_turn_is_not_touched(tmp_path):
+    world = _World(tmp_path)
+    _plant_stuck_send(world, "ran", age_ms=9 * 3600_000)
+    from lib import turn_lifecycle
+    turn_lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-ran")
+    done = turn_queue.settle_unsent_held_sends(can_steer=lambda backend: False)
+    assert done == {"released": [], "failed": [], "left": []} and _status("ran") == "queued"
