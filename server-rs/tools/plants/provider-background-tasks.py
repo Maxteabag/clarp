@@ -134,6 +134,10 @@ PLANTS=[
     ('clarp-kernel/src/provider_tasks.rs', 'host', 'adopt a phantom provider worker', 'heartbeat_at_ms: None', 'heartbeat_at_ms:Some(at)'),
     ('clarp-kernel/src/provider_tasks.rs', 'host', 'store the wrong job generation', 'generation: 1', 'generation:2'),
     ('clarp-kernel/src/provider_tasks.rs', 'host', 'lose the job kind', 'kind: "provider-task".into()', 'kind:"process".into()'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'search sibling projects for the bound runtime', 'claude_source(root, cwd, session, false)', 'claude_source(root,cwd,session,true)'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'discard a valid in-store session alias', 'let meta = match std::fs::metadata(&named)', 'let meta = match std::fs::symlink_metadata(&named)'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'keep a stale resolved target after a link changes', 'if *old == stamp', 'if true'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'accept an invalid or escaping session boundary as absent', 'let path = clarp_backend::past::claude_source(root, cwd, session, false)\n        .map_err(|_| io::Error::other("provider parent outside its store"))?', 'let path=clarp_backend::past::claude_source(root,cwd,session,false).ok().flatten()'),
 ]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
