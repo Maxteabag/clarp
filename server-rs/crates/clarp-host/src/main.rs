@@ -326,6 +326,8 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::explain::run(&app);
     // And the open goals are kept current beside their owners, where a keeper is on.
     clarp_host::keeper::run(&app);
+    // And an idle agent's own label that outlived its time is taken back.
+    clarp_host::labels::run(&app);
     eprintln!("clarp-host listens on {address}");
     eprintln!(
         "clarp-host {} serves {} (engine {}, codec {}, blobs {}, launcher {})",

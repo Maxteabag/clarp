@@ -447,6 +447,8 @@ pub struct Status {
     pub backend_session: Option<String>,
     /// What the agent says it is busy with beyond its turns. Empty: nothing.
     pub label: String,
+    /// When it said so, while it says so.
+    pub label_at_ms: Option<i64>,
     /// What the agent rests in since it last said so, until its next turn starts.
     pub resting: Option<Rest>,
     /// How many tokens the tool's conversation held when a turn last said so: the gauge an
@@ -1385,6 +1387,7 @@ impl Actor {
             head_revision: self.head_revision(),
             backend_session: agent.backend_session().map(str::to_string),
             label: agent.label().to_string(),
+            label_at_ms: agent.label_at(),
             resting: agent.resting(),
             context_tokens: self.remembered.context_tokens,
             completed_at_ms: self.remembered.completed_at_ms,
@@ -2337,6 +2340,27 @@ impl Actor {
             },
             ..Outputs::default()
         })
+    }
+
+    /// Takes back a label that outlived its time, if it is still the one set at `set_at_ms`.
+    /// Returns whether it was taken back.
+    pub fn retire_label(
+        &mut self,
+        set_at_ms: i64,
+        now_ms: i64,
+    ) -> Result<(bool, Outputs), ActorError> {
+        let before = self.status().label_at_ms;
+        self.recorder
+            .handle(Command::RetireLabel { set_at_ms }, now_ms)?;
+        let retired = before.is_some() && self.status().label_at_ms.is_none();
+        let out = Outputs {
+            changed: Changed {
+                status: retired,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((retired, out))
     }
 
     /// Lets a held mailbox run again. Returns whether it was held.

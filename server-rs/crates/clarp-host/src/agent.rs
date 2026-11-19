@@ -192,6 +192,11 @@ pub enum Ask {
         text: String,
         answer: Answer<()>,
     },
+    /// A label that outlived its time is taken back, if it is still the one set then.
+    RetireLabel {
+        set_at_ms: i64,
+        answer: Answer<bool>,
+    },
     /// Something asked of one of the agent's background jobs. The inner error is a command
     /// that makes no sense.
     Job {
@@ -587,6 +592,13 @@ impl AgentHandle {
         self.ask(|answer| Ask::Label { text, answer }).await
     }
 
+    /// Takes back the agent's label that outlived its time, if it is still the one set at
+    /// `set_at_ms`. Answers whether it was taken back.
+    pub async fn retire_label(&self, set_at_ms: i64) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::RetireLabel { set_at_ms, answer })
+            .await
+    }
+
     /// Asks something of one of the agent's background jobs.
     pub async fn job(
         &self,
@@ -807,6 +819,7 @@ pub(crate) fn never_ran() -> Status {
         head_revision: 0,
         backend_session: None,
         label: String::new(),
+        label_at_ms: None,
         resting: None,
         context_tokens: None,
         completed_at_ms: None,
@@ -1780,6 +1793,9 @@ impl Worker {
             Ask::Label { text, answer } => {
                 answered(actor.label(&text, now).map(|out| ((), out)), answer)?
             }
+            Ask::RetireLabel { set_at_ms, answer } => {
+                answered(actor.retire_label(set_at_ms, now), answer)?
+            }
             Ask::Job { command, answer } => {
                 let revision = self.setup.revisions.next(now);
                 answered(actor.job(command, now, revision), answer)?
@@ -2731,6 +2747,7 @@ fn refuse_for(
             }
             Ok(Ask::Before { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::RetireLabel { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Job { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Publish { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TakePlans { answer, .. }) => drop(answer.send(Err(refusal()))),

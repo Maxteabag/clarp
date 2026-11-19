@@ -515,8 +515,9 @@ pub fn again(mut kept: Value) -> Value {
     kept
 }
 
-/// What each paired client last opened (`/select`, `/focus`), kept among the settings under
-/// a key of its own: a clip it records belongs to the chat open on it, not to the focus that
+/// What each paired client last opened (`/select`, `/focus`), kept as a record of its own
+/// kind under the digest of who it is (the reference keeps it among its settings): a clip it
+/// records belongs to the chat open on it, not to the focus that
 /// every client shares and the Host itself moves. The Python Host's `lib/client_chat.py`,
 /// held by `tests/fixtures/client-chat-vectors.json`.
 pub const CLIENT_CHAT_PREFIX: &str = "client-chat:";

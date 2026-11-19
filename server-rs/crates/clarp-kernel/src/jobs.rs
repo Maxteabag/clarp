@@ -743,17 +743,49 @@ impl JobBook {
                     },
                     "",
                 ));
-            } else if silent_ms > lost_after_ms {
-                todo.push(lose("heartbeat_lost", LOST_NOTE));
-            } else if silent_ms > stale_after_ms && !self.remarked.contains(&job.id) {
-                todo.push(JobCommand::Note {
-                    id: job.id.clone(),
-                    note: STALE_NOTE.to_string(),
-                });
+            } else {
+                let grace_ms = lost_after_ms - stale_after_ms;
+                match heartbeat_verdict(silent_ms, false, stale_after_ms, grace_ms) {
+                    Verdict::Lost => todo.push(lose("heartbeat_lost", LOST_NOTE)),
+                    Verdict::Stale if !self.remarked.contains(&job.id) => {
+                        todo.push(JobCommand::Note {
+                            id: job.id.clone(),
+                            note: STALE_NOTE.to_string(),
+                        });
+                    }
+                    Verdict::Stale | Verdict::Keep => {}
+                }
             }
         }
         todo
     }
+}
+
+/// What becomes of a running job nobody can be asked after, by how long it has been silent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verdict {
+    /// It goes on.
+    Keep,
+    /// It is remarked on its timeline once, and not ended yet.
+    Stale,
+    /// It ends as lost (`heartbeat_lost`).
+    Lost,
+}
+
+/// The Python Host's `job_heartbeat` (`policies/stale_work.py`): a job whose worker is
+/// verified alive is never touched here; one silent past `stale_ms` is stale, and past
+/// `stale_ms` and `grace_ms` lost. A `stale_ms` of nothing turns the rule off.
+pub fn heartbeat_verdict(age_ms: i64, verified: bool, stale_ms: i64, grace_ms: i64) -> Verdict {
+    if verified || stale_ms <= 0 {
+        return Verdict::Keep;
+    }
+    if age_ms > stale_ms + grace_ms.max(0) {
+        return Verdict::Lost;
+    }
+    if age_ms > stale_ms {
+        return Verdict::Stale;
+    }
+    Verdict::Keep
 }
 
 #[cfg(test)]

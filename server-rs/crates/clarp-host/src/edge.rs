@@ -255,6 +255,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `GET /status` `runtime`: true of this Host, where nothing is drained: a turn lives in
     // its shim across a restart of the Host (docs/differences.md).
     ("runtime_drain_status", 62),
+    // A quiet stream of events is sent a heartbeat as an event of its own, which EventSource
+    // shows (`event: heartbeat`).
+    ("sse_heartbeat", 44),
+    // A work label that outlived the work behind it is retired: a job nobody can be asked
+    // after goes stale and then is lost, a helper that sits idle has reported, and an idle
+    // agent's own label older than two hours is taken back. The label checker among the
+    // janitors is made here and does not run (docs/differences.md).
+    ("stale_work_labels", 17),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),

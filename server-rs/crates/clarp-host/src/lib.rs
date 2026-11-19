@@ -42,6 +42,7 @@ pub mod ids;
 pub mod janitors;
 pub mod joblog;
 pub mod keeper;
+pub mod labels;
 pub mod launcher;
 pub mod library;
 pub mod line;
