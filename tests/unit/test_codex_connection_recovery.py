@@ -9,6 +9,7 @@ from lib.backend.registry import by_id
 from lib.activity import state_activity_event
 from lib.turn_dispatch import TurnDispatchService, clear_for_agent
 from test_codex_app_server import FAKE_CODEX, _Stream
+from tests.qa.fake_codex import rollout_path
 
 
 @pytest.mark.parametrize('mode,expected,turns', [
@@ -41,7 +42,7 @@ def test_connection_recovery_real_dispatch(tmp_path, monkeypatch, mode, expected
             assert 'provider_limit_event_id' not in state['detail']
             assert 'Try again' in state['detail']['summary']
         thread = agents.live_backend_session(agent)
-        records = [json.loads(line) for line in (tmp_path/'sessions'/f'rollout-{thread}.jsonl').read_text().splitlines()]
+        records = [json.loads(line) for line in rollout_path(tmp_path/'sessions', thread).read_text().splitlines()]
         requests = [row for row in records if row['payload'].get('type') == 'user_message']
         assert len(requests) == turns
         assert all(row['payload']['message'] == 'hello' for row in requests)
