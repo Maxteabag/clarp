@@ -16031,6 +16031,14 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     );
     let exact = padded(json!({}), LOG_FROM);
     post("/application-activity", &exact);
+    let wanted = format!(
+        "requestBodyLarge family=/application-activity bytes={}",
+        LOG_FROM + 1
+    );
+    wait_for("the large application-activity log line", || {
+        let heard = host.heard.lock().unwrap();
+        heard.lines().any(|line| line == wanted)
+    });
     let log = host.heard.lock().unwrap().clone();
     let lines: Vec<_> = log
         .lines()
@@ -16038,10 +16046,6 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         .collect();
     let refusal = format!("requestBodyTooLarge family=/pairing bytes={}", DRAIN + 1);
     assert_eq!(log.lines().filter(|s| *s == refusal).count(), 1);
-    let wanted = format!(
-        "requestBodyLarge family=/application-activity bytes={}",
-        LOG_FROM + 1
-    );
     assert_eq!(lines.iter().filter(|l| **l == wanted).count(), 1);
     assert!(
         !lines
