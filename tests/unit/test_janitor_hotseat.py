@@ -2546,3 +2546,25 @@ def test_empty_janitor_keeps_empty_id_and_notices_survive_native_binding_with_pa
     janitor_notices.publish(None,owner,'later','later service notice')
     delta=load_conversation(session=owner['session'],after_revision=previous)
     assert [r['text'] for r in delta['turns']]==['later service notice']
+
+
+def test_a_raise_in_one_providers_check_closes_its_run_and_the_next_provider_is_checked(switcher, monkeypatch):
+    """R100's sweep: a raise after the accounts were read left that provider's run running and
+    skipped every provider after it."""
+    owner, worker, readings, calls, sent = switcher
+    real = hotseat.preview
+
+    def preview(provider, *args, **kwargs):
+        if provider == "claude":
+            raise RuntimeError("planted")
+        return real(provider, *args, **kwargs)
+    monkeypatch.setattr(hotseat, "preview", preview)
+    worker.hotseat_once()
+    assert sorted(run["status"] for run in janitors.list_runs(owner["session"])) == ["completed", "failed"]
+    assert [c for c in calls if c[0] == "read" and c[2] == "codex"]          # the next provider was checked
+    monkeypatch.setattr(hotseat, "preview", real)
+    for provider in ("claude", "codex"):
+        _check_again(f"hotseat-switcher.{provider}")
+        settings_store.set_int(f"hotseat-switcher.{provider}.last-check", 0)
+    worker.hotseat_once()                                                   # the next look works
+    assert sorted(run["status"] for run in janitors.list_runs(owner["session"])).count("completed") == 3
