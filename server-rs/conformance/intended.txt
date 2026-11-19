@@ -81,6 +81,8 @@ c0a2b172559d  send-after-stop: the agent's model after the turn that followed a 
 # reply that closed a turn again when the next message arrives, so its revision moves past a
 # cursor the client already holds: reference defect R16).
 d9328e5ae3d4  roster-edits: the second reply, which no cursor after its turn is older than
+e174da59f1c5  router: the second reply of the second agent, written again when the next message routed to it arrived (run 44461872880: both recordings of the reference)
+88363440f226  router: its third reply, the same
 
 # After a turn that completed, an agent's row says what it is doing: at rest, since when, after
 # which turn (the Python Host leaves `live_activity` empty after an agent's first turn until its
