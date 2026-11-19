@@ -81,11 +81,12 @@ class TurnIndex:
         self._spans = None
 
     def ended_before(self, trace: str, timestamp: Any) -> bool:
-        """Whether every turn of ``trace`` had ended before ``timestamp``: it
-        settled, or the agent's next turn of another trace began (an agent
-        runs one turn at a time, so a turn that never settled ended when the
-        next began). False for a trace with no turn (a message steered into
-        another turn), a turn still running, or a time not known."""
+        """Whether the turn of ``trace`` had ended before ``timestamp``: at the
+        latest settle among its rows, or, when none of its rows settled, when
+        the agent's next turn of another trace began (an agent runs one turn at
+        a time); never later than that next start. False for a trace with no
+        turn (a message steered into another turn), a turn still running, or a
+        time not known."""
         if self._spans is None:
             self._spans = self._turn_spans()
         span = self._spans.get(trace)
@@ -103,9 +104,13 @@ class TurnIndex:
             start = int(row["started_at"])
             first[trace] = min(first.get(trace, start), start)
             last[trace] = max(last.get(trace, start), start)
-            done = None if row["settled_at"] is None else int(row["settled_at"])
-            settled[trace] = None if trace in settled and settled[trace] is None or done is None \
-                else max(settled.get(trace) or done, done)
+            if row["settled_at"] is not None:
+                # The latest settle among the trace's rows ends it: a twin row that never
+                # settled does not keep a turn running that a settle says finished.
+                done = int(row["settled_at"])
+                settled[trace] = max(settled.get(trace) or done, done)
+            else:
+                settled.setdefault(trace, None)
         spans = {}
         for trace, began in first.items():
             later = bisect.bisect_right(self._starts, last[trace])

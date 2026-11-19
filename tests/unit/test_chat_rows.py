@@ -340,18 +340,22 @@ def test_a_reply_answers_the_message_whose_turn_ran(tmp_path):
 
 def test_words_sent_twice_and_run_twice_are_still_linked_in_order(tmp_path):
     """Both ran, in order. No turn was running when the first copy was
-    written (a transcript timestamp outside every turn), so the oldest is
-    taken, as it always was; the second finds its own turn."""
+    written, after both sends: of the two rows with its words the older is
+    taken, as sends reach the provider in the order they were sent; the
+    second copy finds its own turn. (R89, third part, replacing the rule this
+    case was written for: a copy outside every turn took the oldest row with
+    its words, whatever it was; it was dated 2020, before both sends, and a
+    copy is never of a message not yet sent.)"""
     agent_id = _agent(tmp_path)
     _sent(agent_id, "m1", "trace-1", "lol", seconds_ago=600)
-    _sent(agent_id, "m2", "trace-2", "lol")
+    _sent(agent_id, "m2", "trace-2", "lol", seconds_ago=595)
     agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-2")
     live = agents_db.upsert_live_assistant_message(
         agent_id=agent_id, backend_session_id=BSID, trace_id="trace-2", text="second reply")
 
     _import(agent_id, [
-        {"role": "user", "text": "lol", "timestamp": "2020-01-01T10:00:00Z"},
-        {"role": "assistant", "text": "first reply", "timestamp": "2020-01-01T10:00:05Z"},
+        {"role": "user", "text": "lol", "timestamp": iso_from_ms(now_ms() - 590_000)},
+        {"role": "assistant", "text": "first reply", "timestamp": iso_from_ms(now_ms() - 585_000)},
         {"role": "user", "text": "lol", "timestamp": iso_from_ms(now_ms())},
         {"role": "assistant", "text": "second reply", "timestamp": iso_from_ms(now_ms() + 1)},
     ])
