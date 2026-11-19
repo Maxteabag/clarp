@@ -170,15 +170,19 @@ impl Place {
             .spawn()
             .unwrap();
         let mut said = BufReader::new(process.stderr.take().unwrap());
-        let mut first = String::new();
-        said.read_line(&mut first).unwrap();
-        let address = first
-            .trim()
-            .strip_prefix("clarp-host listens on ")
-            .unwrap_or_else(|| panic!("the Host did not say where it listens, it said: {first}"))
-            .to_string();
-        // Whatever else it says is kept out of the way, for a test that reads it.
-        let heard = Arc::new(Mutex::new(String::new()));
+        let mut startup = String::new();
+        let address = loop {
+            let mut line = String::new();
+            assert!(
+                said.read_line(&mut line).unwrap() > 0,
+                "the Host exited before listening: {startup}"
+            );
+            if let Some(address) = line.trim().strip_prefix("clarp-host listens on ") {
+                break address.to_string();
+            }
+            startup.push_str(&line);
+        };
+        let heard = Arc::new(Mutex::new(startup));
         let keeping = heard.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -43397,4 +43401,79 @@ print(home/"Project one")
     );
     assert!(refused.0 >= 400);
     assert_eq!(host.get(fav), before);
+}
+
+#[test]
+fn unreadable_launch_usage_is_skipped_until_that_directory_is_launched_again() {
+    use clarp_ports::kv::KeyValueEngine as _;
+    let place = Place::new("unreadable-launch-usage");
+    let start = || place.start_with_token("fixture");
+    let good = place.root.join("good");
+    let broken = place.root.join("private-directory-name");
+    for dir in [&good, &broken] {
+        std::fs::create_dir(dir).unwrap();
+    }
+    let host = start();
+    host.post(
+        "/agents",
+        json!({"name":"Good","backend":"scripted","cwd":good}),
+    );
+    let original = host.get("/favorite-paths");
+    assert_eq!(original["paths"][0]["path"], json!(good));
+    drop(host);
+    let open = || {
+        clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap()
+    };
+    let shelf = clarp_host::fleet::shelf("launch-path-usage");
+    let key = broken.to_str().unwrap();
+    let corrupt = b"unreadable-private-value";
+    {
+        let mut store = open();
+        store.put(&shelf, key, corrupt).unwrap();
+        store.put(&shelf, "another-private-key", b"{}").unwrap();
+    }
+    let host = start();
+    assert_eq!(host.get("/favorite-paths"), original);
+    let journal = host.heard.lock().unwrap().clone();
+    assert_eq!(
+        journal
+            .lines()
+            .filter(|l| l.contains("launch-path-usage"))
+            .collect::<Vec<_>>(),
+        ["clarp-host: unreadable launch-path-usage records skipped: 2"]
+    );
+    for private in [key, "another-private-key", "unreadable-private-value"] {
+        assert!(!journal.contains(private));
+    }
+    drop(host);
+    assert_eq!(
+        open().get(&shelf, key).unwrap().as_deref(),
+        Some(corrupt.as_slice())
+    );
+    let host = start();
+    host.post(
+        "/agents",
+        json!({"name":"Repaired","backend":"scripted","cwd":broken}),
+    );
+    let after = host.get("/favorite-paths");
+    let repaired = after["paths"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["path"] == key)
+        .unwrap();
+    assert_eq!(repaired["use_count"], 1);
+    assert_eq!(repaired["first_used_at"], repaired["last_used_at"]);
+    drop(host);
+    let host = start();
+    assert_eq!(host.get("/favorite-paths"), after);
+    assert!(
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
+            .any(|l| l == "clarp-host: unreadable launch-path-usage records skipped: 1")
+    );
 }

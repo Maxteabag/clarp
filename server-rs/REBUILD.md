@@ -1477,7 +1477,7 @@ and starts it without a shell. Each invocation has half a second. If it is absen
 recent and explicit paths can still answer. Both the directory lookup and the launch frequencies shown as favorites require
 full access, as does browsing directories through `/dirs`.
 
-The fleet loads one kept record per distinct launch directory at startup. The
+The fleet loads one kept record per distinct launch directory at startup. A store read failure stops startup. An unreadable record stays on disk and is skipped; the journal says how many were skipped. A later launch in the same directory replaces it. The
 storage port accepts text keys with no separate key-length limit in either engine.
 The exact stripped path keys its count, first use and last use. Registration writes
 the agent and the updated count together. The ledger grows with distinct directories.

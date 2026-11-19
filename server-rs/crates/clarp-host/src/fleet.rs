@@ -1172,12 +1172,19 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }
     works.telling.settings_are(Arc::new(settings.clone()));
     let mut launch_usage = Ledger::new();
+    let mut unreadable = 0usize;
     for (key, bytes) in store
         .list(&shelf(LAUNCH_USAGE))
         .map_err(|e| e.to_string())?
     {
-        let usage: launches::Usage = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        let Ok(usage) = serde_json::from_slice::<launches::Usage>(&bytes) else {
+            unreadable += 1;
+            continue;
+        };
         launch_usage.insert(key, usage);
+    }
+    if unreadable > 0 {
+        eprintln!("clarp-host: unreadable launch-path-usage records skipped: {unreadable}");
     }
     let launch_usage = Arc::new(launch_usage);
     let mut owners = Owners::new();
