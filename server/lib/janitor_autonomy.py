@@ -4,7 +4,7 @@ Models propose continuity; current source/identity/stop fences own admission.
 No model can change accounts, approve decisions, or dispatch outside its snapshot.
 """
 from __future__ import annotations
-import hashlib,json,threading,time,subprocess,shutil,os
+import hashlib,json,re,threading,time,subprocess,shutil,os
 from . import agents,db,janitors,janitor_builtins,settings_store,backends,janitor_hotseat
 from . import janitor_store,hotseat_status
 from .protocol import AgentState
@@ -165,7 +165,11 @@ def model_json(run,prompt,request_suffix=''):
             check_argument(provider,'--print='+prompt)
             try:answer=adapter.isolated_oneshot(prompt,model=model.get('model') or '',home_name=f"{provider}-janitor-{frozen['template_id']}-home")
             except TimeoutError as exc:raise model_fallbacks.ProviderFailure(str(exc)[:500],'timeout') from exc
-            except RuntimeError as exc:raise model_fallbacks.cli_failure(provider,str(exc),prompt=prompt) from None
+            except RuntimeError as exc:
+                # The status is in the backend's own fixed prefix (backend.agy: "agy exited N ..."),
+                # read here once, where its error enters; a provider's words are never read.
+                status=re.match(r'agy exited (-?\d+)',str(exc))
+                raise model_fallbacks.cli_failure(provider,str(exc),prompt=prompt,returncode=int(status.group(1)) if status else None) from None
             usage.update(answer['usage']);return orchestrator._extract_json(answer['text'])
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('CLI unavailable')

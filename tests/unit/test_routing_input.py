@@ -319,6 +319,20 @@ def test_a_left_behind_prompt_directory_is_swept_once_no_call_can_still_use_it(t
     assert not old.exists() and young.exists() and other.exists()
 
 
+def test_a_stale_prompt_directory_of_another_user_is_left_alone(tmp_path, monkeypatch):
+    """Two users may share the temporary directory: only the Host's own user's directories go."""
+    import os
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    theirs = tmp_path / "clarp-routing-theirs"
+    theirs.mkdir()
+    os.utime(theirs, (1_000, 1_000))
+    real = os.getuid()
+    monkeypatch.setattr(routing_input.os, "getuid", lambda: real + 1)    # the directory is not ours
+    assert routing_input.sweep_stale(now=1_000 + 3601) == 0
+    assert theirs.exists()
+
+
 # ---- R82: no command line in any log line, stored reason, event or route answer ----------------
 
 MARKER = "PROMPT-MARKER-6f1c"

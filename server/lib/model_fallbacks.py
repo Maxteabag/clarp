@@ -122,6 +122,8 @@ def is_provider_failure(cause, message=""):
         message = message or str(cause)
         if isinstance(cause, (Cancelled, AlreadyAttempted, KeyboardInterrupt)):
             return False
+        if getattr(cause, "denied", False):
+            return False
         cause = (
             cause.category
             if isinstance(cause, ProviderFailure)
@@ -188,7 +190,13 @@ def cli_failure(backend, output, *, prompt, returncode=None):
         line = f"{backend} {status} ({category})"
     if category == error_classify.INTERRUPTED:
         return Cancelled(line)
-    return ProviderFailure(line, category)
+    failure = ProviderFailure(line, category)
+    # A failure's facts are attributes, read by the code; its words are for a person (R85, ruled):
+    # whatever text is kept, a refusal stays a refusal and the exit stays known.
+    failure.denied = bool(_DENIED_RE.search(words))
+    failure.backend = backend
+    failure.returncode = returncode
+    return failure
 
 
 def provider_error(message):
@@ -219,7 +227,7 @@ def _as_provider_failure(error):
     """
     if isinstance(error, (Cancelled, AlreadyAttempted, KeyboardInterrupt)):
         return None
-    if _DENIED_RE.search(str(error)):
+    if getattr(error, "denied", False) or _DENIED_RE.search(str(error)):
         return None
     promoted = provider_error(str(error))
     return None if isinstance(promoted, Cancelled) else promoted
