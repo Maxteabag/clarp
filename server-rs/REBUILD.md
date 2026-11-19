@@ -1348,7 +1348,9 @@ its lane, each a record of its own; then a receipt is pushed as the alert of a f
 of it is written on it. The book itself is kept as records of its tables (`janitor-config`, `janitor-run`,
 `janitor-progress`, ...), so that a run every five minutes writes its own rows, about two kilobytes, where
 the book was written whole, about thirty, at every change; a book kept whole before is read and kept apart
-at once. On a Host beside another (`--accounts follow`) a receipt is kept and marked as not delivered, and
+at once. Going back is not free: a build before this one reads only the one record and finds a book with no
+tables, so once a Host has run this build, an older build loses its janitors' book (their configurations,
+triggers and runs; the agents themselves stay). On a Host beside another (`--accounts follow`) a receipt is kept and marked as not delivered, and
 nothing is pushed; with `none` and `select` the owner is told. A recovery is asked of no runtime yet: a
 window with nothing left says what the Python Host says where none runs. Held through the Host by a stand-in
 Codex that says its limits and a stand-in relay: turned on, the keeper looks at once and the owner is told

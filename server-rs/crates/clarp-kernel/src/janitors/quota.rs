@@ -360,6 +360,14 @@ pub fn ran(told: usize, recoveries: &[String]) -> (&'static str, String, Value) 
     (activity, summary, result)
 }
 
+/// Whether a look of the keeper is due at `now_ms`: it was never armed, the moment it was
+/// armed for has come, or the janitors' book changed since (`changes`, the count of its
+/// writes, against the count it was armed at): the keeper may have been turned on, off or set
+/// anew, and nobody has to remember to say so.
+pub fn due(armed: Option<(i64, u64)>, now_ms: i64, changes: u64) -> bool {
+    armed.is_none_or(|(at, count)| now_ms >= at || changes != count)
+}
+
 /// When the keeper looks again, as its lane keeps it (`janitor_autonomy.lane_state`,
 /// `lane_next_run`, `lane_start`, `lane_record`): for its agent and generation, the cadence
 /// that grows while looks find nothing, and when it runs next. `last_check` is the moment of
@@ -442,6 +450,16 @@ mod tests {
         ] {
             assert_eq!(general(number), written, "{number}");
         }
+    }
+
+    #[test]
+    fn a_look_is_due_at_its_moment_or_when_the_janitors_changed() {
+        assert!(due(None, 0, 0));
+        assert!(!due(Some((1_000, 7)), 999, 7));
+        assert!(due(Some((1_000, 7)), 1_000, 7));
+        // Nobody keeps: nothing is due until a janitor changes, and then at once.
+        assert!(!due(Some((i64::MAX, 7)), 5_000, 7));
+        assert!(due(Some((i64::MAX, 7)), 5_000, 8));
     }
 
     #[test]
