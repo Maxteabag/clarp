@@ -1,0 +1,1447 @@
+{
+ "actors": [
+  {
+   "data": {},
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {},
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "user",
+    true
+   ]
+  },
+  {
+   "data": {},
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {},
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {},
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {},
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "user",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "user"
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "agent:omar"
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "  agent:omar  "
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "agent:omar",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "user",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": ""
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "user",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": null
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "user",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "7",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "7",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "7",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "7",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "7",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "dev-0a1b2c",
+   "turn": null,
+   "actor": [
+    "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "",
+   "turn": null,
+   "actor": [
+    "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "administrator",
+   "turn": "desk",
+   "actor": [
+    "agent:desk",
+    true
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "administrator",
+   "turn": "never",
+   "actor": [
+    "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "principal": "administrator",
+   "turn": "",
+   "actor": [
+    "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+    false
+   ]
+  },
+  {
+   "data": {},
+   "principal": "administrator",
+   "turn": "failing",
+   "unavailable": true
+  },
+  {
+   "data": {
+    "actor": true
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "True",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": 7.5
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "7.5",
+    false
+   ]
+  },
+  {
+   "data": {
+    "actor": [
+     "user"
+    ]
+   },
+   "principal": "administrator",
+   "turn": null,
+   "actor": [
+    "['user']",
+    false
+   ]
+  }
+ ],
+ "repairs": [
+  {
+   "data": null,
+   "said": [
+    [
+     400,
+     {
+      "error": "bad json"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": [],
+   "said": [
+    [
+     "broke",
+     "AttributeError: 'list' object has no attribute 'get'"
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": {},
+   "said": [
+    [
+     404,
+     {
+      "error": "agent not found"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": {
+    "session": "nobody",
+    "reason": "x"
+   },
+   "said": [
+    [
+     404,
+     {
+      "error": "agent not found"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": {
+    "session": "desk"
+   },
+   "said": [
+    [
+     400,
+     {
+      "error": "reason is required"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "   "
+   },
+   "said": [
+    [
+     400,
+     {
+      "error": "reason is required"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "session": "desk"
+    },
+    "provenance": {}
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": " it is stuck  "
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "user",
+      "repair_actor_verified": false,
+      "repair_reason": "it is stuck"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "it is stuck",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "it is stuck",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": " desk ",
+    "reason": "x"
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "user",
+      "repair_actor_verified": false,
+      "repair_reason": "x"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "x",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "x",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "user",
+      "repair_actor_verified": false,
+      "repair_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "user",
+      "repair_actor_verified": false,
+      "repair_reason": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6\u00e6",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": 7
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "user",
+      "repair_actor_verified": false,
+      "repair_reason": "7"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "7",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "user",
+     "repair_actor_verified": false,
+     "repair_reason": "7",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "fixing",
+    "actor": "agent:omar"
+   },
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "agent:omar",
+      "repair_actor_verified": false,
+      "repair_reason": "fixing"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "agent:omar",
+     "repair_actor_verified": false,
+     "repair_reason": "fixing",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "agent:omar",
+     "repair_actor_verified": false,
+     "repair_reason": "fixing",
+     "released_trace": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "by its turn"
+   },
+   "turn": "omar",
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "session": "desk",
+      "released_trace": "",
+      "queue_recovered": 0,
+      "repair_actor": "agent:omar",
+      "repair_actor_verified": true,
+      "repair_reason": "by its turn"
+     }
+    ]
+   ],
+   "state": {
+    "kind": "spawned",
+    "detail": {
+     "source": "slot_repair",
+     "repair_actor": "agent:omar",
+     "repair_actor_verified": true,
+     "repair_reason": "by its turn",
+     "released_trace": ""
+    },
+    "provenance": {
+     "repair_actor": "agent:omar",
+     "repair_actor_verified": true,
+     "repair_reason": "by its turn",
+     "released_trace": ""
+    }
+   }
+  }
+ ],
+ "stops": [
+  {
+   "data": {
+    "session": "desk"
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "user",
+      "stop_actor_verified": false,
+      "stop_reason": "",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "User stopped this agent"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "provenance": {
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "  wrong branch  "
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "user",
+      "stop_actor_verified": false,
+      "stop_reason": "wrong branch",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "User stopped this agent: wrong branch"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "wrong branch"
+    },
+    "provenance": {
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "wrong branch"
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "actor": "agent:omar"
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "agent:omar",
+      "stop_actor_verified": false,
+      "stop_reason": "",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "Stopped by agent:omar (unverified)"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "provenance": {
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "actor": "agent:omar",
+    "reason": "it loops"
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "agent:omar",
+      "stop_actor_verified": false,
+      "stop_reason": "it loops",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "Stopped by agent:omar (unverified): it loops"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": false,
+     "stop_reason": "it loops"
+    },
+    "provenance": {
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": false,
+     "stop_reason": "it loops"
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "user",
+      "stop_actor_verified": false,
+      "stop_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "User stopped this agent: rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "provenance": {
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": 7
+   },
+   "turn": null,
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "user",
+      "stop_actor_verified": false,
+      "stop_reason": "7",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "User stopped this agent: 7"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "7"
+    },
+    "provenance": {
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": "7"
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "reason": "it loops"
+   },
+   "turn": "omar",
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "agent:omar",
+      "stop_actor_verified": true,
+      "stop_reason": "it loops",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "Stopped by agent:omar: it loops"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": true,
+     "stop_reason": "it loops"
+    },
+    "provenance": {
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": true,
+     "stop_reason": "it loops"
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk"
+   },
+   "turn": "omar",
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "agent:omar",
+      "stop_actor_verified": true,
+      "stop_reason": "",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "Stopped by agent:omar"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": true,
+     "stop_reason": ""
+    },
+    "provenance": {
+     "stop_actor": "agent:omar",
+     "stop_actor_verified": true,
+     "stop_reason": ""
+    }
+   }
+  },
+  {
+   "data": {
+    "session": "desk",
+    "actor": "user"
+   },
+   "turn": "never",
+   "said": [
+    [
+     200,
+     {
+      "ok": true,
+      "terminated": 0,
+      "stop_actor": "user",
+      "stop_actor_verified": false,
+      "stop_reason": "",
+      "goals_paused": 0,
+      "queue_paused": true
+     }
+    ]
+   ],
+   "goals_paused_with": [
+    "User stopped this agent"
+   ],
+   "state": {
+    "kind": "interrupted",
+    "detail": {
+     "source": "user_stop",
+     "message": "Turn stopped",
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    },
+    "provenance": {
+     "stop_actor": "user",
+     "stop_actor_verified": false,
+     "stop_reason": ""
+    }
+   }
+  }
+ ],
+ "provenance": [
+  {
+   "detail": {
+    "source": "user_stop",
+    "stop_actor": "agent:omar",
+    "stop_actor_verified": true,
+    "stop_reason": "x",
+    "message": "Turn stopped"
+   },
+   "provenance": {
+    "stop_actor": "agent:omar",
+    "stop_actor_verified": true,
+    "stop_reason": "x"
+   }
+  },
+  {
+   "detail": {
+    "source": "user_stop",
+    "message": "Turn stopped"
+   },
+   "provenance": {}
+  },
+  {
+   "detail": {
+    "source": "user_stop",
+    "stop_actor": "user"
+   },
+   "provenance": {
+    "stop_actor": "user"
+   }
+  },
+  {
+   "detail": {
+    "source": "slot_repair",
+    "repair_actor": "user",
+    "repair_actor_verified": false,
+    "repair_reason": "x",
+    "released_trace": ""
+   },
+   "provenance": {
+    "repair_actor": "user",
+    "repair_actor_verified": false,
+    "repair_reason": "x",
+    "released_trace": ""
+   }
+  },
+  {
+   "detail": {
+    "source": "slot_repair",
+    "repair_actor": "user"
+   },
+   "provenance": {
+    "repair_actor": "user"
+   }
+  },
+  {
+   "detail": {
+    "source": "slot_repair"
+   },
+   "provenance": {}
+  },
+  {
+   "detail": {
+    "source": "other",
+    "stop_actor": "user",
+    "repair_actor": "user"
+   },
+   "provenance": {}
+  },
+  {
+   "detail": {},
+   "provenance": {}
+  }
+ ],
+ "activity_fields": [
+  "agent_id",
+  "session",
+  "persona",
+  "kind",
+  "phase",
+  "status",
+  "tool",
+  "action",
+  "summary",
+  "file_path",
+  "ts",
+  "state",
+  "call_id",
+  "started_at_ms",
+  "turn_started_ms",
+  "stop_actor",
+  "stop_actor_verified",
+  "stop_reason",
+  "repair_actor",
+  "repair_actor_verified",
+  "repair_reason",
+  "released_trace"
+ ]
+}
