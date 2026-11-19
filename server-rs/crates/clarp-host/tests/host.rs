@@ -590,13 +590,13 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
 }
 
 /// What a user's send is shown of its delivery (send_delivery_state), as the Python Host shows
-/// it: handed over once its tool is launched, and a plain send behind a busy turn once the queue
-/// that keeps it has it; the user's Stop changes neither, and the generation moves. The same id
-/// sent again changes nothing; a resume runs the held one. The apps are told of each launch by
-/// the send's id alone, and the feed gives the sends from its start. A number that is not plain
-/// digits is the Python Host's 400.
+/// it with its PR 462 (R120): handed over once its tool is launched; a plain send behind a busy
+/// turn pending until then; the user's Stop fences it (stopped) and moves the generation; the
+/// same id sent again changes nothing; a resume runs it, and its launch replaces the fence. The
+/// apps are told of each fence and each launch by the send's id alone, and the feed gives the
+/// sends from its start. A number that is not plain digits is the Python Host's 400.
 #[test]
-fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
+fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     let place = Place::new("delivery");
     let host = place.start();
     let session = host.new_agent("Deliverer");
@@ -611,19 +611,11 @@ fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
         row.map_or(Value::Null, |row| row["delivery"].clone())
     };
     let before = log("");
-    assert_eq!(
-        delivery(&before, "u-m1")["state"],
-        "handed_over",
-        "{before}"
-    );
+    assert_eq!(delivery(&before, "u-m1")["state"], "handed_over", "{before}");
     let queued = delivery(&before, "u-m2");
     assert_eq!(
-        (
-            &queued["state"],
-            &queued["rev"],
-            &queued["for"]["client_msg_id"]
-        ),
-        (&json!("handed_over"), &json!(2), &json!("m2")),
+        (&queued["state"], &queued["rev"], &queued["for"]["client_msg_id"]),
+        (&json!("pending_launch"), &json!(1), &json!("m2")),
         "{before}"
     );
     assert_eq!(
@@ -638,7 +630,12 @@ fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
     host.post("/stop", json!({ "session": session }));
     wait_for("the turn to end", || host.state(&session) == "interrupted");
     let held = log("&delivery_since=0");
-    assert_eq!(delivery(&held, "u-m2"), queued, "{held}");
+    let stopped = delivery(&held, "u-m2");
+    assert_eq!(
+        (&stopped["state"], &stopped["rev"]),
+        (&json!("stopped"), &json!(2)),
+        "{held}"
+    );
     assert_eq!(held["delivery_stop_generation"], 1);
     let updates = held["delivery_updates"].as_array().unwrap();
     let ids: Vec<&str> = updates
@@ -650,16 +647,21 @@ fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
 
     // The same id again changes nothing of it.
     host.send(&session, "later", "m2");
-    assert_eq!(delivery(&log(""), "u-m2"), queued);
+    assert_eq!(delivery(&log(""), "u-m2"), stopped);
 
     host.post("/turn-queue/resume", json!({ "session": session }));
     wait_for("the held one to be answered", || {
         host.conversation(&session)
             .contains(&said("assistant", "later"))
     });
-    assert_eq!(delivery(&log(""), "u-m2"), queued);
+    let after = delivery(&log(""), "u-m2");
+    assert_eq!(
+        (&after["state"], &after["rev"]),
+        (&json!("handed_over"), &json!(3)),
+        "{after}"
+    );
 
-    // Told of each launch, by id alone: the first, and the held one when it ran.
+    // Told by id alone: the first's launch, the second's fence, and its launch.
     let hints = || -> Vec<Value> {
         heard
             .lock()
@@ -669,17 +671,14 @@ fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
             .cloned()
             .collect()
     };
-    wait_for("the hints", || hints().len() >= 2);
+    wait_for("the hints", || hints().len() >= 3);
     let told: Vec<String> = hints()
         .iter()
         .map(|hint| hint["message_id"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(told, ["u-m1", "u-m2"], "{:?}", hints());
+    assert_eq!(told, ["u-m1", "u-m2", "u-m2"], "{:?}", hints());
     for hint in hints() {
-        assert!(
-            hint.get("delivery").is_none() && hint["session"] == session,
-            "{hint}"
-        );
+        assert!(hint.get("delivery").is_none() && hint["session"] == session, "{hint}");
     }
 
     let (status, refused) = host.ask(
@@ -687,10 +686,7 @@ fn a_held_send_is_shown_handed_over_and_each_launch_is_hinted() {
         &format!("/log?session={session}&delivery_since=x"),
         None,
     );
-    assert_eq!(
-        (status, &refused["error"]),
-        (400, &json!("bad delivery_since"))
-    );
+    assert_eq!((status, &refused["error"]), (400, &json!("bad delivery_since")));
 }
 
 /// A Stop while another message waits (R92, the Python Host's PR 451): the turn that ran is

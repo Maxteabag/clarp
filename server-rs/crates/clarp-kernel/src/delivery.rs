@@ -650,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn a_send_is_handed_over_at_its_launch_or_its_queue_and_fenced_by_the_users_stop() {
+    fn a_send_is_handed_over_at_its_launch_and_fenced_by_the_users_stop_before_it() {
         let mut agent = Agent::new();
         let thinking = || TurnEvent::Moved {
             activity: Activity::Thinking,
@@ -676,8 +676,8 @@ mod tests {
             ]
         );
         assert_eq!(agent.deliveries_mut().take_launched(), [1]);
-        // One behind the busy turn is handed to the queue that keeps it, at once. One left for
-        // later, and an agent's, are not shown.
+        // One behind the busy turn is pending until its tool is launched. One left for later,
+        // and an agent's, are not shown.
         turn(
             &mut agent,
             5,
@@ -696,16 +696,13 @@ mod tests {
         turn(&mut agent, 9, 4, accepted(4, 8, other, Admission::Queue));
         assert_eq!(
             told(&mut agent),
-            [
-                (2, false, false, 1, revision(5, 0)),
-                (2, false, true, 2, revision(5, 1))
-            ]
+            [(2, false, false, 1, revision(5, 0))]
         );
-        // The user's Stop: nothing pending to fence; the generation moves.
+        // The user's Stop fences the pending one; the generation moves.
         paused(&mut agent, 10);
-        assert!(told(&mut agent).is_empty());
+        assert_eq!(told(&mut agent), [(2, true, false, 2, revision(10, 0))]);
         assert_eq!(agent.user_stop_generation(), 1);
-        // The held one runs after a resume: no change, and its launch is told.
+        // The held one runs after a resume: its launch replaces the fence, and is told.
         turn(&mut agent, 11, 1, thinking());
         turn(&mut agent, 12, 1, completed());
         agent.at(13);
@@ -714,7 +711,7 @@ mod tests {
             .apply(&AgentEvent::Resumed { by, at_ms: 3_000 })
             .unwrap();
         turn(&mut agent, 14, 2, TurnEvent::Started { at_ms: 3_200 });
-        assert!(told(&mut agent).is_empty());
+        assert_eq!(told(&mut agent), [(2, true, true, 3, revision(14, 0))]);
         assert_eq!(agent.deliveries_mut().take_launched(), [2]);
         // A send admitted while nothing runs and stopped before its tool is launched is fenced,
         // and shown stopped.
