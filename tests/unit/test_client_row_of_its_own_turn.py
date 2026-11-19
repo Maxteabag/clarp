@@ -137,8 +137,8 @@ def test_a_turn_ended_when_it_settled_or_the_next_turn_began():
     index = _index(("t", 10_000, 20_000), ("t", 11_000, 21_000), ("never", 30_000, None),
                    ("never", 31_000, 32_000), ("late", 40_000, 60_000), ("next", 50_000, None))
     assert [index.ended_before("t", BASE + at) for at in (21_000, 21_001)] == [False, True]
-    # One row never settled: the turn ended when the next turn began, not never.
-    assert [index.ended_before("never", BASE + at) for at in (40_000, 40_001)] == [False, True]
+    # One row never settled and one settled: the turn ended at that settle.
+    assert [index.ended_before("never", BASE + at) for at in (32_000, 32_001)] == [False, True]
     # Settled after the next turn began: it ended at that start.
     assert [index.ended_before("late", BASE + at) for at in (50_000, 50_001)] == [False, True]
     assert index.ended_before("next", BASE + 10**9) is False             # the latest still runs
@@ -520,11 +520,16 @@ def test_a_turns_second_row_of_its_own_trace_does_not_end_it():
     second is the same turn: it ends neither the first nor the turn, settled or not."""
     index = _index(("prompt", 10_000, None), ("prompt", 11_000, None))
     assert [index.ended_before("prompt", BASE + at) for at in (10_500, 11_500, 10**9)] == [False] * 3
-    # One row settled and one never: the turn is not taken as ended at that settle, only when the
-    # agent's next turn of another trace begins (as august-watch's never-settled old turns end).
+    # One row settled and one never (R92's twin): the settle says the turn finished, so it ended
+    # at the latest settle among its rows; the twin that never settled does not keep it running.
     index = _index(("prompt", 10_000, None), ("prompt", 11_000, 30_000), ("next", 40_000, None))
-    assert [index.ended_before("prompt", BASE + at) for at in (11_500, 30_001, 40_000, 40_001)] == [
-        False, False, False, True]
+    assert [index.ended_before("prompt", BASE + at) for at in (11_500, 30_000, 30_001)] == [False, False, True]
+    # Both settled: the later settle.
+    index = _index(("prompt", 10_000, 20_000), ("prompt", 11_000, 30_000))
+    assert [index.ended_before("prompt", BASE + at) for at in (25_000, 30_001)] == [False, True]
+    # None settled: it ended only when the agent's next turn of another trace began.
+    index = _index(("prompt", 10_000, None), ("prompt", 11_000, None), ("next", 40_000, None))
+    assert [index.ended_before("prompt", BASE + at) for at in (39_000, 40_000, 40_001)] == [False, False, True]
 
 
 @CONFIGURATIONS
@@ -547,3 +552,29 @@ def test_a_prompt_with_two_turn_rows_never_settled_keeps_its_row_for_a_late_copy
         users, replies = cli.imported(full=full)
         assert [row_id for row_id, _text in users] == ["u-old0", "u-two-rows"]     # no copy beside its row
         assert replies == [(ANSWER, "two-rows")]
+
+
+@CONFIGURATIONS
+def test_a_copy_after_a_settled_turn_with_an_unsettled_twin_does_not_take_its_row(tmp_path, monkeypatch, configuration):
+    """august-watch's old sends: a send whose copy never reached the transcript, its turn with two
+    rows of its trace, one settled (failed) and its twin never (R92's artefact). The turn ended at
+    that settle. A copy of the same words typed seven hours later, with no row of its own and past
+    every turn's reach, does not take that send's row; it is stored as itself."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    cli.send("failed", PROMPT, "settled-twin", BASE)
+    cli.now[0] = BASE + 1000
+    agents.open_turn(agent_id=cli.id, source='pwa', trace_id="settled-twin")         # its twin row
+    with db.conn() as con:      # the first row settles (failed); the twin never does
+        con.execute("UPDATE turns SET settled_at=?, outcome='failed' WHERE trace_id='settled-twin'"
+                    " AND turn_id = (SELECT MIN(turn_id) FROM turns WHERE trace_id='settled-twin')", (BASE + 20_000,))
+    db.close_local()
+    typed = BASE + 7 * 3_600_000
+    cli.line('user', PROMPT, typed)                                                 # no row, no turn
+    cli.line('assistant', [{'type': 'text', 'text': "Typed answer."}], typed + 3000)
+    cli.now[0] = typed + 4000
+    for full in (False, True):
+        users, replies = cli.imported(full=full)
+        assert [text for row_id, text in users if not row_id.startswith("u-")] == [PROMPT], users
+        assert "u-failed" in {row_id for row_id, _ in users}                          # its row stays its own
+        assert dict(replies)["Typed answer."] != "settled-twin"
