@@ -117,6 +117,9 @@ class OrchestratorOutcome:
     # Internal, never in a payload: the routed dispatch failed in a way the
     # client's same-id retry may resend (RTO-07).
     retry_dispatch: bool = False
+    # Internal, never in a payload: the session the decision resolved to, "" for none, which
+    # the run's receipt records (R83); None where the answer's session already is it.
+    target: str | None = None
 
 
 # A routing receipt whose dispatch a same-id retry sends again (RTO-07).

@@ -25,6 +25,7 @@ PHRASES = {
     "fork_in_app": "Please fork agents from the app.",
     "name_taken": "I already have an agent by that name.",
     "command_refused": "I could not do that.",
+    "no_valid_target": "I am not sure which agent that was for.",
 }
 
 # A fixed sentence's key, by its text.
