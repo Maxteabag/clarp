@@ -696,10 +696,7 @@ mod tests {
             agent_id: "helper".into(),
         };
         turn(&mut agent, 9, 4, accepted(4, 8, other, Admission::Queue));
-        assert_eq!(
-            told(&mut agent),
-            [(2, false, false, 1, revision(5, 0))]
-        );
+        assert_eq!(told(&mut agent), [(2, false, false, 1, revision(5, 0))]);
         // An agent's own Stop, which the Host knows to be that agent's, withdraws nothing of the
         // user's and moves no generation.
         stopped_by(&mut agent, 10, "agent:helper", true);
