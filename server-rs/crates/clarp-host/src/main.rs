@@ -225,6 +225,7 @@ async fn serve(config: Config) -> Result<(), String> {
         hub: hub.clone(),
         clock: clock.clone(),
     });
+    let ears = Arc::new(clarp_host::heard::Ears::new(&config, &fleet).await?);
     let app = App {
         turns,
         form_event_writer: Arc::default(),
@@ -268,7 +269,6 @@ async fn serve(config: Config) -> Result<(), String> {
         ears: {
             // The engines that listen. The Host's own loads its model from now on; answers
             // nobody will ask for again are forgotten on the side.
-            let ears = Arc::new(clarp_host::heard::Ears::new(&config));
             let old = ears.clone();
             tokio::task::spawn_blocking(move || old.forget_old());
             ears
