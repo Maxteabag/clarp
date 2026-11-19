@@ -86,8 +86,16 @@ pub struct Stopped {
     pub goals_paused: usize,
 }
 
-/// A line that was said to its end: how many bytes its clip has, and which engine said it
-/// in which voice.
+/// Caller identity established by the Host before the goal command reaches its owner.
+#[derive(Debug, Default)]
+pub enum GoalCaller {
+    #[default]
+    Default,
+    Verified(String),
+    Peer(String, bool),
+}
+
+/// A line that was said to its end, together with its engine and voice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Spoke {
     pub bytes: u64,
@@ -235,6 +243,7 @@ pub enum Ask {
     /// The agent's goal tool was called about this agent's goals. Answers what it prints.
     Goal {
         ask: goaltool::Ask,
+        caller: GoalCaller,
         answer: Answer<ToolAnswer>,
     },
     /// Something is asked of the agent's artifacts: one is made or changed, a request to
@@ -258,7 +267,8 @@ pub enum Ask {
     /// The plans the agent had on the Host it comes from, each as that Host showed it, with
     /// the documents of its goal. Answers how many there are now, or why one cannot be taken.
     TakePlans {
-        plans: Vec<(Value, Vec<Value>)>,
+        source: String,
+        plans: Vec<crate::edge::MovedPlan>,
         answer: Answer<Result<usize, String>>,
     },
     /// The agent published a file: its bytes are kept, and this is what is to be written
@@ -784,11 +794,17 @@ impl AgentHandle {
 
     /// Gives the agent the plans it had where it comes from. The inner error is a plan
     /// that cannot be taken.
-    pub async fn take_plans(
+    pub(crate) async fn take_plans(
         &self,
-        plans: Vec<(Value, Vec<Value>)>,
+        source: String,
+        plans: Vec<crate::edge::MovedPlan>,
     ) -> Result<Result<usize, String>, Unavailable> {
-        self.ask(|answer| Ask::TakePlans { plans, answer }).await
+        self.ask(|answer| Ask::TakePlans {
+            source,
+            plans,
+            answer,
+        })
+        .await
     }
 
     /// Writes a file the agent published into its log. Its bytes are kept already.
@@ -799,7 +815,19 @@ impl AgentHandle {
 
     /// Answers the goal tool from this agent's goals.
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
-        self.ask(|answer| Ask::Goal { ask, answer }).await
+        self.goal_as(ask, GoalCaller::Default).await
+    }
+    pub async fn goal_as(
+        &self,
+        ask: goaltool::Ask,
+        caller: GoalCaller,
+    ) -> Result<ToolAnswer, Unavailable> {
+        self.ask(|answer| Ask::Goal {
+            ask,
+            caller,
+            answer,
+        })
+        .await
     }
 
     pub fn view(&self) -> Arc<View> {
@@ -1102,11 +1130,13 @@ fn keep_goal(
     record: &AgentRecord,
     change: &GoalChange,
     title: Option<&str>,
+    author: clarp_kernel::goals::ledger::Author,
     now_ms: i64,
 ) -> Result<Outputs, ActorError> {
     let shown = plan_shown(actor, record, change, title, now_ms);
     let kept = Kept {
         goal: Some(change),
+        author,
         artifacts: shown.as_slice(),
         ..Kept::default()
     };
@@ -1759,6 +1789,7 @@ impl Worker {
     fn handle_goal(
         &mut self,
         ask: &goaltool::Ask,
+        caller: GoalCaller,
         answer: Answer<ToolAnswer>,
     ) -> Result<(), ActorError> {
         let now = self.now_ms();
@@ -1777,8 +1808,16 @@ impl Worker {
             goaltool::Ask::Create { title, .. } => Some(title.trim()),
             _ => None,
         };
+        use clarp_kernel::goals::ledger::Author;
+        let author = match (&caller, ask) {
+            (GoalCaller::Verified(id), _) => Author::Owner(Some(id)),
+            (GoalCaller::Peer(id, verified), _) => Author::Peer(id, *verified),
+            (_, goaltool::Ask::UserAct { .. }) => Author::User,
+            (_, goaltool::Ask::Keeper { written, .. }) => Author::Keeper(&written.janitor_agent_id),
+            _ => Author::Owner(None),
+        };
         let written = match &change {
-            Some(change) => keep_goal(actor, &self.setup.record, change, title, now),
+            Some(change) => keep_goal(actor, &self.setup.record, change, title, author, now),
             None => Ok(Outputs::default()),
         };
         match written {
@@ -1855,7 +1894,8 @@ impl Worker {
     /// stood there, with the artifact it is shown as, and published before the answer.
     fn handle_plans(
         &mut self,
-        plans: &[(Value, Vec<Value>)],
+        source: &str,
+        plans: &[crate::edge::MovedPlan],
         answer: Answer<Result<usize, String>>,
     ) -> Result<(), ActorError> {
         let now = self.now_ms();
@@ -1868,27 +1908,57 @@ impl Worker {
         };
         let mut outs = Vec::new();
         let mut taken = Ok(0);
-        for (shown, documents) in plans {
-            let change = match actor.goals().taken_over(owner, shown, documents) {
+        let imports: Vec<_> = plans
+            .iter()
+            .map(|p| {
+                (
+                    p.plan["plan_id"].as_str().unwrap_or("").to_owned(),
+                    p.events.as_deref().unwrap_or_default(),
+                )
+            })
+            .collect();
+        if let Err(why) = actor.validate_goal_import(&imports) {
+            let _ = answer.send(Ok(Err(why.to_string())));
+            return Ok(());
+        }
+        let import_high = imports
+            .iter()
+            .filter_map(|(_, rows)| rows.last().map(|e| e.event_id))
+            .max()
+            .unwrap_or(0);
+        let entering_existing = actor.next_goal_event_id()? > 1;
+        for moved in plans {
+            let change = match actor
+                .goals()
+                .taken_over(owner, &moved.plan, &moved.documents)
+            {
                 Ok(change) => change,
                 Err(why) => {
                     taken = Err(why.0);
                     break;
                 }
             };
-            // A plan whose artifact came with the library is shown as that artifact, as
-            // it was: only a plan that has none is given one.
-            let title = change.plan.title.clone();
-            let shown = actor.artifacts().of_plan(&change.plan.plan_id).is_some();
-            let written = if shown {
-                let kept = Kept {
-                    goal: Some(&change),
-                    ..Kept::default()
-                };
-                actor.keep(&kept, now)
+            let shown = if actor.artifacts().of_plan(&change.plan.plan_id).is_none() {
+                plan_shown(
+                    actor,
+                    &self.setup.record,
+                    &change,
+                    Some(&change.plan.title),
+                    now,
+                )
             } else {
-                keep_goal(actor, &self.setup.record, &change, Some(&title), now)
+                None
             };
+            let kept = Kept {
+                goal: Some(&change),
+                imported_events: moved.events.as_deref(),
+                author: clarp_kernel::goals::ledger::Author::Legacy,
+                entry_source: entering_existing.then_some(source),
+                import_high,
+                artifacts: shown.as_slice(),
+                ..Kept::default()
+            };
+            let written = actor.keep(&kept, now);
             match written {
                 Ok(out) => outs.push(out),
                 Err(error) => {
@@ -1908,11 +1978,19 @@ impl Worker {
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
         let ask = match ask {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
-            Ask::TakePlans { plans, answer } => return self.handle_plans(&plans, answer),
+            Ask::TakePlans {
+                source,
+                plans,
+                answer,
+            } => return self.handle_plans(&source, &plans, answer),
             Ask::TakeLibrary { artifacts, answer } => {
                 return self.handle_library(&artifacts, answer);
             }
-            Ask::Goal { ask, answer } => return self.handle_goal(&ask, answer),
+            Ask::Goal {
+                ask,
+                caller,
+                answer,
+            } => return self.handle_goal(&ask, caller, answer),
             Ask::Amended { record, taken } => {
                 self.amended(*record);
                 // What it last finished is told by the name it now has.
@@ -2026,7 +2104,18 @@ impl Worker {
                 let stopped = actor.stop_as(by, now).and_then(|(told, mut out)| {
                     let paused = with_goals(actor, now, |book, world| book.stopped(&reason, world));
                     for change in &paused {
-                        let kept = keep_goal(actor, &self.setup.record, change, None, now)?;
+                        let kept = keep_goal(
+                            actor,
+                            &self.setup.record,
+                            change,
+                            None,
+                            if by == "user" {
+                                clarp_kernel::goals::ledger::Author::User
+                            } else {
+                                clarp_kernel::goals::ledger::Author::System
+                            },
+                            now,
+                        )?;
                         out.changed.goals |= kept.changed.goals;
                         out.changed.artifacts |= kept.changed.artifacts;
                     }
@@ -2362,7 +2451,14 @@ impl Worker {
             };
             let moved = with_goals(actor, now, |book, _| book.carried(&from, &to, CARRIED, now));
             for change in &moved {
-                match keep_goal(actor, &self.setup.record, change, None, now) {
+                match keep_goal(
+                    actor,
+                    &self.setup.record,
+                    change,
+                    None,
+                    clarp_kernel::goals::ledger::Author::System,
+                    now,
+                ) {
                     Ok(kept) => {
                         out.changed.goals |= kept.changed.goals;
                         out.changed.artifacts |= kept.changed.artifacts;

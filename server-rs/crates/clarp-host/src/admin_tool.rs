@@ -1819,8 +1819,26 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),
         Some((command, rest)) if command == "model" => model(app, call, rest).await,
-        Some((command, rest)) if command == "request" => request_tool::request(app, rest).await,
-        Some((command, rest)) if command == "reply" => request_tool::reply(app, rest).await,
+        Some((command, rest)) if command == "request" => {
+            request_tool::request(
+                app,
+                rest,
+                call.env
+                    .get(crate::turn_identity::TURN_ENV)
+                    .map(String::as_str),
+            )
+            .await
+        }
+        Some((command, rest)) if command == "reply" => {
+            request_tool::reply(
+                app,
+                rest,
+                call.env
+                    .get(crate::turn_identity::TURN_ENV)
+                    .map(String::as_str),
+            )
+            .await
+        }
         Some((command, rest)) if command == "call" => self::call(app, call, rest).await,
         Some((command, rest)) if command == "oracle" => oracle(app, rest).await,
         Some((command, rest)) if command == "schedule" => schedule(app, rest).await,
