@@ -133,6 +133,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
         if provenance is not None else None)
     trace_at = getattr(turn_index, "trace_at", lambda _: "")
     running_at = getattr(turn_index, "running_at", lambda _: ("", None))
+    ran_at = getattr(turn_index, "ran_at", None)
     outcomes = getattr(turn_index, "outcomes", {})
     result = {}
     for index, turn in enumerate(turns):
@@ -158,8 +159,11 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
                         continue
                     if rows:
                         running, began = running_at(stamp)
-                        chosen = copied.take(key, rows, _own_turns_row(
-                            None, rows, running, began, trace_ids=client_traces))
+                        own = _own_turns_row(
+                            None, rows, running, began, trace_ids=client_traces,
+                            ran_at=None if ran_at is None else (lambda sent, at=stamp: ran_at(sent, at)))
+                    if rows and own is not None:
+                        chosen = copied.take(key, rows, own)
                         current_trace = client_traces.get(chosen[0]) or ""
                         if running and current_trace not in outcomes:
                             current_trace = running
@@ -519,7 +523,7 @@ class _ClientProvenance:
 
 
 def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
-                   trace_ids=None) -> int:
+                   trace_ids=None, ran_at=None) -> int | None:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -534,24 +538,36 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     reply took that row's trace, was not recognised as the reply its turn
     was streaming, and was stored under a new id beside the live row
     (issue 285: the same words sent three times to an agent that could not
-    run, then a fourth time)."""
-    if len(rows) < 2 or not trace:
+    run, then a fourth time).
+
+    Neither fallback takes a row sent for another turn that was not running
+    when the copy was written (``ran_at``): that row is its own turn's. Taken
+    by a copy that has no row of its own, it left its turn without one, and
+    that turn took the next one's: with the same words every time, every
+    later reply carried an earlier or later prompt's trace, and the last an
+    old failed send's (R89). None: no row is this copy's."""
+    if not trace:
         return 0
-    for index, row in enumerate(rows):
-        if trace_ids is None:
-            sent = database.execute(
-                "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
-            sent_trace = (sent["trace_id"] or "") if sent is not None else ""
-        else:
-            sent_trace = trace_ids.get(row[0]) or ""
-        if sent_trace == trace:
+
+    def sent_trace(row):
+        if trace_ids is not None:
+            return trace_ids.get(row[0]) or ""
+        sent = database.execute(
+            "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
+        return (sent["trace_id"] or "") if sent is not None else ""
+
+    sent = [sent_trace(row) for row in rows]
+    for index, sent_for in enumerate(sent):
+        if sent_for == trace:
             return index
+    free = [index for index, sent_for in enumerate(sent)
+            if ran_at is None or not sent_for or ran_at(sent_for) is not False]
     if began is not None:
-        for index, row in enumerate(rows):
-            sent_at = iso_ms(row[3])
+        for index in free:
+            sent_at = iso_ms(rows[index][3])
             if sent_at is not None and sent_at > began:
                 return index
-    return 0
+    return free[0] if free else None
 
 
 class _AgyAuthority:

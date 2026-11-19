@@ -78,6 +78,33 @@ class TurnIndex:
         self._starts = [int(r["started_at"]) for r in rows]
         self._rows = rows
         self.outcomes = {str(r["trace_id"]): r["outcome"] for r in rows if r["trace_id"]}
+        self._spans = None
+
+    def ran_at(self, trace: str, timestamp: Any) -> bool | None:
+        """Whether a turn of ``trace`` was running at ``timestamp``, counting
+        from _START_SLACK_MS before it began until it settled; None when the
+        trace has no turn (a message steered into another turn) or the time
+        is not known."""
+        if self._spans is None:
+            spans: dict[str, tuple[int, int | None]] = {}
+            for row in self._rows:
+                trace_id = str(row["trace_id"] or "")
+                if not trace_id:
+                    continue
+                start = int(row["started_at"])
+                settled = None if row["settled_at"] is None else int(row["settled_at"])
+                if trace_id in spans:
+                    first, last = spans[trace_id]
+                    start = min(start, first)
+                    settled = None if last is None or settled is None else max(last, settled)
+                spans[trace_id] = (start, settled)
+            self._spans = spans
+        span = self._spans.get(trace)
+        ms = iso_ms(timestamp)
+        if span is None or ms is None:
+            return None
+        start, settled = span
+        return start - _START_SLACK_MS <= ms and (settled is None or ms <= settled)
 
     def trace_at(self, timestamp: Any) -> str:
         return self.running_at(timestamp)[0]
