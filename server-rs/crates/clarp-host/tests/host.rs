@@ -23755,7 +23755,11 @@ echo '{"type":"turn.completed","usage":{}}'
     };
     assert_eq!(fork("outside"), refusal);
     wait_for("the content-free transcript refusal", || {
-        host.heard.lock().unwrap().lines().any(|line| line == "transcriptSessionIdRefused backend=claude")
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
+            .any(|line| line == "transcriptSessionIdRefused backend=claude")
     });
     std::fs::remove_file(project.join("outside.jsonl")).unwrap();
     std::fs::remove_dir(&project).unwrap();

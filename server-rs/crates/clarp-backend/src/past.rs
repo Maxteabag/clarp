@@ -242,7 +242,9 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             }
             let declared = PathBuf::from(text_of(entry.get("fullPath")));
             let beside = dir.join(format!("{id}.jsonl"));
-            if confined("claude", &root, &declared).is_none() && confined("claude", &root, &beside).is_none() {
+            if confined("claude", &root, &declared).is_none()
+                && confined("claude", &root, &beside).is_none()
+            {
                 continue;
             }
             named.insert(id.clone());
@@ -592,7 +594,10 @@ pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
             .is_some_and(|matched| &matched[1] == session)
     });
     let mut newest: Option<(SystemTime, PathBuf)> = None;
-    for path in named.into_iter().filter_map(|p| confined("codex", &root, &p)) {
+    for path in named
+        .into_iter()
+        .filter_map(|p| confined("codex", &root, &p))
+    {
         let Some(at) = written(&path).0 else {
             continue;
         };
@@ -629,8 +634,9 @@ pub fn agy_kept(base: &Path, conversation: &str) -> bool {
     if !store.is_dir() {
         return true;
     }
-    base.canonicalize()
-        .is_ok_and(|root| confined("agy", &root, &store.join(format!("{conversation}.db"))).is_some())
+    base.canonicalize().is_ok_and(|root| {
+        confined("agy", &root, &store.join(format!("{conversation}.db"))).is_some()
+    })
 }
 
 /// The transcript of a conversation of agy, where there is one (`find_latest_jsonl`).
