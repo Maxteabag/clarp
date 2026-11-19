@@ -101,5 +101,8 @@ RUNS['int']=['test','--test','python_int_vectors']
 P='clarp-kernel/src/python.rs'
 plant(P,'int','lose non-ASCII decimal digits','(digit < 10).then_some(digit)','(digit < 2).then_some(digit)')
 plant(P,'int','ignore the Python integer input limit','if count > 4300 {','if count > 9999 {')
+RUNS['damaged']=['test','--test','host','unreadable_launch_usage_is_skipped_until_that_directory_is_launched_again']
+plant(F,'damaged','stop the Host for one unreadable path record','unreadable += 1;\n            continue;', 'return Err("invalid usage".into());')
+plant(F,'damaged','report one regardless of the number skipped','unreadable += 1;', 'unreadable = 1;')
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
