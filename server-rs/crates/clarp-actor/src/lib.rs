@@ -254,7 +254,11 @@ pub struct Outputs {
 
 /// A committed timeline entry for live delivery. Its payload comes from
 /// the canonical job book at publication, as in the reference watcher.
-pub struct JobEvent{pub id:String,pub at:i64,pub revision:u64}
+pub struct JobEvent {
+    pub id: String,
+    pub at: i64,
+    pub revision: u64,
+}
 /// The actor's log or files failed. Drop the actor and open it again.
 #[derive(Debug)]
 pub enum ActorError {
@@ -613,7 +617,7 @@ pub struct Actor {
     for_its_model: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
-    job_events:Vec<JobEvent>,
+    job_events: Vec<JobEvent>,
     provider_sessions: std::collections::BTreeMap<String, clarp_kernel::provider_tasks::Session>,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
@@ -1011,21 +1015,29 @@ impl Actor {
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
-        let mut provider_sessions=std::collections::BTreeMap::new();
-        let mut after=0;
+        let mut provider_sessions = std::collections::BTreeMap::new();
+        let mut after = 0;
         loop {
-            let page=recorder.log().read_after(after,kind::JOBS,WINDOW)?;
-            let Some(last)=page.last() else{break;};after=last.seq;
-            for item in page{
-                let corrupt=|e:serde_json::Error|ActorError::Corrupt(format!("invalid job record at {}: {e}",item.seq));
-                match item.kind{
-                    kind::JOB=>jobs.apply(&serde_json::from_slice(&item.body).map_err(corrupt)?),
-                    kind::PROVIDER_JOBS=>{
-                        let entry:clarp_kernel::provider_tasks::JournalEntry=serde_json::from_slice(&item.body).map_err(corrupt)?;
-                        for record in entry.records{jobs.apply(&record);}
-                        provider_sessions.insert(entry.native,entry.session);
+            let page = recorder.log().read_after(after, kind::JOBS, WINDOW)?;
+            let Some(last) = page.last() else {
+                break;
+            };
+            after = last.seq;
+            for item in page {
+                let corrupt = |e: serde_json::Error| {
+                    ActorError::Corrupt(format!("invalid job record at {}: {e}", item.seq))
+                };
+                match item.kind {
+                    kind::JOB => jobs.apply(&serde_json::from_slice(&item.body).map_err(corrupt)?),
+                    kind::PROVIDER_JOBS => {
+                        let entry: clarp_kernel::provider_tasks::JournalEntry =
+                            serde_json::from_slice(&item.body).map_err(corrupt)?;
+                        for record in entry.records {
+                            jobs.apply(&record);
+                        }
+                        provider_sessions.insert(entry.native, entry.session);
                     }
-                    _=>{}
+                    _ => {}
                 }
             }
         }
@@ -1078,7 +1090,7 @@ impl Actor {
             recorder,
             jobs,
             provider_sessions,
-            job_events:Vec::new(),
+            job_events: Vec::new(),
             goals,
             artifacts,
             media,
@@ -1843,36 +1855,54 @@ impl Actor {
         &mut self,
         command: JobCommand,
         now_ms: i64,
-        mut revision:impl FnMut()->u64,
+        mut revision: impl FnMut() -> u64,
     ) -> Result<(Result<JobChange, JobRefusal>, Outputs), ActorError> {
-        let registered=matches!(command,JobCommand::Register{..});
+        let registered = matches!(command, JobCommand::Register { .. });
         let mut change = match self.jobs.decide(command, now_ms, revision()) {
             Ok(change) => change,
             Err(refusal) => return Ok((Err(refusal), Outputs::default())),
         };
         let mut out = Outputs::default();
         if let Some(record) = &mut change.record {
-            let mut invalidated=Vec::new();
+            let mut invalidated = Vec::new();
             if registered {
-                let previous=self.jobs.get(&record.job.id).map(|j|&j.metadata);
-                for metadata in std::iter::once(&record.job.metadata).chain(previous){
-                    let (Some("claude"),Some(native),Some(tool))=(metadata["provider"].as_str(),metadata["native_session_id"].as_str(),metadata["tool_use_id"].as_str())else{continue;};
-                    let id=clarp_kernel::provider_tasks::job_id(&self.profile.agent_id,native,tool);
-                    if let Some(job)=self.jobs.get(&id).filter(|j|j.provider_owned()){
-                        let mut job=job.clone();
-                        job.revision=record.job.revision;
-                        record.job.revision=revision();
-                        invalidated.push(JobRecord{job,at_ms:now_ms,note:"Display projection changed; native task lifecycle unchanged".into(),timeline:true});
+                let previous = self.jobs.get(&record.job.id).map(|j| &j.metadata);
+                for metadata in std::iter::once(&record.job.metadata).chain(previous) {
+                    let (Some("claude"), Some(native), Some(tool)) = (
+                        metadata["provider"].as_str(),
+                        metadata["native_session_id"].as_str(),
+                        metadata["tool_use_id"].as_str(),
+                    ) else {
+                        continue;
+                    };
+                    let id =
+                        clarp_kernel::provider_tasks::job_id(&self.profile.agent_id, native, tool);
+                    if let Some(job) = self.jobs.get(&id).filter(|j| j.provider_owned()) {
+                        let mut job = job.clone();
+                        job.revision = record.job.revision;
+                        record.job.revision = revision();
+                        invalidated.push(JobRecord {
+                            job,
+                            at_ms: now_ms,
+                            note: "Display projection changed; native task lifecycle unchanged"
+                                .into(),
+                            timeline: true,
+                        });
                     }
                 }
-                change.job=Some(record.job.clone());
+                change.job = Some(record.job.clone());
             }
-            let mut batch=self.recorder.batch();
-            for entry in invalidated.iter().chain(std::iter::once(&*record)){
-                batch.item(record_item(kind::JOB,format!("j-{}",entry.job.id),entry,now_ms)?);
+            let mut batch = self.recorder.batch();
+            for entry in invalidated.iter().chain(std::iter::once(&*record)) {
+                batch.item(record_item(
+                    kind::JOB,
+                    format!("j-{}", entry.job.id),
+                    entry,
+                    now_ms,
+                )?);
             }
             batch.commit()?;
-            for entry in invalidated.iter().chain(std::iter::once(&*record)){
+            for entry in invalidated.iter().chain(std::iter::once(&*record)) {
                 self.jobs.apply(entry);
                 self.remember_job_event(entry);
             }
@@ -1886,10 +1916,18 @@ impl Actor {
         Ok((Ok(change), out))
     }
 
-    fn remember_job_event(&mut self,record:&JobRecord){
-        if record.timeline || !record.job.provider_owned(){self.job_events.push(JobEvent{id:record.job.id.clone(),revision:record.job.revision,at:record.at_ms});}
+    fn remember_job_event(&mut self, record: &JobRecord) {
+        if record.timeline || !record.job.provider_owned() {
+            self.job_events.push(JobEvent {
+                id: record.job.id.clone(),
+                revision: record.job.revision,
+                at: record.at_ms,
+            });
+        }
     }
-    pub fn take_job_events(&mut self)->Vec<JobEvent>{std::mem::take(&mut self.job_events)}
+    pub fn take_job_events(&mut self) -> Vec<JobEvent> {
+        std::mem::take(&mut self.job_events)
+    }
 
     /// The agent's goals and plans.
     pub fn goals(&self) -> &GoalBook {

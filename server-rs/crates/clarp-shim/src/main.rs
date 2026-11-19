@@ -654,21 +654,36 @@ fn run(args: Args) -> Result<u8, String> {
 }
 
 /// A hook is advisory. Invalid or oversized input produces no response.
-fn background_hook(agent:Option<String>){
-    const MAX_INPUT:u64=64*1024;
-    let Some(agent)=agent else{return;};
-    let mut bytes=Vec::new();
-    if std::io::stdin().lock().take(MAX_INPUT+1).read_to_end(&mut bytes).is_err() || bytes.len() as u64>MAX_INPUT{return;}
-    let Ok(payload)=serde_json::from_slice(&bytes) else{return;};
-    let managed=std::env::var_os("CLARP_PROVIDER_TURN").is_some_and(|value| !value.is_empty());
-    if let Some(reply)=clarp_provider_hook::background_hook(&agent,managed,&payload){
-        let _=serde_json::to_writer(std::io::stdout().lock(),&reply);
+fn background_hook(agent: Option<String>) {
+    const MAX_INPUT: u64 = 64 * 1024;
+    let Some(agent) = agent else {
+        return;
+    };
+    let mut bytes = Vec::new();
+    if std::io::stdin()
+        .lock()
+        .take(MAX_INPUT + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MAX_INPUT
+    {
+        return;
+    }
+    let Ok(payload) = serde_json::from_slice(&bytes) else {
+        return;
+    };
+    let managed = std::env::var_os("CLARP_PROVIDER_TURN").is_some_and(|value| !value.is_empty());
+    if let Some(reply) = clarp_provider_hook::background_hook(&agent, managed, &payload) {
+        let _ = serde_json::to_writer(std::io::stdout().lock(), &reply);
     }
 }
 
 fn main() -> ExitCode {
     let mut argv = std::env::args().skip(1).peekable();
-    if argv.peek().is_some_and(|word|word=="claude-background-hook"){
+    if argv
+        .peek()
+        .is_some_and(|word| word == "claude-background-hook")
+    {
         argv.next();
         background_hook(argv.next());
         return ExitCode::SUCCESS;

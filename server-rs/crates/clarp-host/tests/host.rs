@@ -37798,6 +37798,7 @@ fn read_push_token(bearer: &str, public: &[u8]) -> (Value, Value) {
 
 #[test]
 fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them() {
+    const TOKEN: &str = "fixture-admin";
     let place = Place::new("provider-observer");
     let cwd = place.root.join("work");
     let sid = "a10bafe2-20cd-4d3e-b884-8dacf57c5aa4";
@@ -37834,17 +37835,22 @@ fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them
     // The detached fixture acknowledges challenges even after its turn and
     // its Host end. A removed test place also releases the fixture.
     let detached = place.root.join("detached");
-    program(&detached, r#"#!/bin/sh
+    program(
+        &detached,
+        r#"#!/bin/sh
 cd "$1" || exit 1
 while [ -d "$1" ] && [ ! -f detached-end ]; do
     if [ -f challenge ]; then mv challenge answer; fi
     sleep 0.05
 done
-"#);
+"#,
+    );
     // This stand-in calls the hook named in the real launch settings.
     // It never executes the updated Bash command.
-    let probe=place.root.join("call-hook");
-    program(&probe,r#"#!/usr/bin/env python3
+    let probe = place.root.join("call-hook");
+    program(
+        &probe,
+        r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys
 settings=json.loads(sys.argv[sys.argv.index('--settings')+1])
 hook=settings['hooks']['PreToolUse'][0]
@@ -37863,12 +37869,18 @@ for invalid in (b'{',encoded.ljust(65537),json.dumps(dict(payload,tool_name='Rea
 reply=json.loads(invoke(json.dumps(payload).encode()))['hookSpecificOutput']
 assert set(reply)=={'updatedInput','additionalContext','hookEventName'}
 pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
-"#);
+"#,
+    );
     program(
         &fake,
         &format!(
             "#!/bin/sh\nread -r request\n'{}' \"$@\" || exit 1\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
-            probe.display(), detached.display(), place.root.display(), place.root.join("started").display(),place.root.display(),release.display()
+            probe.display(),
+            detached.display(),
+            place.root.display(),
+            place.root.join("started").display(),
+            place.root.display(),
+            release.display()
         ),
     );
     let env = [
@@ -37876,7 +37888,7 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
         ("CLARP_CLAUDE_PROGRAM", fake.to_str().unwrap()),
     ];
     let flags = ["--janitors-checked-every-ms", "100"];
-    let host = place.start_in("", &flags, &env);
+    let host = place.start_in(TOKEN, &flags, &env);
     let made = host.post(
         "/agents",
         json!({"backend":"claude","name":"Fixture","cwd":cwd,"resume_session_id":sid}),
@@ -37914,15 +37926,25 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     wait_for("the running managed task reaches the registry", || {
         job(&host, "managed")["status"] == "running"
     });
-    let hook:Value=serde_json::from_slice(&std::fs::read(place.root.join("hook-reply")).unwrap()).unwrap();
-    assert_eq!(hook["hookEventName"],"PreToolUse");
-    assert!(hook["additionalContext"].as_str().unwrap().contains("run_detached_job.sh --goal"));
-    let amended=hook["updatedInput"]["command"].as_str().unwrap();
-    let origin=amended.strip_prefix("export CLARP_BACKGROUND_ORIGIN='").unwrap().strip_suffix("'\nfixture").unwrap();
-    let origin_json:Value=serde_json::from_str(origin).unwrap();
-    assert_eq!(origin_json["agent_id"],job(&host,"managed")["agent_id"]);
-    assert_eq!(origin_json["native_session_id"],sid);
-    assert_eq!(origin_json["tool_use_id"],"managed");
+    let hook: Value =
+        serde_json::from_slice(&std::fs::read(place.root.join("hook-reply")).unwrap()).unwrap();
+    assert_eq!(hook["hookEventName"], "PreToolUse");
+    assert!(
+        hook["additionalContext"]
+            .as_str()
+            .unwrap()
+            .contains("run_detached_job.sh --goal")
+    );
+    let amended = hook["updatedInput"]["command"].as_str().unwrap();
+    let origin = amended
+        .strip_prefix("export CLARP_BACKGROUND_ORIGIN='")
+        .unwrap()
+        .strip_suffix("'\nfixture")
+        .unwrap();
+    let origin_json: Value = serde_json::from_str(origin).unwrap();
+    assert_eq!(origin_json["agent_id"], job(&host, "managed")["agent_id"]);
+    assert_eq!(origin_json["native_session_id"], sid);
+    assert_eq!(origin_json["tool_use_id"], "managed");
     let shown = job(&host, "managed");
     assert_eq!(shown["generation"], 1);
     assert_eq!(shown["kind"], "provider-task");
@@ -37935,60 +37957,114 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     let detail = host.get(&path);
     assert_eq!(detail["job"]["revision"], shown["revision"]);
     assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
+    // A limited device can inspect canonical state and progress, but the
+    // provider's output path and bytes are withheld before any file read.
+    let (limited, _) = pair(&host, "Task observer", "limited");
+    let (status, restricted) = host.ask_as(&limited, "GET", &path, None);
+    assert_eq!(status, 200);
+    assert_eq!(restricted["timeline"], detail["timeline"]);
+    assert_eq!(restricted["progress"], detail["progress"]);
+    assert_eq!(
+        restricted["log"],
+        json!({"path":"","available":false,"reason":"forbidden","text":"","size":0,"truncated":false})
+    );
     // A stale generation and an unsupported cancellation are separate
     // refusals and leave the job and its timeline at the same revision.
-    let (status,stale)=host.ask("DELETE",&format!("{path}?expected_generation=2"),None);
-    assert_eq!(status,409);
-    assert_eq!(stale["error"],"generation_mismatch");
-    assert_eq!(stale["expected_generation"],2);
-    assert_eq!(stale["current_generation"],1);
-    let (status,refusal)=host.ask("DELETE",&path,None);
-    assert_eq!(status,409);
-    assert_eq!(refusal["error"],"provider_task_cancel_unsupported");
-    assert_eq!(refusal["changed"],false);
-    assert_eq!(refusal["job_handle"],detail["handle"]);
-    assert_eq!(refusal["job"]["revision"],shown["revision"]);
-    assert_eq!(host.get(&path)["timeline"],detail["timeline"]);
+    let (status, stale) = host.ask("DELETE", &format!("{path}?expected_generation=2"), None);
+    assert_eq!(status, 409);
+    assert_eq!(stale["error"], "generation_mismatch");
+    assert_eq!(stale["expected_generation"], 2);
+    assert_eq!(stale["current_generation"], 1);
+    let (status, refusal) = host.ask("DELETE", &path, None);
+    assert_eq!(status, 409);
+    assert_eq!(refusal["error"], "provider_task_cancel_unsupported");
+    assert_eq!(refusal["changed"], false);
+    assert_eq!(refusal["job_handle"], detail["handle"]);
+    assert_eq!(refusal["job"]["revision"], shown["revision"]);
+    assert_eq!(host.get(&path)["timeline"], detail["timeline"]);
     // The origin exported by the hook links an explicit registration to
     // exactly this task. Detail stays canonical while live clients remove
     // the superseded row before they receive the new worker's event.
-    let events=host.listen();
-    let register=|host:&Host,raw:&str|{
-        let result=Command::new(env!("CARGO_BIN_EXE_clarp-host")).args(["tool","clarp-agent-bg",session,"job-upsert","linked-worker","fixture","Explicit job"])
-            .env_clear().env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
-            .env("CLARP_BACKGROUND_ORIGIN",raw).current_dir(&cwd).ended();
-        assert!(result.status.success(),"{}",String::from_utf8_lossy(&result.stderr));
+    let events = host.listen();
+    let register = |host: &Host, raw: &str| {
+        let result = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+            .args([
+                "tool",
+                "clarp-agent-bg",
+                session,
+                "job-upsert",
+                "linked-worker",
+                "fixture",
+                "Explicit job",
+            ])
+            .env_clear()
+            .env("HOME", &place.root)
+            .env("CLARP_HOST_ADDR", &host.address)
+            .env("CLARP_HOST_TOKEN", &host.token)
+            .env("CLARP_BACKGROUND_ORIGIN", raw)
+            .current_dir(&cwd)
+            .ended();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     };
-    let mut invalid=origin_json.clone();
-    invalid["agent_id"]=json!("someone-else");
-    register(&host,&invalid.to_string());
-    assert!(host.get("/background-jobs/linked-worker")["job"]["metadata"].get("tool_use_id").is_none());
-    register(&host,origin);
-    let event_id=shown["job_id"].as_str().unwrap();
-    wait_for("the registration follows its superseded native event",||{
-        let kept=events.lock().unwrap();
-        kept.iter().any(|e|e["job_id"]=="linked-worker" && e["job"]["metadata"]["tool_use_id"]=="managed")
-    });
-    let kept=events.lock().unwrap();
-    let mirrored=kept.iter().position(|e|e["job_id"]==event_id && e["status"]=="superseded").unwrap();
-    let explicit=kept.iter().position(|e|e["job_id"]=="linked-worker" && e["job"]["metadata"]["tool_use_id"]=="managed").unwrap();
-    assert!(mirrored<explicit);
-    let native_revision=kept[mirrored]["change_revision"].as_u64().unwrap();
-    let reg_revision=kept[explicit]["change_revision"].as_u64().unwrap();
-    assert!(shown["revision"].as_u64().unwrap()<native_revision && native_revision<reg_revision);
-    assert_eq!(kept[mirrored]["job"]["projection_only"],true);
-    assert_eq!(kept[mirrored]["job"]["replaced_by_job_id"],"linked-worker");
+    let mut invalid = origin_json.clone();
+    invalid["agent_id"] = json!("someone-else");
+    register(&host, &invalid.to_string());
+    assert!(
+        host.get("/background-jobs/linked-worker")["job"]["metadata"]
+            .get("tool_use_id")
+            .is_none()
+    );
+    register(&host, origin);
+    let event_id = shown["job_id"].as_str().unwrap();
+    wait_for(
+        "the registration follows its superseded native event",
+        || {
+            let kept = events.lock().unwrap();
+            kept.iter().any(|e| {
+                e["job_id"] == "linked-worker" && e["job"]["metadata"]["tool_use_id"] == "managed"
+            })
+        },
+    );
+    let kept = events.lock().unwrap();
+    let mirrored = kept
+        .iter()
+        .position(|e| e["job_id"] == event_id && e["status"] == "superseded")
+        .unwrap();
+    let explicit = kept
+        .iter()
+        .position(|e| {
+            e["job_id"] == "linked-worker" && e["job"]["metadata"]["tool_use_id"] == "managed"
+        })
+        .unwrap();
+    assert!(mirrored < explicit);
+    let native_revision = kept[mirrored]["change_revision"].as_u64().unwrap();
+    let reg_revision = kept[explicit]["change_revision"].as_u64().unwrap();
+    assert!(
+        shown["revision"].as_u64().unwrap() < native_revision && native_revision < reg_revision
+    );
+    assert_eq!(kept[mirrored]["job"]["projection_only"], true);
+    assert_eq!(kept[mirrored]["job"]["replaced_by_job_id"], "linked-worker");
     drop(kept);
-    let visible=|host:&Host|host.get("/background-jobs")["jobs"].as_array().unwrap().iter().any(|j|j["job_id"]==event_id);
+    let visible = |host: &Host| {
+        host.get("/background-jobs")["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|j| j["job_id"] == event_id)
+    };
     assert!(!visible(&host));
-    assert_eq!(host.get(&path)["job"]["status"],"running");
+    assert_eq!(host.get(&path)["job"]["status"], "running");
     host.kill();
     std::fs::write(&release, "end").unwrap();
-    let host = place.start_in("", &flags, &env);
+    let host = place.start_in(TOKEN, &flags, &env);
     assert!(!visible(&host));
     // Registering without an origin removes the link. A restart cannot
     // erase either display invalidation from the native task's timeline.
-    register(&host,"");
+    register(&host, "");
     assert!(visible(&host));
     wait_for("the exited attempt is reconciled after rejoin", || {
         job(&host, "managed")["metadata"]["stop_basis"] == "turn_exit"
@@ -38013,42 +38089,65 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     assert_eq!(settled["timeline"].as_array().unwrap().len(), 6);
     assert!(settled["job"]["metadata"].get("stop_basis").is_none());
     host.kill();
-    let host = place.start_in("", &flags, &env);
+    let host = place.start_in(TOKEN, &flags, &env);
     let restored = host.get(&path);
     assert_eq!(restored["timeline"], settled["timeline"]);
     assert_eq!(restored["job"]["revision"], settled["job"]["revision"]);
-    let challenge = |word:&str| {
-        let sent=place.root.join("challenge");
-        std::fs::write(&sent,word).unwrap();
-        wait_for("the detached child answers a new challenge",||std::fs::read_to_string(place.root.join("answer")).is_ok_and(|v|v==word));
+    let challenge = |word: &str| {
+        let sent = place.root.join("challenge");
+        std::fs::write(&sent, word).unwrap();
+        wait_for("the detached child answers a new challenge", || {
+            std::fs::read_to_string(place.root.join("answer")).is_ok_and(|v| v == word)
+        });
     };
     challenge("after the turn");
     host.kill();
-    let host=place.start_in("",&flags,&env);
+    let host = place.start_in(TOKEN, &flags, &env);
     challenge("after another Host restart");
-    std::fs::write(place.root.join("detached-end"),"").unwrap();
+    std::fs::write(place.root.join("detached-end"), "").unwrap();
 
     // Exercise the checked-in launcher against this isolated Host's real
     // tools. The test controls when the harmless command may finish.
-    let keeper=host.new_agent("Launcher");
-    host.send(&keeper,r#"{"session":"script-fixture"}"#,"bind-script");
-    wait_for("the launcher agent to be bound",||host.state(&keeper)=="done");
+    let keeper = host.new_agent("Launcher");
+    host.send(&keeper, r#"{"session":"script-fixture"}"#, "bind-script");
+    wait_for("the launcher agent to be bound", || {
+        host.state(&keeper) == "done"
+    });
     let commitment=json!({"outcome":"Receive the command result","criteria":["The fixture runs"],"limits":"Fixture only","enroll":true}).to_string();
-    let plan=goal(&host,&cwd,&["create",&keeper,"work","Read the result","[]",&commitment]);
-    let plan_id=plan["plan_id"].as_str().unwrap();
-    let bin=place.root.join("commands");
+    let plan = goal(
+        &host,
+        &cwd,
+        &[
+            "create",
+            &keeper,
+            "work",
+            "Read the result",
+            "[]",
+            &commitment,
+        ],
+    );
+    let plan_id = plan["plan_id"].as_str().unwrap();
+    let bin = place.root.join("commands");
     std::fs::create_dir(&bin).unwrap();
-    for name in ["clarp-agent-bg","clarp-goal"] {
-        let cli=env!("CARGO_BIN_EXE_clarp-host");
-        let stale=if name=="clarp-goal"{
-            format!("if [ \"$1\" = checkpoint ] && [ \"$FIXTURE_STALE_REVISION\" = yes ]; then exec '{cli}' tool clarp-goal checkpoint \"$2\" 999999 \"$4\"; fi\n")
-        }else{String::new()};
-        program(&bin.join(name),&format!("#!/bin/sh\n{stale}exec '{cli}' tool {name} \"$@\"\n"));
+    for name in ["clarp-agent-bg", "clarp-goal"] {
+        let cli = env!("CARGO_BIN_EXE_clarp-host");
+        let stale = if name == "clarp-goal" {
+            format!(
+                "if [ \"$1\" = checkpoint ] && [ \"$FIXTURE_STALE_REVISION\" = yes ]; then exec '{cli}' tool clarp-goal checkpoint \"$2\" 999999 \"$4\"; fi\n"
+            )
+        } else {
+            String::new()
+        };
+        program(
+            &bin.join(name),
+            &format!("#!/bin/sh\n{stale}exec '{cli}' tool {name} \"$@\"\n"),
+        );
     }
     // No user service manager is needed for this local launch.
-    program(&bin.join("systemctl"),"#!/bin/sh\nexit 1\n");
-    let launcher=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../skills/clarp-background-jobs/scripts/run_detached_job.sh");
-    let run=|id:&str,key:&str|{
+    program(&bin.join("systemctl"), "#!/bin/sh\nexit 1\n");
+    let launcher = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../skills/clarp-background-jobs/scripts/run_detached_job.sh");
+    let run = |id: &str, key: &str| {
         Command::new(&launcher)
             .args(["--goal",id,&keeper,key,"fixture","Fixture command"])
             .arg(cwd.join(format!("{key}.log"))).args(["--","sh","-c",
@@ -38059,32 +38158,59 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
             .env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
             .env("CLARP_HOST_TOKEN",&host.token).current_dir(&cwd).ended()
     };
-    let denied=run("nonexistent","unstarted");
-    assert_eq!(denied.status.code(),Some(4));
+    let denied = run("nonexistent", "unstarted");
+    assert_eq!(denied.status.code(), Some(4));
     assert!(!cwd.join("unstarted.started").exists());
-    assert_eq!(host.ask("GET","/background-jobs/unstarted",None).0,404);
+    assert_eq!(host.ask("GET", "/background-jobs/unstarted", None).0, 404);
     // The real goal store refuses this stale checkpoint after the worker
     // registered. The launcher must not release the underlying command.
-    let refused=run(plan_id,"refused-write");
-    assert_eq!(refused.status.code(),Some(3),"{}",String::from_utf8_lossy(&refused.stderr));
-    wait_for("the refused launch closes its registered job",||host.get("/background-jobs/refused-write")["job"]["status"]=="failed");
+    let refused = run(plan_id, "refused-write");
+    assert_eq!(
+        refused.status.code(),
+        Some(3),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    wait_for("the refused launch closes its registered job", || {
+        host.get("/background-jobs/refused-write")["job"]["status"] == "failed"
+    });
     assert!(!cwd.join("refused-write.started").exists());
-    let started=run(plan_id,"held-command");
-    assert_eq!(started.status.code(),Some(0),"{}",String::from_utf8_lossy(&started.stderr));
-    let handle=String::from_utf8(started.stdout).unwrap();
-    assert_eq!(handle.trim(),"bg1:1:held-command");
-    let registered=host.get("/background-jobs/held-command");
-    assert_eq!(registered["job"]["status"],"running");
-    assert!(registered["job"]["worker_pid"].as_u64().is_some_and(|pid|pid>0));
-    let waiting=goal(&host,&cwd,&["get",plan_id]);
-    assert_eq!(waiting["goal"]["continuation"]["job_handle"],handle.trim());
-    assert_eq!(waiting["goal"]["continuation"]["state"],"waiting");
-    std::fs::write(cwd.join("allow-end"),"").unwrap();
-    wait_for("the goal wakes its agent on the command result",||host.conversation(&keeper).iter().any(|(role,text)|role=="user" && text.starts_with("Continue your durable outcome commitment.")));
-    let settled=goal(&host,&cwd,&["get",plan_id]);
-    assert_eq!(settled["goal"]["continuation"]["dependency_result"]["outcome"],"succeeded");
-    assert_eq!(std::fs::read_to_string(cwd.join("held-command.log.exit")).unwrap().trim(),"0");
-
+    let started = run(plan_id, "held-command");
+    assert_eq!(
+        started.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let handle = String::from_utf8(started.stdout).unwrap();
+    assert_eq!(handle.trim(), "bg1:1:held-command");
+    let registered = host.get("/background-jobs/held-command");
+    assert_eq!(registered["job"]["status"], "running");
+    assert!(
+        registered["job"]["worker_pid"]
+            .as_u64()
+            .is_some_and(|pid| pid > 0)
+    );
+    let waiting = goal(&host, &cwd, &["get", plan_id]);
+    assert_eq!(waiting["goal"]["continuation"]["job_handle"], handle.trim());
+    assert_eq!(waiting["goal"]["continuation"]["state"], "waiting");
+    std::fs::write(cwd.join("allow-end"), "").unwrap();
+    wait_for("the goal wakes its agent on the command result", || {
+        host.conversation(&keeper).iter().any(|(role, text)| {
+            role == "user" && text.starts_with("Continue your durable outcome commitment.")
+        })
+    });
+    let settled = goal(&host, &cwd, &["get", plan_id]);
+    assert_eq!(
+        settled["goal"]["continuation"]["dependency_result"]["outcome"],
+        "succeeded"
+    );
+    assert_eq!(
+        std::fs::read_to_string(cwd.join("held-command.log.exit"))
+            .unwrap()
+            .trim(),
+        "0"
+    );
 }
 
 #[test]

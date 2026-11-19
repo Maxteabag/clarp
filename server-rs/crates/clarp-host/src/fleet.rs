@@ -1586,7 +1586,7 @@ impl Fleet {
                         owner = self
                             .members
                             .iter()
-                            .find(|m|m.agent.view().provider_mirrors.contains_key(&job_id))
+                            .find(|m| m.agent.view().provider_mirrors.contains_key(&job_id))
                             .map(|m| m.record.agent_id.clone());
                         if let Some(id) = &owner {
                             self.jobs.insert(job_id, id.clone());
@@ -2726,7 +2726,10 @@ pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
             .jobs
             .iter()
             .filter(|job| job.status.is_active())
-            .filter(|job| !view.mirrored_provider(&job.id) && wire::mirrored_helper(job, &helper_sessions).is_none());
+            .filter(|job| {
+                !view.mirrored_provider(&job.id)
+                    && wire::mirrored_helper(job, &helper_sessions).is_none()
+            });
         let last_job = view.jobs.iter().map(|job| job.updated_at_ms).max();
         let last_turn = view.status.last.as_ref().map(|last| last.ended_at_ms);
         helpers::Doing {

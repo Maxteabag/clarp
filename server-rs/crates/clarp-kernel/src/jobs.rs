@@ -347,16 +347,25 @@ pub struct JobBook {
     jobs: BTreeMap<String, Job>,
     /// The jobs whose silence has been remarked on, until they are heard from again.
     remarked: BTreeSet<String>,
-    first_seen:BTreeMap<String,u64>,
-    registered:BTreeMap<OriginKey,BTreeSet<(u64,String)>>,
+    first_seen: BTreeMap<String, u64>,
+    registered: BTreeMap<OriginKey, BTreeSet<(u64, String)>>,
 }
 
 // The registration order is stable across replay, even when a registration
 // later acquires or changes its native origin.
-type OriginKey=(String,String,String);
-fn origin_key(metadata:&Value)->Option<OriginKey>{
-    let part=|k:&str|metadata[k].as_str().filter(|v|!v.is_empty()).map(str::to_owned);
-    Some((part("provider")?,part("native_session_id")?,part("tool_use_id")?))
+type OriginKey = (String, String, String);
+fn origin_key(metadata: &Value) -> Option<OriginKey> {
+    let part = |k: &str| {
+        metadata[k]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    Some((
+        part("provider")?,
+        part("native_session_id")?,
+        part("tool_use_id")?,
+    ))
 }
 
 impl JobBook {
@@ -377,9 +386,14 @@ impl JobBook {
         self.jobs.values().filter(|job| job.status.is_active())
     }
 
-    pub fn provider_replacement(&self,job:&Job)->Option<&str>{
-        if !job.provider_owned(){return None;}
-        self.registered.get(&origin_key(&job.metadata)?)?.first().map(|(_,id)|id.as_str())
+    pub fn provider_replacement(&self, job: &Job) -> Option<&str> {
+        if !job.provider_owned() {
+            return None;
+        }
+        self.registered
+            .get(&origin_key(&job.metadata)?)?
+            .first()
+            .map(|(_, id)| id.as_str())
     }
     /// Takes a record that is in the log.
     pub fn apply(&mut self, record: &JobRecord) {
@@ -395,16 +409,28 @@ impl JobBook {
         } else if job.status.is_terminal() || !record.note.is_empty() {
             self.remarked.remove(&job.id);
         }
-        if !job.provider_owned(){
-            let first=*self.first_seen.entry(job.id.clone()).or_insert(job.revision);
-            let old=self.get(&job.id).and_then(|j|origin_key(&j.metadata));
-            let new=origin_key(&job.metadata);
-            if old!=new {
-                if let Some(key)=old && let Some(candidates)=self.registered.get_mut(&key){
-                    candidates.remove(&(first,job.id.clone()));
-                    if candidates.is_empty(){self.registered.remove(&key);}
+        if !job.provider_owned() {
+            let first = *self
+                .first_seen
+                .entry(job.id.clone())
+                .or_insert(job.revision);
+            let old = self.get(&job.id).and_then(|j| origin_key(&j.metadata));
+            let new = origin_key(&job.metadata);
+            if old != new {
+                if let Some(key) = old
+                    && let Some(candidates) = self.registered.get_mut(&key)
+                {
+                    candidates.remove(&(first, job.id.clone()));
+                    if candidates.is_empty() {
+                        self.registered.remove(&key);
+                    }
                 }
-                if let Some(key)=new{self.registered.entry(key).or_default().insert((first,job.id.clone()));}
+                if let Some(key) = new {
+                    self.registered
+                        .entry(key)
+                        .or_default()
+                        .insert((first, job.id.clone()));
+                }
             }
         }
         self.jobs.insert(job.id.clone(), job);

@@ -7,8 +7,8 @@ publish.workspace = true
 
 [dependencies]
 clarp-child.workspace = true
-clarp-provider-hook.workspace = true
 clarp-tool-args.workspace = true
+clarp-provider-hook.workspace = true
 clarp-ports.workspace = true
 clarp-speech.workspace = true
 http.workspace = true
