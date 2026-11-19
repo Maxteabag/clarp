@@ -225,7 +225,9 @@ def _verified_file_mime(blob: bytes, declared: str) -> str:
 
 
 def _extension(name: str, mime: str) -> str:
-    ext = pathlib.PurePath(name).suffix.lower()
+    # A name ending in a dot has no extension: CPython 3.14 gives such a name the suffix "."
+    # where 3.12 and 3.13 give none; the Host answers the same on each (R90).
+    ext = "" if name.endswith(".") else pathlib.PurePath(name).suffix.lower()
     if ext and all(c.isalnum() or c == "." for c in ext):
         return ext[:12]
     guessed = mimetypes.guess_extension(mime) or ".img"
