@@ -195,10 +195,12 @@ def test_structured_fallback_runs_on_every_provider(backend, monkeypatch, tmp_pa
     script = tmp_path / "cli"
     script.write_text('#!/bin/sh\necho \'{"answer":"from ' + backend + '"}\'\n')
     script.chmod(0o755)
+    # The class, not the shared instance: undoing an instance patch leaves the bound method ON
+    # the instance, where it shadows every later class patch (test_routing_input's stub).
     monkeypatch.setattr(
-        runner, "routing_cmd", lambda prompt, **kw: [str(script), prompt]
+        type(runner), "routing_cmd", lambda self, prompt, **kw: [str(script), prompt]
     )
-    monkeypatch.setattr(runner, "routing_text", lambda stdout: stdout)
+    monkeypatch.setattr(type(runner), "routing_text", lambda self, stdout: stdout)
     assert fallback.json_call(
         {"backend": backend, "model": "m", "effort": ""}, "explain", ANSWER_SCHEMA
     ) == {"answer": f"from {backend}"}
@@ -213,7 +215,7 @@ def test_structured_fallback_reports_a_dead_provider_as_a_provider_failure(
     script = tmp_path / "cli"
     script.write_text("#!/bin/sh\necho 'fetch failed' >&2\nexit 1\n")
     script.chmod(0o755)
-    monkeypatch.setattr(runner, "routing_cmd", lambda prompt, **kw: [str(script)])
+    monkeypatch.setattr(type(runner), "routing_cmd", lambda self, prompt, **kw: [str(script)])
     with pytest.raises(fallback.ProviderFailure) as raised:
         fallback.json_call(
             {"backend": "codex", "model": "m", "effort": ""}, "x", ANSWER_SCHEMA

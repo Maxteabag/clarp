@@ -427,3 +427,15 @@ def test_the_attempt_rows_keep_the_failures_type_name(monkeypatch):
         return {"kind": "ok"}
     assert model_fallbacks.execute("agent", "request", primary, invoke) == {"kind": "ok"}
     assert reasons == ["TimeoutExpired"]
+
+
+def test_the_stub_still_answers_after_the_fallback_tests_ran_in_the_same_session():
+    """test_model_fallbacks used to patch the shared runner INSTANCE; monkeypatch's undo then left
+    the real routing_text on it, shadowing this file's class patch whenever that file ran first."""
+    import subprocess as sp
+    here = pathlib.Path(__file__)
+    ran = sp.run([sys.executable, "-m", "pytest", "-q", "-n0", "-p", "no:cacheprovider", "-o", "addopts=",
+                  str(here.with_name("test_model_fallbacks.py")) + "::test_structured_fallback_runs_on_every_provider",
+                  str(here) + "::test_the_routing_prompt_never_stands_on_the_command_line"],
+                 cwd=here.parents[2], capture_output=True, text=True, timeout=300)
+    assert ran.returncode == 0, ran.stdout[-2000:]

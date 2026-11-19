@@ -223,7 +223,7 @@ def test_a_refusal_that_repeats_its_prompt_is_still_a_refusal_not_a_fallback(fai
         model_fallbacks.json_call({"backend": "claude", "model": ""}, f"{START} the secret plan", SCHEMA)
     failure = caught.value
     assert START not in str(failure) and "permission denied" not in str(failure)   # the words go
-    assert failure.denied is True                                                  # the fact stays
+    assert getattr(failure, "denied", None) is True                               # the fact stays
     assert model_fallbacks._as_provider_failure(failure) is None
     assert model_fallbacks.is_provider_failure(failure) is False
 
@@ -234,5 +234,5 @@ def test_every_backends_exit_is_named_by_its_facts(failing, provider):
     failing("whole")
     with pytest.raises(model_fallbacks.ProviderFailure) as caught:
         model_fallbacks.json_call({"backend": provider, "model": ""}, f"{START} the plan", SCHEMA)
-    assert (caught.value.backend, caught.value.returncode) == (provider, 3)
+    assert (getattr(caught.value, "backend", None), getattr(caught.value, "returncode", None)) == (provider, 3)
     assert goal_keeper.error_code(caught.value) == f"{provider}_exit_3"
