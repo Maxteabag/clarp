@@ -56,19 +56,54 @@ pub fn job_id(given: Option<&str>) -> Result<String, &'static str> {
 /// What makes two requests the same job: the clip, what it says it is, the engine that was
 /// asked for and whether it was said hands-free.
 pub fn fingerprint(audio: &[u8], content_type: &str, model: &str, hands_free: bool) -> String {
+    scoped_fingerprint(audio, content_type, model, hands_free, None)
+}
+
+/// R87: retain every byte of chat identity. A call adds a distinct suffix and three
+/// UTF-8 netstrings so punctuation, digits and multibyte session names remain unambiguous.
+pub fn scoped_fingerprint(
+    audio: &[u8],
+    content_type: &str,
+    model: &str,
+    hands_free: bool,
+    scope: Option<&crate::call_transcription::Scope>,
+) -> String {
     let mut digest = Sha256::new();
-    digest.update(audio);
-    digest.update([0]);
-    digest.update(content_type.as_bytes());
-    digest.update([0]);
-    digest.update(model.as_bytes());
-    digest.update([0]);
-    digest.update(if hands_free { b"1" } else { b"0" });
+    fingerprint_input(audio, content_type, model, hands_free, scope, |bytes| {
+        digest.update(bytes)
+    });
     digest
         .finalize()
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// Stream the canonical input without allocating a second copy of the uploaded audio.
+pub fn fingerprint_input(
+    audio: &[u8],
+    content_type: &str,
+    model: &str,
+    hands_free: bool,
+    scope: Option<&crate::call_transcription::Scope>,
+    mut write: impl FnMut(&[u8]),
+) {
+    write(audio);
+    write(&[0]);
+    write(content_type.as_bytes());
+    write(&[0]);
+    write(model.as_bytes());
+    write(&[0]);
+    write(if hands_free { b"1" } else { b"0" });
+    if let Some(scope) = scope {
+        write(b"\0call\0");
+        for part in [&scope.principal, &scope.call_id, &scope.session] {
+            write(part.len().to_string().as_bytes());
+            write(b":");
+            write(part.as_bytes());
+            write(b",");
+        }
+    }
 }
 
 /// Whether a header says yes.
