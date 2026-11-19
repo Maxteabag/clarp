@@ -246,3 +246,28 @@ fn a_request_is_one_run_claimed_once_and_answered_once_as_on_the_python_host() {
     let read: Book = serde_json::from_str(&written).unwrap();
     assert_eq!(read, book);
 }
+
+#[test]
+fn the_history_takes_what_the_python_host_takes_the_answer_of_a_routing_run_too() {
+    let vectors = vectors();
+    let cases = vectors["fits"].as_array().unwrap();
+    for case in cases {
+        let value = &case["value"];
+        assert_eq!(demand::fits(value), case["fits"] == true, "{value}");
+    }
+    // Every name the Python Host's history knows has its case, the answer's three among them.
+    let named: Vec<&str> = vectors["said"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|name| name.as_str().unwrap())
+        .collect();
+    for name in ["answer_session", "answer_dispatch", "answer_status"] {
+        assert!(named.contains(&name), "{name}");
+    }
+    for name in &named {
+        let alone = json!({ (*name): "x" });
+        assert!(cases.iter().any(|case| case["value"] == alone), "{name}");
+    }
+    assert_eq!(cases.len(), named.len() + 18);
+}

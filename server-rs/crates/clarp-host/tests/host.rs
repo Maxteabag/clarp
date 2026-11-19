@@ -11036,7 +11036,9 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
     );
 
     // The model is not sure enough: the message is held, its user is asked, nobody is
-    // given it. The next question shows what Anna was told, and what is held.
+    // given it. The next question shows what Anna was told, and what is held. Nothing was
+    // delivered: the answer names the agent spoken to, and what was decided the agent the model
+    // named.
     let (status, unsure) = dictate("maybe ship it", "r-2");
     let decided = &unsure["orchestrator"];
     assert_eq!(
@@ -11044,11 +11046,25 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
             status,
             &unsure["session"],
             &decided["action"],
-            &decided["decision"]["kind"]
+            &decided["decision"]["kind"],
+            &decided["decision"]["target_session"]
         ),
-        (200, &json!("anna"), &json!("clarify"), &json!("clarify")),
+        (
+            200,
+            &json!(mike),
+            &json!("clarify"),
+            &json!("clarify"),
+            &json!("anna")
+        ),
         "{unsure}"
     );
+    wait_for("the apps to be told of the question", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "orchestrator-decision"
+                && event["action"] == "clarify"
+                && event["target_session"] == "anna"
+        })
+    });
     assert_eq!(told_by_people(&anna), 1);
     let (status, yes) = dictate("yes", "r-3");
     assert_eq!(
@@ -11182,6 +11198,19 @@ fn a_message_dictated_hands_free_is_shown_to_the_router_when_it_is_on() {
     let host = place.start_in("", &[], &world);
     let kept = host.get("/orchestrator/decisions");
     assert_eq!(kept["decisions"].as_array().unwrap().len(), 6);
+    // The question sent again is answered what it was answered first, from what its run's
+    // receipt kept, and no model is asked.
+    let before = questions().len();
+    let again = json!({
+        "session": mike, "text": "maybe ship it", "hands_free": true, "client_msg_id": "r-2",
+    });
+    let (status, sent) = host.ask("POST", "/send", Some(&again));
+    assert_eq!(
+        (status, &sent["session"], &sent["orchestrator"]["action"]),
+        (200, &json!(mike), &json!("clarify")),
+        "{sent}"
+    );
+    assert_eq!(questions().len(), before);
     let screen = host.get("/orchestrator/settings");
     assert_eq!(
         (
