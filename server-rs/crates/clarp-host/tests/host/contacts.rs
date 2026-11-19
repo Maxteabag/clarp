@@ -256,23 +256,39 @@ fn launches_and_assignments_at_once_each_take_a_contact_of_their_own() {
         names
     };
     for (what, asked) in [
-        ("auto_contact", json!({ "backend": "claude", "auto_contact": true })),
-        ("mint_contact", json!({ "backend": "claude", "mint_contact": true })),
+        (
+            "auto_contact",
+            json!({ "backend": "claude", "auto_contact": true }),
+        ),
+        (
+            "mint_contact",
+            json!({ "backend": "claude", "mint_contact": true }),
+        ),
     ] {
-        let asks = (0..AT_ONCE).map(|_| ("/agents".to_string(), asked.clone())).collect();
+        let asks = (0..AT_ONCE)
+            .map(|_| ("/agents".to_string(), asked.clone()))
+            .collect();
         distinct(&all_at_once(asks), what);
     }
     // Running agents of no contact of their own, each assigned one automatically at once: the
     // pool of their tool holds one free contact, and the others are minted, each its own.
     let sessions: Vec<String> = (0..AT_ONCE)
         .map(|n| {
-            let made = host.post("/agents", json!({ "name": format!("Worker {n}"), "backend": "scripted" }));
+            let made = host.post(
+                "/agents",
+                json!({ "name": format!("Worker {n}"), "backend": "scripted" }),
+            );
             made["session"].as_str().unwrap().to_string()
         })
         .collect();
     let asks = sessions
         .iter()
-        .map(|session| ("/agent-assign".to_string(), json!({ "session": session, "mode": "auto" })))
+        .map(|session| {
+            (
+                "/agent-assign".to_string(),
+                json!({ "session": session, "mode": "auto" }),
+            )
+        })
         .collect();
     distinct(&all_at_once(asks), "agent-assign auto");
 }
