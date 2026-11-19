@@ -35846,85 +35846,132 @@ fn read_push_token(bearer: &str, public: &[u8]) -> (Value, Value) {
 
 #[test]
 fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them() {
-    let place=Place::new("provider-observer");
-    let cwd=place.root.join("work");
-    let sid="a10bafe2-20cd-4d3e-b884-8dacf57c5aa4";
-    let project=place.root.join(".claude/projects").join(clarp_backend::past::claude_project(cwd.to_str().unwrap()));
+    let place = Place::new("provider-observer");
+    let cwd = place.root.join("work");
+    let sid = "a10bafe2-20cd-4d3e-b884-8dacf57c5aa4";
+    let project = place
+        .root
+        .join(".claude/projects")
+        .join(clarp_backend::past::claude_project(cwd.to_str().unwrap()));
     std::fs::create_dir_all(&project).unwrap();
-    let parent=project.join(format!("{sid}.jsonl"));
-    let launch=|tool:&str,time:&str|json!({"type":"assistant","timestamp":time,"sessionId":sid,
-        "message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":tool,"input":{"run_in_background":true,"description":"Check password=fixture"}}]}});
-    let receipt=|tool:&str,time:&str|json!({"type":"user","timestamp":time,"sessionId":sid,
-        "message":{"content":[{"type":"tool_result","tool_use_id":tool}]},"toolUseResult":{"backgroundTaskId":"fixture-child"}});
-    std::fs::write(&parent,format!("{}\n",launch("pre-binding","2000-01-01T00:00:00Z"))).unwrap();
-    let append=|row:&Value|{
-        let mut file=std::fs::OpenOptions::new().append(true).open(&parent).unwrap();
-        writeln!(file,"{row}").unwrap();
+    let parent = project.join(format!("{sid}.jsonl"));
+    let launch = |tool: &str, time: &str| {
+        json!({"type":"assistant","timestamp":time,"sessionId":sid,
+        "message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":tool,"input":{"run_in_background":true,"description":"Check password=fixture"}}]}})
     };
-    let fake=place.root.join("fixture-claude");
-    let release=place.root.join("release");
-    let init=json!({"type":"system","subtype":"init","session_id":sid});
-    let done=json!({"type":"result","subtype":"success","session_id":sid,"result":"Done."});
-    program(&fake,&format!("#!/bin/sh\nread -r request\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",place.root.join("started").display(),release.display()));
-    let env=[("HOME",place.root.to_str().unwrap()),("CLARP_CLAUDE_PROGRAM",fake.to_str().unwrap())];
-    let flags=["--janitors-checked-every-ms","100"];
-    let host=place.start_in("",&flags,&env);
-    let made=host.post("/agents",json!({"backend":"claude","name":"Fixture","cwd":cwd,"resume_session_id":sid}));
-    let session=made["session"].as_str().unwrap();
-    let job=|host:&Host,tool:&str|host.get("/background-jobs")["jobs"].as_array().unwrap().iter()
-        .find(|j|j["session"]==session && j["metadata"]["tool_use_id"]==tool).cloned().unwrap_or(Value::Null);
+    let receipt = |tool: &str, time: &str| {
+        json!({"type":"user","timestamp":time,"sessionId":sid,
+        "message":{"content":[{"type":"tool_result","tool_use_id":tool}]},"toolUseResult":{"backgroundTaskId":"fixture-child"}})
+    };
+    std::fs::write(
+        &parent,
+        format!("{}\n", launch("pre-binding", "2000-01-01T00:00:00Z")),
+    )
+    .unwrap();
+    let append = |row: &Value| {
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&parent)
+            .unwrap();
+        writeln!(file, "{row}").unwrap();
+    };
+    let fake = place.root.join("fixture-claude");
+    let release = place.root.join("release");
+    let init = json!({"type":"system","subtype":"init","session_id":sid});
+    let done = json!({"type":"result","subtype":"success","session_id":sid,"result":"Done."});
+    program(
+        &fake,
+        &format!(
+            "#!/bin/sh\nread -r request\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
+            place.root.join("started").display(),
+            release.display()
+        ),
+    );
+    let env = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", fake.to_str().unwrap()),
+    ];
+    let flags = ["--janitors-checked-every-ms", "100"];
+    let host = place.start_in("", &flags, &env);
+    let made = host.post(
+        "/agents",
+        json!({"backend":"claude","name":"Fixture","cwd":cwd,"resume_session_id":sid}),
+    );
+    let session = made["session"].as_str().unwrap();
+    let job = |host: &Host, tool: &str| {
+        host.get("/background-jobs")["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|j| j["session"] == session && j["metadata"]["tool_use_id"] == tool)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
     // The bound native runtime can receive evidence without a shim. Its
     // earlier history and uncorrelated tool results cannot create jobs.
-    let stamp=||clarp_host::wire::iso(now_ms()+1);
-    append(&receipt("unclaimed",&stamp()));
-    append(&launch("terminal",&stamp()));
-    append(&receipt("terminal",&stamp()));
-    wait_for("the idle binding sees a native receipt",||job(&host,"terminal")["status"]=="running");
-    assert!(job(&host,"pre-binding").is_null());
-    assert!(job(&host,"unclaimed").is_null());
+    let stamp = || clarp_host::wire::iso(now_ms() + 1);
+    append(&receipt("unclaimed", &stamp()));
+    append(&launch("terminal", &stamp()));
+    append(&receipt("terminal", &stamp()));
+    wait_for("the idle binding sees a native receipt", || {
+        job(&host, "terminal")["status"] == "running"
+    });
+    assert!(job(&host, "pre-binding").is_null());
+    assert!(job(&host, "unclaimed").is_null());
     // A managed turn has a separate launch identity. Only its unfinished
     // tasks stop at its exit, even when the Host restarts during that turn.
-    host.send(session,"Run the fixture","native-turn");
-    wait_for("the stand-in received the turn",||place.root.join("started").is_file());
-    let time=stamp();
-    append(&launch("managed",&time));
-    append(&receipt("managed",&time));
-    wait_for("the running managed task reaches the registry",||job(&host,"managed")["status"]=="running");
-    let shown=job(&host,"managed");
-    assert_eq!(shown["generation"],1);
-    assert_eq!(shown["kind"],"provider-task");
-    assert_eq!(shown["heartbeat_source"],"provider_event");
+    host.send(session, "Run the fixture", "native-turn");
+    wait_for("the stand-in received the turn", || {
+        place.root.join("started").is_file()
+    });
+    let time = stamp();
+    append(&launch("managed", &time));
+    append(&receipt("managed", &time));
+    wait_for("the running managed task reaches the registry", || {
+        job(&host, "managed")["status"] == "running"
+    });
+    let shown = job(&host, "managed");
+    assert_eq!(shown["generation"], 1);
+    assert_eq!(shown["kind"], "provider-task");
+    assert_eq!(shown["heartbeat_source"], "provider_event");
     assert!(shown["heartbeat_at"].is_null() && shown["worker_pid"].is_null());
-    assert_eq!(shown["worker_freshness"],"unknown");
-    assert_eq!(shown["can_cancel"],false);
-    assert_eq!(shown["title"],"Check password=[redacted]");
-    let path=format!("/background-jobs/{}",shown["job_id"].as_str().unwrap());
-    let detail=host.get(&path);
-    assert_eq!(detail["job"]["revision"],shown["revision"]);
-    assert_eq!(detail["timeline"].as_array().unwrap().len(),2);
+    assert_eq!(shown["worker_freshness"], "unknown");
+    assert_eq!(shown["can_cancel"], false);
+    assert_eq!(shown["title"], "Check password=[redacted]");
+    let path = format!("/background-jobs/{}", shown["job_id"].as_str().unwrap());
+    let detail = host.get(&path);
+    assert_eq!(detail["job"]["revision"], shown["revision"]);
+    assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
     host.kill();
-    std::fs::write(&release,"end").unwrap();
-    let host=place.start_in("",&flags,&env);
-    wait_for("the exited attempt is reconciled after rejoin",||job(&host,"managed")["metadata"]["stop_basis"]=="turn_exit");
-    let stopped=job(&host,"managed");
-    assert_eq!(stopped["outcome_state"],"unknown");
-    assert_eq!(stopped["status"],"failed");
-    assert!(job(&host,"terminal")["terminal_at"].is_null());
+    std::fs::write(&release, "end").unwrap();
+    let host = place.start_in("", &flags, &env);
+    wait_for("the exited attempt is reconciled after rejoin", || {
+        job(&host, "managed")["metadata"]["stop_basis"] == "turn_exit"
+    });
+    let stopped = job(&host, "managed");
+    assert_eq!(stopped["outcome_state"], "unknown");
+    assert_eq!(stopped["status"], "failed");
+    assert!(job(&host, "terminal")["terminal_at"].is_null());
     // A late completion for the wrong task is powerless. The receipted
     // task settles the inferred stop once, including after another restart.
-    let finish=|task:&str|json!({"type":"queue-operation","timestamp":stamp(),"content":format!(
-        "<task-notification><tool-use-id>managed</tool-use-id><task-id>{task}</task-id><status>completed</status></task-notification>")});
+    let finish = |task: &str| {
+        json!({"type":"queue-operation","timestamp":stamp(),"content":format!(
+        "<task-notification><tool-use-id>managed</tool-use-id><task-id>{task}</task-id><status>completed</status></task-notification>")})
+    };
     append(&finish("foreign"));
     append(&finish("fixture-child"));
-    wait_for("the exact task receipt supersedes the inferred stop",||job(&host,"managed")["status"]=="succeeded");
-    let settled=host.get(&path);
-    assert_eq!(settled["timeline"].as_array().unwrap().len(),4);
+    wait_for(
+        "the exact task receipt supersedes the inferred stop",
+        || job(&host, "managed")["status"] == "succeeded",
+    );
+    let settled = host.get(&path);
+    assert_eq!(settled["timeline"].as_array().unwrap().len(), 4);
     assert!(settled["job"]["metadata"].get("stop_basis").is_none());
     host.kill();
-    let host=place.start_in("",&flags,&env);
-    let restored=host.get(&path);
-    assert_eq!(restored["timeline"],settled["timeline"]);
-    assert_eq!(restored["job"]["revision"],settled["job"]["revision"]);
+    let host = place.start_in("", &flags, &env);
+    let restored = host.get(&path);
+    assert_eq!(restored["timeline"], settled["timeline"]);
+    assert_eq!(restored["job"]["revision"], settled["job"]["revision"]);
 }
 
 #[test]

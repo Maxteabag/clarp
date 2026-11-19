@@ -128,7 +128,9 @@ pub struct Job {
 }
 
 impl Job {
-    pub fn provider_owned(&self)->bool{self.heartbeat_source=="provider_event"}
+    pub fn provider_owned(&self) -> bool {
+        self.heartbeat_source == "provider_event"
+    }
     /// The name a worker is given for its run: what it reports under.
     pub fn handle(&self) -> String {
         format!("bg1:{}:{}", self.generation, self.id)
@@ -142,7 +144,13 @@ impl Job {
     /// What became of the work, as far as anyone knows: `pending` while it runs, `unknown`
     /// when its worker was lost, else the status it ended with.
     pub fn outcome_state(&self) -> &'static str {
-        if self.lost() || self.provider_owned() && matches!(self.metadata["provider_state"].as_str(),Some("stopped"|"unknown")) {
+        if self.lost()
+            || self.provider_owned()
+                && matches!(
+                    self.metadata["provider_state"].as_str(),
+                    Some("stopped" | "unknown")
+                )
+        {
             "unknown"
         } else if self.status.is_active() {
             "pending"
@@ -425,11 +433,20 @@ impl JobBook {
         now_ms: i64,
         revision: u64,
     ) -> Result<JobChange, JobRefusal> {
-        let target=match &command{
-            JobCommand::Register{id,..}|JobCommand::Start{id,..}|JobCommand::Heartbeat{id,..}|JobCommand::Finish{id,..}
-            |JobCommand::Cancel{id,..}|JobCommand::Progress{id,..}|JobCommand::SetLog{id,..}|JobCommand::Note{id,..}|JobCommand::Lose{id,..}=>id,
+        let target = match &command {
+            JobCommand::Register { id, .. }
+            | JobCommand::Start { id, .. }
+            | JobCommand::Heartbeat { id, .. }
+            | JobCommand::Finish { id, .. }
+            | JobCommand::Cancel { id, .. }
+            | JobCommand::Progress { id, .. }
+            | JobCommand::SetLog { id, .. }
+            | JobCommand::Note { id, .. }
+            | JobCommand::Lose { id, .. } => id,
         };
-        if target.trim().starts_with(RESERVED_PREFIX){return Err(JobRefusal::ReservedId);}
+        if target.trim().starts_with(RESERVED_PREFIX) {
+            return Err(JobRefusal::ReservedId);
+        }
         match command {
             JobCommand::Register {
                 id,

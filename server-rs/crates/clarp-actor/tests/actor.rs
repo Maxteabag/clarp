@@ -2003,114 +2003,220 @@ fn what_an_agent_last_finished_for_its_user_is_the_end_of_the_turn_their_newest_
 }
 
 #[test]
-fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(){
-    use clarp_kernel::provider_tasks::{self as rules,Attempt,Cursor,FinalRead,Visit};
+fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads() {
     use clarp_kernel::jobs::JobStatus;
-    let mut world=World::new("native-task");
-    use clarp_ports::log::{AgentLog,Item,Kinds,LogError,NewItem,Seq};
-    struct FailFirstNativeWrite(Box<dyn AgentLog>,bool);
+    use clarp_kernel::provider_tasks::{self as rules, Attempt, Cursor, FinalRead, Visit};
+    let mut world = World::new("native-task");
+    use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
+    struct FailFirstNativeWrite(Box<dyn AgentLog>, bool);
     impl AgentLog for FailFirstNativeWrite {
-        fn append(&mut self,items:&[NewItem])->Result<Seq,LogError>{
-            if self.1 && items.iter().any(|i|i.kind==kind::PROVIDER_JOBS){
-                self.1=false;
+        fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError> {
+            if self.1 && items.iter().any(|i| i.kind == kind::PROVIDER_JOBS) {
+                self.1 = false;
                 return Err(LogError::Storage("fixture refused this append".into()));
             }
             self.0.append(items)
         }
-        fn last_seq(&self)->Result<Seq,LogError>{self.0.last_seq()}
-        fn read_after(&self,n:Seq,k:Kinds,l:usize)->Result<Vec<Item>,LogError>{self.0.read_after(n,k,l)}
-        fn read_before(&self,n:Seq,k:Kinds,l:usize)->Result<Vec<Item>,LogError>{self.0.read_before(n,k,l)}
-        fn find(&self,key:&str)->Result<Option<Item>,LogError>{self.0.find(key)}
+        fn last_seq(&self) -> Result<Seq, LogError> {
+            self.0.last_seq()
+        }
+        fn read_after(&self, n: Seq, k: Kinds, l: usize) -> Result<Vec<Item>, LogError> {
+            self.0.read_after(n, k, l)
+        }
+        fn read_before(&self, n: Seq, k: Kinds, l: usize) -> Result<Vec<Item>, LogError> {
+            self.0.read_before(n, k, l)
+        }
+        fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+            self.0.find(key)
+        }
     }
-    let log=world.engine.open(&world.profile.dir,standard_set("zstd").unwrap()).unwrap();
-    let (mut actor,_)=Actor::open(world.profile.clone(),world.backend.clone(),Box::new(FailFirstNativeWrite(log,true)),world.now_ms).unwrap();
-    let id=rules::job_id(&world.profile.agent_id,"fixture","tool");
-    let owner=Attempt{turn:1,attempt:2};
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let (mut actor, _) = Actor::open(
+        world.profile.clone(),
+        world.backend.clone(),
+        Box::new(FailFirstNativeWrite(log, true)),
+        world.now_ms,
+    )
+    .unwrap();
+    let id = rules::job_id(&world.profile.agent_id, "fixture", "tool");
+    let owner = Attempt {
+        turn: 1,
+        attempt: 2,
+    };
     let mut visit=Visit{native:"fixture".into(),bound_at:90,owner:Some(owner),expected:0,cursor:Cursor{device:1,inode:2,offset:256,..Default::default()},
         final_read:None,actions:vec![serde_json::from_value(json!({"tool":"tool","at":100,"state":"launching","title":"Read","project":"fixture"})).unwrap(),
         serde_json::from_value(json!({"tool":"tool","at":101,"state":"running","task":"child"})).unwrap()],eof:true};
-    let revision=std::cell::Cell::new(500);
-    let next=||{revision.set(revision.get()+1);revision.get()};
+    let revision = std::cell::Cell::new(500);
+    let next = || {
+        revision.set(revision.get() + 1);
+        revision.get()
+    };
     // When the one append fails, neither the advancing cursor nor any
     // public job or timeline entry escapes. The same batch can be retried.
-    assert!(actor.apply_provider_visit(visit.clone(),101,next).is_err());
+    assert!(
+        actor
+            .apply_provider_visit(visit.clone(), 101, next)
+            .is_err()
+    );
     assert!(actor.jobs().get(&id).is_none());
     assert!(actor.provider_session("fixture").is_none());
-    assert!(actor.job_timeline(&id,10).unwrap().is_empty());
-    actor.apply_provider_visit(visit.clone(),101,next).unwrap();
-    assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Running);
-    assert_eq!(actor.job_timeline(&id,10).unwrap().len(),2);
+    assert!(actor.job_timeline(&id, 10).unwrap().is_empty());
+    actor
+        .apply_provider_visit(visit.clone(), 101, next)
+        .unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().status, JobStatus::Running);
+    assert_eq!(actor.job_timeline(&id, 10).unwrap().len(), 2);
     // A stale read cannot advance the file position or retire this attempt.
-    visit.final_read=Some(FinalRead{attempt:Some(owner),successor:None,exited_at:200,device:1,inode:2,end:900});
-    visit.cursor.offset=500;visit.actions.clear();visit.eof=false;
-    actor.apply_provider_visit(visit.clone(),200,next).unwrap();
-    assert_eq!(actor.provider_session("fixture").unwrap().cursor.offset,256);
-    visit.expected=1;
-    actor.apply_provider_visit(visit.clone(),200,next).unwrap();
+    visit.final_read = Some(FinalRead {
+        attempt: Some(owner),
+        successor: None,
+        exited_at: 200,
+        device: 1,
+        inode: 2,
+        end: 900,
+    });
+    visit.cursor.offset = 500;
+    visit.actions.clear();
+    visit.eof = false;
+    actor
+        .apply_provider_visit(visit.clone(), 200, next)
+        .unwrap();
+    assert_eq!(
+        actor.provider_session("fixture").unwrap().cursor.offset,
+        256
+    );
+    visit.expected = 1;
+    actor
+        .apply_provider_visit(visit.clone(), 200, next)
+        .unwrap();
     drop(actor);
-    let mut actor=world.open();
-    let saved=actor.provider_session("fixture").unwrap();
-    assert_eq!(saved.final_read,visit.final_read);
-    assert_eq!(saved.links[&id].attempt,owner);
-    assert_eq!(actor.jobs().get(&id).unwrap().heartbeat_at_ms,None);
-    visit.expected=saved.revision;visit.cursor.offset=900;visit.eof=true;
-    actor.apply_provider_visit(visit.clone(),202,next).unwrap();
-    assert_eq!(actor.jobs().get(&id).unwrap().outcome_state(),"unknown");
-    assert_eq!(actor.jobs().get(&id).unwrap().metadata["stop_basis"],"turn_exit");
-    assert_eq!(actor.jobs().get(&id).unwrap().metadata["turn_exited_at"],200);
-    let mut actor=world.open();
-    let saved=actor.provider_session("fixture").unwrap();assert_eq!(saved.final_read,None);
-    visit.expected=saved.revision;visit.owner=None;visit.final_read=None;visit.cursor.offset+=100;
+    let mut actor = world.open();
+    let saved = actor.provider_session("fixture").unwrap();
+    assert_eq!(saved.final_read, visit.final_read);
+    assert_eq!(saved.links[&id].attempt, owner);
+    assert_eq!(actor.jobs().get(&id).unwrap().heartbeat_at_ms, None);
+    visit.expected = saved.revision;
+    visit.cursor.offset = 900;
+    visit.eof = true;
+    actor
+        .apply_provider_visit(visit.clone(), 202, next)
+        .unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().outcome_state(), "unknown");
+    assert_eq!(
+        actor.jobs().get(&id).unwrap().metadata["stop_basis"],
+        "turn_exit"
+    );
+    assert_eq!(
+        actor.jobs().get(&id).unwrap().metadata["turn_exited_at"],
+        200
+    );
+    let mut actor = world.open();
+    let saved = actor.provider_session("fixture").unwrap();
+    assert_eq!(saved.final_read, None);
+    visit.expected = saved.revision;
+    visit.owner = None;
+    visit.final_read = None;
+    visit.cursor.offset += 100;
     visit.actions.push(serde_json::from_value(json!({"tool":"tool","at":180,"state":"completed","task":"child","require_receipt":true})).unwrap());
-    actor.apply_provider_visit(visit,205,next).unwrap();
-    assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Succeeded);
-    assert_eq!(actor.job_timeline(&id,10).unwrap().len(),4);
-    let log=world.engine.open(&world.profile.dir,standard_set("zstd").unwrap()).unwrap();
-    let entries=log.read_after(0,clarp_ports::log::Kinds::only(kind::PROVIDER_JOBS),10).unwrap();
-    assert_eq!(entries.len(),4);
-    for item in entries{
-        let kept:serde_json::Value=serde_json::from_slice(&item.body).unwrap();
+    actor.apply_provider_visit(visit, 205, next).unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().status, JobStatus::Succeeded);
+    assert_eq!(actor.job_timeline(&id, 10).unwrap().len(), 4);
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let entries = log
+        .read_after(0, clarp_ports::log::Kinds::only(kind::PROVIDER_JOBS), 10)
+        .unwrap();
+    assert_eq!(entries.len(), 4);
+    for item in entries {
+        let kept: serde_json::Value = serde_json::from_slice(&item.body).unwrap();
         assert!(kept.get("actions").is_none());
         assert!(kept["session"]["cursor"].is_object() && kept["records"].is_array());
     }
     // The final byte boundary is durable while more than 64 tasks await
     // reconciliation. The successor cannot inherit any of those tasks.
-    let archive="crowded";
-    let successor=Attempt{turn:2,attempt:1};
-    actor.provider_boundary(archive,Some(owner),(0,0,0),300).unwrap();
-    let drain=|actor:&mut Actor,at|{
-        let mut v=actor.provider_session(archive).unwrap().visit(archive.into());
-        v.eof=true;
-        actor.apply_provider_visit(v,at,next).unwrap();
+    let archive = "crowded";
+    let successor = Attempt {
+        turn: 2,
+        attempt: 1,
     };
-    drain(&mut actor,300);
-    for group in [0..64,64..65]{
-        let mut v=actor.provider_session(archive).unwrap().visit(archive.into());
+    actor
+        .provider_boundary(archive, Some(owner), (0, 0, 0), 300)
+        .unwrap();
+    let drain = |actor: &mut Actor, at| {
+        let mut v = actor
+            .provider_session(archive)
+            .unwrap()
+            .visit(archive.into());
+        v.eof = true;
+        actor.apply_provider_visit(v, at, next).unwrap();
+    };
+    drain(&mut actor, 300);
+    for group in [0..64, 64..65] {
+        let mut v = actor
+            .provider_session(archive)
+            .unwrap()
+            .visit(archive.into());
         for n in group {
             v.actions.push(serde_json::from_value(json!({"tool":format!("tool-{n}"),"state":"launching","at":301,"title":"Fixture"})).unwrap());
         }
-        v.cursor.offset+=1;v.cursor.device=1;v.cursor.inode=3;v.eof=true;
-        actor.apply_provider_visit(v,301,next).unwrap();
+        v.cursor.offset += 1;
+        v.cursor.device = 1;
+        v.cursor.inode = 3;
+        v.eof = true;
+        actor.apply_provider_visit(v, 301, next).unwrap();
     }
-    actor.provider_boundary(archive,Some(successor),(1,3,2),400).unwrap();
-    drain(&mut actor,400);
-    assert_eq!(actor.jobs().active().filter(|j|j.metadata["native_session_id"]==archive).count(),1);
+    actor
+        .provider_boundary(archive, Some(successor), (1, 3, 2), 400)
+        .unwrap();
+    drain(&mut actor, 400);
+    assert_eq!(
+        actor
+            .jobs()
+            .active()
+            .filter(|j| j.metadata["native_session_id"] == archive)
+            .count(),
+        1
+    );
     drop(actor);
-    let mut actor=world.open();
-    assert_eq!(actor.provider_session(archive).unwrap().owner,Some(owner));
+    let mut actor = world.open();
+    assert_eq!(actor.provider_session(archive).unwrap().owner, Some(owner));
     // Even a long outage cannot let the independent retention sweep
     // forget the one launch link whose final write is still outstanding.
-    assert!(!actor.expire_provider_links(archive,401+7*86_400_000).unwrap());
-    drain(&mut actor,401);
-    assert_eq!(actor.provider_session(archive).unwrap().owner,Some(successor));
-    assert!(actor.provider_session(archive).unwrap().final_read.is_none());
-    assert_eq!(actor.jobs().active().filter(|j|j.metadata["native_session_id"]==archive).count(),0);
+    assert!(
+        !actor
+            .expire_provider_links(archive, 401 + 7 * 86_400_000)
+            .unwrap()
+    );
+    drain(&mut actor, 401);
+    assert_eq!(
+        actor.provider_session(archive).unwrap().owner,
+        Some(successor)
+    );
+    assert!(
+        actor
+            .provider_session(archive)
+            .unwrap()
+            .final_read
+            .is_none()
+    );
+    assert_eq!(
+        actor
+            .jobs()
+            .active()
+            .filter(|j| j.metadata["native_session_id"] == archive)
+            .count(),
+        0
+    );
     // The original exit time survives recovery. Its links are still
     // actionable at the retention boundary and removed one millisecond later.
-    let week=7*86_400_000;
-    assert!(!actor.expire_provider_links(archive,400+week).unwrap());
-    assert_eq!(actor.provider_session(archive).unwrap().links.len(),65);
-    assert!(actor.expire_provider_links(archive,401+week).unwrap());
+    let week = 7 * 86_400_000;
+    assert!(!actor.expire_provider_links(archive, 400 + week).unwrap());
+    assert_eq!(actor.provider_session(archive).unwrap().links.len(), 65);
+    assert!(actor.expire_provider_links(archive, 401 + week).unwrap());
     assert!(actor.provider_session(archive).unwrap().links.is_empty());
-
 }
