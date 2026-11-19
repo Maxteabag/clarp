@@ -3,10 +3,12 @@
 Maximus's corpus case (delivery-of-a-held-send; synthetic), rebuilt on the dispatcher harness:
   1. send 'papa' (plain): it starts; 2. the agent is busy;
   3. send 'quebec' (plain, no queue_if_busy) while busy;
-  4. Stop; 5. the Host comes to rest with the queue held;
-  6. quebec's delivery reads handed_over (the corpus's step 6);
-  7. resume; 8. quebec must start.
-The same steps with queue_if_busy on the second send (the corpus's stop-with-queue) start it.
+  4. the user's Stop, as a Host makes it (begin_stop as the user's, then fence_user_stop, the
+     runtime's RPC order); 5. the Host comes to rest with the queue held;
+  6. quebec's delivery, as /log projects it (annotate_rows), reads 'stopped';
+  7. resume; 8. quebec starts, once, and its delivery reads 'handed_over' with a higher rev.
+Before the Stop it reads 'pending_launch'. The same steps with queue_if_busy on the second send
+(the corpus's stop-with-queue) start it too.
 
 The provider refuses a mid-turn steer, as the real registry does for Claude (backends.steer_turn:
 the base backend raises Unsupported and steer_turn answers False), so a plain send meets the
@@ -54,6 +56,14 @@ class _World(World):
     def make_provider(self):
         return self.provider_class()
 
+    def stop_as_the_host(self):
+        """The user's Stop as the runtime's RPC makes it: begin_stop as the user's Stop, then
+        fence_user_stop (runtime_rpc_server), then the interrupt and complete_stop as World.stop."""
+        snapshot, _dropped, _was_paused = td.begin_stop(self.agent, user_stop=True)
+        td.fence_user_stop(self.agent)
+        self.provider.interrupt("claude", self.agent)
+        td.complete_stop(self.service.ctx, self.agent, snapshot, set(), backend_registry=self.provider)
+
     def send(self, cid, *, origin="user", queue=False, trace=None):
         self.service.dispatch(
             text=cid, requested_session="mike", trace_id=trace or f"t-{cid}",
@@ -77,8 +87,14 @@ def _resume(world):
 
 
 def _delivery(world, cid):
-    receipt = launch_receipts.delivery_for_send(cid, agent_id=world.agent, origin="user", sender_agent_id="")
-    return (receipt or {}).get("state")
+    """The delivery /log shows on the send's user row (annotate_rows), as (state, rev); None when
+    /log has no row for it or no delivery on it."""
+    from lib.conversation import load_conversation
+    turns = load_conversation(session="mike", limit=500)["turns"]
+    launch_receipts.annotate_rows(world.agent, turns)
+    row = next((t for t in turns if t.get("role") == "user" and (t.get("delivery") or {}).get("for", {})
+                .get("client_msg_id") == cid), None)
+    return ((row["delivery"]["state"], row["delivery"]["rev"]) if row and row.get("delivery") else None)
 
 
 def _held_send(tmp_path, *, queue):
@@ -88,7 +104,8 @@ def _held_send(tmp_path, *, queue):
     assert world.started == ["papa"]
     assert world.agent in world.provider.live            # 2: busy
     world.send("quebec", queue=queue)                    # 3
-    world.stop()                                         # 4
+    world.before_stop = _delivery(world, "quebec")
+    world.stop_as_the_host()                             # 4
     world.settle(recover=True)                           # 5: at rest, the queue held
     assert world.started == ["papa"] and turn_queue.is_paused(world.agent)
     return world
@@ -97,11 +114,26 @@ def _held_send(tmp_path, *, queue):
 @pytest.mark.parametrize("queue", [False, True], ids=["plain send", "queue_if_busy"])
 def test_a_send_held_by_the_users_stop_runs_after_the_resume(tmp_path, queue):
     world = _held_send(tmp_path, queue=queue)
-    held = _delivery(world, "quebec")                    # 6 (recorded, not the claim here)
+    held = _delivery(world, "quebec")                    # 6
     _resume(world)                                       # 7
-    assert world.started == ["papa", "quebec"], (       # 8
+    assert world.started == ["papa", "quebec"], (       # 8, once
         f"the held send never ran after the resume (delivery before it read {held!r}; "
         f"steers asked: {world.provider.steers})")
+    if not queue:
+        assert world.before_stop[0] == "pending_launch" and held[0] == "stopped"
+        after = _delivery(world, "quebec")
+        assert after[0] == "handed_over" and after[1] > held[1] > world.before_stop[1]
+
+
+def test_what_a_queue_if_busy_send_reads_in_the_same_walk(tmp_path):
+    """A queue_if_busy send has no launch receipt at any step: no delivery is shown for it, before
+    the Stop, while the queue holds it, or after the resume runs it (once)."""
+    world = _held_send(tmp_path, queue=True)
+    assert launch_receipts.get("t-quebec") is None
+    assert (world.before_stop, _delivery(world, "quebec")) == (None, None)
+    _resume(world)
+    assert world.started == ["papa", "quebec"]
+    assert launch_receipts.get("t-quebec") is None and _delivery(world, "quebec") is None
 
 
 def _queue_rows(client_msg_id):
@@ -162,7 +194,7 @@ def test_a_codex_steer_answered_false_leaves_the_receipt_pending_and_the_send_ru
     assert world.provider.steers == ["quebec"]
     assert _receipt("t-quebec") == launch_receipts.PENDING          # nothing left: not ATTEMPTED
     if then == "stop and resume":
-        world.stop()
+        world.stop_as_the_host()
         world.settle(recover=True)
         assert world.started == ["papa"]
         _resume(world)
@@ -261,3 +293,44 @@ def test_a_send_whose_trace_has_a_turn_is_not_touched(tmp_path):
     turn_lifecycle.open_turn(agent_id=world.agent, source="pwa", trace_id="t-ran")
     done = turn_queue.settle_unsent_held_sends(can_steer=lambda backend: False)
     assert done == {"released": [], "failed": [], "left": []} and _status("ran") == "queued"
+
+
+def test_the_notice_is_the_newest_row_of_the_conversation_a_client_reads(tmp_path):
+    """Written now, about a message lost earlier: /log (load_conversation, ordered by timestamp, seq
+    only a tie-break) puts it LAST in a conversation of 200 rows, and a client's delta brings it."""
+    from lib import agents as agents_db
+    from lib import clock
+    from lib.conversation import load_conversation
+    world = _World(tmp_path)
+    agents_db.bind_backend_session(world.agent, "bs-mike")
+    start = db.now_ms() - 3600_000
+    for n in range(200):                                       # an hour of conversation before it
+        db.conn().execute(
+            """INSERT INTO messages(message_id, agent_id, backend_session_id, source_file, seq, role,
+                   timestamp, text, updated_at, revision)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (f"row-{n:03d}", world.agent, "bs-mike", "/t.jsonl", n, "user" if n % 2 else "assistant",
+             clock.iso_from_ms(start + n * 1000), f"row {n}", 1, message_writes._next_revision(db.conn())))
+    db.conn().commit()
+    _plant_stuck_send(world, "lost", age_ms=2 * 3600_000)
+    held = load_conversation(session="mike", limit=500)
+    held_revision = max(int(t.get("revision") or 0) for t in held["turns"])
+    world.restart()                                            # the pass writes the notice
+    notice = "notice:held_send_not_run:lost"
+    whole = load_conversation(session="mike", limit=500)["turns"]
+    assert len(whole) == 201 and whole[-1]["id"] == notice     # last: where the user looks
+    assert whole[-1]["origin"] == "system" and whole[-1]["role"] == "assistant"
+    assert whole[-1]["text"].split("\n\n")[0] == "A message you sent was never run."
+    delta = load_conversation(session="mike", after_revision=held_revision, limit=500)["turns"]
+    assert [t["id"] for t in delta][-1] == notice
+
+
+def test_a_held_send_through_a_runtime_restart_runs_once_after_the_resume(tmp_path):
+    """The Host's fenced Stop, then a runtime start while the queue holds the send (the pass runs
+    at that start and leaves a FENCED receipt alone), then the resume: it runs once."""
+    world = _held_send(tmp_path, queue=False)
+    assert launch_receipts.get("t-quebec")["state"] == launch_receipts.FENCED
+    world.restart()
+    assert world.started.count("quebec") == 0 and turn_queue.is_paused(world.agent)
+    _resume(world)
+    assert world.started.count("quebec") == 1, world.started
