@@ -15782,6 +15782,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     for (method, path, status) in [
         ("POST", "/send", 400),
         ("PUT", "/turn-queue/nothing", 400),
+        ("POST", "/decisions", 400),
         ("POST", "/crash", 400),
         ("POST", "/clog", 400),
         ("POST", "/agent-schedules", 400),
@@ -15804,7 +15805,56 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     refused("POST", "/artifacts/door-limit-form", DEFAULT + 1);
     refused("POST", "/agents/import", 512 * 1024 * 1024 + 1);
     const PAIRING: usize = 64 * 1024;
-    refused("POST", "/pairing/exchange", PAIRING + 1);
+    // At and below the drain boundary, discard every byte before returning
+    // the refusal. Only then may another ordinary request use the same socket.
+    const DRAIN: usize = 1024 * 1024;
+    for size in [PAIRING + 1, DRAIN] {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream,"POST /pairing/exchange HTTP/1.1\r\nHost: test\r\nContent-Length: {size}\r\nExpect: 100-continue\r\n\r\n").unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut first = String::new();
+        reader.read_line(&mut first).unwrap();
+        assert_eq!(first, "HTTP/1.1 100 Continue\r\n");
+        let mut blank = String::new();
+        reader.read_line(&mut blank).unwrap();
+        assert_eq!(blank, "\r\n");
+        reader.get_mut().write_all(&vec![b'x'; size]).unwrap();
+        let mut status = String::new();
+        reader.read_line(&mut status).unwrap();
+        assert!(status.starts_with("HTTP/1.1 413 "));
+        let mut length = None;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            assert!(!line.is_empty());
+            let (key, value) = line.split_once(':').unwrap();
+            if key.eq_ignore_ascii_case("content-length") {
+                length = Some(value.trim().parse::<usize>().unwrap());
+            }
+            assert!(
+                !(key.eq_ignore_ascii_case("connection")
+                    && value.trim().eq_ignore_ascii_case("close"))
+            );
+        }
+        let mut body = vec![0; length.unwrap()];
+        reader.read_exact(&mut body).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap(),
+            json!({"error":"request body too large"})
+        );
+        write!(reader.get_mut(),"GET /server-info HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").unwrap();
+        let mut reply = String::new();
+        reader.read_to_string(&mut reply).unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200 "));
+    }
+    refused("POST", "/pairing/exchange", DRAIN + 1);
+
     let issue = host.post(
         "/pairing/issue",
         json!({"device_name":"Body limit phone","scope":"full","relay":true}),
@@ -15846,6 +15896,14 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
             assert_eq!(response.json()["ok"], true);
         }
     }
+    // The connector already has the framed body. Reject it there even
+    // when the Host would require credentials before calling this handler.
+    let relay_body = padded(json!({}), DEFAULT + 1);
+    let sid = phone.ask_sized("POST", "/voice-events", &[], &relay_body, 64 * 1024);
+    let relay_refused = phone.answer(sid);
+    assert_eq!(relay_refused.status, 413);
+    assert_eq!(relay_refused.json(), json!({"error":"request body too large"}));
+    assert!(relay_refused.ended);
     // Invalid HTTP framing is refused by Hyper; a missing length reaches the JSON policy.
     for (extra, router_error) in [
         ("", true),
@@ -15894,6 +15952,8 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         .lines()
         .filter(|line| line.starts_with("requestBodyLarge "))
         .collect();
+    let refusal = format!("requestBodyTooLarge family=/pairing bytes={}", DRAIN + 1);
+    assert_eq!(log.lines().filter(|s| *s == refusal).count(), 1);
     let wanted = format!(
         "requestBodyLarge family=/application-activity bytes={}",
         LOG_FROM + 1

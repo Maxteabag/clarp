@@ -6,7 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-axum = { workspace = true, features = ["matched-path"] }
+axum.workspace = true
 bytes.workspace = true
 clarp-actor.workspace = true
 clarp-backend.workspace = true
@@ -22,7 +22,6 @@ clarp-store-sqlite.workspace = true
 futures-util.workspace = true
 h2.workspace = true
 http.workspace = true
-http-body-util.workspace = true
 nix.workspace = true
 pty-process.workspace = true
 ring.workspace = true
