@@ -520,8 +520,9 @@ pub fn refused(asked: Asked) -> Option<Value> {
 /// makes the card before it writes the receipt, and a look that fails between asks again at
 /// the next; this Host writes the receipt in the look and makes the card after it, so a card
 /// that was not made (it failed, or the Host stopped between the two) is asked again at every
-/// look until it is. A second card where only the write of its id failed is the reference's
-/// own failure mode.
+/// look until it is, and one that was made and not named on the receipt (the write of its id
+/// failed) is named. A card is one a receipt: the book refuses a second with the same
+/// `reference_id`, as the reference's table does (`idx_artifacts_reference`).
 pub fn unasked(payload: &Value, (agent_id, generation): (&str, u64)) -> bool {
     let recovery = &payload["recovery"];
     payload["agent_id"] == agent_id

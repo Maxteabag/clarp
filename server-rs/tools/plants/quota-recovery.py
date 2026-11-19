@@ -45,6 +45,8 @@ PLANTS = [
     # ---- a card that was not made is never made: it is asked again at every look
     (Q, 'host', 'a card that was not made is never asked again', '        && recovery["status"] == "awaiting_approval"\n',
      '        && recovery["status"] == "never"\n'),
+    (K, 'host', 'a card that was made and not named on its receipt is asked a second time',
+     '        let made = match made_before.get(&receipt_id) {', '        let made = match None::<&Value> {'),
     (K, 'host', 'a card that was not made is asked again only at a look that is due',
      '    // A card that was not made is asked at every look, whether one is due or not.\n    ask_cards(app, &keeper, receipts).await;\n',
      ''),

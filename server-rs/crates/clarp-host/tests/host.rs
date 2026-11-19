@@ -41963,9 +41963,11 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
     assert_eq!(acted[id]["status"], "nothing_to_resume", "{acted:?}");
     assert_eq!(lines(&asked), "");
 
-    // A CARD THAT WAS NOT MADE IS NEVER MADE: here the receipt is kept as a Host that stopped
-    // between writing it and making its card leaves it (awaiting approval, naming no card). At
-    // the Host's first look, though none is due, its card is asked again and named on it.
+    // A CARD THAT WAS NOT MADE IS NEVER MADE. Two receipts are kept as a Host that stopped in a
+    // look leaves them: the first as one that stopped after its card was made and before the
+    // card's id was written on it (awaiting approval, naming no card), the second as one that
+    // stopped before its card was made. At the Host's first look, though none is due, the first
+    // is named its card (a card is one a receipt: never a second), and the second's is asked.
     let (receipt_id, mut receipt) = kept_records(&place, "quota-keeper-receipt")
         .into_iter()
         .next()
@@ -41975,20 +41977,29 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
         .unwrap()
         .remove("artifact_id");
     keep_record(&place, "quota-keeper-receipt", &receipt_id, &receipt);
+    let never = "a-receipt-whose-card-was-never-made";
+    let mut unasked = receipt.clone();
+    unasked["receipt_id"] = json!(never);
+    unasked["payload"]["notification_id"] = json!(never);
+    unasked["order"] = json!(receipt["order"].as_u64().unwrap() + 1);
+    keep_record(&place, "quota-keeper-receipt", never, &unasked);
     let host = start(&place, &own, &owners);
-    wait_for("the card asked again", || cards(&host).len() == 2);
-    let again = cards(&host)
-        .into_iter()
-        .find(|made| made["artifact_id"] != card["artifact_id"])
-        .unwrap();
-    assert_eq!(again["reference_id"], json!(receipt_id), "{again}");
-    assert_eq!(again["decision"]["status"], "pending", "{again}");
-    wait_for("its id on the receipt", || {
-        let kept = kept_records(&place, "quota-keeper-receipt");
-        kept[&receipt_id]["payload"]["recovery"]["artifact_id"] == again["artifact_id"]
+    let card_of = |host: &Host, receipt: &str| {
+        let all = cards(host);
+        all.into_iter().find(|made| made["reference_id"] == receipt)
+    };
+    wait_for("the card that was never made", || {
+        card_of(&host, never).is_some()
     });
-    // Asked once: a later look does not ask it again.
+    let asked_now = card_of(&host, never).unwrap();
+    assert_eq!(asked_now["decision"]["status"], "pending", "{asked_now}");
+    wait_for("both receipts to name their cards", || {
+        let kept = kept_records(&place, "quota-keeper-receipt");
+        kept[&receipt_id]["payload"]["recovery"]["artifact_id"] == card["artifact_id"]
+            && kept[never]["payload"]["recovery"]["artifact_id"] == asked_now["artifact_id"]
+    });
+    // One card a receipt: the first card named again, the second made once.
     std::thread::sleep(Duration::from_millis(500));
-    assert_eq!(cards(&host).len(), 2);
+    assert_eq!(cards(&host).len(), 2, "{:?}", cards(&host));
     drop(host);
 }

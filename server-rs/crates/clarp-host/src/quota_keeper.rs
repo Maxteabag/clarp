@@ -556,12 +556,23 @@ async fn ask_cards(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, R
     let Some(janitor) = app.fleet.directory().janitor(&keeper.agent_id).cloned() else {
         return;
     };
+    // A card is one a receipt (its `reference_id`): one that was made and not named on its
+    // receipt (the Host stopped between the two, or the write of its id failed) is named, never
+    // asked a second time, which the book refuses as it is the reference's table's own key.
+    let made_before: BTreeMap<String, Value> = crate::library::decisions_of(app, &keeper.session)
+        .into_iter()
+        .filter_map(|card| Some((card["reference_id"].as_str()?.to_string(), card)))
+        .collect();
     let mut rows = Vec::new();
     for (receipt_id, card) in asking {
         let Some(fields) = card.as_object() else {
             continue;
         };
-        let made = match crate::library::asked_of(app, &janitor, fields).await {
+        let made = match made_before.get(&receipt_id) {
+            Some(made) => Ok(made.clone()),
+            None => crate::library::asked_of(app, &janitor, fields).await,
+        };
+        let made = match made {
             Ok(made) => made,
             Err(_) => {
                 eprintln!(
