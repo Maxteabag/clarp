@@ -144,12 +144,6 @@ class Host:
         self.stop=threading.Event()
         def sample():
             while not self.stop.is_set() and self.proc.poll() is None:
-                if self.bound is None:
-                    try:
-                        with socket.create_connection(("127.0.0.1",self.port),timeout=.02):
-                            self.bound=NOW()-self.started
-                    except OSError:
-                        pass
                 try:
                     for key,num in memory(self.proc.pid).items():
                         self.peak[key]=max(num,self.peak.get(key,0))
@@ -167,11 +161,24 @@ class Host:
                     with (root/"journal").open("ab") as f:f.write(line)
         ready=threading.Event()
         threading.Thread(target=journal,daemon=True).start()
+        # A connect can succeed while the socket is still only a backlog.
+        # Start a request immediately, without waiting for the stderr message.
+        until=self.started+30
+        while True:
+            try:
+                with socket.create_connection(("127.0.0.1", self.port), timeout=.1):
+                    self.bound=NOW()-self.started
+                break
+            except OSError:
+                if self.proc.poll() is not None or NOW()>=until:
+                    self.close(True)
+                    raise RuntimeError("Host never bound its disposable socket")
+                time.sleep(.001)
+        self.snapshot=get(self.port,"/agents/snapshot")[0]
+        self.http=NOW()-self.started
         if not ready.wait(30):
             self.close(True)
             raise RuntimeError("Host did not announce readiness")
-        self.snapshot=get(self.port,"/agents/snapshot")[0]
-        self.http=NOW()-self.started
 
     def close(self,kill=False):
         if self.proc.poll() is None:
