@@ -494,3 +494,56 @@ def test_an_agy_copy_is_timed_and_held_to_the_same_rule(tmp_path, monkeypatch, c
         assert {"u-old0", "u-later"} <= {row_id for row_id, _ in users}
         assert replies["Typed answer."] != "old-0"
         assert replies["Sent answer."] == "later-turn"
+
+
+# ---- the reviewer's mutants that survived on 446: the 2 s bound exactly, and a turn's own second row ----
+
+@pytest.mark.parametrize("after_ms, taken", [(1_999, True), (2_000, True), (2_001, False)])
+@pytest.mark.parametrize("running", [True, False], ids=["a turn running", "no turn running"])
+def test_a_row_sent_up_to_two_seconds_after_the_copy_may_be_its_and_one_more_may_not(after_ms, taken, running):
+    """The bound is two seconds exactly: 1,999 and 2,000 ms after the copy are taken, 2,001 is not.
+    With no turn running, the row is sent for a turn that began after the copy, as the rule asks."""
+    copy_ms = 41_000
+    index = _index(("turn-2", 40_000, 55_000), ("late", copy_ms + after_ms + 100, None))
+    rows = _rows(("late", copy_ms + after_ms))
+    copy_at = clock.iso_from_ms(BASE + copy_ms)
+    chosen = message_import_rows._own_turns_row(
+        None, rows, "turn-2" if running else "", BASE + 40_000 if running else None,
+        trace_ids={"c0": "late"}, written_at=copy_at,
+        ended_before=lambda trace: index.ended_before(trace, copy_at),
+        began_after=lambda trace: index.began_after(trace, copy_at))
+    assert chosen == (0 if taken else None)
+
+
+def test_a_turns_second_row_of_its_own_trace_does_not_end_it():
+    """Every prompt on a live Host has two turn rows of one trace a second apart (section D). The
+    second is the same turn: it ends neither the first nor the turn, settled or not."""
+    index = _index(("prompt", 10_000, None), ("prompt", 11_000, None))
+    assert [index.ended_before("prompt", BASE + at) for at in (10_500, 11_500, 10**9)] == [False] * 3
+    # One row settled and one never: the turn is not taken as ended at that settle, only when the
+    # agent's next turn of another trace begins (as august-watch's never-settled old turns end).
+    index = _index(("prompt", 10_000, None), ("prompt", 11_000, 30_000), ("next", 40_000, None))
+    assert [index.ended_before("prompt", BASE + at) for at in (11_500, 30_001, 40_000, 40_001)] == [
+        False, False, False, True]
+
+
+@CONFIGURATIONS
+def test_a_prompt_with_two_turn_rows_never_settled_keeps_its_row_for_a_late_copy(tmp_path, monkeypatch, configuration):
+    """Section D's shape at the store: the send opens two turn rows of its trace a second apart and
+    neither ever settles. Its copy is written seven hours later, past every turn's reach, so no turn
+    is running at it. The turn has not ended (its second row is the same turn), so the copy takes
+    its row, and its reply carries its trace."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    cli.send("old0", PROMPT, "old-0", BASE - 7 * 86_400_000, settle_after=1000)    # an old failed send
+    cli.send("two-rows", PROMPT, "two-rows", BASE)
+    cli.now[0] = BASE + 1000
+    agents.open_turn(agent_id=cli.id, source='pwa', trace_id="two-rows")           # its second row
+    late = BASE + 7 * 3_600_000
+    cli.line('user', PROMPT, late)
+    cli.line('assistant', [{'type': 'text', 'text': ANSWER}], late + 3000)
+    cli.now[0] = late + 4000
+    for full in (False, True):
+        users, replies = cli.imported(full=full)
+        assert [row_id for row_id, _text in users] == ["u-old0", "u-two-rows"]     # no copy beside its row
+        assert replies == [(ANSWER, "two-rows")]
