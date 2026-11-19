@@ -5,7 +5,7 @@ use clarp_kernel::heard::inventory as rules;
 use std::path::Path;
 use std::sync::RwLock;
 
-pub(super) struct Inventory(RwLock<Arc<Vec<Value>>>);
+pub(super) struct Inventory(RwLock<Option<Arc<Vec<Value>>>>);
 
 impl Inventory {
     pub(super) async fn open(fleet: &crate::fleet::FleetHandle) -> Result<Self, String> {
@@ -14,23 +14,58 @@ impl Inventory {
             .await
             .map_err(|e| e.0)?;
         let records = match kept {
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| format!("invalid transcription inventory: {e}"))?,
-            None => Vec::new(),
+            Some(bytes) => match serde_json::from_slice::<Vec<Value>>(&bytes) {
+                Ok(rows) => Some(Arc::new(rows)),
+                Err(_) => {
+                    fleet
+                        .keep(
+                            "transcription-models",
+                            "records.unreadable".into(),
+                            Some(bytes),
+                        )
+                        .await
+                        .map_err(|e| e.0)?;
+                    eprintln!(
+                        "clarp-host: unreadable transcription inventory; using an empty list"
+                    );
+                    None
+                }
+            },
+            None => Some(Arc::default()),
         };
-        Ok(Self(RwLock::new(Arc::new(records))))
+        Ok(Self(RwLock::new(records)))
     }
 
-    pub(super) async fn recover(&self, fleet: &FleetHandle, root: &Path, active: Option<&str>) {
+    pub(super) async fn recover(
+        &self,
+        fleet: &FleetHandle,
+        root: &Path,
+        active: Option<&str>,
+    ) -> Result<(), String> {
         for record in self.records().iter() {
-            if record["_remove_pending"] == true
-                && let Some(id) = record["id"].as_str()
-                && Some(id) != active
-                && self.remove(fleet, root, id).await.is_err()
-            {
+            if record["_remove_pending"] != true {
+                continue;
+            }
+            let Some(id) = record["id"].as_str() else {
+                continue;
+            };
+            if Some(id) == active {
+                let mut rows = self.records().as_ref().clone();
+                for row in &mut rows {
+                    if row["id"] == id
+                        && let Some(fields) = row.as_object_mut()
+                    {
+                        fields.remove("_remove_pending");
+                    }
+                }
+                self.publish(fleet, rows)
+                    .await
+                    .map_err(|e| format!("clearing pending default model removal: {e:?}"))?;
+            } else if self.remove(fleet, root, id).await.is_err() {
                 eprintln!("clarp-host: a pending transcription model removal could not finish");
             }
         }
+        Ok(())
     }
 
     pub(super) fn records(&self) -> Arc<Vec<Value>> {
@@ -38,6 +73,7 @@ impl Inventory {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+            .unwrap_or_default()
     }
 
     async fn publish(&self, fleet: &FleetHandle, records: Vec<Value>) -> Result<(), ApiError> {
@@ -50,13 +86,21 @@ impl Inventory {
                 })?),
             )
             .await?;
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(records);
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(records));
         Ok(())
     }
 
     async fn remove(&self, fleet: &FleetHandle, root: &Path, id: &str) -> Result<(), ApiError> {
         let mut records = self.records().as_ref().clone();
         let Some(index) = records.iter().position(|r| r["id"] == id) else {
+            let unreadable = self
+                .0
+                .read()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_none();
+            if unreadable {
+                self.publish(fleet, records).await?;
+            }
             return Ok(());
         };
         let record = &records[index];

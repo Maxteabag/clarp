@@ -170,14 +170,25 @@ impl Place {
             .unwrap();
         let mut said = BufReader::new(process.stderr.take().unwrap());
         let mut first = String::new();
-        said.read_line(&mut first).unwrap();
+        let mut startup = String::new();
+        loop {
+            assert!(
+                said.read_line(&mut first).unwrap() > 0,
+                "Host exited during startup: {startup}"
+            );
+            if first.starts_with("clarp-host listens on ") {
+                break;
+            }
+            startup.push_str(&first);
+            first.clear();
+        }
         let address = first
             .trim()
             .strip_prefix("clarp-host listens on ")
             .unwrap_or_else(|| panic!("the Host did not say where it listens, it said: {first}"))
             .to_string();
         // Whatever else it says is kept out of the way, for a test that reads it.
-        let heard = Arc::new(Mutex::new(String::new()));
+        let heard = Arc::new(Mutex::new(startup));
         let keeping = heard.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -22993,6 +23004,10 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
         (
+            "/transcription-models/install",
+            "Installing a transcription model from an app is",
+        ),
+        (
             "/backend-auth/login",
             "Signing a tool in or out from an app is",
         ),
@@ -41838,6 +41853,116 @@ for line in sys.stdin:
             "{kind}"
         );
     }
+    // Make unlink fail in a real registered directory after the pending record is durable.
+    use std::os::unix::fs::PermissionsExt;
+    let place = Place::new("inventory-recovery");
+    let root = place.root.join("data/models");
+    let folder = root.join("faster-whisper--small");
+    let other = root.join("faster-whisper--medium");
+    file_set(&folder);
+    file_set(&other);
+    let record = json!({"id":ID,"provider":"faster-whisper","model":"small","_local_path":folder,"_managed_root":folder});
+    let stored = |key: &str| {
+        clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap()
+            .get("kept.transcription-models", key)
+            .unwrap()
+            .unwrap()
+    };
+    let rows = || serde_json::from_slice::<Value>(&stored("records")).unwrap();
+    let listed = |host: &Host| {
+        host.get("/transcription-capabilities")["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == ID)
+    };
+    save(&place, &json!([record]));
+    let host = place.start_with_token("admin");
+    assert!(listed(&host));
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let (code, error) = host.ask("POST", ROUTE, Some(&json!({"model_id":ID})));
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(code, 500);
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("Permission denied")
+    );
+    assert!(!listed(&host));
+    host.kill();
+    let mut marked = record.clone();
+    marked["_remove_pending"] = json!(true);
+    assert_eq!(rows(), json!([marked]));
+    assert!(folder.join("model.bin").exists());
+    place.start_with_token("admin").kill();
+    assert!(!folder.exists());
+    assert_eq!(rows(), json!([]));
+    save(&place, &json!([marked]));
+    place.start_with_token("admin").kill();
+    assert_eq!(rows(), json!([]));
+    let moved_root = place.root.join("moved-models");
+    std::fs::rename(&root, &moved_root).unwrap();
+    save(&place, &json!([marked]));
+    place.start_with_token("admin").kill();
+    assert_eq!(rows(), json!([]));
+    std::fs::rename(moved_root, &root).unwrap();
+    file_set(&folder);
+    let mut unsafe_row = marked.clone();
+    unsafe_row["_managed_root"] = json!(other);
+    save(&place, &json!([unsafe_row]));
+    let host = place.start_with_token("admin");
+    assert!(!listed(&host));
+    host.kill();
+    assert_eq!(rows(), json!([unsafe_row]));
+    assert!(other.join("model.bin").is_file());
+    save(&place, &json!([marked]));
+    let host = place.start_with(
+        "admin",
+        &["--whisper-python", "/bin/false", "--whisper-model", "small"],
+    );
+    assert!(
+        host.get("/transcription-capabilities")["catalog"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == ID && r["installed"] == true)
+    );
+    host.kill();
+    assert_eq!(rows(), json!([record]));
+    place.start_with_token("admin").kill();
+    assert!(folder.join("model.bin").is_file());
+    assert_eq!(rows(), json!([record]));
+    let sentinel = "private-corrupt-record";
+    clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .put("kept.transcription-models", "records", sentinel.as_bytes())
+        .unwrap();
+    let host = place.start_with_token("admin");
+    assert!(!listed(&host));
+    let log = host.heard.lock().unwrap().clone();
+    assert_eq!(
+        log.lines()
+            .filter(|s| s.contains("unreadable transcription inventory; using an empty list"))
+            .count(),
+        1
+    );
+    assert!(!log.contains(sentinel));
+    host.kill();
+    assert_eq!(stored("records.unreadable"), sentinel.as_bytes());
+    assert_eq!(stored("records"), sentinel.as_bytes());
+    let host = place.start_with_token("admin");
+    assert_eq!(
+        host.ask("POST", ROUTE, Some(&json!({"model_id":ID}))).0,
+        200
+    );
+    host.kill();
+    assert_eq!(stored("records.unreadable"), sentinel.as_bytes());
+    assert_eq!(rows(), json!([]));
+    assert!(folder.join("model.bin").is_file());
 }
 
 #[test]
