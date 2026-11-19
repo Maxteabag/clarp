@@ -93,7 +93,7 @@ fn a_failed_clis_words_are_kept_only_where_they_hold_none_of_the_request() {
         );
         counted[3] += 1;
     }
-    assert_eq!(counted, [124, 8, 180, 4]);
+    assert_eq!(counted, [125, 8, 195, 4]);
 }
 
 #[test]
