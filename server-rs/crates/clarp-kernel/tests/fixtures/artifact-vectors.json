@@ -22814,6 +22814,728 @@
      "note": "thrown away, it is gone"
     }
    ]
+  },
+  {
+   "name": "a_request_answered_on_the_users_behalf",
+   "agents": [
+    {
+     "agent_id": "0c01aaaabbbbcccc",
+     "session": "vera12",
+     "persona": "Vera"
+    },
+    {
+     "agent_id": "0c02aaaabbbbcccc",
+     "session": "omar12",
+     "persona": "Omar"
+    }
+   ],
+   "calls": [
+    {
+     "call": "create_decision",
+     "args": {
+      "session": "vera12",
+      "title": "Deploy?",
+      "question": "Deploy version 1.3?",
+      "reference_id": "deploy-1.3"
+     },
+     "at": 1805168001000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0c01aaaabbbbcccc",
+      "session": "vera12",
+      "type": "decision",
+      "title": "Deploy?",
+      "summary": "Deploy version 1.3?",
+      "status": "active",
+      "reference_id": "deploy-1.3",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1805168001000,
+      "updated_at": 1805168001000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {},
+      "decision": {
+       "decision_id": "decision-000000000000000000000002",
+       "artifact_id": "artifact-000000000000000000000001",
+       "question": "Deploy version 1.3?",
+       "context": "",
+       "yes_label": "Yes",
+       "no_label": "No",
+       "status": "pending",
+       "resolved_choice": "",
+       "resolved_at": null,
+       "resolved_by": "",
+       "revision": 1,
+       "expires_at": null,
+       "response_type": "approval",
+       "allow_custom_text": false,
+       "recommended_option_id": null,
+       "blocks_progress": false,
+       "priority_reason": "",
+       "urgency": "normal",
+       "response_effort": "review",
+       "deadline_at": null,
+       "options": [],
+       "answer": null,
+       "priority": 100,
+       "archived_at": null,
+       "delivery_pending": false
+      }
+     },
+     "ids": 2
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "omar12"
+     },
+     "at": 1805168002000,
+     "error": {
+      "kind": "PermissionError",
+      "message": "session is not designated to answer on the user's behalf"
+     },
+     "ids": 0,
+     "note": "named by nobody"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "omar12",
+      "designated_sessions": [
+       "omar12"
+      ]
+     },
+     "at": 1805168003000,
+     "error": {
+      "kind": "PermissionError",
+      "message": "on-behalf answer requires the designated agent's verified turn identity"
+     },
+     "ids": 0,
+     "note": "named, but its turn is not known"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "omar12",
+      "designated_sessions": [
+       "omar12"
+      ],
+      "verified_session": "vera12"
+     },
+     "at": 1805168004000,
+     "error": {
+      "kind": "PermissionError",
+      "message": "on-behalf answer requires the designated agent's verified turn identity"
+     },
+     "ids": 0,
+     "note": "named, and another agent's turn"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "verified_session": "omar12"
+     },
+     "at": 1805168005000,
+     "error": {
+      "kind": "PermissionError",
+      "message": "agent resolution requires on_behalf_session"
+     },
+     "ids": 0,
+     "note": "an agent's turn that says for whom it answers nothing"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "  ",
+      "designated_sessions": [
+       "omar12"
+      ],
+      "verified_session": "omar12"
+     },
+     "at": 1805168006000,
+     "error": {
+      "kind": "ValueError",
+      "message": "on_behalf_session must be a nonempty session"
+     },
+     "ids": 0,
+     "note": "a blank session"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "vera12",
+      "designated_sessions": [
+       "vera12"
+      ],
+      "verified_session": "vera12"
+     },
+     "at": 1805168007000,
+     "error": {
+      "kind": "PermissionError",
+      "message": "the asking agent may not answer its own request"
+     },
+     "ids": 0,
+     "note": "the asking agent for itself"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "ghost",
+      "designated_sessions": [
+       "ghost"
+      ],
+      "verified_session": "ghost"
+     },
+     "at": 1805168008000,
+     "error": {
+      "kind": "ValueError",
+      "message": "on-behalf session not found"
+     },
+     "ids": 0,
+     "note": "a session nobody has"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": " omar12 ",
+      "designated_sessions": [
+       " omar12 ",
+       7,
+       ""
+      ],
+      "verified_session": "omar12 "
+     },
+     "at": 1805168009000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000001",
+       "agent_id": "0c01aaaabbbbcccc",
+       "session": "vera12",
+       "type": "decision",
+       "title": "Deploy?",
+       "summary": "Deploy version 1.3?",
+       "status": "completed",
+       "reference_id": "deploy-1.3",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1805168001000,
+       "updated_at": 1805168009000,
+       "completed_at": 1805168009000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {},
+       "decision": {
+        "decision_id": "decision-000000000000000000000002",
+        "artifact_id": "artifact-000000000000000000000001",
+        "question": "Deploy version 1.3?",
+        "context": "",
+        "yes_label": "Yes",
+        "no_label": "No",
+        "status": "accepted",
+        "resolved_choice": "accepted",
+        "resolved_at": 1805168009000,
+        "resolved_by": "agent:omar12",
+        "revision": 2,
+        "expires_at": null,
+        "response_type": "approval",
+        "allow_custom_text": false,
+        "recommended_option_id": null,
+        "blocks_progress": false,
+        "priority_reason": "",
+        "urgency": "normal",
+        "response_effort": "review",
+        "deadline_at": null,
+        "options": [],
+        "answer": {
+         "choice": "accepted"
+        },
+        "priority": 100,
+        "archived_at": null,
+        "delivery_pending": true
+       }
+      },
+      true
+     ],
+     "ids": 0,
+     "note": "the front desk, in its own turn, with blanks around the names"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted",
+      "on_behalf_session": "omar12",
+      "designated_sessions": [
+       "omar12"
+      ],
+      "verified_session": "omar12"
+     },
+     "at": 1805168010000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000001",
+       "agent_id": "0c01aaaabbbbcccc",
+       "session": "vera12",
+       "type": "decision",
+       "title": "Deploy?",
+       "summary": "Deploy version 1.3?",
+       "status": "completed",
+       "reference_id": "deploy-1.3",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1805168001000,
+       "updated_at": 1805168009000,
+       "completed_at": 1805168009000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {},
+       "decision": {
+        "decision_id": "decision-000000000000000000000002",
+        "artifact_id": "artifact-000000000000000000000001",
+        "question": "Deploy version 1.3?",
+        "context": "",
+        "yes_label": "Yes",
+        "no_label": "No",
+        "status": "accepted",
+        "resolved_choice": "accepted",
+        "resolved_at": 1805168009000,
+        "resolved_by": "agent:omar12",
+        "revision": 2,
+        "expires_at": null,
+        "response_type": "approval",
+        "allow_custom_text": false,
+        "recommended_option_id": null,
+        "blocks_progress": false,
+        "priority_reason": "",
+        "urgency": "normal",
+        "response_effort": "review",
+        "deadline_at": null,
+        "options": [],
+        "answer": {
+         "choice": "accepted"
+        },
+        "priority": 100,
+        "archived_at": null,
+        "delivery_pending": true
+       }
+      },
+      false
+     ],
+     "ids": 0,
+     "note": "again, the same: nothing changes"
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000002",
+      "expected_revision": 1,
+      "choice": "accepted"
+     },
+     "at": 1805168011000,
+     "error": {
+      "kind": "ValueError",
+      "message": "decision already resolved with a different choice or answer"
+     },
+     "ids": 0,
+     "note": "again, by the user: answered by another"
+    },
+    {
+     "call": "get",
+     "args": {
+      "artifact_id": "artifact-000000000000000000000001"
+     },
+     "at": 1805168012000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000001",
+      "agent_id": "0c01aaaabbbbcccc",
+      "session": "vera12",
+      "type": "decision",
+      "title": "Deploy?",
+      "summary": "Deploy version 1.3?",
+      "status": "completed",
+      "reference_id": "deploy-1.3",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1805168001000,
+      "updated_at": 1805168009000,
+      "completed_at": 1805168009000,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {},
+      "decision": {
+       "decision_id": "decision-000000000000000000000002",
+       "artifact_id": "artifact-000000000000000000000001",
+       "question": "Deploy version 1.3?",
+       "context": "",
+       "yes_label": "Yes",
+       "no_label": "No",
+       "status": "accepted",
+       "resolved_choice": "accepted",
+       "resolved_at": 1805168009000,
+       "resolved_by": "agent:omar12",
+       "revision": 2,
+       "expires_at": null,
+       "response_type": "approval",
+       "allow_custom_text": false,
+       "recommended_option_id": null,
+       "blocks_progress": false,
+       "priority_reason": "",
+       "urgency": "normal",
+       "response_effort": "review",
+       "deadline_at": null,
+       "options": [],
+       "answer": {
+        "choice": "accepted"
+       },
+       "priority": 100,
+       "archived_at": null,
+       "delivery_pending": true
+      }
+     },
+     "ids": 0
+    },
+    {
+     "call": "pending_deliveries",
+     "args": {},
+     "at": 1805168013000,
+     "result": [
+      {
+       "decision_id": "decision-000000000000000000000002",
+       "artifact_id": "artifact-000000000000000000000001",
+       "session": "vera12",
+       "question": "Deploy version 1.3?",
+       "context": "",
+       "reference_id": "deploy-1.3",
+       "payload_json": "{}",
+       "choice": "accepted",
+       "status": "pending",
+       "created_at": 1805168009000,
+       "delivered_at": null,
+       "response_type": "approval",
+       "answer_json": "{\"choice\": \"accepted\"}",
+       "resolved_by": "agent:omar12",
+       "answer": {
+        "choice": "accepted"
+       },
+       "prompt": "[Clarp decision resolved]\nDecision ID: decision-000000000000000000000002\nArtifact ID: artifact-000000000000000000000001\nResolved by: agent:omar12\nQuestion: Deploy version 1.3?\nContext: \nReference: deploy-1.3\nPayload: {}\nThe user, through agent omar12 approved this exact action: Deploy version 1.3? Proceed with exactly that action and scope after revalidating the target and payload. This does not approve any broader, additional, or repeated action."
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "create_decision",
+     "args": {
+      "session": "vera12",
+      "title": "Which?",
+      "question": "Which way?",
+      "response_type": "single_choice",
+      "options": [
+       {
+        "id": "a",
+        "label": "The first"
+       },
+       {
+        "id": "b",
+        "label": "The second"
+       }
+      ]
+     },
+     "at": 1805168014000,
+     "result": {
+      "artifact_id": "artifact-000000000000000000000003",
+      "agent_id": "0c01aaaabbbbcccc",
+      "session": "vera12",
+      "type": "question",
+      "title": "Which?",
+      "summary": "Which way?",
+      "status": "active",
+      "reference_id": "",
+      "payload_version": 1,
+      "source_message_id": "",
+      "source_trace_id": "",
+      "created_at": 1805168014000,
+      "updated_at": 1805168014000,
+      "completed_at": null,
+      "deleted_at": null,
+      "archived_at": null,
+      "pinned_at": null,
+      "agent_name": "Vera",
+      "pinned": false,
+      "payload": {},
+      "decision": {
+       "decision_id": "decision-000000000000000000000004",
+       "artifact_id": "artifact-000000000000000000000003",
+       "question": "Which way?",
+       "context": "",
+       "yes_label": "Yes",
+       "no_label": "No",
+       "status": "pending",
+       "resolved_choice": "",
+       "resolved_at": null,
+       "resolved_by": "",
+       "revision": 1,
+       "expires_at": null,
+       "response_type": "single_choice",
+       "allow_custom_text": true,
+       "recommended_option_id": null,
+       "blocks_progress": false,
+       "priority_reason": "",
+       "urgency": "normal",
+       "response_effort": "review",
+       "deadline_at": null,
+       "options": [
+        {
+         "id": "a",
+         "label": "The first"
+        },
+        {
+         "id": "b",
+         "label": "The second"
+        }
+       ],
+       "answer": null,
+       "priority": 100,
+       "archived_at": null,
+       "delivery_pending": false
+      }
+     },
+     "ids": 2
+    },
+    {
+     "call": "resolve",
+     "args": {
+      "decision_id": "decision-000000000000000000000004",
+      "expected_revision": 1,
+      "answer": {
+       "option_id": "b"
+      },
+      "on_behalf_session": "omar12",
+      "designated_sessions": [
+       "omar12"
+      ],
+      "verified_session": "omar12"
+     },
+     "at": 1805168015000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000003",
+       "agent_id": "0c01aaaabbbbcccc",
+       "session": "vera12",
+       "type": "question",
+       "title": "Which?",
+       "summary": "Which way?",
+       "status": "completed",
+       "reference_id": "",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1805168014000,
+       "updated_at": 1805168015000,
+       "completed_at": 1805168015000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {},
+       "decision": {
+        "decision_id": "decision-000000000000000000000004",
+        "artifact_id": "artifact-000000000000000000000003",
+        "question": "Which way?",
+        "context": "",
+        "yes_label": "Yes",
+        "no_label": "No",
+        "status": "answered",
+        "resolved_choice": "answered",
+        "resolved_at": 1805168015000,
+        "resolved_by": "agent:omar12",
+        "revision": 2,
+        "expires_at": null,
+        "response_type": "single_choice",
+        "allow_custom_text": true,
+        "recommended_option_id": null,
+        "blocks_progress": false,
+        "priority_reason": "",
+        "urgency": "normal",
+        "response_effort": "review",
+        "deadline_at": null,
+        "options": [
+         {
+          "id": "a",
+          "label": "The first"
+         },
+         {
+          "id": "b",
+          "label": "The second"
+         }
+        ],
+        "answer": {
+         "option_id": "b",
+         "label": "The second"
+        },
+        "priority": 100,
+        "archived_at": null,
+        "delivery_pending": true
+       }
+      },
+      true
+     ],
+     "ids": 0
+    },
+    {
+     "call": "pending_deliveries",
+     "args": {},
+     "at": 1805168016000,
+     "result": [
+      {
+       "decision_id": "decision-000000000000000000000002",
+       "artifact_id": "artifact-000000000000000000000001",
+       "session": "vera12",
+       "question": "Deploy version 1.3?",
+       "context": "",
+       "reference_id": "deploy-1.3",
+       "payload_json": "{}",
+       "choice": "accepted",
+       "status": "pending",
+       "created_at": 1805168009000,
+       "delivered_at": null,
+       "response_type": "approval",
+       "answer_json": "{\"choice\": \"accepted\"}",
+       "resolved_by": "agent:omar12",
+       "answer": {
+        "choice": "accepted"
+       },
+       "prompt": "[Clarp decision resolved]\nDecision ID: decision-000000000000000000000002\nArtifact ID: artifact-000000000000000000000001\nResolved by: agent:omar12\nQuestion: Deploy version 1.3?\nContext: \nReference: deploy-1.3\nPayload: {}\nThe user, through agent omar12 approved this exact action: Deploy version 1.3? Proceed with exactly that action and scope after revalidating the target and payload. This does not approve any broader, additional, or repeated action."
+      },
+      {
+       "decision_id": "decision-000000000000000000000004",
+       "artifact_id": "artifact-000000000000000000000003",
+       "session": "vera12",
+       "question": "Which way?",
+       "context": "",
+       "reference_id": "",
+       "payload_json": "{}",
+       "choice": "answered",
+       "status": "pending",
+       "created_at": 1805168015000,
+       "delivered_at": null,
+       "response_type": "single_choice",
+       "answer_json": "{\"option_id\": \"b\", \"label\": \"The second\"}",
+       "resolved_by": "agent:omar12",
+       "answer": {
+        "option_id": "b",
+        "label": "The second"
+       },
+       "prompt": "[Clarp decision resolved]\nDecision ID: decision-000000000000000000000004\nArtifact ID: artifact-000000000000000000000003\nResolved by: agent:omar12\nQuestion: Which way?\nContext: \nReference: \nPayload: {}\nThe user, through agent omar12 answered this clarification: {\"option_id\": \"b\", \"label\": \"The second\"}. Continue using this answer. This does not grant approval for unrelated protected actions."
+      }
+     ],
+     "ids": 0
+    },
+    {
+     "call": "list",
+     "args": {
+      "type": "decision"
+     },
+     "at": 1805168017000,
+     "result": [
+      {
+       "artifact_id": "artifact-000000000000000000000001",
+       "agent_id": "0c01aaaabbbbcccc",
+       "session": "vera12",
+       "type": "decision",
+       "title": "Deploy?",
+       "summary": "Deploy version 1.3?",
+       "status": "completed",
+       "reference_id": "deploy-1.3",
+       "payload_version": 1,
+       "source_message_id": "",
+       "source_trace_id": "",
+       "created_at": 1805168001000,
+       "updated_at": 1805168009000,
+       "completed_at": 1805168009000,
+       "deleted_at": null,
+       "archived_at": null,
+       "pinned_at": null,
+       "agent_name": "Vera",
+       "pinned": false,
+       "payload": {},
+       "decision": {
+        "decision_id": "decision-000000000000000000000002",
+        "artifact_id": "artifact-000000000000000000000001",
+        "question": "Deploy version 1.3?",
+        "context": "",
+        "yes_label": "Yes",
+        "no_label": "No",
+        "status": "accepted",
+        "resolved_choice": "accepted",
+        "resolved_at": 1805168009000,
+        "resolved_by": "agent:omar12",
+        "revision": 2,
+        "expires_at": null,
+        "response_type": "approval",
+        "allow_custom_text": false,
+        "recommended_option_id": null,
+        "blocks_progress": false,
+        "priority_reason": "",
+        "urgency": "normal",
+        "response_effort": "review",
+        "deadline_at": null,
+        "options": [],
+        "answer": {
+         "choice": "accepted"
+        },
+        "priority": 100,
+        "archived_at": null,
+        "delivery_pending": true
+       }
+      }
+     ],
+     "ids": 0
+    }
+   ]
   }
  ]
 }

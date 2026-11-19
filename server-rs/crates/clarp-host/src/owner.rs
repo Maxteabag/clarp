@@ -59,6 +59,25 @@ pub fn selectors(file: &Table) -> Vec<(&'static str, Vec<String>)> {
     selectors
 }
 
+/// The sessions the owner lets answer a request in his place (`[agents]
+/// decision_on_behalf_sessions`), as the Python Host reads them (`config.load`): a list of texts,
+/// each without the space around it, the empty ones and what is no text passed over, each once in
+/// the order written. Anything else names nobody.
+pub fn on_behalf_sessions(file: &Table) -> Vec<String> {
+    let listed = file.get("agents").and_then(Value::as_table);
+    let listed = listed.and_then(|agents| agents.get("decision_on_behalf_sessions"));
+    let Some(listed) = listed.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut sessions: Vec<String> = Vec::new();
+    for session in listed.iter().filter_map(Value::as_str).map(str::trim) {
+        if !session.is_empty() && !sessions.iter().any(|known| known == session) {
+            sessions.push(session.to_string());
+        }
+    }
+    sessions
+}
+
 /// The texts of a table that maps names to texts (`[gemini_tts.voices]`), in the order the
 /// owner wrote them. What is no text in it is passed over.
 pub fn texts_at(root: &Table, path: &[&str]) -> Vec<(String, String)> {
@@ -511,5 +530,28 @@ enabled = true
                 .is_none()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The owner's list of who may answer in his place, read from files of every shape as the
+    /// Python Host's `config.load` reads it (`decision-on-behalf-vectors.json`).
+    #[test]
+    fn the_sessions_that_answer_in_the_owners_place_are_read_as_the_python_host_reads_them() {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/decision-on-behalf-vectors.json"
+        ))
+        .unwrap();
+        let files = vectors["files"].as_array().unwrap();
+        for file in files {
+            let text = file["toml"].as_str().unwrap();
+            let read: Table = text.parse().unwrap();
+            let theirs: Vec<String> = file["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|session| session.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(on_behalf_sessions(&read), theirs, "{}", file["what"]);
+        }
+        assert_eq!(files.len(), 9);
     }
 }
