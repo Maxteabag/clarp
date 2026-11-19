@@ -429,6 +429,19 @@ impl Fleet {
         )
     }
 
+    /// Include the requested Janitor only on reads of its own shelf.
+    fn scoped(app: &App, session: &str, id: &str) -> Self {
+        let mut fleet = Self::of(app);
+        let dir = app.fleet.directory();
+        if let Some(m) = dir.janitor(if session.is_empty() { id } else { session })
+            && (session.is_empty() || m.record.session == session)
+            && (id.is_empty() || m.record.agent_id == id)
+        {
+            fleet.0.push((m.clone(), m.agent.view()));
+        }
+        fleet
+    }
+
     fn shelves(&self) -> Vec<Shelf<'_>> {
         self.0
             .iter()
@@ -643,7 +656,7 @@ async fn list_artifacts(
         by_creation: text("order") == "created",
     };
     let rows = {
-        let fleet = Fleet::of(&app);
+        let fleet = Fleet::scoped(&app, &listing.session, &listing.agent_id);
         artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
     };
     let capable = render_spec::capable(&app, &headers);
@@ -904,6 +917,38 @@ pub(crate) async fn posted(
 /// Makes an artifact from what a request says. Answers the artifact as it is shown.
 pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
     made(app, data, false, false).await
+}
+
+/// Internal publication to the claimed checker. Public artifact POSTs cannot select a Janitor.
+pub(crate) async fn label_document(member: &Member, row: &Value) -> Result<(), ApiError> {
+    let row = row
+        .as_object()
+        .ok_or_else(|| refused(StatusCode::BAD_REQUEST, "invalid label document"))?;
+    let id = said(row, "artifact_id", "");
+    if member.agent.view().books.artifacts.get(&id).is_some() {
+        return Ok(());
+    }
+    let new = New {
+        kind: "document".into(),
+        status: "completed".into(),
+        title: said(row, "title", ""),
+        summary: said(row, "summary", ""),
+        reference_id: said(row, "reference_id", ""),
+        payload: row.get("payload").cloned(),
+        artifact_id: id,
+        expected_version: None,
+        validate_only: false,
+    };
+    ask_agent(
+        member,
+        Want::Create {
+            new,
+            taken_elsewhere: false,
+            live_elsewhere: false,
+        },
+    )
+    .await?;
+    Ok(())
 }
 
 /// Makes an artifact, or only checks a render spec when `validate_only` says so; the row as
@@ -1459,7 +1504,16 @@ pub(crate) fn badge(app: &App) -> Vec<String> {
 /// One artifact by its id, as it is shown.
 pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
     let fleet = Fleet::of(app);
-    artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms())
+    artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms()).or_else(|| {
+        if !artifact_id.starts_with("label-audit-") {
+            return None;
+        }
+        app.fleet.directory().janitors.iter().find_map(|m| {
+            let view = m.agent.view();
+            let art = view.books.artifacts.get(artifact_id)?;
+            Some(art.public(&m.record.persona, &view.books.goals, app.clock.now_ms()))
+        })
+    })
 }
 
 /// The artifacts of one session, as `GET /artifacts?session=` answers them.
@@ -1470,7 +1524,7 @@ pub(crate) async fn of_session(app: &App, session: &str) -> Value {
         ..Listing::default()
     };
     let rows = {
-        let fleet = Fleet::of(app);
+        let fleet = Fleet::scoped(app, &listing.session, &listing.agent_id);
         artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
     };
     json!({ "artifacts": all_shown(app, rows, "", false).await })

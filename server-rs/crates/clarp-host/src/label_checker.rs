@@ -108,10 +108,10 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
     facts
 }
 
-async fn project<F: AsyncFnMut(String) -> Result<Vec<Value>, Unavailable>>(
+async fn project<Fut: std::future::Future<Output = Result<Vec<Value>, Unavailable>> + Send>(
     facts: Vec<Candidate>,
     now: i64,
-    mut history: F,
+    mut history: impl FnMut(String) -> Fut + Send,
 ) -> Result<Vec<Evidence>, Unavailable> {
     let mut result = Vec::new();
     for c in selected(facts, now) {
@@ -123,7 +123,7 @@ async fn project<F: AsyncFnMut(String) -> Result<Vec<Value>, Unavailable>>(
 
 /// A scan reads at most three current-conversation entries for each of the selected twelve.
 pub async fn candidates(directory: &Directory, now: i64) -> Result<Vec<Evidence>, Unavailable> {
-    project(roster(directory), now, async |id: String| {
+    project(roster(directory), now, |id: String| async move {
         let member = directory
             .named(&id)
             .ok_or_else(|| Unavailable("label check target disappeared".into()))?;
@@ -156,9 +156,9 @@ mod tests {
             })
             .collect();
         let mut opened = Vec::new();
-        let result = project(facts, 1_000_000, async |id: String| {
+        let result = project(facts, 1_000_000, |id: String| {
             opened.push(id);
-            Ok(vec![json!({"role":"user","text":"a sample"})])
+            std::future::ready(Ok(vec![json!({"role":"user","text":"a sample"})]))
         })
         .await;
         assert_eq!(opened, (0..12).map(|i| i.to_string()).collect::<Vec<_>>());
@@ -172,74 +172,119 @@ mod tests {
 }
 
 /// The master switch and the labels switch are both required before reading a key.
-pub fn site_enabled(app:&crate::edge::App)->bool{
-    let dir=app.fleet.directory();
-    dir.setting("judgments.enabled")==Some("true") && dir.setting("judgments.labels")==Some("true") && app.ears.key("typesafe").is_some()
+pub fn site_enabled(app: &crate::edge::App) -> bool {
+    let dir = app.fleet.directory();
+    dir.setting("judgments.enabled") == Some("true")
+        && dir.setting("judgments.labels") == Some("true")
+        && app.ears.key("typesafe").is_some()
 }
 
-const DIAGNOSTIC:&str="label-judgment-diagnostic";
-const CURSOR:&str="label-judgment-cursor";
-const CAPACITY:u64=100;
+const DIAGNOSTIC: &str = "label-judgment-diagnostic";
+const CURSOR: &str = "label-judgment-cursor";
+const CAPACITY: u64 = 100;
 
 /// There is one writer, the claimed lane. The cursor and its bounded slot are committed
 /// together. The 101st call replaces the first; no diagnostic scan is needed.
-async fn diagnostic(app:&crate::edge::App, mut row:Value)->Result<(),Unavailable>{
-    let prior=app.fleet.kept(CURSOR,"labels".into()).await?;
-    let next=match prior{
-        None=>0,
-        Some(bytes)=>serde_json::from_slice::<u64>(&bytes).map_err(|_|Unavailable("invalid label diagnostic cursor".into()))?
+async fn diagnostic(app: &crate::edge::App, mut row: Value) -> Result<(), Unavailable> {
+    let prior = app.fleet.kept(CURSOR, "labels".into()).await?;
+    let next = match prior {
+        None => 0,
+        Some(bytes) => serde_json::from_slice::<u64>(&bytes)
+            .map_err(|_| Unavailable("invalid label diagnostic cursor".into()))?,
     };
-    row["sequence"]=json!(next);
-    app.fleet.keep_together(vec![
-        (DIAGNOSTIC,(next%CAPACITY).to_string(),row.to_string().into_bytes()),
-        (CURSOR,"labels".into(),next.wrapping_add(1).to_string().into_bytes())
-    ]).await
+    row["sequence"] = json!(next);
+    app.fleet
+        .keep_together(vec![
+            (
+                DIAGNOSTIC,
+                (next % CAPACITY).to_string(),
+                row.to_string().into_bytes(),
+            ),
+            (
+                CURSOR,
+                "labels".into(),
+                next.wrapping_add(1).to_string().into_bytes(),
+            ),
+        ])
+        .await
 }
 
 use crate::vocabulary::judge;
-use clarp_kernel::janitors::label_audit::{JUDGE_SECONDS,batch,findings};
+use clarp_kernel::janitors::label_audit::{JUDGE_SECONDS, batch, findings};
 
 /// Ask the labels site once. No other provider is eligible on a failed judgment.
-pub async fn judge_labels(app:&crate::edge::App, entries:&[Evidence],run:&str)->Option<Vec<Value>>{
-    let body=batch(entries)?;
-    if !site_enabled(app){return None;}
-    let key=app.ears.key("typesafe")?;
-    let breaker=&app.ears.judge;
-    let began=std::time::Instant::now();
-    let clipped=|v:&Value,n|clarp_kernel::python::dumps(v).chars().take(n).collect::<String>();
-    let mut row=json!({"run_id":run,"site":"labels","created_at":app.clock.now_ms(),
+pub async fn judge_labels(
+    app: &crate::edge::App,
+    entries: &[Evidence],
+    run: &str,
+) -> Option<Vec<Value>> {
+    let body = batch(entries)?;
+    if !site_enabled(app) {
+        return None;
+    }
+    let key = app.ears.key("typesafe")?;
+    let breaker = &app.ears.judge;
+    let began = std::time::Instant::now();
+    let clipped = |v: &Value, n| {
+        clarp_kernel::python::dumps(v)
+            .chars()
+            .take(n)
+            .collect::<String>()
+    };
+    let mut row = json!({"run_id":run,"site":"labels","created_at":app.clock.now_ms(),
         "state_json":clipped(&body["state"],4000),"question_json":clipped(&body["questions"],2000),
         "question_ids":(1..=entries.len()).map(|i|format!("l_a{i}")).collect::<Vec<_>>().join(","),
         "error":"","outcome":"","answers_json":"{}","input_tokens":0,"output_tokens":0});
-    let found=if breaker.remaining()>0.0{
-        row["error"]=json!("breaker open");
+    let found = if breaker.remaining() > 0.0 {
+        row["error"] = json!("breaker open");
         None
-    }else{
-        match judge::post(judge::endpoint(app),key,body,JUDGE_SECONDS*1000).await{
-            Ok(response)=>{
-                let result=findings(entries,&response["answers"]);
-                breaker.record(result.is_some(),false);
-                if let Some(items)=&result {
-                    row["answers_json"]=json!(clipped(&response["answers"],4000));
-                    for field in ["input_tokens","output_tokens"]{row[field]=json!(response["usage"][field].as_i64().unwrap_or(0));}
-                    let outcome:Vec<_>=entries.iter().enumerate().map(|(i,e)|{
-                        let verdict=items.iter().find(|v|v["agent_id"]==e.agent_id).and_then(|v|v["verdict"].as_str());
-                        format!("a{}={}",i+1,verdict.map_or_else(||"ok".into(),|v|format!("mismatch:{v}")))
-                    }).collect();
-                    row["outcome"]=json!(outcome.join(","));
-                }else{row["error"]=json!("invalid judgment response");}
+    } else {
+        match judge::post(judge::endpoint(app), key, body, JUDGE_SECONDS * 1000).await {
+            Ok(response) => {
+                let result = findings(entries, &response["answers"]);
+                breaker.record(result.is_some(), false);
+                if let Some(items) = &result {
+                    row["answers_json"] = json!(clipped(&response["answers"], 4000));
+                    for field in ["input_tokens", "output_tokens"] {
+                        row[field] = json!(response["usage"][field].as_i64().unwrap_or(0));
+                    }
+                    let outcome: Vec<_> = entries
+                        .iter()
+                        .enumerate()
+                        .map(|(i, e)| {
+                            let verdict = items
+                                .iter()
+                                .find(|v| v["agent_id"] == e.agent_id)
+                                .and_then(|v| v["verdict"].as_str());
+                            format!(
+                                "a{}={}",
+                                i + 1,
+                                verdict.map_or_else(|| "ok".into(), |v| format!("mismatch:{v}"))
+                            )
+                        })
+                        .collect();
+                    row["outcome"] = json!(outcome.join(","));
+                } else {
+                    row["error"] = json!("invalid judgment response");
+                }
                 result
             }
-            Err(billing)=>{
-                breaker.record(false,billing);
-                row["error"]=json!(if billing{"billing refusal"}else{"judgment unavailable"});
+            Err(billing) => {
+                breaker.record(false, billing);
+                row["error"] = json!(if billing {
+                    "billing refusal"
+                } else {
+                    "judgment unavailable"
+                });
                 None
             }
         }
     };
-    row["fallback_used"]=json!(found.is_none());
-    row["latency_ms"]=json!(began.elapsed().as_millis() as u64);
-    if let Err(e)=diagnostic(app,row).await{app.fleet.unkept(DIAGNOSTIC,&e.0);}
+    row["fallback_used"] = json!(found.is_none());
+    row["latency_ms"] = json!(began.elapsed().as_millis() as u64);
+    if let Err(e) = diagnostic(app, row).await {
+        app.fleet.unkept(DIAGNOSTIC, &e.0);
+    }
     found
 }
 
@@ -247,31 +292,294 @@ pub async fn judge_labels(app:&crate::edge::App, entries:&[Evidence],run:&str)->
 #[allow(clippy::unwrap_used)]
 mod site_tests {
     use super::*;
-    use std::io::{BufRead,BufReader,Read,Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     #[tokio::test]
-    async fn a_loopback_judge_receives_one_batch_and_returns_each_choice(){
-        let listener=std::net::TcpListener::bind(("127.0.0.1",0)).unwrap();
-        let url=format!("http://{}/judge",listener.local_addr().unwrap());
-        let peer=std::thread::spawn(move ||{
-            let (mut stream,_)=listener.accept().unwrap();
-            let mut reader=BufReader::new(&mut stream);
-            let mut lines=Vec::new();
-            loop{let mut line=String::new();assert!(reader.read_line(&mut line).unwrap()>0);if line=="\r\n"{break;}lines.push(line.trim().to_lowercase());}
-            assert!(lines.iter().any(|l|l=="authorization: bearer demo"));
-            assert_eq!(lines[0],"post /judge http/1.1");
-            let length=lines.iter().find_map(|l|l.strip_prefix("content-length: ")).unwrap().parse().unwrap();
-            let mut bytes=vec![0;length];reader.read_exact(&mut bytes).unwrap();
-            let request:Value=serde_json::from_slice(&bytes).unwrap();
-            assert_eq!(request["questions"].as_object().unwrap().len(),2);
-            let body=json!({"answers":{"l_a1":{"choice":"finished","probabilities":{"finished":1}},
-                "l_a2":{"choice":"accurate","probabilities":{"accurate":1}}}}).to_string();
-            write!(stream,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+    async fn a_loopback_judge_receives_one_batch_and_returns_each_choice() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let url = format!("http://{}/judge", listener.local_addr().unwrap());
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut lines = Vec::new();
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+                lines.push(line.trim().to_lowercase());
+            }
+            assert!(lines.iter().any(|l| l == "authorization: bearer demo"));
+            assert_eq!(lines[0], "post /judge http/1.1");
+            let length = lines
+                .iter()
+                .find_map(|l| l.strip_prefix("content-length: "))
+                .unwrap()
+                .parse()
+                .unwrap();
+            let mut bytes = vec![0; length];
+            reader.read_exact(&mut bytes).unwrap();
+            let request: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(request["questions"].as_object().unwrap().len(), 2);
+            let body =
+                json!({"answers":{"l_a1":{"choice":"finished","probabilities":{"finished":1}},
+                "l_a2":{"choice":"accurate","probabilities":{"accurate":1}}}})
+                .to_string();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
             request
         });
-        let entries:Vec<_>=["one","two"].into_iter().map(|id|Evidence{agent_id:id.into(),name:id.into(),packet:json!({"label":"sample"}),idle_min:None}).collect();
-        let response=judge::post(url,"demo".into(),batch(&entries).unwrap(),JUDGE_SECONDS*1000).await.unwrap();
-        let found=findings(&entries,&response["answers"]).unwrap();
-        assert_eq!(found.len(),1);assert_eq!(found[0]["agent_id"],"one");
-        assert_eq!(peer.join().unwrap()["state"]["agents"],json!({"a1":{"label":"sample"},"a2":{"label":"sample"}}));
+        let entries: Vec<_> = ["one", "two"]
+            .into_iter()
+            .map(|id| Evidence {
+                agent_id: id.into(),
+                name: id.into(),
+                packet: json!({"label":"sample"}),
+                idle_min: None,
+            })
+            .collect();
+        let response = judge::post(
+            url,
+            "demo".into(),
+            batch(&entries).unwrap(),
+            JUDGE_SECONDS * 1000,
+        )
+        .await
+        .unwrap();
+        let found = findings(&entries, &response["answers"]).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0]["agent_id"], "one");
+        assert_eq!(
+            peer.join().unwrap()["state"]["agents"],
+            json!({"a1":{"label":"sample"},"a2":{"label":"sample"}})
+        );
     }
+}
+
+use crate::edge::App;
+use clarp_kernel::janitors::{adaptive, label_audit, quota};
+const ROLE: &str = "label-auditor";
+const CADENCE: &str = "label-checker-cadence";
+const LAST: &str = "label-checker-last-check";
+const MARK: &str = "label-checker-fingerprint";
+
+#[derive(Default)]
+pub struct Desk {
+    armed: std::sync::Mutex<Option<(i64, u64)>>,
+    looking: std::sync::Arc<tokio::sync::Mutex<()>>,
+}
+
+/// Called by the shared Janitor runner. No label-specific timer or polling task.
+pub(crate) fn look(app: &App) {
+    let d = &app.label_checker;
+    let changes = app.janitors.changes();
+    let now = app.clock.now_ms();
+    let armed = *d
+        .armed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !quota::due(armed, now, changes) {
+        return;
+    }
+    let Ok(guard) = d.looking.clone().try_lock_owned() else {
+        return;
+    };
+    let app = app.clone();
+    tokio::spawn(async move {
+        let _guard = guard;
+        let next = match pass(&app, now).await {
+            Ok(next) => next,
+            Err(why) => {
+                app.fleet.unkept(ROLE, &why.0);
+                now + 15_000
+            }
+        };
+        *app.label_checker
+            .armed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((next, changes));
+    });
+}
+
+async fn stored<T: serde::de::DeserializeOwned>(
+    app: &App,
+    kind: &'static str,
+) -> Result<Option<T>, Unavailable> {
+    app.fleet
+        .kept(kind, ROLE.into())
+        .await?
+        .map(|raw| {
+            serde_json::from_slice(&raw).map_err(|_| Unavailable(format!("invalid {kind} record")))
+        })
+        .transpose()
+}
+
+fn row(kind: &'static str, value: &impl serde::Serialize) -> crate::janitors::Row {
+    (
+        kind,
+        ROLE.to_owned(),
+        serde_json::to_vec(value).unwrap_or_default(),
+    )
+}
+
+async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
+    let owner = app
+        .janitors
+        .read(app, |book, world, _| {
+            let id = book.resolve(ROLE, None, world).ok()??;
+            let config = book.configs.get(&id)?;
+            let opts = &config.options;
+            Some((
+                id,
+                config.generation,
+                (
+                    opts.get("interval_seconds")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(3600),
+                    opts.get("max_interval_seconds")
+                        .and_then(Value::as_i64)
+                        .unwrap_or(86400),
+                ),
+            ))
+        })
+        .await?;
+    let Some((id, generation, bounds)) = owner else {
+        return Ok(i64::MAX);
+    };
+    if !site_enabled(app) {
+        return Ok(now + 15_000);
+    }
+    let mut lane = quota::Lane::of(stored(app, CADENCE).await?, &id, generation);
+    lane.last_check = stored(app, LAST).await?;
+    if now < lane.next_run(bounds.0) {
+        return Ok(lane.next_run(bounds.0));
+    }
+    let span = std::env::var("CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS").unwrap_or_default();
+    if !span.is_empty() && label_audit::quiet(&span, &crate::oracle::zone_of_this_machine(), now) {
+        return Ok(now + 15_000);
+    }
+    lane.start(bounds, now);
+    lane.last_check = None; // The last check is its own record across ownership changes.
+    let directory = app.fleet.directory();
+    let entries = candidates(&directory, now).await?;
+    if entries.is_empty() {
+        lane.record(bounds, (adaptive::IDLE, "Nothing shown as working"), now);
+        app.fleet
+            .keep_together(vec![row(LAST, &now), row(CADENCE, &lane)])
+            .await?;
+        return Ok(lane.next_run(bounds.0));
+    }
+    let Some(member) = directory.janitor(&id) else {
+        return Ok(now);
+    };
+    let packets = batch(&entries)
+        .map(|b| b["state"]["agents"].clone())
+        .unwrap_or_default();
+    let request = json!(quota::digest(&json!([id, now])));
+    let context = json!({"input_hash":quota::digest(&packets),"target_count":entries.len()});
+    let run = app
+        .janitors
+        .with_kept(app, |book, world, at| {
+            if !book
+                .configs
+                .get(&id)
+                .is_some_and(|c| c.enabled && c.generation == generation)
+            {
+                return (None, vec![], vec![]);
+            }
+            let run = book
+                .begin_run_of(
+                    Some(id.clone()),
+                    ROLE,
+                    &request,
+                    Some(&context),
+                    None,
+                    world,
+                    at,
+                )
+                .ok()
+                .flatten()
+                .and_then(|r| {
+                    let name = r["run_id"].as_str()?;
+                    book.claim_run(name, world, at).then(|| name.to_owned())
+                });
+            if run.is_none() {
+                lane.record(bounds, (adaptive::FAILED, "The check could not start"), now);
+            }
+            (run, vec![row(LAST, &now), row(CADENCE, &lane)], vec![])
+        })
+        .await?;
+    let Some(run) = run else {
+        return Ok(lane.next_run(bounds.0));
+    };
+    let found = judge_labels(app, &entries, &run).await;
+    let mut extra = vec![];
+    let (status, activity, summary, result, error) = if let Some(found) = found {
+        let prior = stored::<String>(app, MARK).await?.unwrap_or_default();
+        let (mark, doc) =
+            label_audit::report(&member.record.session, &run, entries.len(), &found, &prior);
+        if let Some(d) = &doc
+            && !app.janitors.label_document(app, &run, member, d).await?
+        {
+            return Ok(now);
+        }
+        let summary = label_audit::summary(entries.len(), found.len(), doc.is_some());
+        extra.push(row(MARK, &mark));
+        (
+            "completed",
+            if doc.is_some() {
+                adaptive::WORKED
+            } else {
+                adaptive::IDLE
+            },
+            summary.clone(),
+            json!({"summary":summary,"item_count":found.len(),"target_count":entries.len()}),
+            "",
+        )
+    } else {
+        let why = "Jev did not answer; nothing reported";
+        ("failed", adaptive::FAILED, why.to_owned(), Value::Null, why)
+    };
+    lane.record(bounds, (activity, &summary), now);
+    extra.push(row(CADENCE, &lane));
+    app.janitors
+        .with_kept(app, |book, world, at| {
+            if !book.is_current(&run, world, at) {
+                return ((), vec![], vec![]);
+            }
+            let kept = book.complete_run(
+                &run,
+                status,
+                result.as_object().map(|_| &result),
+                error,
+                Some((activity, &summary)),
+                world,
+                at,
+            );
+            ((), if kept == Ok(true) { extra } else { vec![] }, vec![])
+        })
+        .await?;
+    Ok(lane.next_run(bounds.0))
+}
+
+pub(crate) async fn show_cadence(app: &App, janitor: &mut Value) {
+    if janitor["template_id"] != ROLE {
+        return;
+    }
+    let Ok(Some(lane)) = stored::<quota::Lane>(app, CADENCE).await else {
+        return;
+    };
+    if janitor["agent_id"] != lane.agent_id || janitor["generation"] != lane.generation {
+        return;
+    }
+    let base = janitor["options"]["interval_seconds"]
+        .as_i64()
+        .unwrap_or(3600);
+    let cap = janitor["options"]["max_interval_seconds"].as_i64();
+    let next = lane.next_run_at.filter(|_| janitor["enabled"] == true);
+    janitor["cadence"] = json!([adaptive::cadence(&lane.cadence, (base, cap), next, ROLE)]);
 }
