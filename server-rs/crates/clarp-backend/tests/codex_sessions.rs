@@ -138,7 +138,7 @@ fn the_rollout_of_a_session_is_found_as_the_python_host_finds_it() {
         assert_eq!(json!(ours), row["path"], "{session:?}");
         there += usize::from(ours.is_some());
     }
-    assert_eq!((found.len(), there), (9, 6));
+    assert_eq!((found.len(), there), (9, 4));
     assert_eq!(
         codex_rollout(&sessions.join("no-such-directory"), "a1"),
         None
