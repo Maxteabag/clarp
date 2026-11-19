@@ -38,7 +38,7 @@ one of these:
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
-| `managed_skills`, `agent_portraits`, `auto_contact_minting`, `backend_auth`, `controller_actions`, `diagnostics`, `goal_ledger`, `harness_model_providers`, `launch_directories`, `provider_background_tasks`, `remote_action`, `transcription` | to be built |
+| `managed_skills`, `agent_portraits`, `auto_contact_minting`, `backend_auth`, `controller_actions`, `diagnostics`, `goal_ledger`, `harness_model_providers`, `provider_background_tasks`, `remote_action`, `transcription` | to be built |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -421,3 +421,5 @@ with its port (19 Nov 2026).
 | A render spec made with the agent's tool's `create` (not `publish-render-spec`) whose payload writes `-0` | the tool reads the payload and writes it again: `0`, taken | the tool reads `-0` as a fraction: refused, `number_form` | `publish-render-spec` sends the agent's bytes on both Hosts and is what the skill names |
 | Where a refused render spec is logged (`renderSpecRefused code=<code> path=<pointer>`) | the Host's log and its telemetry | the Host's standard error | This Host has no telemetry; both write the code and the pointer and nothing the caller wrote |
 | An agent with render specs that moves to this Host (`clarp-host import`) | (it is the Host moved from) | a render spec is refused as a kind the import does not take (`unsupported artifact type`) | Not built: moving one, with what was answered and not yet told, is the mover's contract (contract 0.5, section 7) |
+
+| Launch directory suggestions for a limited paired device | Can read `GET /launch-directories`, including names under an absolute path | Requires full device access, as for `/dirs`. A limited device can read `GET /favorite-paths`. | Directory enumeration requires full access. Favorites use the launch ledger. |

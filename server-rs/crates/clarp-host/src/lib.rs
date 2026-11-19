@@ -47,6 +47,7 @@ pub mod joblog;
 pub mod keeper;
 pub mod label_checker;
 pub mod labels;
+pub mod launch_directories;
 pub mod launcher;
 pub mod library;
 pub mod line;

@@ -200,6 +200,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("snapshot_without_archived", 82),
     // `DELETE /devices` and `GET /devices/push-tokens`.
     ("push_unregister", 93),
+    ("launch_directories", 1),
     // An agent's row says that its tool's account is used up (`backend_quota`), and the apps
     // are told to read the rows again when that changes (`agent-roster`, `backend-quota`):
     // for Codex by what Codex writes of its account and by a turn that failed for a usage
@@ -574,6 +575,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::schedules::routes())
         .merge(crate::heartbeat::routes())
         .merge(crate::forks::routes())
+        .merge(crate::launch_directories::routes())
         .merge(crate::janitors::routes())
         .merge(crate::router::routes())
         .merge(crate::past::routes())
@@ -773,7 +775,7 @@ fn percent_decoded(part: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-async fn no_route() -> ApiError {
+pub(crate) async fn no_route() -> ApiError {
     ApiError::plain(StatusCode::NOT_FOUND, "not found")
 }
 
