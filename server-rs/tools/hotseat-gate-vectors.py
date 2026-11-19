@@ -62,9 +62,12 @@ def run() -> dict:
 
     class Asked:
         """What a handler reads of a request and writes of its answer."""
-        def __init__(self, body: str, desk):
+        def __init__(self, body: str, desk, method: str):
             self.body, self.answer = body, None
             self.ctx = type('Ctx', (), {'hotseat_desk': desk})()
+            # What the dispatcher reads of the request before its route (request_body.refused):
+            # a change says the length its body has; a read sends no body and says nothing of one.
+            self.headers = {'Content-Length': str(len(body.encode()))} if method != 'GET' else {}
 
         def _read_json(self):
             raw = self.body.encode()
@@ -100,7 +103,7 @@ def run() -> dict:
             for method, path in DOORS:
                 for body in BODIES if method == 'POST' else ('',):
                     desk = Desk() if there else None
-                    asked = Asked(body, desk)
+                    asked = Asked(body, desk, method)
                     registry.dispatch(asked, method, path)
                     answer = asked.answer or {'status': None}
                     if answer.get('type') == 'application/json':

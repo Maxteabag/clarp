@@ -59,6 +59,9 @@ def run() -> dict:
         """A request whose route, where it has one, only writes down its name."""
         def __init__(self):
             self.answer = None
+            # What the dispatcher reads of the request before its route (request_body.refused):
+            # a change with no body, as a client sends one, says its length is nothing.
+            self.headers = {'Content-Length': '0'}
 
         def _read_json(self):
             return {}
