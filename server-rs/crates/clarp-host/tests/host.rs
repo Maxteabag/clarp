@@ -11253,6 +11253,296 @@ fn a_janitor_reaches_none_of_its_owners_attention_and_its_turns_tell_nobody() {
     assert_eq!((attention_of(&keeper_id), inbox_of(&keeper)), (0, 0));
 }
 
+/// A janitor whose runs fail again and again reaches its owner, the one thing of a quiet agent
+/// that does: an item among `janitor_items` of `GET /attention`, counted by the badge, never in
+/// the Updates and never pushed; closed when the janitor recovers; put away or discarded by the
+/// owner, and then never made again for the same failure; kept through a restart.
+#[test]
+fn a_janitor_that_fails_again_and_again_reaches_its_owner_until_it_recovers() {
+    let relay = StandInRelay::start();
+    let place = Place::new("janitor-alert");
+    let (codex, _) = explaining_model(&place);
+    // Mike, a stand-in for Claude Code whose turn, told to hold, runs while the chip is read,
+    // and ends with its place.
+    let at = |name: &str| place.root.join(name);
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "case \"$message\" in\n*HOLD*) touch \"{a}\"; while [ -e \"{a}\" ] && [ ! -e \"{b}\" ]; \
+             do sleep 0.1; done;;\nesac\n",
+            a = at("started").display(),
+            b = at("release").display(),
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    let relay_at = format!("http://{}", relay.address);
+    let args = ["--push-relay", relay_at.as_str()];
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_PUSH_CREDENTIAL", "the-hosts-own-account"),
+    ];
+    let host = place.start_in("secret", &args, &world);
+    let made = host.post("/agents", json!({ "name": "Mike", "backend": "claude" }));
+    let mike = made["session"].as_str().unwrap().to_string();
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let device = json!({ "token": "a1".repeat(32), "session": mike, "push_grant": grant });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&device)),
+        (200, json!({ "ok": true }))
+    );
+    let activity = json!({
+        "token": "AB".repeat(20), "activity_id": "act-1", "kind": "agents-working",
+        "environment": "sandbox",
+    });
+    let (status, _) = host.ask_as(&phone, "POST", "/devices/live-activity", Some(&activity));
+    assert_eq!(status, 200);
+    let events = host.listen_at("/events?token=secret");
+    let post = |path: &str, body: Value| host.ask("POST", path, Some(&body));
+    let bash = |id: &str, command: &str| json!({ "id": id, "activity": { "name": "Bash", "command": command } });
+    let explain = |id: &str, command: &str| {
+        let body = json!({ "session": mike, "detail_level": 2, "items": [bash(id, command)] });
+        post("/tool-explanations", body)
+    };
+    // The janitor that explains tools, turned on.
+    assert_eq!(
+        post("/tool-explanations/settings", json!({ "enabled": true })).0,
+        200
+    );
+    let janitor = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
+    let (status, on) = post(
+        "/janitors/clarp-tool-explainer/enabled",
+        json!({ "expected_revision": janitor["revision"], "enabled": true }),
+    );
+    assert_eq!(status, 200, "{on}");
+    let persona = janitor["name"].as_str().unwrap().to_string();
+    let janitor_id = janitor["agent_id"].as_str().unwrap().to_string();
+    let items = |archived: bool| -> Vec<Value> {
+        let path = if archived {
+            "/attention?include_archived=1"
+        } else {
+            "/attention"
+        };
+        host.get(path)["janitor_items"].as_array().unwrap().clone()
+    };
+    let runs_ended = |how: &str| -> usize {
+        let runs = host.get("/janitors/clarp-tool-explainer/runs?limit=100");
+        let runs = runs["runs"].as_array().unwrap().clone();
+        runs.iter().filter(|run| run["status"] == how).count()
+    };
+    // One failed run at a time: requests asked together are answered by one run.
+    let fail = |n: usize| {
+        for _ in 0..n {
+            let before = runs_ended("failed");
+            explain(&format!("broken-{before}"), &format!("broken {before}"));
+            wait_for("the run to fail", || runs_ended("failed") == before + 1);
+        }
+    };
+
+    // Once is no pattern: nothing reaches the owner.
+    fail(1);
+    assert!(items(false).is_empty());
+    // Twice in a row: an item for the owner, of the janitor, that says so.
+    fail(1);
+    wait_for("the item to be raised", || items(false).len() == 1);
+    let item = items(false)[0].clone();
+    let id = item["artifact_id"].as_str().unwrap().to_string();
+    assert!(id.starts_with("janitor-alert-") && id.len() == 54, "{item}");
+    assert_eq!(
+        (
+            &item["agent_id"],
+            &item["session"],
+            &item["agent_name"],
+            &item["type"],
+            &item["status"],
+            &item["title"],
+            &item["attention_kind"],
+            &item["failure_count"],
+            &item["configuration_generation"],
+        ),
+        (
+            &json!(janitor_id),
+            &json!("clarp-tool-explainer"),
+            &json!(persona),
+            &json!("document"),
+            &json!("failed"),
+            &json!(format!("{persona} needs attention")),
+            &json!("janitor_failure"),
+            &json!(2),
+            &on["janitor"]["generation"],
+        ),
+        "{item}"
+    );
+    let summary = item["summary"].as_str().unwrap();
+    assert!(
+        summary.ends_with(
+            "needs attention after 2 failed runs. Review the configuration or pause maintenance."
+        ),
+        "{summary}"
+    );
+    assert!(
+        item["reference_id"]
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("janitor-failure:{janitor_id}:")),
+        "{item}"
+    );
+    // The apps are told to read the janitors again; the item opens as an artifact, with what
+    // went wrong; it is not among the Updates, and nobody is told of it any other way.
+    wait_for("the apps to be told", || {
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event["type"] == "agent-roster" && event["kind"] == "janitor-attention")
+    });
+    let opened = host.get(&format!("/artifacts/{id}"));
+    assert_eq!(
+        opened["artifact"]["payload"]["attention_kind"], "janitor_failure",
+        "{opened}"
+    );
+    assert!(
+        opened["artifact"]["payload"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Latest error: "),
+        "{opened}"
+    );
+    let updates = host.get("/attention/inbox");
+    let listed = updates["artifacts"].as_array().unwrap();
+    assert!(
+        listed.iter().all(|row| row["artifact_id"] != id.as_str()),
+        "{updates}"
+    );
+    let told: Vec<Value> = events.lock().unwrap().clone();
+    assert!(
+        told.iter().all(|event| event["type"] != "user-notification"
+            || event["session"] != "clarp-tool-explainer"),
+        "{told:?}"
+    );
+    // The badge counts it: the chip that shows Mike at work says so, and nothing is pushed of
+    // the janitor beside the chip.
+    host.send(&mike, "HOLD", "m1");
+    wait_for("Mike's turn to begin", || at("started").exists());
+    let chips = || -> Vec<Value> {
+        let taken = relay.taken();
+        let sent = taken.iter().filter(|(path, ..)| path == "/v1/push/send");
+        let sent: Vec<Value> = sent
+            .map(|(_, _, body)| body["notifications"][0].clone())
+            .collect();
+        sent.into_iter()
+            .filter(|push| push["pushType"] == "liveactivity")
+            .map(|push| push["payload"]["aps"]["content-state"].clone())
+            .collect()
+    };
+    wait_for("the chip to count the item", || {
+        chips().iter().any(|chip| {
+            chip["decisions"] == 1
+                && chip["agents"].as_array().is_some_and(|agents| {
+                    agents.iter().any(|agent| agent["session"] == mike.as_str())
+                })
+        })
+    });
+    let others = relay.taken();
+    let others = others.iter().filter(|(path, ..)| path == "/v1/push/send");
+    let others = others.map(|(_, _, body)| body["notifications"][0].clone());
+    assert!(
+        others
+            .filter(|push| push["pushType"] != "liveactivity")
+            .all(|push| push["payload"]["session"] != "clarp-tool-explainer"),
+        "a janitor's failure is never pushed"
+    );
+    std::fs::write(at("release"), "").unwrap();
+    wait_for("Mike's turn to be over", || host.state(&mike) == "done");
+
+    // A third failure: the same item, counting three.
+    fail(1);
+    wait_for("the item to count three", || {
+        items(false)
+            .first()
+            .is_some_and(|item| item["failure_count"] == 3)
+    });
+    assert_eq!(items(false)[0]["artifact_id"], json!(id));
+    // It answers well: the item is over, and says the janitor recovered.
+    explain("fine", "zork lantern");
+    wait_for("the run to go well", || runs_ended("completed") >= 1);
+    wait_for("the item to be closed", || items(false).is_empty());
+    let closed = host.get(&format!("/artifacts/{id}"))["artifact"].clone();
+    assert_eq!(
+        (&closed["status"], &closed["summary"]),
+        (
+            &json!("completed"),
+            &json!("Maintenance recovered or its configuration changed.")
+        ),
+        "{closed}"
+    );
+
+    // It fails twice again: another item. Archived by its owner, it is no longer shown, but
+    // where archived ones are asked for; a further failure does not make it again.
+    fail(2);
+    wait_for("another item to be raised", || items(false).len() == 1);
+    let second = items(false)[0].clone();
+    let second_id = second["artifact_id"].as_str().unwrap().to_string();
+    assert_ne!(second_id, id);
+    let opened = host.get(&format!("/artifacts/{second_id}"))["artifact"].clone();
+    let archive = json!({ "archived": true, "expected_updated_at": opened["updated_at"] });
+    let (status, archived) = post(&format!("/artifacts/{second_id}/archive"), archive.clone());
+    assert_eq!(
+        (status, &archived["changed"]),
+        (200, &json!(true)),
+        "{archived}"
+    );
+    assert!(archived["artifact"]["archived_at"].is_i64(), "{archived}");
+    let (status, again) = post(&format!("/artifacts/{second_id}/archive"), archive);
+    assert_eq!((status, &again["changed"]), (200, &json!(false)), "{again}");
+    assert!(items(false).is_empty());
+    assert_eq!(items(true).len(), 1);
+    fail(1);
+    assert!(items(false).is_empty());
+    let kept = host.get(&format!("/artifacts/{second_id}"))["artifact"].clone();
+    assert_eq!(kept["payload"]["failure_count"], 2, "{kept}");
+    // Discarded, it is gone: not shown, not opened. One that changed since is refused.
+    let stale = json!({ "expected_updated_at": 1 });
+    let (status, refused) = post(&format!("/artifacts/{second_id}/discard"), stale);
+    assert_eq!(
+        (status, &refused["error"]),
+        (409, &json!("artifact changed")),
+        "{refused}"
+    );
+    let discard = json!({ "expected_updated_at": kept["updated_at"] });
+    let (status, discarded) = post(&format!("/artifacts/{second_id}/discard"), discard);
+    assert_eq!(
+        (status, &discarded["changed"]),
+        (200, &json!(true)),
+        "{discarded}"
+    );
+    assert!(items(true).is_empty());
+    let (status, _) = host.ask("GET", &format!("/artifacts/{second_id}"), None);
+    assert_eq!(status, 404);
+
+    // What reached the owner is kept: a Host started again knows the item that was closed, and
+    // makes none again for the failure that was discarded.
+    drop(host);
+    let host = place.start_in("secret", &args, &world);
+    let closed = host.get(&format!("/artifacts/{id}"))["artifact"].clone();
+    assert_eq!(closed["status"], "completed", "{closed}");
+    assert!(
+        host.get("/attention?include_archived=1")["janitor_items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
 fn janitors_tool(place: &Place, closing: &str) -> PathBuf {
     let claude = place.root.join("claude");
     let script = [

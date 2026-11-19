@@ -1,0 +1,1713 @@
+{
+ "kind": "janitor_failure",
+ "prefix": "janitor-failure:",
+ "stories": [
+  {
+   "what": "a scheduled task",
+   "agent_id": "0000000000000001",
+   "session": "keeper",
+   "persona": "Keeper",
+   "template_id": "scheduled-prompt",
+   "job_name": "Scheduled task",
+   "steps": [
+    {
+     "step": "fails once",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-1",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000000500,
+       "finished_at": 1800000001000
+      }
+     ],
+     "changed": 0,
+     "alerts": [],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "fails twice",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-2",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000001500,
+       "finished_at": 1800000002000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-2",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "fails a third time, its error with a thought and a key in it",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-3",
+       "status": "failed",
+       "outcome": "error",
+       "error": "<think>why it broke</think> token sk-ant-api03-abcdefghijklmnopqrstuv broke",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000002500,
+       "finished_at": 1800000003000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "is cancelled",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-4",
+       "status": "cancelled",
+       "outcome": "cancelled",
+       "error": "",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000003500,
+       "finished_at": 1800000004000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "fails once after the cancel",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-5",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000004500,
+       "finished_at": 1800000005000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-3",
+       "failure_count": 3,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "goes well",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-6",
+       "status": "completed",
+       "outcome": "completed",
+       "error": "",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000005500,
+       "finished_at": 1800000006000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "fails twice again",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "keeper-run-7",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000006500,
+       "finished_at": 1800000007000
+      },
+      {
+       "run_id": "keeper-run-8",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000007500,
+       "finished_at": 1800000008000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-8",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-8",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "is archived by its owner",
+     "action": "archive",
+     "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-8",
+       "failure_count": 2,
+       "archived": true
+      }
+     ]
+    },
+    {
+     "step": "fails once more, archived",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "keeper-run-9",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000008500,
+       "finished_at": 1800000009000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "keeper-run-8",
+       "failure_count": 2,
+       "archived": true
+      }
+     ]
+    },
+    {
+     "step": "is set anew",
+     "action": "generation",
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "fails twice in its new configuration",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "keeper-run-10",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000009500,
+       "finished_at": 1800000010000
+      },
+      {
+       "run_id": "keeper-run-11",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000010500,
+       "finished_at": 1800000011000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-0a3a21c67cae329b57ab2b340a5ef37944d13f8a",
+       "reference_id": "janitor-failure:0000000000000001:2:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 2,
+        "latest_run_id": "keeper-run-11",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-0a3a21c67cae329b57ab2b340a5ef37944d13f8a",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:2:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 2,
+       "latest_run_id": "keeper-run-11",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-0a3a21c67cae329b57ab2b340a5ef37944d13f8a",
+       "session": "keeper",
+       "agent_name": "Keeper",
+       "type": "document",
+       "status": "failed",
+       "title": "Keeper needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000001:2:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 2,
+       "latest_run_id": "keeper-run-11",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "is turned off",
+     "action": "enabled",
+     "enabled": false,
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-0a3a21c67cae329b57ab2b340a5ef37944d13f8a",
+       "reference_id": "janitor-failure:0000000000000001:2:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance is paused or removed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 2,
+        "latest_run_id": "keeper-run-11",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "is turned on again",
+     "action": "enabled",
+     "enabled": true,
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-a4b2fb96f184cda673a5c134d996e59a275cbac6",
+       "reference_id": "janitor-failure:0000000000000001:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-3",
+        "failure_count": 3,
+        "content": "Scheduled task needs attention after 3 failed runs. Review the configuration or pause maintenance.\n\nLatest error: token [REDACTED API KEY] broke",
+        "diagnostic": "token [REDACTED API KEY] broke",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-3d9395c8811a232db389000a4f7f846b9c52a984",
+       "reference_id": "janitor-failure:0000000000000001:1:keeper-run-6",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "keeper-run-8",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": true,
+       "deleted": false
+      },
+      {
+       "artifact_id": "janitor-alert-0a3a21c67cae329b57ab2b340a5ef37944d13f8a",
+       "reference_id": "janitor-failure:0000000000000001:2:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Keeper needs attention",
+       "summary": "Maintenance is paused or removed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 2,
+        "latest_run_id": "keeper-run-11",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    }
+   ]
+  },
+  {
+   "what": "a janitor that answers requests",
+   "agent_id": "0000000000000002",
+   "session": "router",
+   "persona": "Router",
+   "template_id": "message-delegator",
+   "job_name": "Message delegator",
+   "steps": [
+    {
+     "step": "fails twice",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "router-run-1",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "no route",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": {
+        "summary": "x"
+       },
+       "created_at": 1800000011500,
+       "finished_at": 1800000012000
+      },
+      {
+       "run_id": "router-run-2",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": null,
+       "created_at": 1800000012500,
+       "finished_at": 1800000013000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-2",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "answers without a summary",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "router-run-3",
+       "status": "completed",
+       "outcome": "completed",
+       "error": "",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": {
+        "summary": " "
+       },
+       "created_at": 1800000013500,
+       "finished_at": 1800000014000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-2",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "fails again",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "router-run-4",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "no route",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": null,
+       "created_at": 1800000014500,
+       "finished_at": 1800000015000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-2",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "answers in another way than it was set",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "router-run-5",
+       "status": "completed",
+       "outcome": "completed",
+       "error": "",
+       "configuration": {
+        "executor": "deterministic",
+        "template_id": "message-delegator"
+       },
+       "demand_result": {
+        "summary": "routed"
+       },
+       "created_at": 1800000015500,
+       "finished_at": 1800000016000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-2",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "fails twice more",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "router-run-6",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "no route",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": null,
+       "created_at": 1800000016500,
+       "finished_at": 1800000017000
+      },
+      {
+       "run_id": "router-run-7",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "no route",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": null,
+       "created_at": 1800000017500,
+       "finished_at": 1800000018000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-7",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: no route",
+        "diagnostic": "no route",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-7",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "session": "router",
+       "agent_name": "Router",
+       "type": "document",
+       "status": "failed",
+       "title": "Router needs attention",
+       "summary": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "router-run-7",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "answers well",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "router-run-8",
+       "status": "completed",
+       "outcome": "completed",
+       "error": "",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "message-delegator"
+       },
+       "demand_result": {
+        "summary": "routed"
+       },
+       "created_at": 1800000018500,
+       "finished_at": 1800000019000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-7027c0ebe9186931be3ad0bb5a40e69ce49db1d0",
+       "reference_id": "janitor-failure:0000000000000002:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Router needs attention",
+       "summary": "Maintenance recovered or its configuration changed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "router-run-7",
+        "failure_count": 2,
+        "content": "Message delegator needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: no route",
+        "diagnostic": "no route",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    }
+   ]
+  },
+  {
+   "what": "the labels janitor",
+   "agent_id": "0000000000000003",
+   "session": "labels",
+   "persona": "Labels",
+   "template_id": "label-auditor",
+   "job_name": "Label checker",
+   "steps": [
+    {
+     "step": "fails twice, the second without a word",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "labels-run-1",
+       "status": "failed",
+       "outcome": "failed",
+       "error": "Jev did not answer",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "label-auditor"
+       },
+       "demand_result": null,
+       "created_at": 1800000019500,
+       "finished_at": 1800000020000
+      },
+      {
+       "run_id": "labels-run-2",
+       "status": "failed",
+       "outcome": "error",
+       "error": "",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "label-auditor"
+       },
+       "demand_result": null,
+       "created_at": 1800000020500,
+       "finished_at": 1800000021000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "labels-run-2",
+        "failure_count": 2,
+        "content": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "session": "labels",
+       "agent_name": "Labels",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "labels-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "session": "labels",
+       "agent_name": "Labels",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "labels-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "is discarded by its owner",
+     "action": "discard",
+     "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "labels-run-2",
+        "failure_count": 2,
+        "content": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": true
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "fails again, discarded",
+     "action": "run",
+     "runs": [
+      {
+       "run_id": "labels-run-3",
+       "status": "failed",
+       "outcome": "error",
+       "error": "still",
+       "configuration": {
+        "executor": "ephemeral",
+        "template_id": "label-auditor"
+       },
+       "demand_result": null,
+       "created_at": 1800000021500,
+       "finished_at": 1800000022000
+      }
+     ],
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "labels-run-2",
+        "failure_count": 2,
+        "content": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": true
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    },
+    {
+     "step": "is no janitor any more",
+     "action": "janitor",
+     "is_janitor": false,
+     "changed": 0,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-29d96e938200c1e67d01d6936bd4325efc0c729d",
+       "reference_id": "janitor-failure:0000000000000003:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Labels needs attention",
+       "summary": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "labels-run-2",
+        "failure_count": 2,
+        "content": "Label checker needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: Maintenance ended without a valid completion receipt.",
+        "diagnostic": "Maintenance ended without a valid completion receipt.",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": true
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    }
+   ]
+  },
+  {
+   "what": "a janitor put away",
+   "agent_id": "0000000000000004",
+   "session": "shelved",
+   "persona": "Shelved",
+   "template_id": "scheduled-prompt",
+   "job_name": "Scheduled task",
+   "steps": [
+    {
+     "step": "fails twice",
+     "action": "runs",
+     "runs": [
+      {
+       "run_id": "shelved-run-1",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000022500,
+       "finished_at": 1800000023000
+      },
+      {
+       "run_id": "shelved-run-2",
+       "status": "failed",
+       "outcome": "error",
+       "error": "The scheduled task failed",
+       "configuration": {
+        "template_id": "scheduled-prompt"
+       },
+       "demand_result": null,
+       "created_at": 1800000023500,
+       "finished_at": 1800000024000
+      }
+     ],
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-b1d5f3a7f4c8244f4c9c444a7a9d77dc9250e709",
+       "reference_id": "janitor-failure:0000000000000004:1:initial",
+       "type": "document",
+       "status": "failed",
+       "title": "Shelved needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "shelved-run-2",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [
+      {
+       "artifact_id": "janitor-alert-b1d5f3a7f4c8244f4c9c444a7a9d77dc9250e709",
+       "session": "shelved",
+       "agent_name": "Shelved",
+       "type": "document",
+       "status": "failed",
+       "title": "Shelved needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000004:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "shelved-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ],
+     "pending_with_archived": [
+      {
+       "artifact_id": "janitor-alert-b1d5f3a7f4c8244f4c9c444a7a9d77dc9250e709",
+       "session": "shelved",
+       "agent_name": "Shelved",
+       "type": "document",
+       "status": "failed",
+       "title": "Shelved needs attention",
+       "summary": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.",
+       "reference_id": "janitor-failure:0000000000000004:1:initial",
+       "attention_kind": "janitor_failure",
+       "configuration_generation": 1,
+       "latest_run_id": "shelved-run-2",
+       "failure_count": 2,
+       "archived": false
+      }
+     ]
+    },
+    {
+     "step": "is put away",
+     "action": "archived",
+     "archived": true,
+     "changed": 1,
+     "alerts": [
+      {
+       "artifact_id": "janitor-alert-b1d5f3a7f4c8244f4c9c444a7a9d77dc9250e709",
+       "reference_id": "janitor-failure:0000000000000004:1:initial",
+       "type": "document",
+       "status": "completed",
+       "title": "Shelved needs attention",
+       "summary": "Maintenance is paused or removed.",
+       "payload": {
+        "attention_kind": "janitor_failure",
+        "configuration_generation": 1,
+        "latest_run_id": "shelved-run-2",
+        "failure_count": 2,
+        "content": "Scheduled task needs attention after 2 failed runs. Review the configuration or pause maintenance.\n\nLatest error: The scheduled task failed",
+        "diagnostic": "The scheduled task failed",
+        "suggested_action": "review_configuration"
+       },
+       "archived": false,
+       "deleted": false
+      }
+     ],
+     "pending": [],
+     "pending_with_archived": []
+    }
+   ]
+  }
+ ]
+}

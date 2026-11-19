@@ -2234,6 +2234,29 @@ turn they run in and printed as the Python tool prints them. Held to the Python 
 nothing to release, the activity's provenance) and by `a_stop_and_a_repair_say_who_acted_and_why_and_an_agent_is_known_by_its_own_turn`;
 the wrong rules are `tools/plants/turn-slot-repair.py`.
 
+**A janitor's failure reaches its owner** (19 Nov 2026; no feature of its own: the reference lists none). The one
+thing of a quiet agent that does. When a janitor's runs of its current configuration failed twice in a row since its
+last verified success (a scheduled task's run that ended well; a run of a job that answers requests whose answer was
+made for that job by a model called for it, with a summary), an item is raised for its owner: a document of the
+janitor, `failed`, id `janitor-alert-` and forty signs of the sha256 of its episode (`janitor-failure:{agent}:
+{generation}:{success | initial}`), whose payload says `attention_kind: janitor_failure`, how many failed, the last
+run and its error, cleaned of secrets and of what a model thought. A further failure updates it; a verified success,
+the janitor set anew, turned off, put away or no janitor any more closes it; the owner archives or discards it by its
+id (`POST /artifacts/{id}/archive|discard`, the artifacts' own rules, which are now functions of one artifact), and
+it is never made again for the same episode. `GET /attention` lists the open ones among its `janitor_items`, the
+badge counts them (so the chip's count moves with them), `GET /artifacts/{id}` opens one; never the Updates, never a
+push, a sound or an unread mark. The rule is the kernel's (`janitors/attention.rs`), held to the Python Host's own
+`janitor_attention` by `tools/janitor-attention-vectors.py` (four janitors, twenty-five steps, run in an isolated
+store); the items are a table of the janitors' book (`janitor-alert`, by the item's id), reconciled in the one write
+that keeps every change of the book, so an item changes in the same write as the run or the configuration that changed
+it; kept, then shown: only once that write answered well are the counts and lists given the change, the apps told
+(`agent-roster`, `janitor-attention`) and the badge moved, and a write that fails tells nobody anything
+(`kept_then_shown`, held by its own test and two wrong rules). Held by
+`a_janitor_that_fails_again_and_again_reaches_its_owner_until_it_recovers` (the tool explainer's model fails on
+request: once nothing, twice an item, the chip counts it while Mike works, a third failure counts three, a good answer
+closes it; failing again, archived, failing once more, discarded; a restart keeps them) and the wrong rules
+`tools/plants/janitor-attention.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

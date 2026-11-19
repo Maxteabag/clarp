@@ -53,13 +53,14 @@ const ALL: &str = "all";
 /// The book's tables, each a kind of its own with one record a row: a run of a janitor, or
 /// one change of one, writes what changed of it and nothing of the rest. A book kept whole
 /// before is read, and kept apart at once.
-const TABLES: [(&str, &str); 6] = [
+const TABLES: [(&str, &str); 7] = [
     ("configs", "janitor-config"),
     ("triggers", "janitor-trigger"),
     ("builtins", "janitor-builtin"),
     ("runs", "janitor-run"),
     ("progress", "janitor-progress"),
     ("creations", "janitor-creation"),
+    ("alerts", "janitor-alert"),
 ];
 
 /// A record written with a change of the book, by a desk that keeps its own beside it.
@@ -109,20 +110,47 @@ fn written(before: Option<&Book>, after: &Book) -> (Vec<Row>, Vec<Gone>) {
     (rows, gone)
 }
 
-/// Keeps a change of the book, and what a desk keeps beside it, in one write.
+/// Keeps a change of the book, and what a desk keeps beside it, in one write. What reached the
+/// owner of a janitor that fails is brought in line with the change first, and kept with it.
+/// Kept, then shown: only once the write answered well does the owner see the change (what
+/// the counts and lists read, the apps told, the badge moved); a write that fails tells
+/// nobody anything, and what is shown stays what was kept.
 async fn keep(
     app: &App,
     before: Option<&Book>,
-    after: &Book,
+    after: &mut Book,
     (mut rows, mut gone): (Vec<Row>, Vec<Gone>),
 ) -> Result<(), Unavailable> {
+    let raised = after.reconcile_attention(&Around::new(app), app.clock.now_ms());
+    let moved = before.is_none_or(|before| before.alerts != after.alerts);
     let (book, went) = written(before, after);
     rows.extend(book);
     gone.extend(went);
-    app.fleet.change_together(rows, gone).await?;
-    app.janitors
-        .changes
-        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let after = &*after;
+    kept_then_shown(app.fleet.change_together(rows, gone), || {
+        app.janitors
+            .changes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        app.janitors.mirror(after);
+        if raised > 0 {
+            // The apps read the janitors again, as the Python Host tells them.
+            let told = json!({ "type": "agent-roster", "kind": "janitor-attention" });
+            app.hub.publish(told, app.clock.now_ms());
+        }
+        if moved {
+            app.hub.badge_moved();
+        }
+    })
+    .await
+}
+
+/// Waits for a write, and only once it answered well does what shows it.
+async fn kept_then_shown<E>(
+    written: impl std::future::Future<Output = Result<(), E>>,
+    shown: impl FnOnce(),
+) -> Result<(), E> {
+    written.await?;
+    shown();
     Ok(())
 }
 /// What a schedule is taken to be apart when it cannot be read: a day.
@@ -141,6 +169,9 @@ pub struct Desk {
     /// How often the book was kept since the Host started: whoever arms itself on the book
     /// (the Quota keeper) sees by it that the book changed since.
     changes: std::sync::atomic::AtomicU64,
+    /// The janitors' jobs and what reached their owners, as the book last kept them: read by
+    /// what counts and lists for the owner without waiting for the book.
+    attention: std::sync::RwLock<Book>,
 }
 
 /// What the book asks of the Host around it: the fleet as it stands, the machine's zones,
@@ -265,10 +296,11 @@ impl Desk {
                 }
             }
             // What cannot be read is a book with nothing in it.
-            let book: Book = serde_json::from_value(whole).unwrap_or_default();
+            let mut book: Book = serde_json::from_value(whole).unwrap_or_default();
             if kept_whole {
-                keep(app, None, &book, Default::default()).await?;
+                keep(app, None, &mut book, Default::default()).await?;
             }
+            self.mirror(&book);
             *held = Some(book);
         }
         Ok(held)
@@ -293,6 +325,62 @@ impl Desk {
             .await
             .map_err(|_| Unavailable("label report could not be saved".into()))?;
         Ok(true)
+    }
+
+    /// Keeps what the owner is shown of the janitors as the book has it now.
+    fn mirror(&self, book: &Book) {
+        if let Ok(mut shown) = self.attention.write() {
+            shown.configs.clone_from(&book.configs);
+            shown.alerts.clone_from(&book.alerts);
+        }
+    }
+
+    /// What reached the owner of janitors that failed again and again and waits for them, as
+    /// `GET /attention` lists it among its `janitor_items` (`attention.rs`).
+    pub(crate) fn pending(&self, app: &App, include_archived: bool) -> Vec<Value> {
+        let shown = self.attention.read();
+        let shown = shown.as_deref().ok();
+        shown.map_or_else(Vec::new, |book| {
+            book.pending_attention(&Around::new(app), include_archived)
+        })
+    }
+
+    /// One such item, by its id, whatever became of it.
+    pub(crate) fn alert(&self, artifact_id: &str) -> Option<clarp_kernel::artifacts::Artifact> {
+        let shown = self.attention.read().ok()?;
+        shown.alerts.get(artifact_id).cloned()
+    }
+
+    /// The owner archives such an item, or shows it again, or discards it: by the artifacts'
+    /// own rules, in a write of the book. `None`: the book has no such item.
+    pub(crate) async fn put_away(
+        &self,
+        app: &App,
+        artifact_id: &str,
+        archived: Option<bool>,
+        expected_updated_at: i64,
+    ) -> Result<
+        Option<Result<(clarp_kernel::artifacts::Artifact, bool), clarp_kernel::artifacts::Refused>>,
+        Unavailable,
+    > {
+        self.update(app, |book, _, now_ms| {
+            let current = book.alerts.get(artifact_id)?;
+            let done = match archived {
+                Some(archived) => clarp_kernel::artifacts::archived(
+                    current,
+                    archived,
+                    expected_updated_at,
+                    now_ms,
+                ),
+                None => clarp_kernel::artifacts::discarded(current, expected_updated_at, now_ms),
+            };
+            if let Ok((changed, true)) = &done {
+                book.alerts.insert(artifact_id.to_string(), changed.clone());
+            }
+            Some(done)
+        })
+        .await
+        .map(|(done, _)| done)
     }
 
     /// One reading of the book. Nothing is kept, and nothing of it is copied.
@@ -1469,6 +1557,27 @@ mod tests {
         assert_eq!(read(json!(null)), Err("expected_revision is required"));
         assert_eq!(read(json!([3])), Err("expected_revision is required"));
         assert_eq!(revision(None), Err("expected_revision is required"));
+    }
+
+    #[test]
+    fn a_change_of_the_book_is_shown_only_once_it_is_kept() {
+        let run = |write: Result<(), &'static str>| {
+            let said = std::cell::RefCell::new(Vec::new());
+            let written = async {
+                said.borrow_mut().push("written");
+                write
+            };
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            let done =
+                runtime.block_on(kept_then_shown(written, || said.borrow_mut().push("shown")));
+            (done, said.into_inner())
+        };
+        // Kept, then shown.
+        assert_eq!(run(Ok(())), (Ok(()), vec!["written", "shown"]));
+        // A write that fails shows nothing, and says why.
+        assert_eq!(run(Err("full")), (Err("full"), vec!["written"]));
     }
 
     #[test]

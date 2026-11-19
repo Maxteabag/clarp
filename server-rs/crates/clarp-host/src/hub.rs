@@ -115,6 +115,12 @@ impl Hub {
         waiting.values().sum()
     }
 
+    /// What waits for the user changed apart from the agents' requests: what reached the owner
+    /// of a janitor that fails.
+    pub fn badge_moved(&self) {
+        self.badge.send_modify(|changes| *changes += 1);
+    }
+
     /// Wakes whenever what waits for the user changed.
     pub fn badge(&self) -> tokio::sync::watch::Receiver<u64> {
         self.badge.subscribe()

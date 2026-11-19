@@ -1202,6 +1202,33 @@ async fn changed_as(
             }
         }
     };
+    // What reached the owner of a janitor that fails is the janitors' book's: the owner puts
+    // it away or discards it there, by the artifacts' own rules.
+    let put_away = match &want {
+        Want::Archive {
+            archived,
+            expected_updated_at,
+            ..
+        } => Some((Some(*archived), *expected_updated_at)),
+        Want::Discard {
+            expected_updated_at,
+            ..
+        } => Some((None, *expected_updated_at)),
+        _ => None,
+    };
+    if let Some((archived, expected)) =
+        put_away.filter(|_| clarp_kernel::janitors::attention::is_alert(&artifact_id))
+    {
+        let put = app.janitors.put_away(app, &artifact_id, archived, expected);
+        let put = put
+            .await
+            .map_err(|why| refused(StatusCode::SERVICE_UNAVAILABLE, why.0))?;
+        if let Some(done) = put {
+            let (alert, changed) = done.map_err(conflict)?;
+            let artifact = shown(app, alert_row(app, &alert), "", capable).await;
+            return Ok(json!({ "artifact": artifact, "changed": changed }));
+        }
+    }
     let Some(member) = fleet.holder(&artifact_id, action == "discard") else {
         // A pin of an artifact that is not there is the one refusal that says not found.
         return Err(if action == "pin" {
@@ -1506,18 +1533,20 @@ pub(crate) fn inbox(app: &App, include_questions: bool, include_archived: bool) 
         "items": items,
         "count": items.len(),
         "decision_format": 2,
-        "janitor_items": [],
+        "janitor_items": app.janitors.pending(app, include_archived),
     })
 }
 
 /// What the apps' badge counts, as the agent each thing is of: every request that waits for
-/// the user, and everything an agent made that blocks on the user and is not put away.
+/// the user, each janitor that failed again and again, and everything an agent made that
+/// blocks on the user and is not put away.
 pub(crate) fn badge(app: &App) -> Vec<String> {
     let fleet = Fleet::of(app);
     let (shelves, now) = (fleet.shelves(), app.clock.now_ms());
     let agent_of = |row: &Value| row["agent_id"].as_str().unwrap_or("").to_string();
     let waiting = decisions::attention(&shelves, true, false, now);
     let mut items: Vec<String> = waiting.iter().map(agent_of).collect();
+    items.extend(app.janitors.pending(app, false).iter().map(agent_of));
     let mut cursor = String::new();
     // As many pages as a list of Updates can sensibly have: a list that changes under the
     // count is counted again the next time.
@@ -1542,13 +1571,32 @@ pub(crate) fn badge(app: &App) -> Vec<String> {
 /// One artifact by its id, as it is shown.
 pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
     let fleet = Fleet::of(app);
-    artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms()).or_else(|| {
-        app.fleet.directory().janitors.iter().find_map(|m| {
-            let view = m.agent.view();
-            let art = view.books.artifacts.get(artifact_id)?;
-            Some(art.public(&m.record.persona, &view.books.goals, app.clock.now_ms()))
+    artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms())
+        .or_else(|| {
+            app.fleet.directory().janitors.iter().find_map(|m| {
+                let view = m.agent.view();
+                let art = view.books.artifacts.get(artifact_id)?;
+                Some(art.public(&m.record.persona, &view.books.goals, app.clock.now_ms()))
+            })
         })
-    })
+        .or_else(|| {
+            // What reached the owner of a janitor that fails, while it is not discarded.
+            let alert = app.janitors.alert(artifact_id);
+            let alert = alert.filter(|alert| alert.deleted_at.is_none())?;
+            Some(alert_row(app, &alert))
+        })
+}
+
+/// What reached the owner of a janitor that fails, as an artifact of the janitor is shown.
+fn alert_row(app: &App, alert: &Artifact) -> Value {
+    let directory = app.fleet.directory();
+    let mut janitor = directory.janitors.iter();
+    let persona = janitor.find(|m| m.record.agent_id == alert.agent_id);
+    let persona = persona
+        .map(|m| m.record.persona.clone())
+        .unwrap_or_default();
+    let goals = clarp_kernel::goals::GoalBook::default();
+    alert.public(&persona, &goals, app.clock.now_ms())
 }
 
 /// The decisions asked in one session, the newest hundred, as rows (with `payload` and

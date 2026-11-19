@@ -264,6 +264,55 @@ pub struct Artifact {
     pub submissions: Vec<forms::Submission>,
 }
 
+/// An artifact hidden from the inbox, or shown there again, as the owner asks: with whether
+/// that changed anything. One that changed since the owner saw it is refused.
+pub fn archived(
+    current: &Artifact,
+    archived: bool,
+    expected_updated_at: i64,
+    now: i64,
+) -> Result<(Artifact, bool), Refused> {
+    if current.archived_at.is_some() == archived {
+        return Ok((current.clone(), false));
+    }
+    if current.updated_at != expected_updated_at {
+        return refuse("artifact changed");
+    }
+    let now = now.max(current.updated_at + 1);
+    let changed = Artifact {
+        archived_at: archived.then_some(now),
+        updated_at: now,
+        ..current.clone()
+    };
+    Ok((changed, true))
+}
+
+/// An artifact taken out of the library: the record stays, and nothing it points at is
+/// touched. A request to the user has its own way out.
+pub fn discarded(
+    current: &Artifact,
+    expected_updated_at: i64,
+    now: i64,
+) -> Result<(Artifact, bool), Refused> {
+    if matches!(current.kind.as_str(), "decision" | "question") {
+        return refuse("decisions and questions must use their dedicated dismissal endpoint");
+    }
+    if current.deleted_at.is_some() {
+        return Ok((current.clone(), false));
+    }
+    if current.updated_at != expected_updated_at {
+        return refuse("artifact changed");
+    }
+    let now = now.max(current.updated_at + 1);
+    let changed = Artifact {
+        deleted_at: Some(now),
+        updated_at: now,
+        pinned_at: None,
+        ..current.clone()
+    };
+    Ok((changed, true))
+}
+
 /// What making or changing an artifact comes to.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Made {
@@ -1123,19 +1172,7 @@ impl ArtifactBook {
         let Some(current) = self.get(artifact_id) else {
             return refuse("artifact not found");
         };
-        if current.archived_at.is_some() == archived {
-            return Ok((current.clone(), false));
-        }
-        if current.updated_at != expected_updated_at {
-            return refuse("artifact changed");
-        }
-        let now = now.max(current.updated_at + 1);
-        let changed = Artifact {
-            archived_at: archived.then_some(now),
-            updated_at: now,
-            ..current.clone()
-        };
-        Ok((changed, true))
+        self::archived(current, archived, expected_updated_at, now)
     }
 
     /// Takes an artifact out of the library. The record stays; nothing it points at is
@@ -1149,23 +1186,7 @@ impl ArtifactBook {
         let Some(current) = self.any(artifact_id) else {
             return refuse("artifact not found");
         };
-        if matches!(current.kind.as_str(), "decision" | "question") {
-            return refuse("decisions and questions must use their dedicated dismissal endpoint");
-        }
-        if current.deleted_at.is_some() {
-            return Ok((current.clone(), false));
-        }
-        if current.updated_at != expected_updated_at {
-            return refuse("artifact changed");
-        }
-        let now = now.max(current.updated_at + 1);
-        let changed = Artifact {
-            deleted_at: Some(now),
-            updated_at: now,
-            pinned_at: None,
-            ..current.clone()
-        };
-        Ok((changed, true))
+        discarded(current, expected_updated_at, now)
     }
 
     /// Pins an artifact for its owner, or takes the pin away. A pin is a preference, not an

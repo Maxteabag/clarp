@@ -23,6 +23,7 @@ use serde_json::{Map, Value, json};
 use crate::schedules;
 
 pub mod adaptive;
+pub mod attention;
 pub mod audio;
 pub mod book;
 pub mod creation;
