@@ -13350,9 +13350,11 @@ fn a_turn_that_fails_is_told_under_its_message_in_the_python_hosts_words() {
         .find(|event| event["type"] == "agent-state" && event["kind"] == "interrupted")
         .map(|event| event["detail"].clone())
         .expect("the apps were told the turn failed");
+    // It names its own turn's trace, the one its rows carry (R92, the Python Host's PR 451).
     assert_eq!(
         detail,
         json!({
+            "trace_id": rows[0]["trace_id"],
             "attempts": 1,
             "dispatch": "claude",
             "error": "Claude usage limit reached",
