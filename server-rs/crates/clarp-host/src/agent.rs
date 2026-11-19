@@ -95,6 +95,13 @@ pub struct Spoke {
 
 /// What an agent's thread is asked.
 pub enum Ask {
+    HelperRead {
+        source: Box<crate::helper_source::HelperSource>,
+        session: String,
+        cwd: String,
+        generation: u64,
+        changed: bool,
+    },
     Send {
         reservation: Option<Value>,
         message: Message,
@@ -143,6 +150,7 @@ pub enum Ask {
     /// Begin with a session the agent's tool kept on this machine. Answers how many rows
     /// came, or why it cannot be done.
     TakeUp {
+        helpers: Option<Box<crate::helper_source::HelperSource>>,
         session: String,
         rows: Vec<ImportedRow>,
         answer: Answer<Result<usize, String>>,
@@ -370,6 +378,7 @@ pub struct View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
     pub record: AgentRecord,
     pub profile: Profile,
@@ -513,8 +522,10 @@ impl AgentHandle {
         &self,
         session: String,
         rows: Vec<ImportedRow>,
+        helpers: Option<Box<crate::helper_source::HelperSource>>,
     ) -> Result<Result<usize, String>, Unavailable> {
         self.ask(|answer| Ask::TakeUp {
+            helpers,
             session,
             rows,
             answer,
@@ -861,8 +872,14 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         ended: None,
         finished: None,
         transcript_sent: None,
+        helper_change_session: None,
         transcript_due: None,
         jobs_told: BTreeMap::new(),
+        helper_rows: Default::default(),
+        helper_source: Some(Default::default()),
+        helper_clock: Default::default(),
+        helper_generation: 0,
+        helper_owner: None,
         jobs_checked: Instant::now(),
         goals_looked_at: 0,
         books: Arc::default(),
@@ -914,12 +931,18 @@ struct Worker {
     /// What the agent last finished for its user, as the view shows it.
     finished: Option<Arc<Value>>,
     transcript_sent: Option<Instant>,
+    helper_change_session: Option<String>,
     /// When a held-back "the conversation changed" is to be sent.
     transcript_due: Option<Instant>,
     /// The revision of each job the clients were last told.
     jobs_told: BTreeMap<String, u64>,
     /// When the running jobs were last looked at.
     jobs_checked: Instant,
+    helper_rows: clarp_actor::helper_cells::HelperRows,
+    helper_source: Option<Box<crate::helper_source::HelperSource>>,
+    helper_clock: crate::helper_source::RefreshClock,
+    helper_generation: u64,
+    helper_owner: Option<(String, String)>,
     /// When the goals were last looked at, on the Host's clock. A goal that was due then and
     /// woke nobody is looked at again when something happens, not when the time comes.
     goals_looked_at: i64,
@@ -1120,7 +1143,9 @@ impl Worker {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
                 });
+            let helper_due = self.helper_due();
             let due = [
+                helper_due,
                 self.transcript_due,
                 jobs_due,
                 goals_due,
@@ -1209,6 +1234,57 @@ impl Worker {
         }
     }
 
+    fn helper_due(&mut self) -> Option<Instant> {
+        if self.setup.record.backend != "claude" {
+            return None;
+        }
+        let actor = self.actor.as_ref()?;
+        let (live, session) = actor.helper_context();
+        let now = Instant::now();
+        let due = self.helper_clock.due(live, now)?;
+        self.helper_source.as_ref()?;
+        let session = session?;
+        if !actor.track_helpers(&mut self.helper_rows).unwrap_or(false) {
+            self.helper_clock.started(now);
+            return None;
+        }
+        if due > now {
+            return Some(due);
+        }
+        self.helper_clock.started(now);
+        let session = session.to_owned();
+        let cwd = self.setup.record.cwd.clone();
+        let owner = (cwd.clone(), session.clone());
+        if self.helper_owner.as_ref() != Some(&owner) {
+            self.helper_source = Some(Default::default());
+            self.helper_owner = Some(owner);
+        }
+        let mut source = self.helper_source.take()?;
+        let missed = if !live && self.helper_rows.needs_receipt() {
+            actor.status().last.as_ref().map(|last| last.id.0)
+        } else {
+            None
+        };
+        let read_parent = self.helper_rows.has_imported || missed.is_some();
+        let generation = self.helper_generation;
+        let tx = self.tx.clone();
+        self.setup.runtime.spawn_blocking(move || {
+            let root = crate::past::projects(&crate::config::home());
+            let changed = source.scan(&root, &cwd, &session, read_parent);
+            if missed.is_some() {
+                source.recovered_through = missed;
+            }
+            let _ = tx.send(Ask::HelperRead {
+                source,
+                cwd,
+                session,
+                generation,
+                changed: changed || missed.is_some(),
+            });
+        });
+        None
+    }
+
     fn now_ms(&self) -> i64 {
         self.setup.clock.now_ms()
     }
@@ -1249,6 +1325,12 @@ impl Worker {
     }
 
     fn open(&mut self) -> Result<(), String> {
+        self.helper_rows = Default::default();
+        self.helper_source = Some(Default::default());
+        self.helper_clock = Default::default();
+        self.helper_owner = None;
+        self.helper_generation += 1;
+        self.helper_change_session = None;
         let log = self
             .setup
             .engine
@@ -1757,10 +1839,53 @@ impl Worker {
                 answer,
             } => answered(actor.import(&from, backend_session, rows, now), answer)?,
             Ask::TakeUp {
+                helpers,
                 session,
                 rows,
                 answer,
-            } => answered(actor.take_up(&session, rows, now), answer)?,
+            } => {
+                let result = actor.take_up(&session, rows, now);
+                if matches!(&result, Ok((Ok(_), _)))
+                    && let Some(source) = helpers
+                {
+                    self.helper_source = Some(source);
+                    self.helper_owner = Some((self.setup.record.cwd.clone(), session));
+                    self.helper_generation += 1;
+                }
+                answered(result, answer)?
+            }
+            Ask::HelperRead {
+                source,
+                cwd,
+                session,
+                generation,
+                changed,
+            } => {
+                if self.helper_generation == generation {
+                    if self.setup.record.cwd == cwd
+                        && actor.helper_context().1 == Some(session.as_str())
+                    {
+                        {
+                            actor.track_helpers(&mut self.helper_rows)?;
+                            let out = actor.refresh_helpers(
+                                &mut self.helper_rows,
+                                changed,
+                                now,
+                                |cell, imported, turn| source.apply(cell, imported, turn),
+                            )?;
+                            if out.changed.conversation {
+                                self.helper_change_session = Some(session);
+                                self.after(out);
+                            }
+                        }
+                        self.helper_source = Some(source);
+                    } else {
+                        self.helper_source = Some(Default::default());
+                        self.helper_owner = None;
+                    }
+                }
+                return Ok(());
+            }
             Ask::Withdraw { turn, by, answer } => {
                 let withdrawn = actor.withdraw(turn, &by, now);
                 let queue = actor.queue_state();
@@ -2610,9 +2735,11 @@ impl Worker {
         self.transcript_due = None;
         self.transcript_sent = Some(Instant::now());
         let now = self.now_ms();
-        self.setup
-            .hub
-            .publish(wire::transcript_updated(&self.setup.record), now);
+        let mut event = wire::transcript_updated(&self.setup.record);
+        if let Some(session) = self.helper_change_session.take() {
+            event["backend_session_id"] = Value::String(session);
+        }
+        self.setup.hub.publish(event, now);
     }
 
     fn show_broken(&self, why: &str) {
@@ -2771,6 +2898,7 @@ fn refuse_for(
                 | Ask::ShimGone { .. }
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
+                | Ask::HelperRead { .. }
                 | Ask::Terminal { .. }
                 | Ask::AccountStop
                 | Ask::AccountBack

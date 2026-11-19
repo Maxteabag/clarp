@@ -1074,7 +1074,10 @@ fn card(call: &ToolCall) -> Value {
 /// call its turn was interrupted under runs no longer: its cell says so.
 fn cell_shown(cell: &Value, call: &ToolCall) -> Value {
     let mut cell = cell.clone();
-    if call.status == ToolStatus::Interrupted && cell["status"] == "running" {
+    if call.status == ToolStatus::Interrupted
+        && cell["status"] == "running"
+        && cell["ephemeral"] != true
+    {
         let over = match cell["title"].as_str() {
             Some("Running") => Some("Ran"),
             Some("Calling") => Some("Called"),
@@ -1164,7 +1167,17 @@ pub fn row(version: &Versioned) -> Value {
                 row["reply_to_agent_id"] = json!(agent_id);
             }
             // The tools its message calls, a card each, in the message's order.
-            row["tools"] = version.tools.iter().map(card).collect();
+            row["tools"] = version
+                .tools
+                .iter()
+                .filter(|c| c.cell.is_none())
+                .map(card)
+                .collect();
+            row["display_cells"] = version
+                .tools
+                .iter()
+                .filter_map(|c| c.cell.as_ref().map(|cell| cell_shown(cell, c)))
+                .collect();
             // What a message said, it said along the way when tool work came after it in
             // its turn, and at the end otherwise. One that said nothing has no phase, and
             // neither has one that is still being written.

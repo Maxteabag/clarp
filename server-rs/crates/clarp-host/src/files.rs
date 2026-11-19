@@ -50,7 +50,7 @@ fn parts(relative: &str) -> Result<Vec<&str>, ApiError> {
 }
 
 /// Opens a directory, or what is in an opened directory under one name, following no link.
-fn open(at: &Path, directory: bool) -> std::io::Result<File> {
+pub(crate) fn open(at: &Path, directory: bool) -> std::io::Result<File> {
     let kind = if directory {
         libc::O_DIRECTORY
     } else {
@@ -64,13 +64,17 @@ fn open(at: &Path, directory: bool) -> std::io::Result<File> {
 
 /// What is under a name in a directory that is open: named by the opened directory, not by
 /// the directory's own name.
-fn beneath(directory: &File, name: &str) -> PathBuf {
+pub(crate) fn beneath(directory: &File, name: &str) -> PathBuf {
     PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd())).join(name)
 }
 
 /// Opens what a path names beneath a root, part by part, and answers the root as it really
 /// is called.
-fn open_beneath(root: &Path, relative: &str, directory: bool) -> Result<(PathBuf, File), ApiError> {
+pub(crate) fn open_beneath(
+    root: &Path,
+    relative: &str,
+    directory: bool,
+) -> Result<(PathBuf, File), ApiError> {
     let gone = || {
         refused(
             StatusCode::NOT_FOUND,
