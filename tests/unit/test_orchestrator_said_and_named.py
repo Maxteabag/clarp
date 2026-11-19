@@ -463,22 +463,18 @@ def _stored_receipt():
 def test_a_requested_session_past_the_receipts_bound_is_still_answered_and_replays_alike(
         effects, length, app):
     """A clarify answers the requested session; one of 501 or 600 characters no longer fits the
-    demand history's bound (500): the answer keys are left out of the receipt, the run completes,
-    and the first answer and every retry agree, as on main (no answer at all and 202 pending
-    before)."""
+    demand history's bound (500). Its status and dispatch are stored and its session is left out,
+    which means 'the first answer named the requested session': every retry of the client id
+    answers it again. First = second = third at every length, as on main (no answer at all and 202
+    pending at ba9c34a0; the replay named the resolved target at 12ba2078)."""
     service = _service(_message("antoni", 0.4), effects)
     send = _sender(service, app=app, requested="s" * length)
     first = send()
     assert _said(first) == (200, "clarify", "s" * length, "")
-    second, third = _said(send()), _said(send())
-    assert second == third
+    assert _said(send()) == _said(first) and _said(send()) == _said(first)
     _rowid, receipt = _stored_receipt()
-    if length <= 500:
-        assert "answer_session" in receipt and second == _said(first)
-    else:
-        # Left out of the receipt, so the replay is main's: the recipient the receipt names (the
-        # clarify's resolved target), not the first answer's session (ruling 1 of 05:09).
-        assert "answer_session" not in receipt and second == (200, "clarify", "antoni", "")
+    assert receipt["answer_status"] == 200 and receipt["answer_dispatch"] == ""
+    assert ("answer_session" in receipt) is (length <= 500)
 
 
 def test_a_failed_completion_is_logged_and_the_answer_still_sent_and_the_run_closed(effects, monkeypatch, capfd):
@@ -507,7 +503,6 @@ ODD = {
     "answer_status missing": {"answer_status": "<drop>"},
     "answer_status true": {"answer_status": True},
     "answer_session null": {"answer_session": None},
-    "answer_session missing": {"answer_session": "<drop>"},
     "answer_session empty": {"answer_session": ""},
     "answer_dispatch a number": {"answer_dispatch": 7},
 }
@@ -539,3 +534,15 @@ def test_a_replay_answers_the_stored_status_not_one_recomputed(effects):
     receipt["answer_status"] = 299
     db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
     assert _said(send()) == (299, "route", "antoni", "claude")
+
+
+def test_a_status_without_a_session_replays_the_requested_session(effects):
+    """A receipt with the first answer's status but no session stored: the first answer named the
+    requested session (too long for the bound), so the replay answers the request's own session."""
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False)
+    send()
+    rowid, receipt = _stored_receipt()
+    receipt.pop("answer_session")
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
+    assert _said(send()) == (200, "route", "mike", "claude")
