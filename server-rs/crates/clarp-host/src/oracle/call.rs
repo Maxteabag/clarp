@@ -503,15 +503,18 @@ impl Session<'_> {
         let kept = with_memory(self.app, |memory| memory.save(opened, &state, now_ms));
         let why = match kept.await {
             Ok(Ok(())) => return true,
-            Ok(Err(threads::STALE)) => return false,
             Ok(Err(why)) => why,
-            Err(_) => "the store could not take it",
+            Err(_) => threads::STORE_FAILED,
         };
-        if !self.unkept {
-            self.unkept = true;
-            eprintln!("clarp-host: a call of the Oracle could not keep its talk: {why}");
+        match threads::not_kept(why, &mut self.unkept) {
+            threads::NotKept::Ends => false,
+            threads::NotKept::GoesOn { say } => {
+                if let Some(say) = say {
+                    eprintln!("clarp-host: {say}");
+                }
+                true
+            }
         }
-        true
     }
 
     /// The actions the routing began are written down. `acts`: and something is about to be

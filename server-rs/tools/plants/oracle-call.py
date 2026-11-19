@@ -16,10 +16,12 @@ RUNS = {
 #   that a call whose thread is another call's now ends when it keeps its talk (`Ok(Err(threads::STALE)) => return
 #     false`; taken off after its first run, MISSED): a later call of the same phone ends the older as replaced
 #     before that one keeps anything again, so only a race reaches the branch.
-#   that a talk that could not be kept is said once on the Host's stderr (`eprintln!` in `keeps`): no test reads
-#     the Host's stderr.
-#   that the store's own failure ends no call (`Err(_) => ...` in `keeps`): no stand-in of the tests makes the
-#     store fail; a talk too long to keep, which goes the same way, is planted.
+#   that a talk that could not be kept is said on the Host's stderr (`eprintln!` in `keeps`): no test reads the
+#     Host's stderr; what is said and that it is said once are the kernel's (`threads::not_kept`), planted in the
+#     list oracle-memory.
+#   that the store's own failure ends no call (`Err(_) => threads::STORE_FAILED` in `keeps`): no stand-in of the
+#     tests makes the store fail; the kernel's rule for it is planted in oracle-memory, and a talk too long to keep,
+#     which goes the same way at the Host, is planted here.
 #   that a stop is handed the call's work as the book has it (`supersede(session, &rows, now)`; taken off after its
 #     first run, MISSED): the work a stop silences beyond what waits to be told is a result that is over and not yet
 #     seen, which at this Host lasts less than one tick (250 ms) and no test can place a stop into; the kernel's
