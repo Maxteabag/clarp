@@ -1590,7 +1590,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # those cases retain normalization of the effective value.
                 # An empty prepared value is valid, not a missing value.
                 visible=(visible_replies[index] if visible_replies is not None
-                         and text == str(turn.get("text") or "") else None))
+                         and text == str(turn.get("text") or "") else None),
+                provider_id=str(turn.get("provider_id") or ""))
             skipped_slot_removed = skipped_slot_removed or changed
         row = _upsert_row(
             database, agent_id=agent_id, backend_session_id=backend_session_id,

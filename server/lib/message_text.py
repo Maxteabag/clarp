@@ -1,6 +1,8 @@
 """Canonical injected-context delimiters and pure message text normalization."""
 from __future__ import annotations
 
+import hashlib
+
 from .voice_markup import clean_for_display
 
 
@@ -119,3 +121,14 @@ def _strip_block(text: str, opening: str, closing: str) -> str:
         _, after = rest.split(closing, 1)
         out = (before + after).strip()
     return out
+
+
+def live_message_id(agent_id: str, backend_session_id: str, trace_id: str, item_key: str = "") -> str:
+    """The id of the live row a turn streams one provider message into (``item_key``: the
+    provider's message id, Claude's message.id or Codex's item id; empty when the stream has none).
+    The importer reads the same id to know a live row as the stream of the message it imports
+    (R107)."""
+    raw = f"{agent_id}\0{backend_session_id}\0{trace_id or 'live'}"
+    if item_key:
+        raw += f"\0{item_key}"
+    return "live-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]

@@ -424,6 +424,9 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             }
             if cells:
                 turn["display_cells"] = cells
+            if t == "assistant" and isinstance(msg.get("id"), str) and msg["id"]:
+                # The provider's message id: the key its live row was streamed under (R107).
+                turn["provider_id"] = msg["id"]
             turns.append(turn)
     if subagent_cells:
         transcripts = _subagent_transcripts(path)

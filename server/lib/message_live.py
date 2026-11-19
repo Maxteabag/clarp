@@ -6,22 +6,17 @@ agy imports, and the derived side effects run after a final row commits.
 """
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
+from .message_text import live_message_id
 from .message_writes import _facade, _latest_user_provenance, _next_revision, _row_with_its_head
 
 
-def _live_message_id(agent_id: str, backend_session_id: str, trace_id: str,
-                     item_key: str = "") -> str:
-    raw = f"{agent_id}\0{backend_session_id}\0{trace_id or 'live'}"
-    if item_key:
-        raw += f"\0{item_key}"
-    return "live-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+_live_message_id = live_message_id      # message_text: the importer reads the same id (R107)
 
 
 # How many un-keyed segments one turn may roll over to (see _live_target).
