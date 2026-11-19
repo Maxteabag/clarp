@@ -128,6 +128,7 @@ pub struct Job {
 }
 
 impl Job {
+    pub fn provider_owned(&self)->bool{self.heartbeat_source=="provider_event"}
     /// The name a worker is given for its run: what it reports under.
     pub fn handle(&self) -> String {
         format!("bg1:{}:{}", self.generation, self.id)
@@ -141,7 +142,7 @@ impl Job {
     /// What became of the work, as far as anyone knows: `pending` while it runs, `unknown`
     /// when its worker was lost, else the status it ended with.
     pub fn outcome_state(&self) -> &'static str {
-        if self.lost() {
+        if self.lost() || self.provider_owned() && matches!(self.metadata["provider_state"].as_str(),Some("stopped"|"unknown")) {
             "unknown"
         } else if self.status.is_active() {
             "pending"
@@ -379,7 +380,7 @@ impl JobBook {
     /// did not hear while it was away says nothing about the workers.
     pub fn heard_at(&mut self, now_ms: i64) {
         for job in self.jobs.values_mut() {
-            if job.status.is_active() {
+            if job.status.is_active() && !job.provider_owned() {
                 job.heartbeat_at_ms = Some(now_ms.max(job.heartbeat_at_ms.unwrap_or(0)));
             }
         }
@@ -424,6 +425,11 @@ impl JobBook {
         now_ms: i64,
         revision: u64,
     ) -> Result<JobChange, JobRefusal> {
+        let target=match &command{
+            JobCommand::Register{id,..}|JobCommand::Start{id,..}|JobCommand::Heartbeat{id,..}|JobCommand::Finish{id,..}
+            |JobCommand::Cancel{id,..}|JobCommand::Progress{id,..}|JobCommand::SetLog{id,..}|JobCommand::Note{id,..}|JobCommand::Lose{id,..}=>id,
+        };
+        if target.trim().starts_with(RESERVED_PREFIX){return Err(JobRefusal::ReservedId);}
         match command {
             JobCommand::Register {
                 id,
@@ -437,9 +443,6 @@ impl JobBook {
                 metadata,
             } => {
                 let id = id.trim().to_string();
-                if id.starts_with(RESERVED_PREFIX) {
-                    return Err(JobRefusal::ReservedId);
-                }
                 let existing = self.jobs.get(&id);
                 if let Some(job) = existing
                     && job.status == JobStatus::Cancelled
@@ -714,7 +717,7 @@ impl JobBook {
     ) -> Vec<JobCommand> {
         let mut todo = Vec::new();
         for job in self.jobs.values() {
-            if job.status != JobStatus::Running {
+            if job.status != JobStatus::Running || job.provider_owned() {
                 continue; // one that waits to start is not expected to be heard from
             }
             let silent_ms = now_ms - job.last_sign_ms();

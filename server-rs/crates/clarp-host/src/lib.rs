@@ -38,6 +38,7 @@ mod google_voice_guard;
 pub mod heard;
 pub mod heartbeat;
 pub mod helper_source;
+mod native_lines;
 pub mod hub;
 pub mod ids;
 pub mod janitors;

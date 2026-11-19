@@ -54,6 +54,7 @@ pub mod kind {
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;
+    pub const PROVIDER_JOBS: u16 = 301;
     /// A [`GoalRecord`](crate::goals::GoalRecord) as JSON: what one change set in one of the
     /// agent's plans.
     pub const GOAL: u16 = 400;

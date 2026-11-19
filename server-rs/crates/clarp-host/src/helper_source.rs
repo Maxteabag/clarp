@@ -5,7 +5,7 @@ use clarp_kernel::helper_cells::{self, Children};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, Metadata};
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
@@ -36,7 +36,7 @@ impl From<&Metadata> for Stamp {
 struct Parent {
     stamp: Option<Stamp>,
     offset: u64,
-    fragment: Vec<u8>,
+    lines:crate::native_lines::Lines,
     cells: BTreeMap<String, Value>,
     meta_ids: BTreeSet<String>,
     changed: bool,
@@ -116,21 +116,16 @@ impl Parent {
         });
     }
     fn consume(&mut self, mut input: impl BufRead) -> io::Result<usize> {
-        let mut fragment = std::mem::take(&mut self.fragment);
-        let mut total = 0;
+        let mut lines=std::mem::take(&mut self.lines);
+        let mut total=0;
         loop {
-            let n = input.read_until(b'\n', &mut fragment)?;
-            total += n;
-            if n == 0 {
-                break;
-            }
-            if fragment.last() == Some(&b'\n') {
-                self.record(&fragment);
-                fragment.clear();
-            }
+            let bytes=input.fill_buf()?;
+            if bytes.is_empty(){break;}
+            let n=lines.feed(bytes,self.offset,usize::MAX,|record,_|{self.record(record);true});
+            total+=n;self.offset+=n as u64;
+            input.consume(n);
         }
-        self.fragment = fragment;
-        self.offset += total as u64;
+        self.lines=lines;
         Ok(total)
     }
 }
@@ -139,6 +134,7 @@ pub struct HelperSource {
     metas: BTreeMap<String, (Stamp, Option<String>)>,
     pub(crate) children: Children,
     parent: Parent,
+    provider: ProviderReader,
     available: bool,
     pub(crate) recovered_through: Option<u64>,
     #[cfg(test)]
@@ -236,6 +232,7 @@ impl HelperSource {
         self.children = found;
         changed
     }
+    #[cfg(test)]
     fn read_parent(&mut self, root: &Path, path: &Path) -> io::Result<bool> {
         // An unchanged imported transcript needs only a stat; no parent
         // handle is opened on this path. Recheck identity on the opened file.
@@ -272,7 +269,7 @@ impl HelperSource {
         }
         file.seek(SeekFrom::Start(self.parent.offset))?;
         let data = file.take(stamp.bytes - self.parent.offset);
-        let _bytes = match self.parent.consume(BufReader::new(data)) {
+        let _bytes = match self.parent.consume(std::io::BufReader::new(data)) {
             Ok(bytes) => bytes,
             Err(error) => {
                 self.parent.stamp = None;
@@ -286,6 +283,7 @@ impl HelperSource {
         self.parent.stamp = Some(stamp);
         Ok(self.parent.changed)
     }
+    #[cfg(test)]
     pub(crate) fn scan(&mut self, root: &Path, cwd: &str, session: &str, imported: bool) -> bool {
         let Some((root, path)) = root.canonicalize().ok().and_then(|r| {
             clarp_backend::past::claude_transcript(&r, cwd, session, false).map(|p| (r, p))
@@ -548,5 +546,113 @@ mod tests {
         source.scan(&f.root, "/fixture", "parent", true);
         assert_eq!(source.counts[2], data.len() + short.len() + 3);
         assert!(source.parent.cells.is_empty());
+    }
+}
+
+use clarp_kernel::provider_tasks::{Attempt,Cursor,Evidence,FinalRead,Visit,RECORD_LIMIT};
+
+const VISIT_BYTES:u64=256*1024;
+const VISIT_ACTIONS:usize=64;
+#[derive(Default)]
+struct ProviderReader{
+    lines:crate::native_lines::Lines,
+    consumed:u64,
+    // A record may contain more actions than one journal batch. A crash
+    // restarts at its beginning and skips the already committed actions.
+    pending:Option<(u64,Vec<Evidence>)>,
+    saved:Cursor,
+}
+
+impl ProviderReader{
+    fn read(&mut self,bytes:&[u8],start:u64,project:&str,visit:&mut Visit,now:i64){
+        if self.saved!=visit.cursor {
+            *self=Self{consumed:visit.cursor.offset,saved:visit.cursor.clone(),..Default::default()};
+            self.lines.discard=visit.cursor.discarding;
+        }
+        if let Some((end,actions))=&self.pending{
+            let n=visit.cursor.action_offset.min(actions.len());
+            visit.actions.extend(actions.iter().skip(n).take(VISIT_ACTIONS).cloned());
+            visit.cursor.action_offset=n+visit.actions.len();
+            if visit.cursor.action_offset==actions.len(){
+                visit.cursor.offset=*end;visit.cursor.action_offset=0;self.pending=None;
+            }
+        }
+        if self.pending.is_none() && visit.actions.len()<VISIT_ACTIONS && self.consumed>=start{
+            let from=(self.consumed-start).min(bytes.len() as u64) as usize;
+            let mut line_start=visit.cursor.offset;
+            let used=self.lines.feed(&bytes[from..],start+from as u64,RECORD_LIMIT,|line,end|{
+                let actions=serde_json::from_slice(line).ok().map_or_else(Vec::new,|value|clarp_kernel::provider_tasks::parse_actions(&visit.native,project,&value,now));
+                let n=visit.cursor.action_offset.min(actions.len());
+                let take=(actions.len()-n).min(VISIT_ACTIONS-visit.actions.len());
+                visit.actions.extend(actions.iter().skip(n).take(take).cloned());
+                if n+take<actions.len(){
+                    self.pending=Some((end,actions));visit.cursor.action_offset=n+take;visit.cursor.offset=line_start;return false
+                }
+                visit.cursor.offset=end;visit.cursor.action_offset=0;line_start=end;
+                visit.actions.len()<VISIT_ACTIONS
+            });
+            self.consumed+=used as u64;
+            if self.lines.discard || self.lines.fragment.is_empty() && self.pending.is_none(){visit.cursor.offset=self.consumed;}
+            visit.cursor.discarding=self.lines.discard;
+        }
+        self.saved=visit.cursor.clone();
+    }
+}
+pub(crate) struct ProviderRead {
+    pub visit:Visit,
+    pub closing:Option<(Attempt,i64)>,
+    pub helpers:bool,
+    pub parent:bool,
+}
+impl HelperSource{
+    /// The on-disk position may lag the in-memory reader by a partial line.
+    /// Read only the missing window and hand its shared slice to each cursor.
+    pub(crate) fn read_visit(&mut self,root:&Path,cwd:&str,request:&mut ProviderRead,now:i64)->io::Result<bool>{
+        let v=&mut request.visit;
+        let Some(path)=clarp_backend::past::claude_transcript(root,cwd,&v.native,false)else{
+            v.eof=true;
+            if let Some((attempt,exited_at))=request.closing{v.final_read=Some(FinalRead{attempt,device:v.cursor.device,inode:v.cursor.inode,end:v.cursor.offset,exited_at});}
+            let changed=self.available;self.available=false;self.children.clear();self.metas.clear();return Ok(changed);
+        };
+        let root=root.canonicalize()?;
+        let stamp=Stamp::from(&std::fs::symlink_metadata(&path)?);
+        let changed=request.helpers && (self.discover(&root,&path)||!self.available);self.available=true;
+        if let Some((attempt,exited_at))=request.closing && v.final_read.is_none(){
+            v.final_read=Some(FinalRead{attempt,device:stamp.device,inode:stamp.inode,end:stamp.bytes,exited_at});
+        }
+        if v.final_read.as_ref().is_some_and(|end|end.device!=stamp.device || end.inode!=stamp.inode){
+            v.eof=true;return Ok(changed)
+        }
+        if v.cursor.device!=stamp.device || v.cursor.inode!=stamp.inode || v.cursor.offset>stamp.bytes ||
+            self.provider.saved==v.cursor && self.provider.consumed>stamp.bytes{
+            v.cursor=Cursor{device:stamp.device,inode:stamp.inode,..Default::default()};self.provider=ProviderReader::default();
+        }
+        if self.parent.stamp.is_some_and(|old|old.device!=stamp.device||old.inode!=stamp.inode||self.parent.offset>stamp.bytes||old.bytes==stamp.bytes && old!=stamp){
+            self.parent=Parent{changed:true,..Default::default()};
+        }
+        let end=v.final_read.as_ref().map_or(stamp.bytes,|bound|bound.end.min(stamp.bytes));
+        let next=if self.provider.saved==v.cursor{self.provider.consumed}else{v.cursor.offset};
+        let start=if request.parent {next.min(self.parent.offset)}else{next};
+        let mut bytes=Vec::new();
+        if start<end {
+            let relative=path.strip_prefix(&root).ok().and_then(|p|p.to_str()).ok_or_else(||io::Error::other("invalid provider path"))?;
+            let (_,mut file)=open_beneath(&root,relative,false).map_err(|_|io::Error::other("provider parent unavailable"))?;
+            let m=file.metadata()?;
+            if !m.is_file() || m.dev()!=stamp.device || m.ino()!=stamp.inode {return Err(io::Error::other("provider parent changed"))}
+            file.seek(SeekFrom::Start(start))?;file.take((end-start).min(VISIT_BYTES)).read_to_end(&mut bytes)?;
+        }
+        self.parent.changed=false;
+        if request.parent && self.parent.offset>=start && self.parent.offset<start+bytes.len() as u64{
+            let at=(self.parent.offset-start) as usize;
+            self.parent.consume(&bytes[at..])?;
+            self.parent.stamp=Some(stamp);
+        }
+        let project=path.parent().and_then(Path::file_name).and_then(|s|s.to_str()).unwrap_or("");
+        // If the helper reader trails the durable job cursor by a full
+        // window, it alone consumes this window; don't move the job cursor.
+        if next<=start+bytes.len() as u64 {self.provider.read(&bytes,start,project,v,now);}
+        v.eof=self.provider.pending.is_none() && self.provider.consumed>=end && (!request.parent||self.parent.offset>=end);
+        if v.final_read.is_some() && v.eof {v.cursor.offset=end;v.cursor.action_offset=0;}
+        Ok(changed||self.parent.changed)
     }
 }

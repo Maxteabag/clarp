@@ -56,6 +56,7 @@ use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
 pub mod helper_cells;
+pub mod provider_jobs;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 
@@ -597,6 +598,7 @@ pub struct Actor {
     for_its_model: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
+    provider_sessions:std::collections::BTreeMap<String,clarp_kernel::provider_tasks::Session>,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     /// What the agent made for its user and what it asks its user, as the log has it.
@@ -1001,6 +1003,11 @@ impl Actor {
                 jobs.apply(&record);
             },
         )?;
+        let mut provider_sessions=std::collections::BTreeMap::new();
+        records(recorder.log(),kind::JOBS,kind::PROVIDER_JOBS,|entry:clarp_kernel::provider_tasks::JournalEntry|{
+            for record in entry.records{jobs.apply(&record);}
+            provider_sessions.insert(entry.native,entry.session);
+        })?;
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
         let mut goals = GoalBook::new();
@@ -1048,7 +1055,7 @@ impl Actor {
             profile,
             backend,
             recorder,
-            jobs,
+            jobs,provider_sessions,
             goals,
             artifacts,
             media,
@@ -2039,6 +2046,12 @@ impl Actor {
             let Some(first) = page.first() else { break };
             before = first.seq;
             for item in page.iter().rev() {
+                if item.kind==kind::PROVIDER_JOBS {
+                    let entry:clarp_kernel::provider_tasks::JournalEntry=serde_json::from_slice(&item.body).map_err(|e|ActorError::Corrupt(e.to_string()))?;
+                    let room=limit-entries.len();
+                    entries.extend(entry.records.into_iter().rev().filter(|r|r.timeline && r.job.id==id).take(room));
+                    continue;
+                }
                 if item.kind != kind::JOB || item.key.as_deref() != Some(&format!("j-{id}")) {
                     continue;
                 }

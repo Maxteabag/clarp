@@ -101,6 +101,7 @@ pub enum Ask {
         session: String,
         cwd: String,
         generation: u64,
+        provider:Option<clarp_kernel::provider_tasks::Visit>,
         changed: bool,
     },
     Send {
@@ -892,6 +893,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         helper_rows: Default::default(),
         helper_source: Some(Default::default()),
         helper_clock: Default::default(),
+        provider_due:Instant::now(),
         helper_generation: 0,
         helper_owner: None,
         jobs_checked: Instant::now(),
@@ -955,6 +957,7 @@ struct Worker {
     helper_rows: clarp_actor::helper_cells::HelperRows,
     helper_source: Option<Box<crate::helper_source::HelperSource>>,
     helper_clock: crate::helper_source::RefreshClock,
+    provider_due:Instant,
     helper_generation: u64,
     helper_owner: Option<(String, String)>,
     /// When the goals were last looked at, on the Host's clock. A goal that was due then and
@@ -1255,18 +1258,19 @@ impl Worker {
         let actor = self.actor.as_ref()?;
         let (live, session) = actor.helper_context();
         let now = Instant::now();
-        let due = self.helper_clock.due(live, now)?;
+        let helper_due = self.helper_clock.due(live, now);
         self.helper_source.as_ref()?;
         let session = session?;
-        if !actor.track_helpers(&mut self.helper_rows).unwrap_or(false) {
-            self.helper_clock.started(now);
-            return None;
-        }
-        if due > now {
-            return Some(due);
-        }
+        let attempt=actor.provider_attempt();
+        let saved=actor.provider_session(session).cloned().unwrap_or_default();
+        let closing=saved.owner.filter(|previous|Some(*previous)!=attempt);
+        let due=if closing.is_some()||saved.final_read.is_some(){now}
+            else{helper_due.map_or(self.provider_due,|due|due.min(self.provider_due))};
+        if due>now{return Some(due)}
+        let helpers=helper_due.is_some() && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
         self.helper_clock.started(now);
-        let session = session.to_owned();
+        self.provider_due=now+Duration::from_secs(5);
+        let session=session.to_owned();
         let cwd = self.setup.record.cwd.clone();
         let owner = (cwd.clone(), session.clone());
         if self.helper_owner.as_ref() != Some(&owner) {
@@ -1279,17 +1283,25 @@ impl Worker {
         } else {
             None
         };
-        let read_parent = self.helper_rows.has_imported || missed.is_some();
+        let at=self.now_ms();
+        let owner=saved.final_read.as_ref().map(|end|end.attempt).or(closing).or(attempt);
+        let mut request=crate::helper_source::ProviderRead{helpers,parent:helpers && (self.helper_rows.has_imported || missed.is_some()),
+            closing:closing.map(|turn|(turn,at)),visit:clarp_kernel::provider_tasks::Visit {
+            native:session.clone(),expected:saved.revision,cursor:saved.cursor,bound_at:self.setup.record.created_at_ms,
+            owner,final_read:saved.final_read,actions:Vec::new(),eof:false
+        }};
         let generation = self.helper_generation;
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let root = crate::past::projects(&crate::config::home());
-            let changed = source.scan(&root, &cwd, &session, read_parent);
+            let result=source.read_visit(&root,&cwd,&mut request,at);
+            let provider=result.is_ok().then_some(request.visit);
+            let changed=result.unwrap_or(false);
             if missed.is_some() {
                 source.recovered_through = missed;
             }
             let _ = tx.send(Ask::HelperRead {
-                source,
+                source,provider,
                 cwd,
                 session,
                 generation,
@@ -1870,7 +1882,7 @@ impl Worker {
                 answered(result, answer)?
             }
             Ask::HelperRead {
-                source,
+                source,provider,
                 cwd,
                 session,
                 generation,
@@ -1881,8 +1893,16 @@ impl Worker {
                         && actor.helper_context().1 == Some(session.as_str())
                     {
                         {
+                            let mut jobs_changed=false;
+                            if let Some(visit)=provider {
+                                let more=!visit.eof;
+                                let revisions=&self.setup.revisions;
+                                let applied=actor.apply_provider_visit(visit,now,||revisions.next(now))?;
+                                jobs_changed=applied.changed.jobs;
+                                if more{self.provider_due=Instant::now();}
+                            }
                             actor.track_helpers(&mut self.helper_rows)?;
-                            let out = actor.refresh_helpers(
+                            let mut out = actor.refresh_helpers(
                                 &mut self.helper_rows,
                                 changed,
                                 now,
@@ -1890,8 +1910,9 @@ impl Worker {
                             )?;
                             if out.changed.conversation {
                                 self.helper_change_session = Some(session);
-                                self.after(out);
                             }
+                            out.changed.jobs |= jobs_changed;
+                            if out.changed.conversation||out.changed.jobs{self.after(out);}
                         }
                         self.helper_source = Some(source);
                     } else {
