@@ -321,7 +321,7 @@ def free_after_removal(floor):
     return free
 
 
-def trim_test_executables(deps, floor, free):
+def trim_test_executables(deps):
     files = []
     for name in os.listdir(deps):
         match = re.fullmatch(r'([A-Za-z0-9_]+)-[0-9a-f]{16}', name)
@@ -337,10 +337,7 @@ def trim_test_executables(deps, floor, free):
         if name != newest[group]:
             os.unlink(name, dir_fd=deps)
             removed += 1
-            free = free_after_removal(floor)
-            if free >= floor:
-                break
-    return removed, free
+    return removed
 
 
 def make_room(root, current, floor):
@@ -351,9 +348,11 @@ def make_room(root, current, floor):
     if free < floor:
         try:
             with directory('target') as target, directory('debug', target) as debug, directory('deps', debug) as deps:
-                tests, free = trim_test_executables(deps, floor, free)
+                tests = trim_test_executables(deps)
         except (FileNotFoundError, NotADirectoryError):
             pass
+        if tests:
+            free = free_after_removal(floor)
     if free < floor:
         # Serialize this scan with publication of a new lease. A keeper may
         # release its lease during cleanup; retaining its copy is safe.
