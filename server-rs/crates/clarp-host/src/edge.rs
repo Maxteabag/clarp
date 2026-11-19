@@ -603,7 +603,7 @@ pub fn router(app: App) -> Router {
         .layer(middleware::from_fn_with_state(app.clone(), authorize))
         .layer(middleware::from_fn(declared_framing))
         .layer(middleware::from_fn_with_state(
-            app.clone(),
+            (app.capture.clone(), app.clock.clone()),
             crate::diagnostics::request,
         ))
         .with_state(app)
