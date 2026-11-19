@@ -101,6 +101,27 @@ not marked, one that never read the answer is not marked, a sound third answer i
 nothing asked after it, a mark every time adds nothing, a try that did not run to its end is no
 answer, and a scenario with one sound recording is not recorded again).
 
+A second defect the two recordings can share, the late stamp. An answer that a snapshot named
+complete (its agent's last message, with its words, at the cursor that snapshot handed out) is
+shown by a later read of the conversation as newer than that cursor, with the same words: the
+reference stamped it again, beside a later answer, though nothing of it a client sees changed, and
+a client holding that cursor is told the row changed. In `the-queue-by-hand` the reference did it
+in 9 of 268 recordings; in two runs (155 of 18 Nov, the first of train S's) both recordings had it,
+and the Rust Host, which did it in none of 126, differed from both. A recording says of itself
+that it has it (`stamped_again`): no other Host is looked at. It is a mark like R19's: a scenario
+whose every recording carries a mark is recorded again, and the first answer without any mark is
+kept. Where the mark is still there every time (and in `judge`, which records nothing), a
+difference in such a row's revision is told by its shape (`late-stamp`), and only where the Rust
+Host's row is the same answer and is not newer than the cursor its own snapshot handed out.
+
+What these rules could hide. A mark only asks for another recording; it excuses nothing. If this
+Host began to stamp rows late, its answer would differ from the unmarked recording that is kept,
+and the shape rule says nothing for it (its row would be newer than its own cursor). It would go
+unseen only where every recording of the reference carried the same late stamp at the same row,
+which the reference did at most twice in 268 recordings of one scenario. The mark also falls on a
+row that really changed after the snapshot (its turn settled later, as in older runs of
+`turn-timer`): that costs a recording more and changes no verdict.
+
 A test Host of the reference sometimes does not come to rest. On an agent's first turn the
 Python Host can take the tool's end before it has written down that the turn began; it refuses
 the end and then writes the beginning, and the agent stays busy (defect R43). It takes a tool
