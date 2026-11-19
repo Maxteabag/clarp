@@ -41,6 +41,7 @@ from . import agents as agents_db
 from . import backends
 from . import ws
 from .backend.base import Unsupported
+from .hook_runtime import without_inherited_identity
 from .http_utils import send_plain_http_error
 from .log import log, log_exception
 
@@ -139,6 +140,11 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
     except OSError as e:
         return log_exception("terminalHandshakeFail", e)
 
+    # The child's environment, built before the fork: the Host's own, without
+    # any identity the Host inherited (hook_runtime.INHERITED_IDENTITY_ENV): a
+    # terminal is the user's, never the turn the Host was started from (R111).
+    env = {**without_inherited_identity(os.environ), "TERM": "xterm-256color"}
+    env.setdefault("LANG", "en_US.UTF-8")
     # Spawn the CLI in a PTY. pty.fork() makes the child a session leader with
     # the slave as its controlling tty, which interactive claude/codex/agy need.
     pid, fd = pty.fork()
@@ -148,10 +154,8 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
         except OSError:
             if agent_id is None:
                 os._exit(126)
-        os.environ["TERM"] = "xterm-256color"
-        os.environ.setdefault("LANG", "en_US.UTF-8")
         try:
-            os.execvp(argv[0], argv)
+            os.execvpe(argv[0], argv, env)
         except OSError:
             os._exit(127)
 

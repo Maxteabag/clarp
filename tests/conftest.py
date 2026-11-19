@@ -35,6 +35,11 @@ if _TEMP_ROOT:
     # Read lazily by pytest's tmp_path factory, after initial conftests load.
     os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
 
+# Set inside a turn the Rust Host runs: every hook module exits at import when it is '1'
+# (plugin/hooks/_clarp_lib.py, R111), so a suite run from such a turn would stop at collection.
+# The tests that need it set it in their child process only.
+os.environ.pop("CLARP_RUST_MANAGED_TURN", None)
+
 
 def _load_no_servers_guard():
     import importlib.util
