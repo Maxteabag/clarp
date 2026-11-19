@@ -488,6 +488,14 @@ called; published again under its id, the tool finds the version the new one fol
 Held end to end (`tests/host.rs`, an agent hands its user a report) and by the scenario `reports`. Not there
 yet: countdowns and podcast episodes.
 
+**A form’s events** (19 Nov 2026). The Host accepts 1–32 telemetry records per batch from a
+full-access client. Each event object fits in 16 KiB of compact UTF-8 JSON. The immutable log
+has no per-form quota. One new event reads three keys and commits four records in one fleet
+transaction: the global counter, the form’s tail, its event-ID receipt and the event at its
+ordinal. A retry compares the event with its receipt. Pages seek within one form and carry a
+frozen upper sequence. The artifact tool can export that snapshot as private JSONL or set the
+draft key. Recording telemetry never submits answers or starts a turn.
+
 **An agent asks its user with a form** (15 Nov 2026). The last kind of artifact agents made in the measured
 week that this Host refused: a page that asks for answers, with a JSON Schema that says what an answer is. The
 Python Host asks a library whether the schema is one and whether answers fit, and tells the user the
@@ -509,8 +517,7 @@ are the Python Host's (`server/lib/html_forms.py`), held by 71 recorded calls of
 end (`tests/host.rs`, an agent asks its user with a form), and by the scenario `forms`. The vectors found a
 fault that had nothing to do with forms: a fraction of seventeen digits could be read one step off
 (`9.999999900000001e-05` as `9.9999999e-05`), so a number an agent published could come back as another;
-fractions are read exactly now (`float_roundtrip`). Not there: what a form's page logs of its use
-(`html_form_events`), and the reply spoken.
+fractions are read exactly now (`float_roundtrip`). Whether the agent speaks the reply is kept with the answers.
 
 **What an app asks of any Host** (16 Nov 2026). The load was counted on the live Host's own log: in three
 days its clients made 147,704 requests over 469 routes, and 69.3 per cent of them went to routes this Host

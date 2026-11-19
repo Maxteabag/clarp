@@ -32,6 +32,7 @@ use crate::python;
 
 pub mod answers;
 pub mod decisions;
+pub mod form_events;
 pub mod forms;
 pub mod moved;
 pub mod render_spec;

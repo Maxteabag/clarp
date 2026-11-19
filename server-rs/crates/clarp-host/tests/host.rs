@@ -1795,8 +1795,8 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
     );
     assert_eq!(artifacts(&["frobnicate"]).0, 2);
     assert_eq!(artifacts(&[]).0, 1);
-    // What a form's page logs of its use is not kept here yet, and its verb says so.
-    assert_eq!(artifacts(&["form-events", "no-such"]).0, 69);
+    // Event history is available only for an interactive form.
+    assert_eq!(artifacts(&["form-events", "no-such"]).0, 1);
 
     // What the user does with an artifact: archive it, pin it, discard it.
     let at = document["updated_at"].as_i64().unwrap();
@@ -15569,6 +15569,224 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
         page.header("content-security-policy")
             .contains("connect-src 'none';")
     );
+}
+
+// A missing form checks every published book and returns before any kept-store read.
+// Measure that path through the real handler; the times include loopback HTTP overhead.
+#[test]
+fn form_version_lookup_on_a_synthetic_fleet() {
+    let place = Place::new("form-lookup");
+    let host = place.start_with("", &["--engine", "memory", "--codec", "none"]);
+    for agents in 1..=32 {
+        let owner = host.new_agent(&format!("Fixture{agents}"));
+        for ordinal in 0..32 {
+            let id = format!("form-{agents}-{ordinal:02}");
+            let data = json!({"session":owner,"artifact_id":id,"title":"Fixture","type":"html_form","payload":{"version":"v1","content":"<p>Example</p>","answer_schema":{"type":"object"}}});
+            assert_eq!(host.ask("POST", "/artifacts", Some(&data)).0, 201);
+        }
+        if ![1, 16, 32].contains(&agents) {
+            continue;
+        }
+        for (label, path, expected) in [
+            (
+                "hit",
+                format!("/artifacts/form-{agents}-31/events-config"),
+                200,
+            ),
+            ("miss", "/artifacts/form-zzz/events-config".to_string(), 400),
+        ] {
+            let mut samples = Vec::new();
+            for i in 0..105 {
+                let start = Instant::now();
+                let (status, reply) = host.ask("GET", &path, None);
+                let micros = start.elapsed().as_micros();
+                assert_eq!(status, expected);
+                if label == "hit" {
+                    assert_eq!(reply["version"], "v1");
+                }
+                if i >= 5 {
+                    samples.push(micros);
+                }
+            }
+            samples.sort_unstable();
+            writeln!(std::io::stderr().lock(),"form lookup sample {label}: agents={agents} artifacts={} requests={} median_us={} p95_us={}",agents*32,samples.len(),samples[49],samples[94]).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_forms_events_are_private_append_only_and_exported_at_one_snapshot() {
+    let place = Place::new("form-events");
+    let token = "form-events-test";
+    let host = place.start_with_token(token);
+    let maker = host.new_agent("FormMaker");
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["html_form_events"],
+        51
+    );
+    let report = json!({"session":maker,"artifact_id":"read-only-form","type":"html_form","title":"Report","payload":{"version":"v1","content":"<p>Report</p>","read_only":true}});
+    assert_eq!(host.ask("POST", "/artifacts", Some(&report)).0, 201);
+    for missing in ["read-only-form", "absent-form"] {
+        let path = format!("/artifacts/{missing}/events");
+        assert_eq!(
+            host.ask("GET", &path, None),
+            (400, json!({"error":"interactive form not found"}))
+        );
+        let data = json!({"version":"v1","events":[{"event_id":"abcdefghijklmnop","client_seq":0,"client_at":0,"event":{}}]});
+        assert_eq!(
+            host.ask("POST", &path, Some(&data)),
+            (409, json!({"error":"interactive form not found"}))
+        );
+    }
+    let fixtures: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/forms-events.json"
+    ))
+    .unwrap();
+    let mut count = 0;
+    for case in fixtures.as_array().unwrap() {
+        let id = case["artifact"].as_str().unwrap();
+        let data = &case["data"];
+        let create = json!({"session":maker,"artifact_id":id,"type":"html_form","title":"Test form","payload":{"version":"v1","content":"<p>Test</p>","answer_schema":{"type":"object"}}});
+        let (status, created) = host.ask("POST", "/artifacts", Some(&create));
+        assert_eq!(status, 201, "{created}");
+        let path = format!("/artifacts/{id}/events");
+        let append = case["kind"] == "append";
+        let config = case["kind"] == "configure";
+        let (status, got) = if append {
+            host.ask("POST", &path, Some(data))
+        } else if config {
+            host.ask("POST", &format!("{path}-config"), Some(data))
+        } else {
+            let query = data
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("&");
+            host.ask("GET", &format!("{path}?{query}"), None)
+        };
+        let expected = &case["output"];
+        assert_eq!(
+            status,
+            if expected.get("error").is_some() {
+                if append { 409 } else { 400 }
+            } else {
+                200
+            },
+            "case {id}: {got}"
+        );
+        assert_eq!(&got, expected, "case {id}");
+        count += 1;
+    }
+    assert_eq!(count, 59);
+    let path = "/artifacts/0/events";
+    let batch = |id: &str, n: u64| json!({"version":"v1","events":[{"event_id":id,"client_seq":n,"client_at":n,"event":{"number":n}}]});
+    let nonfinite=fetch(&host,token,"POST",path,&[],br#"{"version":"v1","events":[{"event_id":"abcdefghijklmnop","client_seq":0,"client_at":0,"event":{"bad":[NaN]}}]}"#);
+    assert_eq!(nonfinite.status, 409);
+    assert_eq!(
+        serde_json::from_str::<Value>(&nonfinite.text()).unwrap()["error"],
+        "event must be finite JSON"
+    );
+    let first = batch("first-0000000000", 1);
+    let second = batch("second-000000000", 2);
+    let receipt = host.post(path, first.clone());
+    assert_eq!(host.post(path, first.clone()), receipt);
+    let a = receipt["events"][0]["seq"].as_i64().unwrap();
+    host.post("/artifacts/1/events", first);
+    let b = host.post(path, second.clone())["events"][0]["seq"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(b, a + 2);
+    let page = host.get(&format!("{path}?limit=1"));
+    assert_eq!(page["has_more"], true);
+    assert_eq!(page["next_seq"], a);
+    assert_eq!(page["snapshot_seq"], b);
+    let rejected = json!({"version":"v1","events":[batch("third-0000000000",3)["events"][0],batch("second-000000000",99)["events"][0]]});
+    assert_eq!(host.ask("POST", path, Some(&rejected)).0, 409);
+    assert_eq!(host.get(path)["snapshot_seq"], b);
+    assert_eq!(
+        host.post(path, batch("third-0000000000", 3))["events"][0]["seq"],
+        b + 1
+    );
+    let page = host.get(&format!("{path}?after={a}&through={b}"));
+    assert_eq!(page["has_more"], false);
+    assert_eq!(page["events"].as_array().unwrap().len(), 1);
+    let event = &page["events"][0];
+    assert_eq!(
+        (&event["artifact_id"], &event["version"], &event["event_id"]),
+        (&json!("0"), &json!("v1"), &json!("second-000000000"))
+    );
+    assert_eq!(
+        (&event["client_seq"], &event["client_at"], &event["seq"]),
+        (&json!(2), &json!(2), &json!(b))
+    );
+    assert!(event["received_at"].as_i64().unwrap() > 0);
+    assert_eq!(page["events"][0]["event"], json!({"number":2}));
+    assert!(page["events"][0].get("payload_hash").is_none());
+    let raw = fetch(
+        &host,
+        token,
+        "GET",
+        &format!("{path}?after={a}&through={b}&format=jsonl"),
+        &[],
+        b"",
+    );
+    assert_eq!(raw.status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&raw.text()).unwrap(),
+        page["events"][0]
+    );
+    assert_eq!(host.ask("GET", &format!("{path}?format=csv"), None).0, 400);
+    let (limited, _) = pair(&host, "Limited", "limited");
+    for endpoint in [path, "/artifacts/0/events-config"] {
+        for method in ["GET", "POST"] {
+            assert_eq!(host.ask_as(&limited, method, endpoint, None).0, 403);
+        }
+    }
+    assert!(host.conversation(&maker).is_empty());
+    host.kill();
+    let host = place.start_with_token(token);
+    assert_eq!(host.get(path)["events"].as_array().unwrap().len(), 3);
+    let work = place.root.join("work");
+    let command = |args: &[&str]| {
+        let mut words = vec!["clarp-agent-artifacts", "form-events", "0"];
+        words.extend_from_slice(args);
+        tool(&host, &work, None, &words)
+    };
+    assert_eq!(command(&["--draft-key", "entries"]).0, 0);
+    assert_eq!(
+        host.get("/artifacts/0/events-config")["draft_key"],
+        "entries"
+    );
+    assert_eq!(command(&["--draft-key", ""]).0, 0);
+    assert!(host.get("/artifacts/0/events-config")["draft_key"].is_null());
+    let (code, out, err) = command(&["--limit", "1", "--output", "export.jsonl"]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(serde_json::from_str::<Value>(&out).unwrap()["events"], 3);
+    let target = work.join("export.jsonl");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let rows: Vec<Value> = std::fs::read_to_string(target)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(json!(rows), host.get(path)["events"]);
+    assert_eq!(command(&["--output", "export.jsonl"]).0, 1);
+    assert_eq!(command(&["--output", "export.jsonl", "--overwrite"]).0, 0);
+    // Two writers racing the same receipt see one sequence, including after a restart.
+    let data = batch("concurrent-event-000", 7);
+    let replies = std::thread::scope(|threads| {
+        let one = threads.spawn(|| host.post(path, data.clone()));
+        let two = threads.spawn(|| host.post(path, data.clone()));
+        [one.join().unwrap(), two.join().unwrap()]
+    });
+    assert_eq!(replies[0], replies[1]);
+    assert_eq!(host.get(path)["events"].as_array().unwrap().len(), 4);
 }
 
 #[test]

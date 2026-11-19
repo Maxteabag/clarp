@@ -23,7 +23,7 @@ introduced it, as the Python Host's `FEATURE_CONTRACTS` has it). On 19 Nov 2026 
 `goal_keeper_stalled`, `artifacts`, `flat_artifact_responses`, `artifact_summary_v1`, `render_spec`, `artifact_pins`,
 `decision_lifecycle`, `decision_on_behalf`, `text_input_requests`, `push_grants`, `push_unregister`, `desktop_send_quiet_push`,
 `snapshot_without_archived`, `helper_agents`, `agent_fork`, `media`, `html_reports`, `html_report_revisions`,
-`html_form_network`, `attention_index`, `group_calls`, `agent_rings`, `agent_ring_live`,
+`html_form_network`, `html_form_events`, `attention_index`, `group_calls`, `agent_rings`, `agent_ring_live`,
 `agent_ring_device_optout`, `agent_ring_listen_first`, `agent_call_live`, `call_transcription_policy`, `oracle`, `oracle_contact`, `oracle_direct_contact`, `oracle_gemini_voice`,
 `oracle_context_memory`, `oracle_earcons`, `oracle_handoff`, `heartbeat`, `backend_quota`, `live_activity_push` on a Host that
 can reach an activity with its relay account or direct key, `agent_live_fcm`, `push_fcm` and `live_activity_fcm` (the last two with an Android service account), `hotseat_desk` on a Host that was told its owner's tool for the
@@ -38,7 +38,7 @@ one of these:
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
-| `html_form_events`, `html_form_reply_audio` | in work |
+| `html_form_reply_audio` | in work |
 | `managed_skills`, `agent_portraits`, `auto_contact_minting`, `backend_auth`, `controller_actions`, `controller_narration`, `diagnostics`, `goal_ledger`, `harness_model_providers`, `launch_directories`, `provider_background_tasks`, `quiet_agents`, `remote_action`, `transcription`, `turn_slot_repair` | to be built |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
@@ -286,7 +286,6 @@ with its port (19 Nov 2026).
 | A form whose schema of answers has a word of JSON Schema other than `type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`, `minLength`, `maxLength`, `minItems`, `maxItems`, `minimum`, `maximum`, or the words that say nothing of an answer (`title`, `description`, `default`, `examples`, `format`, `deprecated`, `readOnly`, `writeOnly`, `$comment`, `$schema`, `contentMediaType`, `contentEncoding`) | taken: a library reads all of JSON Schema (jsonschema, draft 2020-12) | refused when the form is made, with the word: `answer_schema says \`pattern\`, which this Host does not read yet` | This Host reads a schema itself, and says of answers that do not fit what the library says first (1,423 recorded pairs). A form is not taken whose answers it would judge otherwise. The four forms of the measured week use `type`, `properties` and `enum`. A word that means nothing to the library means nothing here either |
 | Of several answers nobody asked for that do not fit a schema given as `additionalProperties`, which one the user is told of | whichever the library's set gives first: not the same from one start of the Host to the next | the first as the answers were sent | The library leaves it open |
 | A whole number in a form's answers that 64 bits do not hold | kept and shown as it was written | read as a fraction | No form asks for one |
-| What a form's page logs of its use (`POST` and `GET /artifacts/<id>/events`, the feature `html_form_events`), and the tool's `form-events` | kept, and read back | not there; the tool says it is not available on this Host yet | Not built. No form of the measured weeks logged anything |
 | A user's wish to have the agent's reply to their answers spoken (`synthesize_audio`, the feature `html_form_reply_audio`) | the reply is spoken | kept with the answers; nothing is spoken | Speech out is not built |
 | A form's answers whose agent is put away | kept, and told when the agent is taken out again | told at once | Not compared yet for any kind of message: what this Host does with what is said to an agent that is put away is still to be held to the Python Host |
 | A summary of a report (`representation=summary-v1`) in a list so large that the Host's budget for hashing runs out | `content_omitted` without its digest, marked `hash_pending` | always with its digest and length | This Host keeps a page under its digest: it has nothing to compute |
