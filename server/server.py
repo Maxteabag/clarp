@@ -1217,7 +1217,10 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # Exactly the routes, so unmatched paths keep their 404 (HTTP-01/03).
         # /past-sessions with any scope: a caller-chosen cwd lists that
         # directory's sessions and their first messages (HTTP-03b).
-        if path in ("/dirs", "/past-sessions") or (path.startswith("/terminal/") and method == "GET"):
+        # /launch-directories and /favorite-paths: the owner's directories, for
+        # a launch a limited device cannot make (R123).
+        if path in ("/dirs", "/past-sessions", "/launch-directories", "/favorite-paths") or (
+                path.startswith("/terminal/") and method == "GET"):
             return True
         if method == "GET":
             return False
