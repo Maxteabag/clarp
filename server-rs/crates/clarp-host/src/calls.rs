@@ -38,7 +38,10 @@ use crate::fleet::Directory;
 use crate::ids;
 use crate::pairing::Scope;
 
+pub mod generation;
 pub mod live;
+pub(crate) mod opening;
+pub mod opening_launch;
 mod tools;
 mod transcript;
 
@@ -49,7 +52,7 @@ enum Placing {
     /// It is answered already: the ring its event rang before.
     Told(Value),
     /// A ring held as a live voice call: placed, with nothing voiced.
-    Placed(live::Placed),
+    Placed(Box<live::Placed>),
     /// An ordinary ring: its line is voiced, and then it is placed.
     ToVoice(rings::Admitted),
 }
@@ -93,6 +96,7 @@ struct Books {
 /// kept.
 #[derive(Default)]
 pub struct Desk {
+    opening_turn: tokio::sync::Mutex<()>,
     tool_slots: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     books: tokio::sync::Mutex<Option<Books>>,
     /// One ring is placed at a time: from the moment it is admitted until it rings, while
@@ -165,7 +169,12 @@ impl Desk {
         };
         let mut out = Effects::default();
         let answer = ask(&mut books.calls, at, (&roster, &ids::hex(16)), &mut out);
+        let ended = out.events.iter().any(|e| e["state"] == "ended");
         Self::done(app, &directory, &books.calls, out, at.now_ms).await?;
+        drop(held);
+        if ended {
+            self.retire_openings(app, None).await?;
+        }
         Ok(answer)
     }
 
@@ -246,6 +255,34 @@ impl Desk {
         Ok(())
     }
 
+    async fn attach_opening(
+        app: &App,
+        rings: &mut Rings,
+        originals: &mut HashMap<String, Value>,
+        id: &str,
+    ) -> Result<(), Unavailable> {
+        if !rings.opening_records().any(|r| r.ring_id == id)
+            && let Some(raw) = app.fleet.kept("opening_history", id.into()).await?
+        {
+            let ring: rings::Ring =
+                serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string()))?;
+            originals.insert(id.into(), ring.opening.clone());
+            rings.attach_opening(ring);
+        }
+        Ok(())
+    }
+
+    async fn with_opening<T>(
+        &self,
+        app: &App,
+        id: &str,
+        ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
+    ) -> Result<T, Unavailable> {
+        let (answer, pushes) = self.ask_rings(app, Some(id), ask).await?;
+        self.push(app, pushes).await;
+        Ok(answer)
+    }
+
     /// One request on the rings. `ask` is given the rings, the calls an answer starts one
     /// in, what a request needs to know, and where to put what it does beside its answer.
     /// What it did is done before this answers: kept, told, noted; and the phones are told
@@ -254,10 +291,17 @@ impl Desk {
     async fn ask_rings<T>(
         &self,
         app: &App,
+        opening_id: Option<&str>,
         ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
     ) -> Result<(T, Vec<rings::Pushed>), Unavailable> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
+        let mut rings = books.rings.clone();
+        let mut archived = HashMap::new();
+        if let Some(id) = opening_id {
+            Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+        }
+        let mut calls = books.calls.clone();
         let directory = app.fleet.directory();
         let roster = roster(&directory);
         let now_ms = app.clock.now_ms();
@@ -272,6 +316,10 @@ impl Desk {
             let world = rings::World {
                 profiles: &shelf,
                 android: &androids,
+                opening: Some(&generation::Evidence {
+                    root: &app.config.data_dir,
+                    directory: &directory,
+                }),
                 can_push_android: app.android.configured(),
                 device_ok: &paired,
                 host_id: &app.server_id,
@@ -301,30 +349,77 @@ impl Desk {
                 world,
                 stops: &stops,
             };
-            ask(
-                &mut books.rings,
-                &mut books.calls,
-                &with,
-                (&mut out, &mut of_calls),
-            )
+            ask(&mut rings, &mut calls, &with, (&mut out, &mut of_calls))
         };
-        // A call that was retired on its ring: its session is told now, under the same lock.
-        for (call_id, reason) in stops.into_inner() {
-            if let Some(running) = books.sessions.get(&call_id) {
-                running.stop(&reason);
+        let mut withdrawals = Vec::new();
+        for event in of_calls
+            .events
+            .iter()
+            .filter(|event| event["state"] == "ended")
+        {
+            let ended = &event["call_id"];
+            if !rings.opening_records().any(|r| ended == &r.call_id)
+                && let Some(id) = app
+                    .fleet
+                    .kept("opening_by_call", ended.as_str().unwrap_or("").into())
+                    .await?
+                && let Ok(id) = std::str::from_utf8(&id)
+            {
+                Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+            }
+            let Some(ring) = rings
+                .opening_records()
+                .find(|r| ended == &r.call_id && r.opening["retired"].is_null())
+            else {
+                continue;
+            };
+            let id = ring.ring_id.clone();
+            let session = ring.session.clone();
+            let trace = ring.opening["intent"]["trace_id"].clone();
+            let evidence = self.queue_row(app, &ring.opening).await?;
+            let reason = format!("call_{}", event["reason"].as_str().unwrap_or("ended"));
+            let first = generation::read(&app.config.data_dir);
+            let generation = if first == generation::read(&app.config.data_dir) {
+                first
+            } else {
+                Value::Null
+            };
+            let world = rings::opening::World {
+                generation: &generation,
+                now: now_ms,
+                host: &app.server_id,
+                fence: None,
+                queue: &evidence,
+                nonce: "",
+                trace: "",
+            };
+            if let Some((_, fx)) = rings.change_opening(&id, now_ms, &mut out, |r, fx| {
+                fx.announce = rings::opening::retire_current(&mut r.opening, &reason, &world, fx);
+            }) && fx.takes_waiter(&evidence, &trace)
+                && let Some(turn) = evidence["turn"].as_u64()
+            {
+                withdrawals.push((session, turn, reason));
             }
         }
-        if let Some(taking) = shelf.to_keep() {
-            let kept = serde_json::to_vec(&json!(taking)).unwrap_or_default();
-            app.fleet
-                .keep(RINGS, TAKING_KEPT.to_string(), Some(kept))
-                .await?;
-            books.taking = Some(taking);
+        // The group call, its answered ring and the listen-first opening are
+        // one fact to a recovering phone. Persist them before publishing either.
+        let mut rows = Vec::new();
+        let taking = shelf.to_keep();
+        if let Some(taking) = &taking {
+            rows.push((
+                RINGS,
+                TAKING_KEPT.to_string(),
+                serde_json::to_vec(taking).map_err(|e| Unavailable(e.to_string()))?,
+            ));
         }
-        // What a call says of itself comes before what the ring says of its answer.
-        Self::done(app, &directory, &books.calls, of_calls, now_ms).await?;
-        let rings = &books.rings;
-        let keeps = [
+        for principal in &of_calls.changed {
+            rows.push((
+                KIND,
+                principal.clone(),
+                serde_json::to_vec(calls.of(principal)).map_err(|e| Unavailable(e.to_string()))?,
+            ));
+        }
+        for (changed, name, bytes) in [
             (
                 out.changed.rings,
                 RINGS_KEPT,
@@ -350,13 +445,107 @@ impl Desk {
                 PREFS_KEPT,
                 serde_json::to_vec(rings.prefs()),
             ),
-        ];
-        for (changed, name, kept) in keeps {
+        ] {
             if changed {
-                app.fleet
-                    .keep(RINGS, name.to_string(), Some(kept.unwrap_or_default()))
+                rows.push((
+                    RINGS,
+                    name.to_string(),
+                    bytes.map_err(|e| Unavailable(e.to_string()))?,
+                ));
+            }
+        }
+        // A clip may be synthesized after the opening changes. Keep a trace
+        // index with the state change, so the voice worker needs one lookup.
+        if out.changed.rings {
+            for ring in rings.opening_records() {
+                let previous = books
+                    .rings
+                    .rings()
+                    .iter()
+                    .find(|r| r.ring_id == ring.ring_id)
+                    .map(|r| &r.opening)
+                    .or_else(|| archived.get(&ring.ring_id));
+                if previous == Some(&ring.opening) {
+                    continue;
+                }
+                for field in ["intent", "greeting"] {
+                    let trace = ring.opening[field]["trace_id"].as_str();
+                    if let Some(old) = previous
+                        .and_then(|p| p[field]["trace_id"].as_str())
+                        .filter(|old| Some(*old) != trace)
+                    {
+                        rows.push(("opening_audio", old.into(), b"null".to_vec()));
+                    }
+                    if let Some(trace) = trace
+                        && let Some((tag, skip)) = rings::opening::clip(&ring.opening, trace)
+                    {
+                        rows.push((
+                            "opening_audio",
+                            trace.into(),
+                            json!({"agent_id":ring.agent_id,"tag":tag,"skip":skip})
+                                .to_string()
+                                .into_bytes(),
+                        ));
+                    }
+                }
+            }
+            // The bounded ring trail can evict a call whose opening token is
+            // still on a phone. Keep the opening for a later owner replay.
+            for dropped in books.rings.rings().iter().filter(|old| {
+                !old.opening.is_null() && !rings.rings().iter().any(|r| r.ring_id == old.ring_id)
+            }) {
+                if let Some(token) = dropped.opening["token"].as_str().filter(|s| !s.is_empty()) {
+                    rows.push((
+                        "opening_by_token",
+                        token.into(),
+                        dropped.ring_id.as_bytes().to_vec(),
+                    ));
+                    rows.push((
+                        "opening_by_call",
+                        dropped.call_id.clone(),
+                        dropped.ring_id.as_bytes().to_vec(),
+                    ));
+                    rows.push((
+                        "opening_history",
+                        dropped.ring_id.clone(),
+                        serde_json::to_vec(dropped).map_err(|e| Unavailable(e.to_string()))?,
+                    ));
+                }
+            }
+        }
+        for ring in rings.detach_openings() {
+            if archived.get(&ring.ring_id) != Some(&ring.opening) {
+                rows.push((
+                    "opening_history",
+                    ring.ring_id.clone(),
+                    serde_json::to_vec(&ring).map_err(|e| Unavailable(e.to_string()))?,
+                ));
+            }
+        }
+        app.fleet.keep_together(rows).await?;
+        books.calls = calls;
+        books.rings = rings;
+        if let Some(taking) = taking {
+            books.taking = Some(taking);
+        }
+        for (call_id, reason) in stops.into_inner() {
+            if let Some(running) = books.sessions.get(&call_id) {
+                running.stop(&reason);
+            }
+        }
+        for (session, turn, reason) in withdrawals {
+            if let Some(member) = directory.by_session(&session) {
+                let _ = member
+                    .agent
+                    .withdraw(clarp_kernel::turn::TurnId(turn), reason)
                     .await?;
             }
+        }
+        for event in of_calls.events {
+            app.hub.publish(event, now_ms);
+        }
+        for notice in of_calls.notices {
+            note(&directory, &notice.agent_id, &notice.id, notice.text).await;
         }
         for event in out.events {
             app.hub.publish(event, now_ms);
@@ -402,7 +591,7 @@ impl Desk {
         app: &App,
         ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
     ) -> Result<T, Unavailable> {
-        let (answer, pushes) = self.ask_rings(app, ask).await?;
+        let (answer, pushes) = self.ask_rings(app, None, ask).await?;
         self.push(app, pushes).await;
         Ok(answer)
     }
@@ -434,7 +623,7 @@ impl Desk {
             event_context: &said["event_context"],
             opening_mode: said.get("opening_mode"),
         };
-        let admitted = self.ask_rings(app, |rings, _, with, (out, _)| {
+        let admitted = self.ask_rings(app, None, |rings, _, with, (out, _)| {
             let now = with.at.now_ms;
             let admission = rings.admit(&asked, with.people(), &with.world, now, out)?;
             Ok(match admission {
@@ -442,14 +631,14 @@ impl Desk {
                 // A live ring's opening is its voice's own: it is placed at once.
                 rings::Admission::Place(admitted) if admitted.is_live() => {
                     let ring = rings.place(admitted, "", with.new_id, now, out);
-                    Placing::Placed(live::placed(rings, ring, &with.world))
+                    Placing::Placed(Box::new(live::placed(rings, ring, &with.world)))
                 }
                 rings::Admission::Place(admitted) => Placing::ToVoice(admitted),
             })
         });
         let (admitted, pushes) = admitted.await?;
         let (placed, pushes) = match admitted {
-            Ok(Placing::Placed(placed)) => (placed, pushes),
+            Ok(Placing::Placed(placed)) => (*placed, pushes),
             Ok(Placing::ToVoice(admitted)) => {
                 // What else the request did is told as ever (an older ring missed by now).
                 self.push(app, pushes).await;
@@ -466,7 +655,7 @@ impl Desk {
                     None => None,
                 };
                 let voiced = voiced.map_or_else(String::new, |name| format!("/audio/{name}"));
-                let placed = self.ask_rings(app, |rings, _, with, (out, _)| {
+                let placed = self.ask_rings(app, None, |rings, _, with, (out, _)| {
                     let now = with.at.now_ms;
                     let ring = rings.place(admitted, &voiced, with.new_id, now, out);
                     live::placed(rings, ring, &with.world)
@@ -714,7 +903,19 @@ impl Desk {
                 text,
             })
             .collect();
-        call.header(session, &said)
+        let opening = {
+            let held = self.books.lock().await;
+            held.as_ref()
+                .and_then(|b| {
+                    b.rings
+                        .rings()
+                        .iter()
+                        .find(|r| r.call_id == call.call_id && !r.opening.is_null())
+                })
+                .and_then(|r| r.opening["state"].as_str())
+                .map(str::to_owned)
+        };
+        call.header_with_opening(session, &said, opening.as_deref())
     }
 }
 
@@ -914,6 +1115,9 @@ async fn ring_look(
     let desk = app.calls.clone();
     // What a client is shown is what it may be told of: a live ring only a phone that can
     // hold one, a call the user started only its own phone.
+    if let Err(why) = desk.recover_openings(&app).await {
+        return ApiError::from(why).into_response();
+    }
     let looked = desk.rings(&app, |rings, _, with, (out, _)| {
         rings.look_as((&ring_id, &caller), &with.world, with.at.now_ms, out)
     });
@@ -1043,15 +1247,6 @@ async fn ring_voip_token(
     answered(left.await)
 }
 
-/// What of rings this Host does not have: a ring that listens first. Said in words, and
-/// nothing is done.
-async fn not_this_ring() -> ApiError {
-    ApiError::new(
-        StatusCode::NOT_IMPLEMENTED,
-        "This Host has no ring that listens first",
-    )
-}
-
 pub fn routes() -> Router<App> {
     // A route for each change there is: anything else under `/calls/` is no route, as on
     // the Python Host.
@@ -1062,6 +1257,7 @@ pub fn routes() -> Router<App> {
         .route("/calls", get(snapshot).post(start))
         .route("/calls/ring", get(ring_look).post(ring))
         .route("/calls/ring/answer", post(ring_answer))
+        .route("/calls/ring/opening", post(opening::claim))
         .route("/calls/ring/decline", post(ring_decline))
         .route("/calls/ring/cancel", post(ring_cancel))
         .route(
@@ -1069,10 +1265,7 @@ pub fn routes() -> Router<App> {
             get(ring_settings).post(ring_settings_change),
         )
         .route("/calls/ring/voip-token", post(ring_voip_token));
-    let router = live::routes(router).route(
-        "/calls/ring/{*rest}",
-        get(not_this_ring).post(not_this_ring),
-    );
+    let router = live::routes(router);
     changes.iter().fold(router, |router, action| {
         let (path, action) = (format!("/calls/{action}"), (*action).to_string());
         let change = move |app: State<App>, principal: Extension<Principal>, bytes: Bytes| {

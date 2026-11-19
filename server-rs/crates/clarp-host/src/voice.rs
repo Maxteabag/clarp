@@ -887,10 +887,46 @@ impl Mouth {
         }
     }
 
+    async fn opening_audio(&self, agent: &str, trace: Option<&str>) -> Option<Value> {
+        let raw = self
+            .fleet
+            .kept("opening_audio", trace?.to_owned())
+            .await
+            .ok()??;
+        let tag: Value = serde_json::from_slice(&raw).ok()?;
+        (tag["agent_id"] == agent).then_some(tag)
+    }
+
+    async fn tag_opening(&self, event: &mut Value) {
+        let Some(tag) = self
+            .opening_audio(
+                event["agent_id"].as_str().unwrap_or(""),
+                event["trace_id"].as_str(),
+            )
+            .await
+        else {
+            return;
+        };
+        if let Some(fields) = tag["tag"].as_object() {
+            for (k, v) in fields {
+                event[k] = v.clone();
+            }
+        }
+    }
+
     /// Says one line: into a clip the apps are told of before its first byte is there,
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
+        if self
+            .opening_audio(&record.agent_id, line.trace_id.as_deref())
+            .await
+            .is_some_and(|t| t["skip"] == true)
+        {
+            return self
+                .unsaid(member, &line, None, "listen-first opening fenced", false)
+                .await;
+        }
         let owners = self.owners();
         let has_key = |provider: &str| self.has_key(provider, &owners);
         let (by, unavailable) = match chosen(&owners, record, &has_key) {
@@ -1108,11 +1144,12 @@ impl Mouth {
                         continue;
                     };
                     let trace = held.trace_id.as_deref();
-                    let event = if across {
+                    let mut event = if across {
                         wire::audio_across(&member.record, held.clip, &held.name, trace)
                     } else {
                         wire::audio(&member.record, held.clip, &held.name, trace)
                     };
+                    self.tag_opening(&mut event).await;
                     let event_id = self.hub.publish(event, self.now_ms());
                     if this == Some(held.clip) {
                         told_this = Some(event_id);
@@ -1191,6 +1228,7 @@ impl Mouth {
         let Some(mut clip) = last else {
             return false;
         };
+        self.tag_opening(&mut clip).await;
         clip["replay"] = json!(true);
         self.hub.publish(clip, self.now_ms());
         true
@@ -1710,13 +1748,16 @@ async fn recoverable(
         .filter(|(_, line)| line.clip_id.is_some())
         .collect();
     let lines: Vec<&Line> = clips.iter().map(|(_, line)| *line).collect();
-    let events: Vec<Value> = spoken::offered_again(&lines, app.clock.now_ms())
+    let mut events: Vec<Value> = spoken::offered_again(&lines, app.clock.now_ms())
         .into_iter()
         .filter_map(|place| {
             let (record, line) = clips[place];
             wire::audio_of(record, line)
         })
         .collect();
+    for event in &mut events {
+        app.mouth.tag_opening(event).await;
+    }
     Json(json!({ "events": events }))
 }
 
@@ -1753,6 +1794,9 @@ async fn of_message(
                 .is_some_and(|name| app.mouth.audio.join(name).is_file());
         let event = kept.then(|| wire::audio_kept(&member.record, line));
         events.push(event.flatten().ok_or_else(unavailable)?);
+    }
+    for event in &mut events {
+        app.mouth.tag_opening(event).await;
     }
     Ok(Json(json!({ "events": events })))
 }

@@ -146,6 +146,7 @@ fn rings_go_as_the_python_hosts_go_step_by_step() {
             let world = World {
                 profiles: &Bare,
                 android: &[],
+                opening: None,
                 can_push_android: false,
                 device_ok: &anyone,
                 host_id: "host-1",

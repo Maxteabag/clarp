@@ -228,6 +228,9 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
             ..Live::default()
         };
         let ring = Ring {
+            opening_mode: String::new(),
+            generation: Value::Null,
+            opening: Value::Null,
             ring_id: head["ring_id"].as_str().unwrap().to_string(),
             session: "theo-97e5".to_string(),
             persona: "Theo".to_string(),
@@ -284,6 +287,7 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
             let world = World {
                 profiles: &NoProfiles,
                 android: &[],
+                opening: None,
                 can_push_android: false,
                 device_ok: &device_ok,
                 host_id,

@@ -26,6 +26,9 @@ pub trait KeyValue: Send {
     /// the value survives a crash of the process.
     fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError>;
 
+    /// Commit related replacements atomically across named tables.
+    fn put_together(&mut self, writes: &[(String, String, Vec<u8>)]) -> Result<(), StoreError>;
+
     /// Removes a key. Returns whether it was there.
     fn delete(&mut self, table: &str, key: &str) -> Result<bool, StoreError>;
 

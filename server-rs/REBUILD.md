@@ -1524,9 +1524,7 @@ is told to the apps (`agent-ring`), pushed to the owner's phones whether or not 
 incoming call breaks through Focus and has Answer and Decline; what became of it takes its place), and
 noted quietly in the agent's conversation. An agent rings as itself with its own tool (`clarp-admin call
 ring --reason .. --say .. [--wait]`, `ring-status`, `ring-cancel`, `rings on|off|status`); the next thing its
-user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). Not
-built with it, and refused in words that say how to ring instead: a ring that listens first
-(`docs/differences.md`).
+user says in the call reaches its tool with why it rang. The feature is advertised (`agent_rings`). The listen-first opening is described below.
 
 **A ring held as a live voice call** (18 Nov 2026; the owner uses it: most of the rings his Host keeps are
 of this kind, counted there and read only). A ring may ask that its
@@ -1581,6 +1579,18 @@ delegation is checked by one read of the director's intent. The contact's answer
 in bounded parts and is acknowledged after the voice transport accepts its first part.
 An opted-in transcript keeps text, receipts and pacing entries in the call's private directory.
 The receiver and sender flows are compared with `live-call-tools-vectors.json`.
+*A ring that listens first* (18 Nov 2026). The answering phone claims its opening with
+a token and renews its epoch using a rotating nonce. The public ring carries neither.
+The greeting is admitted to the calling agent. A silence or microphone claim can instead
+admit one initiative, tied to its ring, generation and trace. The Host checks the boot,
+instance, call, pairing and Stop generation again before starting the shim. A crashed Host
+can reconstruct an intended admission by its reserved id. The group call and its opening
+are committed together before the answer or event. Older phones receive the original
+spoken line. A clip for the opening carries its token, epoch and admission id, and the
+voice worker skips synthesis once its authority has been withdrawn. A ring can leave the public history
+while its call continues. Its answering phone can still send a greeting, and closing the
+call or revoking the pairing retires its audio. A shim that recorded a failure to spawn
+lets the same admission try again. Its proof applies to that attempt alone.
 The push by which such a ring reaches a
 locked phone as an incoming call came with the next landing ("A ring pushed as an incoming call" below);
 until a Host is given the word for it, a live ring reaches a phone whose app is open, and a call the user
