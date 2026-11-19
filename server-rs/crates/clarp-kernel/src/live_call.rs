@@ -206,7 +206,10 @@ pub fn event_time(text: &str) -> bool {
     }
     let mut rest = &bytes[19..];
     if let Some(after) = rest.strip_prefix(b".") {
-        let digits = after.iter().take_while(|byte| byte.is_ascii_digit()).count();
+        let digits = after
+            .iter()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
         if !(1..=9).contains(&digits) {
             return false;
         }
