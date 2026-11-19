@@ -478,7 +478,9 @@ class AutonomyJanitors:
                 if not janitor_builtins.is_current(run['run_id']):
                     janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Configuration changed'});return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
-                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
+                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation'],
+                         # What a retry needs (R105): the window it speaks of, and when that window resets.
+                         'window_key':quota_window_key(provider_id,account,window),'resets_at':window.get('resets_at')}
                 ownership=_automatic_hotseat_quota_snapshot(provider_id)
                 with settings_store.transaction():
                     c=db.conn()
@@ -828,17 +830,47 @@ class AutonomyJanitors:
             error=summary[:500] if activity=='failed' else '',activity=activity,summary=summary[:300])
 
     def deliver_notifications(self,owner):
-        rows=janitor_store.undelivered_quota_receipts()
-        for row in rows:
+        """Send the receipts written and not yet delivered. A quota notice that reached nobody
+        because the transport failed stays undelivered and is tried again at later looks (R105)."""
+        from .log import log
+        now=db.now_ms()
+        rows=[]
+        for row in janitor_store.undelivered_quota_receipts():
+            try:payload=json.loads(row['payload_json'])
+            except (TypeError,ValueError):payload=None
+            if not isinstance(payload,dict):
+                # A receipt that cannot be read is set aside once, logged, and the others delivered.
+                log('quotaReceiptUnreadable',f"receipt={str(row['receipt_id'])[:64]}")
+                janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'cancelled':'The receipt could not be read'}));continue
+            rows.append((row,payload))
+        newest=_newest_waiting_per_window(rows)
+        for row,payload in rows:
             if self.stop_event.is_set():return
-            payload=json.loads(row['payload_json'])
             if payload.get('agent_id')!=owner['agent_id']:continue
             if payload.get('owner_generation')!=owner['generation']:
                 janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'cancelled':'Janitor configuration changed'}));continue
             current=janitors.get(owner['session'])
             if not current or not current['enabled'] or current['generation']!=owner['generation']:continue
+            retry=payload.get('delivery_retry') if isinstance(payload.get('delivery_retry'),dict) else {}
+            attempts=int(retry.get('attempts') or 0)
+            key=payload.get('window_key')
+            if payload.get('reason')=='quota_threshold' and key and newest.get(key,row['receipt_id'])!=row['receipt_id']:
+                # A newer crossing of the same window replaces this one: the newest is sent.
+                janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'superseded':newest[key],'attempts':attempts}));continue
+            if attempts and _window_has_reset(payload,now):
+                # Telling someone about a window that is over is noise.
+                janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps({'expired':'The window has reset','attempts':attempts}));continue
+            if attempts and now<int(retry.get('at') or 0)+int(owner['options'].get('interval_seconds') or 0)*1000:continue
             if self._read_meter is not None: self._read_meter.work()
-            delivery=self.notify(payload)
+            delivery=self.notify({k:v for k,v in payload.items() if k!='delivery_retry'})
+            if payload.get('reason')=='quota_threshold' and transport_failed(delivery):
+                # Nobody got it because the transport failed: it stays undelivered, the attempt recorded.
+                payload['delivery_retry']={'attempts':attempts+1,'at':now,
+                    'last':{k:int(delivery.get(k) or 0) for k in ('sent','failed','disabled')}}
+                janitor_store.set_quota_receipt_payload(row['receipt_id'],json.dumps(payload))
+                log('quotaNoticeUndelivered',f"receipt={str(row['receipt_id'])[:64]} attempts={attempts+1} failed={int(delivery.get('failed') or 0)}")
+                continue
+            if attempts and isinstance(delivery,dict):delivery={**delivery,'attempts':attempts+1}
             janitor_store.set_quota_receipt_delivery(row['receipt_id'],json.dumps(delivery or {}))
 
     def request_recovery(self,provider,owner,run_id,receipt_id):
@@ -890,6 +922,32 @@ def quota_crossing(provider,account,window,used,owner,stamp):
     threshold=owner['options']['remaining_threshold'];cross=(remaining<=threshold and (prior is None or prior['remaining']>threshold)) or (remaining==0 and prior is not None and prior['remaining']>0)
     settings_store.set_text(key,json.dumps({'stamp':stamp,'remaining':remaining}))
     return {'remaining':remaining} if cross else None
+
+
+def transport_failed(delivery):
+    """A notice nobody got because the transport failed (R105): push on, not suppressed, no device
+    took it and at least one send failed. A device that took it (sent >= 1, even beside failures)
+    is delivered; push off, no deliverable device and a suppressed push were never meant to reach
+    anyone. Each as apns.send_user_notification reports it."""
+    if not isinstance(delivery,dict) or not delivery.get('enabled') or delivery.get('suppressed'):return False
+    try:return int(delivery.get('sent') or 0)==0 and int(delivery.get('failed') or 0)>=1
+    except (TypeError,ValueError):return False
+
+
+def _newest_waiting_per_window(rows):
+    """For each window with quota notices still waiting, the newest notice's id (by when it was
+    written, then its id)."""
+    newest={}
+    for row,payload in sorted(rows,key=lambda item:(item[0]['created_at'],item[0]['receipt_id'])):
+        if payload.get('reason')=='quota_threshold' and payload.get('window_key'):
+            newest[payload['window_key']]=row['receipt_id']
+    return newest
+
+
+def _window_has_reset(payload,now):
+    from .backend_usage_store import _iso_to_ms
+    reset=_iso_to_ms(payload.get('resets_at')) if isinstance(payload.get('resets_at'),str) else None
+    return reset is not None and now>=reset
 
 
 def validate_dispatch(session, request_id):
