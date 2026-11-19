@@ -1015,6 +1015,14 @@ impl Pool {
     }
 
     /// Whether a recovery is under way.
+    /// The first turn the pool knows that is still its agent's, in the order the agents came
+    /// to the pool: the turn a recovery the Quota keeper asks for begins with (the
+    /// coordinator's `candidates[0]` of `janitor_autonomy.runtime_recover`). Its agent and trace.
+    pub fn first_owned(&self) -> Option<(String, String)> {
+        let first = self.attempts.iter().find(|attempt| attempt.owned)?;
+        Some((first.agent.clone(), first.trace.clone()))
+    }
+
     pub fn recovering(&self) -> bool {
         self.recovering
     }

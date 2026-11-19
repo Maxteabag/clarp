@@ -208,6 +208,26 @@ impl Service {
         self.told(|pool, now| ((), pool.carried(true, since_ms, agents, now).1));
     }
 
+    /// Whether the owner has a selector for this tool: a recovery can be asked of the pool.
+    pub fn has_selector(&self) -> bool {
+        !self.command.is_empty()
+    }
+
+    /// A recovery the Quota keeper asks for: the first turn the pool knows that is still its
+    /// agent's is taken up as if it had failed on its account (the runtime's
+    /// `runtime_recover`), and what that wants done is done. `None`: no such turn; else
+    /// whether the pool took it.
+    pub fn recover(self: &Arc<Self>) -> Option<bool> {
+        let selector = self.has_selector();
+        self.told(|pool, now| match pool.first_owned() {
+            None => (None, Vec::new()),
+            Some((agent, trace)) => {
+                let (taken, effects) = pool.request(&agent, &trace, selector, false, now);
+                (Some(taken), effects)
+            }
+        })
+    }
+
     /// Whether a recovery is under way, and whose turns wait.
     pub fn waiting(&self) -> (bool, Vec<String>) {
         let pool = self.pool.lock().unwrap_or_else(PoisonError::into_inner);
