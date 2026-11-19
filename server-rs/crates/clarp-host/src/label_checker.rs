@@ -70,7 +70,7 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
         let mut jobs: Vec<_> = view
             .jobs
             .iter()
-            .filter(|j| j.status.is_active() && !view.provider_mirrors.contains_key(&j.id) && wire::mirrored_helper(j, &names).is_none())
+            .filter(|j| j.status.is_active() && !view.mirrored_provider(&j.id) && wire::mirrored_helper(j, &names).is_none())
             .collect();
         jobs.sort_by_key(|j| j.started_at_ms);
         let processes: Vec<_> = jobs
