@@ -27,6 +27,7 @@ from lib.runtime_release import (consume_account_recovery_carry,
 
 from test_graceful_release_drain import (  # noqa: F401 - autouse fixture
     _agent, _fresh_runtime_memory, _service)
+from short_sockets import socket_path as short_socket
 
 SESSION_ID = "11111111-2222-3333-4444-555555555555"
 
@@ -82,7 +83,7 @@ def _bound_agent(tmp_path, session="mike"):
 
 def _runtime(tmp_path, service, carry=True):
     runtime = RuntimeRPCServer(
-        tmp_path / "runtime.sock", dispatch_service=service, release_id="old",
+        short_socket("runtime.sock"), dispatch_service=service, release_id="old",
         account_recovery_carry=(tmp_path / "carry.json") if carry else None)
     runtime.shutdown = lambda: None
     return runtime

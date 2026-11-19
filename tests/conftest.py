@@ -700,3 +700,13 @@ def _seed_agents_via_db(rows: dict[str, dict]) -> None:
 @pytest.fixture
 def seed_agents():
     return _seed_agents_via_db
+
+
+@pytest.fixture(autouse=True)
+def _short_socket_directory():
+    """A test's short Unix-socket directory (tests/short_sockets.py) is removed after it. Only a
+    test that used the helper has one; a copy of this conftest in an inner session has no helper."""
+    yield
+    short_sockets = sys.modules.get("short_sockets")
+    if short_sockets is not None:
+        short_sockets.cleanup()

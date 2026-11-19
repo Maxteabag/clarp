@@ -33,6 +33,7 @@ from lib.context import ServerContext, StubSTT  # noqa: E402
 from lib.tts_engine import FakeTTSEngine  # noqa: E402
 
 import importlib.util as _ilu  # noqa: E402
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -287,7 +288,7 @@ def test_http_server_can_be_replaced_while_runtime_keeps_active_turn(
         def dispatch_queued(self, queue_id):
             return DispatchResult(session=queue_id, backend="claude")
 
-    runtime_socket = tmp_path / "runtime.sock"
+    runtime_socket = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(
         runtime_socket,
         dispatch_service=PersistentDispatch(),
@@ -380,7 +381,7 @@ def test_runtime_owned_turn_completes_after_http_server_is_gone(
         runtime_ctx, backend_registry=runtime_backends, home=tmp_path,
         uuid_factory=lambda: "runtime-conversation",
     )
-    runtime_socket = tmp_path / "turn-runtime.sock"
+    runtime_socket = short_socket("turn-runtime.sock")
     runtime = RuntimeRPCServer(
         runtime_socket, dispatch_service=runtime_dispatch)
     runtime_thread = threading.Thread(target=runtime.serve_forever, daemon=True)

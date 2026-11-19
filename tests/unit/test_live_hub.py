@@ -10,6 +10,7 @@ from lib import live_core
 
 from lib.live_hub import LiveHub
 from lib.live_items import LiveView
+from short_sockets import socket_path as short_socket
 
 
 class FakeClock:
@@ -222,7 +223,7 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
         assert getattr(live_hub, name) is getattr(live_core, name)
     fanout = LiveFanout()
     hub = LiveHub(sink=fanout.publish)
-    socket_path = tmp_path / "rt.sock"
+    socket_path = short_socket("rt.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=_Dispatch(),
                                status_provider=lambda: {})
     runtime.live_fanout = fanout
