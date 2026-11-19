@@ -171,3 +171,52 @@ def test_a_claude_started_in_a_codex_agents_shell_acts_for_nobody(tmp_path, monk
     _run(monkeypatch, tool_activity, session_id="child-of-codex-uuid")
     assert agents_db.latest_state(agent_id)["kind"] == AgentState.THINKING
     assert agents_db.live_backend_session(agent_id) == "codex-thread" and len(_foreign(events)) == 1
+
+
+# the record needs no switch (the reviewer's point): the hooks' own log file every Host keeps
+
+def _hook_log():
+    from lib.paths import RuntimePaths
+    path = RuntimePaths.from_home(pathlib.Path.home()).hook_log
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def test_a_foreign_hook_is_recorded_in_the_hook_log_without_diagnostics_capture(tmp_path, monkeypatch):
+    from lib import diagnostics_settings
+    monkeypatch.setattr(diagnostics_settings, "allows_event", lambda **kwargs: False)   # capture off
+    agent_id = _agent(tmp_path)
+    _dispatched_turn(agent_id)
+    _run(monkeypatch, tool_activity, session_id="child-uuid-1234")
+    lines = [line for line in _hook_log().splitlines() if "hookForeignSession" in line]
+    assert len(lines) == 1
+    assert f"agent={agent_id[:8]}" in lines[0] and "session_id=child-uu" in lines[0] and "hook=" in lines[0]
+    assert agent_id not in lines[0] and "child-uuid-1234" not in lines[0] and "ls" not in lines[0].split("hook=")[1]
+
+
+def test_a_payload_with_no_session_id_resolves_through_the_variable_as_on_main(tmp_path, monkeypatch, events):
+    """There is no id to be foreign: the inherited variable names the agent, as on main."""
+    agent_id = _agent(tmp_path)
+    _dispatched_turn(agent_id)
+    _run(monkeypatch, tool_activity, session_id="")
+    assert agents_db.latest_state(agent_id)["kind"] == AgentState.TOOL
+    assert _foreign(events) == [] and "hookForeignSession" not in _hook_log()
+
+
+def test_a_record_that_cannot_be_written_is_logged_and_the_hook_still_acts_for_nobody(tmp_path, monkeypatch):
+    from lib import log as log_module
+    from lib import paths
+    failures = []
+    monkeypatch.setattr(log_module, "log_exception", lambda event, exc, **kw: failures.append(event))
+    unwritable = tmp_path / "a-directory"
+    unwritable.mkdir()
+    real = paths.RuntimePaths.from_home
+
+    def from_home(home):
+        import dataclasses
+        return dataclasses.replace(real(home), hook_log=unwritable)
+    monkeypatch.setattr(paths.RuntimePaths, "from_home", staticmethod(from_home))
+    agent_id = _agent(tmp_path)
+    _dispatched_turn(agent_id)
+    before = _snapshot(agent_id)
+    _run(monkeypatch, tool_activity, session_id="child-uuid-1234")    # asserts the hook returned 0
+    assert failures == ["hookForeignReportFail"] and _snapshot(agent_id) == before
