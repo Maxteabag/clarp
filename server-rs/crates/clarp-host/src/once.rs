@@ -353,15 +353,7 @@ async fn run_with(
     keeps: Option<&[&str]>,
     (backend, prompt): (&str, &str),
 ) -> Result<String, Unanswered> {
-    let mut command = tokio::process::Command::new(&launch.program);
-    if let Some(keeps) = keeps {
-        command.env_clear();
-        for name in keeps {
-            if let Some(value) = std::env::var_os(name) {
-                command.env(name, value);
-            }
-        }
-    }
+    let mut command = crate::child::one_off(&launch.program, keeps);
     command
         .process_group(0)
         .args(&launch.args)
@@ -370,18 +362,6 @@ async fn run_with(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    // The Host's own secrets stay with the Host, as for a turn.
-    for name in crate::OWN_SECRETS {
-        command.env_remove(name);
-    }
-    for (name, value) in crate::child_environment() {
-        match value {
-            Some(value) if keeps.is_none_or(|names| names.contains(name)) => {
-                command.env(name, value)
-            }
-            _ => command.env_remove(name),
-        };
-    }
     for (name, value) in &launch.env {
         command.env(name, value);
     }

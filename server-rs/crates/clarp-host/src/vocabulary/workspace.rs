@@ -2,10 +2,10 @@
 //! contributes at most 3000 entries; directory links are never descended.
 use clarp_kernel::vocabulary::sources::{SKIP, Sources, identifiers};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 fn git(cwd: &Path, args: &[&str]) -> String {
-    let output = Command::new("timeout")
+    let output = crate::child::command("timeout")
         .args(["3s", "git", "--no-pager"])
         .args(args)
         .current_dir(cwd)

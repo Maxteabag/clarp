@@ -151,16 +151,13 @@ impl Desk {
     ) -> Answer {
         // A Host that was told no tool has no program to start: that fails as one that is
         // not there does.
-        let mut tool = tokio::process::Command::new(&self.tool);
+        let mut tool = crate::child::asynchronous(&self.tool);
         tool.args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .process_group(0)
             .kill_on_drop(true);
-        for name in crate::OWN_SECRETS {
-            tool.env_remove(name);
-        }
         if let Some(lock) = lock {
             // The child retains the machine-wide lock even if its Host exits during the switch.
             tool.stdin(lock.try_clone().map_err(|_| Failed::DidNotRun)?);
@@ -203,7 +200,7 @@ impl Desk {
             Err(_) => {
                 if let Some(group) = group {
                     let group = format!("-{group}");
-                    let mut kill = tokio::process::Command::new("kill");
+                    let mut kill = crate::child::asynchronous("kill");
                     let _ = kill.args(["-KILL", "--", &group]).status().await;
                 }
                 let _ = running.kill().await;

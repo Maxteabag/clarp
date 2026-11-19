@@ -187,14 +187,11 @@ impl Drop for Group {
 }
 
 fn child(tool: &str) -> Option<Command> {
-    let mut cmd = Command::new(clarp_backend::program(tool)?);
+    let mut cmd = crate::child::asynchronous(clarp_backend::program(tool)?);
     cmd.process_group(0)
         .kill_on_drop(true)
         .stderr(Stdio::null())
         .stdout(Stdio::piped());
-    for key in crate::OWN_SECRETS {
-        cmd.env_remove(key);
-    }
     Some(cmd)
 }
 

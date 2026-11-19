@@ -131,17 +131,13 @@ fn logins(home: &Path) -> [u8; 32] {
 /// Starts a tool for one answer about itself: how it ended and what it printed. What it
 /// writes aside is not read. `None`: it could not be started, or did not answer in time.
 async fn asked(program: &Path, args: &[String], within: Duration) -> Option<(i32, String)> {
-    let mut command = tokio::process::Command::new(program);
+    let mut command = crate::child::asynchronous(program);
     command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    // The Host's own secrets stay with the Host, as for a turn.
-    for name in crate::OWN_SECRETS {
-        command.env_remove(name);
-    }
     let child = command.spawn().ok()?;
     let done = tokio::time::timeout(within, child.wait_with_output()).await;
     let done = done.ok()?.ok()?;

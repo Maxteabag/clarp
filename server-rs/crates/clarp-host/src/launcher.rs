@@ -76,9 +76,9 @@ impl Launcher {
     /// The command that starts a shim for this order.
     pub fn command(&self, order: &ShimOrder) -> Command {
         let mut command = match self {
-            Self::Direct { shim } => Command::new(shim),
+            Self::Direct { shim } => crate::child::command(shim),
             Self::SystemdScope { shim } => {
-                let mut command = Command::new("systemd-run");
+                let mut command = crate::child::command("systemd-run");
                 // The unit's name is new every time: a second shim for a turn must be able to
                 // start, find the turn taken and leave, which is how a turn starts only once.
                 let unit = format!("clarp-turn-{}-{}", order.turn.0, ids::hex(4));
@@ -128,16 +128,7 @@ impl Launcher {
             .arg("--")
             .arg(program)
             .args(&order.args);
-        // The Host's own secrets stay with the Host. A turn is given what its tools need.
-        for name in crate::OWN_SECRETS {
-            command.env_remove(name);
-        }
-        for (name, value) in crate::child_environment() {
-            match value {
-                Some(value) => command.env(name, value),
-                None => command.env_remove(name),
-            };
-        }
+
         for (name, value) in &order.env {
             command.env(name, value);
         }
