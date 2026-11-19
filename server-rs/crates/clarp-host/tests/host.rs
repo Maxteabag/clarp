@@ -7494,6 +7494,9 @@ fn a_limited_device_is_refused_as_the_python_host_refuses_it_and_let_through_whe
     for path in ["/dirs", "/past-sessions", "/backend-auth"] {
         assert_ne!(ask(&full, "GET", path, b""), refused, "{path}");
     }
+    // A head is asked as a read: refused where a read is, let through where a read is.
+    assert_eq!(ask(&limited, "HEAD", "/paired-devices", b"").0, 403);
+    assert_ne!(ask(&limited, "HEAD", "/log?session=echo", b"").0, 403);
     // Refused by the route itself, in the same words: a report's page, the push rows.
     assert_eq!(ask(&limited, "GET", "/artifacts/none/html", b""), refused);
     assert_eq!(ask(&limited, "GET", "/devices/push-tokens", b""), refused);
@@ -18796,6 +18799,102 @@ fn an_agent_that_moves_stays_who_it_was() {
 }
 
 #[test]
+fn the_owner_turns_the_desk_of_the_seats_off_and_its_doors_are_no_routes() {
+    let place = Place::new("desk-off");
+    let owner = place.root.join("owner.toml");
+    std::fs::write(&owner, "[tts]\nprovider = \"none\"\n").unwrap();
+    // A stand-in for the owner's tool: it writes down what it is asked and answers nothing.
+    let seat = place.root.join("seats-stand-in");
+    let asked = place.root.join("seats-asked");
+    program(
+        &seat,
+        &format!("#!/bin/sh\necho \"$@\" >> {}\nexit 2\n", asked.display()),
+    );
+    let host = place.start_with(
+        "",
+        &[
+            "--speech-keys",
+            owner.to_str().unwrap(),
+            "--seats-tool",
+            seat.to_str().unwrap(),
+        ],
+    );
+    let listed = |host: &Host| {
+        host.get("/server-info")["contract"]["features"]
+            .get("hotseat_desk")
+            .is_some()
+    };
+    let door = |method: &str, path: &str, body: &[u8]| {
+        let got = fetch(
+            &host,
+            "",
+            method,
+            path,
+            &[("Content-Type", "application/json")],
+            body,
+        );
+        (got.status, got.text())
+    };
+    // On, as nobody turned it off: an empty body is an empty asking, and a list no asking.
+    assert!(listed(&host));
+    assert_eq!(door("GET", "/hotseat/desk", b"").0, 200);
+    let (status, said) = door("POST", "/hotseat/switch", b"");
+    assert!(
+        status != 400 || !said.contains("bad json"),
+        "{status} {said}"
+    );
+    assert_eq!(
+        door("POST", "/hotseat/switch", b"[1]"),
+        (400, r#"{"error":"bad json"}"#.to_string())
+    );
+    assert_eq!(
+        door("POST", "/hotseat/resume", b"\"text\""),
+        (400, r#"{"error":"bad json"}"#.to_string())
+    );
+    assert_eq!(
+        door("POST", "/hotseat/renew", b"{}"),
+        (404, "not found".to_string())
+    );
+    assert_eq!(
+        door("GET", "/hotseat/renew", b""),
+        (404, "not found".to_string())
+    );
+    // Off in his file: the desk's doors are the plain 404 of what is not there, before a body
+    // is read, and the apps are not told of it. Only a `false` turns it off.
+    for (kept_on, written) in [
+        (true, "true"),
+        (true, "\"false\""),
+        (true, "0"),
+        (false, "false"),
+    ] {
+        std::fs::write(&owner, format!("[hotseat]\ndesk = {written}\n")).unwrap();
+        assert_eq!(listed(&host), kept_on, "{written}");
+        for (method, path, body) in [
+            ("GET", "/hotseat/desk", &b""[..]),
+            ("POST", "/hotseat/switch", b"[1]"),
+            ("POST", "/hotseat/resume", b"[1]"),
+        ] {
+            let (status, said) = door(method, path, body);
+            assert_eq!(
+                (status, said == "not found"),
+                (
+                    if kept_on {
+                        if method == "GET" { 200 } else { 400 }
+                    } else {
+                        404
+                    },
+                    !kept_on
+                ),
+                "{written} {path}"
+            );
+        }
+    }
+    // Nothing of the owner's tool was asked to change a seat.
+    let told = std::fs::read_to_string(&asked).unwrap_or_default();
+    assert!(!told.contains("switch"), "{told}");
+}
+
+#[test]
 fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refused_in_words() {
     let place = Place::new("screens");
     let host = place.start();
@@ -18897,15 +18996,9 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         "invalid_provider"
     );
     assert_eq!(switch(json!("not an asking")).1["error"], "bad json");
-    // Nothing else is done to the seats.
-    let (status, said) = host.ask("POST", "/hotseat/renew", Some(&json!({})));
-    assert_eq!(
-        (status, said["error"].as_str()),
-        (
-            501,
-            Some("Changing the account seats is not built on this Host yet")
-        )
-    );
+    // Nothing else is done to the seats: any other action is no route, as there.
+    let renew = fetch(&host, &host.token, "POST", "/hotseat/renew", &[], b"{}");
+    assert_eq!((renew.status, renew.text().as_str()), (404, "not found"));
     // Work that stopped is continued from the desk on a Host that lists some: this one
     // lists none.
     let asked = json!({ "id": echo });

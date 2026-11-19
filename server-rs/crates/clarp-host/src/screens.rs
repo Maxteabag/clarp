@@ -154,10 +154,32 @@ async fn hotseat_status(State(app): State<App>) -> Json<Value> {
 
 /// `GET /hotseat/desk`: the desk of the account seats as it is kept; with `refresh=1` (or
 /// `true`, `yes`), after a new reading of the owner's tool where one is allowed.
-async fn hotseat_desk(State(app): State<App>, Query(asked): Asked) -> Json<Value> {
+async fn hotseat_desk(
+    State(app): State<App>,
+    Query(asked): Asked,
+) -> Result<Json<Value>, ApiError> {
+    if crate::seats::turned_off(&app) {
+        return Err(ApiError::plain(StatusCode::NOT_FOUND, "not found"));
+    }
     let refresh = asked.get("refresh").map(|said| said.to_lowercase());
     let refresh = matches!(refresh.as_deref(), Some("1" | "true" | "yes"));
-    Json(crate::seats::asked(&app, refresh).await)
+    Ok(Json(crate::seats::asked(&app, refresh).await))
+}
+
+/// The gate of a door of the desk that changes something: the desk turned off, then a body
+/// that is no JSON object, as the Python Host asks them (`clarp_kernel::desk::gate`). This
+/// Host's desk is always there.
+fn desk_gate(app: &App, body: &[u8]) -> Result<Value, ApiError> {
+    use clarp_kernel::desk::{self, Gate};
+    match desk::gate(!crate::seats::turned_off(app), true, Some(body)) {
+        Gate::Asked(asked) => Ok(asked),
+        Gate::Off => Err(ApiError::plain(StatusCode::NOT_FOUND, "not found")),
+        Gate::Unavailable => Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            desk::UNAVAILABLE,
+        )),
+        Gate::NoObject => Err(bad(desk::NO_OBJECT)),
+    }
 }
 
 /// `POST /hotseat/resume`: work that stopped goes on, or a held queue is let go, or the
@@ -167,10 +189,10 @@ async fn hotseat_resume(
     body: axum::body::Bytes,
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
-    let asked: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    if !asked.is_object() {
-        return bad("bad json").into_response();
-    }
+    let asked = match desk_gate(&app, &body) {
+        Ok(asked) => asked,
+        Err(refused) => return refused.into_response(),
+    };
     let (status, said) = crate::seats::resume(&app, &asked).await;
     let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (status, Json(said)).into_response()
@@ -184,20 +206,16 @@ async fn hotseat_switch(
     body: axum::body::Bytes,
 ) -> axum::response::Response {
     use axum::response::IntoResponse as _;
-    let asked: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-    if !asked.is_object() {
-        return bad("bad json").into_response();
-    }
+    let asked = match desk_gate(&app, &body) {
+        Ok(asked) => asked,
+        Err(refused) => return refused.into_response(),
+    };
     let (status, said) = crate::seats::switch(&app, &asked).await;
     (
         StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
         Json(said),
     )
         .into_response()
-}
-
-async fn no_hotseat() -> ApiError {
-    not_built("Changing the account seats is")
 }
 
 async fn podcasts() -> Json<Value> {
@@ -365,7 +383,6 @@ pub fn routes() -> Router<App> {
         .route("/hotseat/desk", get(hotseat_desk))
         .route("/hotseat/resume", post(hotseat_resume))
         .route("/hotseat/switch", post(hotseat_switch))
-        .route("/hotseat/{action}", post(no_hotseat))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))
         .route("/oracle/calls/status", get(oracle_calls))

@@ -69,11 +69,10 @@ const SEATS: &str = "hotseat_desk";
 /// The features this Host has now: all of [`FEATURES`], without what it cannot do as it is
 /// set up.
 fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
-    let actions =
-        app.config.accounts == clarp_kernel::recovery::Accounts::Select && app.seats.told();
+    let seats = app.seats.told() && !crate::seats::turned_off(app);
+    let actions = app.config.accounts == clarp_kernel::recovery::Accounts::Select && seats;
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
-    let seats = app.seats.told();
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)

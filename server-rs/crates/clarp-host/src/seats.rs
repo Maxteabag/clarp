@@ -328,6 +328,22 @@ fn stopped(status: &clarp_actor::Status) -> Option<(Cause, i64)> {
     refused.then_some((Cause::UsageLimit, last.ended_at_ms))
 }
 
+/// Whether the owner turned the desk off in his file (`[hotseat] desk = false`): its doors
+/// are then no routes, and the apps are not told of it. Read at every asking.
+pub fn turned_off(app: &App) -> bool {
+    let file = crate::owner::OwnerFile::new(app.config.speech_keys.clone()).read();
+    let desk = file
+        .as_ref()
+        .and_then(|file| file.get("hotseat"))
+        .and_then(|hotseat| hotseat.as_table())
+        .and_then(|hotseat| hotseat.get("desk"))
+        .map(|desk| match desk {
+            toml::Value::Boolean(on) => Value::Bool(*on),
+            _ => Value::Null,
+        });
+    clarp_kernel::desk::turned_off(desk.as_ref())
+}
+
 /// A text of an asking's body, as the Python Host takes one: nothing where there is none.
 fn said(asked: &Value, key: &str) -> String {
     match &asked[key] {
