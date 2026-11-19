@@ -2666,6 +2666,8 @@ async fn background_job(
     );
     let log = if limited {
         joblog::forbidden()
+    } else if job.provider_owned(){
+        joblog::provider_output(&job.metadata)
     } else {
         let roots = joblog::roots(&job.worker_cwd, owner.map_or("", |r| &r.cwd));
         joblog::tail(&job.log_path, &roots, joblog::TAIL_BYTES)
@@ -2732,7 +2734,20 @@ async fn cancel_background_job(
         let refused = json!({ "ok": false, "error": "invalid expected_generation" });
         return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
     };
-    let member = job_and_owner(&app, &job_id).await?.map(|(m, _)| m);
+    let owned = job_and_owner(&app, &job_id).await?;
+    if let Some((member, current)) = &owned {
+    if current.provider_owned(){
+        let job=wire::job(&member.record,&current,app.clock.now_ms());
+        let (status,mut receipt)=clarp_kernel::provider_tasks::cancel_refusal(&job);
+        if let Some(expected)=expected.filter(|generation|*generation!=current.generation){
+            receipt["error"]=json!("generation_mismatch");
+            receipt["expected_generation"]=json!(expected);
+            receipt["current_generation"]=json!(current.generation);
+        }
+        return Ok((StatusCode::from_u16(status).unwrap_or(StatusCode::CONFLICT),Json(receipt)).into_response());
+    }
+    }
+    let member = owned.map(|(m, _)| m);
     let command = JobCommand::Cancel {
         id: job_id.clone(),
         expected_generation: expected,

@@ -37831,12 +37831,21 @@ fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them
     let release = place.root.join("release");
     let init = json!({"type":"system","subtype":"init","session_id":sid});
     let done = json!({"type":"result","subtype":"success","session_id":sid,"result":"Done."});
+    // The detached fixture acknowledges challenges even after its turn and
+    // its Host end. A removed test place also releases the fixture.
+    let detached = place.root.join("detached");
+    program(&detached, r#"#!/bin/sh
+cd "$1" || exit 1
+while [ -d "$1" ] && [ ! -f detached-end ]; do
+    if [ -f challenge ]; then mv challenge answer; fi
+    sleep 0.05
+done
+"#);
     program(
         &fake,
         &format!(
-            "#!/bin/sh\nread -r request\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
-            place.root.join("started").display(),
-            release.display()
+            "#!/bin/sh\nread -r request\nsetsid '{}' '{}' </dev/null >/dev/null 2>&1 &\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ -d '{}' ] && [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
+            detached.display(), place.root.display(), place.root.join("started").display(),place.root.display(),release.display()
         ),
     );
     let env = [
@@ -37894,6 +37903,20 @@ fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them
     let detail = host.get(&path);
     assert_eq!(detail["job"]["revision"], shown["revision"]);
     assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
+    // A stale generation and an unsupported cancellation are separate
+    // refusals and leave the job and its timeline at the same revision.
+    let (status,stale)=host.ask("DELETE",&format!("{path}?expected_generation=2"),None);
+    assert_eq!(status,409);
+    assert_eq!(stale["error"],"generation_mismatch");
+    assert_eq!(stale["expected_generation"],2);
+    assert_eq!(stale["current_generation"],1);
+    let (status,refusal)=host.ask("DELETE",&path,None);
+    assert_eq!(status,409);
+    assert_eq!(refusal["error"],"provider_task_cancel_unsupported");
+    assert_eq!(refusal["changed"],false);
+    assert_eq!(refusal["job_handle"],detail["handle"]);
+    assert_eq!(refusal["job"]["revision"],shown["revision"]);
+    assert_eq!(host.get(&path)["timeline"],detail["timeline"]);
     host.kill();
     std::fs::write(&release, "end").unwrap();
     let host = place.start_in("", &flags, &env);
@@ -37924,6 +37947,63 @@ fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them
     let restored = host.get(&path);
     assert_eq!(restored["timeline"], settled["timeline"]);
     assert_eq!(restored["job"]["revision"], settled["job"]["revision"]);
+    let challenge = |word:&str| {
+        let sent=place.root.join("challenge");
+        std::fs::write(&sent,word).unwrap();
+        wait_for("the detached child answers a new challenge",||std::fs::read_to_string(place.root.join("answer")).is_ok_and(|v|v==word));
+    };
+    challenge("after the turn");
+    host.kill();
+    let host=place.start_in("",&flags,&env);
+    challenge("after another Host restart");
+    std::fs::write(place.root.join("detached-end"),"").unwrap();
+
+    // Exercise the checked-in launcher against this isolated Host's real
+    // tools. The test controls when the harmless command may finish.
+    let keeper=host.new_agent("Launcher");
+    host.send(&keeper,r#"{"session":"script-fixture"}"#,"bind-script");
+    wait_for("the launcher agent to be bound",||host.state(&keeper)=="done");
+    let commitment=json!({"outcome":"Receive the command result","criteria":["The fixture runs"],"limits":"Fixture only","enroll":true}).to_string();
+    let plan=goal(&host,&cwd,&["create",&keeper,"work","Read the result","[]",&commitment]);
+    let plan_id=plan["plan_id"].as_str().unwrap();
+    let bin=place.root.join("commands");
+    std::fs::create_dir(&bin).unwrap();
+    for name in ["clarp-agent-bg","clarp-goal"] {
+        program(&bin.join(name),&format!("#!/bin/sh\nexec '{}' tool {name} \"$@\"\n",env!("CARGO_BIN_EXE_clarp-host")));
+    }
+    // No user service manager is needed for this local launch.
+    program(&bin.join("systemctl"),"#!/bin/sh\nexit 1\n");
+    let launcher=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../skills/clarp-background-jobs/scripts/run_detached_job.sh");
+    let run=|id:&str,key:&str|{
+        Command::new(&launcher)
+            .args(["--goal",id,&keeper,key,"fixture","Fixture command"])
+            .arg(cwd.join(format!("{key}.log"))).args(["--","sh","-c",
+                "printf 'started' > \"$1\"; while [ -d \"$3\" ] && [ ! -f \"$2\" ]; do sleep 0.05; done; printf 'done\\n'","fixture"])
+            .arg(cwd.join(format!("{key}.started"))).arg(cwd.join("allow-end")).arg(&cwd)
+            .env_clear().env("PATH",format!("{}:/usr/bin:/bin",bin.display()))
+            .env("HOME",&place.root).env("CLARP_HOST_ADDR",&host.address)
+            .env("CLARP_HOST_TOKEN",&host.token).current_dir(&cwd).ended()
+    };
+    let denied=run("nonexistent","unstarted");
+    assert_eq!(denied.status.code(),Some(4));
+    assert!(!cwd.join("unstarted.started").exists());
+    assert_eq!(host.ask("GET","/background-jobs/unstarted",None).0,404);
+    let started=run(plan_id,"held-command");
+    assert_eq!(started.status.code(),Some(0),"{}",String::from_utf8_lossy(&started.stderr));
+    let handle=String::from_utf8(started.stdout).unwrap();
+    assert_eq!(handle.trim(),"bg1:1:held-command");
+    let registered=host.get("/background-jobs/held-command");
+    assert_eq!(registered["job"]["status"],"running");
+    assert!(registered["job"]["worker_pid"].as_u64().is_some_and(|pid|pid>0));
+    let waiting=goal(&host,&cwd,&["get",plan_id]);
+    assert_eq!(waiting["goal"]["continuation"]["job_handle"],handle.trim());
+    assert_eq!(waiting["goal"]["continuation"]["state"],"waiting");
+    std::fs::write(cwd.join("allow-end"),"").unwrap();
+    wait_for("the goal wakes its agent on the command result",||host.conversation(&keeper).iter().any(|(role,text)|role=="user" && text.starts_with("Continue your durable outcome commitment.")));
+    let settled=goal(&host,&cwd,&["get",plan_id]);
+    assert_eq!(settled["goal"]["continuation"]["dependency_result"]["outcome"],"succeeded");
+    assert_eq!(std::fs::read_to_string(cwd.join("held-command.log.exit")).unwrap().trim(),"0");
+
 }
 
 #[test]
