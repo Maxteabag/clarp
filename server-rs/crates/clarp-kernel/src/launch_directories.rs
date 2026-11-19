@@ -34,15 +34,28 @@ pub fn launched(ledger: &Ledger, path: &str, now: i64) -> Option<Usage> {
 fn limit_value(text: &str) -> Option<i128> {
     use std::sync::LazyLock;
     #[allow(clippy::expect_used)]
-    static ZEROES: LazyLock<Vec<u32>> = LazyLock::new(|| serde_json::from_str(include_str!("launch-decimal-zeroes.json")).expect("Unicode decimal blocks"));
-    let digits:std::borrow::Cow<'_,str>=if text.is_ascii(){text.into()}else{
-        text.chars().map(|c|{
-            let n=u32::from(c);
-            let offset=ZEROES.partition_point(|&z|z<=n).checked_sub(1).map(|i|n-ZEROES[i]);
-            offset.and_then(|d|char::from_digit(d,10)).unwrap_or(c)
-        }).collect::<String>().into()
+    static ZEROES: LazyLock<Vec<u32>> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("launch-decimal-zeroes.json"))
+            .expect("Unicode decimal blocks")
+    });
+    let digits: std::borrow::Cow<'_, str> = if text.is_ascii() {
+        text.into()
+    } else {
+        text.chars()
+            .map(|c| {
+                let n = u32::from(c);
+                let offset = ZEROES
+                    .partition_point(|&z| z <= n)
+                    .checked_sub(1)
+                    .map(|i| n - ZEROES[i]);
+                offset.and_then(|d| char::from_digit(d, 10)).unwrap_or(c)
+            })
+            .collect::<String>()
+            .into()
     };
-    if digits.bytes().filter(u8::is_ascii_digit).count()>4300 {return None;}
+    if digits.bytes().filter(u8::is_ascii_digit).count() > 4300 {
+        return None;
+    }
     python::int(&digits)
 }
 

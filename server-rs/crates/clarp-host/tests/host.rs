@@ -43242,8 +43242,11 @@ print(home/"Project one")
     assert_eq!(refused.0, 403);
     assert_eq!(host.ask_as(&limited, "GET", lookup, None), refused);
     assert_eq!(host.ask_as(&limited, "POST", fav, Some(&json!({}))).0, 403);
-    let refusal=fetch(&host,&full,"POST",fav,&[],b"{}");
-    assert_eq!((refusal.status,refusal.text()),(404,"not found".to_owned()));
+    let refusal = fetch(&host, &full, "POST", fav, &[], b"{}");
+    assert_eq!(
+        (refusal.status, refusal.text()),
+        (404, "not found".to_owned())
+    );
     assert_eq!(host.get(fav), json!({"paths":[]}));
     assert!(!home.join("requests").exists());
     let make = |name: &str, cwd: &PathBuf| {
@@ -43343,24 +43346,50 @@ print(home/"Project one")
         json!([])
     );
     assert_eq!(host.get(fav), favorite);
-    let private=home.join("private-work");
+    let private = home.join("private-work");
     std::fs::create_dir(&private).unwrap();
-    let janitor=json!({"name":"Workspace Check","backend":"codex","cwd":private,
+    let janitor = json!({"name":"Workspace Check","backend":"codex","cwd":private,
         "request_id":"test-janitor","template_id":"scheduled-prompt","options":{"instructions":"Check."},
         "attachments":[{"attachment_id":"check","trigger_id":"schedule","config":{"cron":"15 3 * * *","timezone":"UTC"}}]});
-    let once=host.post("/janitors",janitor.clone());
-    let replay=host.post("/janitors",janitor);
-    assert_eq!(once["janitor"]["agent_id"],replay["janitor"]["agent_id"]);
-    let prefs=host.get(fav);
-    let count=|v:&Value|v["paths"].as_array().unwrap().iter().find(|u|u["path"]==json!(private)).unwrap()["use_count"].clone();
-    assert_eq!(count(&prefs),1);
-    assert!(!host.get(lookup)["matches"].as_array().unwrap().iter().any(|m|m["path"]==json!(private)));
-    host.post("/agents",json!({"name":"Shared Workspace","backend":"scripted","cwd":private}));
-    assert_eq!(count(&host.get(fav)),2);
-    assert!(host.get(lookup)["matches"].as_array().unwrap().iter().any(|m|m["path"]==json!(private)));
-    let before=host.get(fav);
-    let refused=host.ask("POST","/agents",Some(&json!({"name":"First","backend":"scripted","cwd":private})));
-    assert!(refused.0>=400);
-    assert_eq!(host.get(fav),before);
-
+    let once = host.post("/janitors", janitor.clone());
+    let replay = host.post("/janitors", janitor);
+    assert_eq!(once["janitor"]["agent_id"], replay["janitor"]["agent_id"]);
+    let prefs = host.get(fav);
+    let count = |v: &Value| {
+        v["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["path"] == json!(private))
+            .unwrap()["use_count"]
+            .clone()
+    };
+    assert_eq!(count(&prefs), 1);
+    assert!(
+        !host.get(lookup)["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["path"] == json!(private))
+    );
+    host.post(
+        "/agents",
+        json!({"name":"Shared Workspace","backend":"scripted","cwd":private}),
+    );
+    assert_eq!(count(&host.get(fav)), 2);
+    assert!(
+        host.get(lookup)["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["path"] == json!(private))
+    );
+    let before = host.get(fav);
+    let refused = host.ask(
+        "POST",
+        "/agents",
+        Some(&json!({"name":"First","backend":"scripted","cwd":private})),
+    );
+    assert!(refused.0 >= 400);
+    assert_eq!(host.get(fav), before);
 }
