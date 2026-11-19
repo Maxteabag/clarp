@@ -862,9 +862,11 @@ pub fn user_notification(
         client: asked.client,
     };
     // A helper reports to the agent that made it: what it says is marked unread and pages
-    // nobody, as if it were muted. No setting treats automation specially on this Host yet.
+    // nobody, as if it were muted. A quiet agent (a janitor) tells nobody, whatever began its
+    // turn. No setting treats automation specially on this Host yet.
     let agent = notify::Capabilities {
         muted: record.muted || record.is_helper(),
+        quiet: record.is_quiet(),
         ..notify::Capabilities::default()
     };
     let notify::Decision::Notify {
@@ -1533,8 +1535,8 @@ pub fn summary(
         "heartbeat_enabled": record.heartbeat_enabled,
         "dreaming_enabled": false,
         "muted": record.muted,
-        // A janitor is never unread and never counted among the agents at work.
-        "quiet": record.is_janitor,
+        // A quiet agent (a janitor) is never unread and never counted among the agents at work.
+        "quiet": record.is_quiet(),
         "archived_at": record.archived_at_ms,
         "role": record.role(),
         "is_janitor": record.is_janitor,
@@ -2603,6 +2605,20 @@ mod tests {
         assert_eq!(
             (&told["origin"], &told["push"]),
             (&json!("automation"), &json!(true))
+        );
+        // A quiet agent (a janitor) tells nobody of a turn, whatever began it: not of the user's
+        // own message, not of what the Host brought it.
+        let janitor = AgentRecord {
+            is_janitor: true,
+            ..record()
+        };
+        assert_eq!(
+            user_notification(&janitor, "pn-abc", &from(""), &reply, 4_000),
+            None
+        );
+        assert_eq!(
+            user_notification(&janitor, "pn-abc", &from(""), &by_itself, 4_000),
+            None
         );
     }
 

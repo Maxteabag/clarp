@@ -143,6 +143,13 @@ impl AgentRecord {
     pub fn is_helper(&self) -> bool {
         self.role == "helper"
     }
+
+    /// Whether the agent is quiet: it never claims its owner's attention by itself (the
+    /// kernel's one definition). Asked wherever a record of either kind, an agent of the roster
+    /// or a janitor, can appear: its row in the snapshot, and what its turn tells.
+    pub fn is_quiet(&self) -> bool {
+        clarp_kernel::roster::quiet(self.is_janitor)
+    }
 }
 
 #[allow(clippy::trivially_copy_pass_by_ref)]

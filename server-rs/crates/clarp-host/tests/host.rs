@@ -10306,6 +10306,241 @@ fn wait_a_minute(what: &str, mut ready: impl FnMut() -> bool) {
 /// A stand-in for Claude Code as a janitor's tool: it finds the run it was started for in
 /// what it was told, does `closing` (shell lines, with the run's id in `$run` and the Host's
 /// own program in `$host`), and answers.
+#[test]
+fn a_janitor_reaches_none_of_its_owners_attention_and_its_turns_tell_nobody() {
+    let relay = StandInRelay::start();
+    let place = Place::new("quiet");
+    let relay_at = format!("http://{}", relay.address);
+    let args = [
+        "--push-relay",
+        relay_at.as_str(),
+        "--janitors-checked-every-ms",
+        "200",
+    ];
+    // A stand-in for Claude Code whose turn, told to hold, says so and runs on until the test lets
+    // it end; a janitor's scheduled run, and Mike's work beside it, are held the same way. Then it
+    // answers. A held turn also ends when the test's place is gone (a test that fails leaves no
+    // tool running behind it).
+    let at = |name: &str| place.root.join(name);
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "case \"$message\" in\n*HOLD*) touch \"{a}\"; while [ -e \"{a}\" ] && [ ! -e \"{b}\" ]; do sleep 0.1; done;;\n\
+             *'Scheduled Janitor task'*) touch \"{c}\"; while [ -e \"{c}\" ] && [ ! -e \"{d}\" ]; do sleep 0.1; done;;\n\
+             *BUILD*) touch \"{e}\"; while [ -e \"{e}\" ] && [ ! -e \"{f}\" ]; do sleep 0.1; done;;\nesac\n",
+            a = at("started-1").display(),
+            b = at("release-1").display(),
+            c = at("started-2").display(),
+            d = at("release-2").display(),
+            e = at("started-3").display(),
+            f = at("release-3").display(),
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = at("claude");
+    program(&claude, &script);
+    let world = [
+        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+        ("CLARP_PUSH_CREDENTIAL", "the-hosts-own-account"),
+    ];
+    let host = place.start_in("secret", &args, &world);
+    let made = |name: &str| -> String {
+        let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
+        made["session"].as_str().unwrap().to_string()
+    };
+    let (keeper, mike) = (made("Keeper"), made("Mike"));
+    let row = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let rows = snapshot["agents"].as_array().unwrap().clone();
+        rows.into_iter()
+            .find(|row| row["session"] == session)
+            .unwrap()
+    };
+    let keeper_id = row(&keeper)["agent_id"].as_str().unwrap().to_string();
+    // A phone that is pushed to, and whose lock screen shows the agents at work.
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let device = json!({ "token": "a1".repeat(32), "session": mike, "push_grant": grant });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&device)),
+        (200, json!({ "ok": true }))
+    );
+    let activity = json!({
+        "token": "AB".repeat(20), "activity_id": "act-1", "kind": "agents-working",
+        "environment": "sandbox",
+    });
+    let (status, _) = host.ask_as(&phone, "POST", "/devices/live-activity", Some(&activity));
+    assert_eq!(status, 200);
+    let events = host.listen_at("/events?token=secret");
+    // What the relay was handed: the pushes about an agent's turns and requests, and the chip.
+    let sent = || -> Vec<Value> {
+        let taken = relay.taken();
+        let sent = taken.iter().filter(|(path, ..)| path == "/v1/push/send");
+        sent.map(|(_, _, body)| body["notifications"][0].clone())
+            .collect()
+    };
+    let pushed_of = |session: &str| -> Vec<Value> {
+        let pushes = sent()
+            .into_iter()
+            .filter(|push| push["pushType"] != "liveactivity");
+        let payloads = pushes.map(|push| push["payload"].clone());
+        payloads
+            .filter(|payload| payload["session"] == session)
+            .collect()
+    };
+    let chips = || -> Vec<Value> {
+        let chips = sent()
+            .into_iter()
+            .filter(|push| push["pushType"] == "liveactivity");
+        chips
+            .map(|push| push["payload"]["aps"]["content-state"].clone())
+            .collect()
+    };
+    let attention_of = |agent_id: &str| -> usize {
+        let items = host.get("/attention?decision_format=2")["items"].clone();
+        let items = items.as_array().unwrap().iter();
+        items.filter(|item| item["agent_id"] == agent_id).count()
+    };
+    let inbox_of = |session: &str| -> usize {
+        let page = host.get("/attention/inbox")["artifacts"].clone();
+        let page = page.as_array().unwrap().iter();
+        page.filter(|row| row["session"] == session).count()
+    };
+
+    // As an agent of the roster, Keeper asks its user and publishes: the request is pushed and
+    // waits in the inbox, the document is among the Updates.
+    let ask = json!({ "session": keeper, "title": "Deploy?", "question": "Deploy version 1.3?" });
+    let (status, asked) = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 201, "{asked}");
+    let document = json!({
+        "session": keeper, "type": "document", "title": "Notes", "summary": "What was found",
+        "payload": { "content": "# Notes" },
+    });
+    let (status, published) = host.ask("POST", "/artifacts", Some(&document));
+    assert_eq!(status, 201, "{published}");
+    wait_for("Keeper's request to be pushed", || {
+        !pushed_of(&keeper).is_empty()
+    });
+    assert_eq!((attention_of(&keeper_id), inbox_of(&keeper)), (1, 1));
+
+    // Whether a turn a person began can end as a janitor's: an agent at work, or with work that
+    // waits, is not made a janitor; and a janitor's chat takes no message. So it cannot here; the
+    // rule that a quiet agent's turn tells nobody stands all the same (`wire.rs`, its own test).
+    host.send(&keeper, "HOLD", "k1");
+    wait_for("Keeper's turn to begin", || at("started-1").exists());
+    let (status, refused) = host.ask("POST", "/janitors", Some(&every_minute(&keeper, 120)));
+    assert_eq!(
+        (status, &refused["code"]),
+        (409, &json!("agent_busy")),
+        "{refused}"
+    );
+    std::fs::write(at("release-1"), "").unwrap();
+    wait_for("Keeper's turn to be over", || host.state(&keeper) == "done");
+    let (status, janitor) = host.ask("POST", "/janitors", Some(&every_minute(&keeper, 120)));
+    assert_eq!(status, 200, "{janitor}");
+    assert_eq!(row(&keeper)["quiet"], true);
+    assert_eq!(row(&mike)["quiet"], false);
+    let message = json!({ "session": keeper, "text": "one more thing", "client_msg_id": "k2" });
+    let (status, refused) = host.ask("POST", "/send", Some(&message));
+    assert_eq!(
+        (status, &refused["code"]),
+        (403, &json!("janitor_inspection_only")),
+        "{refused}"
+    );
+    let (events_before, pushed_before, chips_before) = (
+        events.lock().unwrap().len(),
+        pushed_of(&keeper).len(),
+        chips().len(),
+    );
+
+    // Turned on, the janitor's own run comes with the next minute (this Host has no run on
+    // demand) and is held. Only once the Host says the run is live (its current run, the
+    // janitor's row busy, and its tool at work) does Mike work, held too; the lock screen is told
+    // of the agents at work while both are, and that chip is the one read.
+    let (status, on) = host.ask(
+        "POST",
+        &format!("/janitors/{keeper}/enabled"),
+        Some(&json!({ "expected_revision": 1, "enabled": true })),
+    );
+    assert_eq!(status, 200, "{on}");
+    let run_of = || host.get(&format!("/janitors/{keeper}"))["janitor"]["current_run_id"].clone();
+    wait_a_minute("the janitor's run to be live, as the Host says", || {
+        run_of().is_string() && row(&keeper)["busy"] == true && at("started-2").exists()
+    });
+    host.send(&mike, "BUILD the release", "m1");
+    wait_for("Mike's turn to begin", || at("started-3").exists());
+    let chip_of_both = || {
+        let told = chips();
+        let told = told[chips_before..].iter();
+        told.rev()
+            .find(|chip| {
+                let agents = chip["agents"].as_array();
+                agents.is_some_and(|agents| {
+                    agents.iter().any(|agent| agent["session"] == mike.as_str())
+                })
+            })
+            .cloned()
+    };
+    wait_for(
+        "the chip to be told of Mike at work beside the janitor's run",
+        || chip_of_both().is_some(),
+    );
+    assert!(
+        run_of().is_string(),
+        "the janitor's run ended before the chip was read"
+    );
+    let chip = chip_of_both().unwrap();
+    let agents = chip["agents"].as_array().unwrap();
+    assert!(
+        agents
+            .iter()
+            .all(|agent| agent["session"] != keeper.as_str()),
+        "the janitor's live run is on the lock screen: {chip}"
+    );
+    std::fs::write(at("release-3"), "").unwrap();
+    wait_for("Mike's turn to be over", || host.state(&mike) == "done");
+    std::fs::write(at("release-2"), "").unwrap();
+    wait_for("the janitor's run to be over", || {
+        host.state(&keeper) == "done"
+    });
+
+    // None of it reached its owner: no notification, no push, no badge, no unread.
+    let told: Vec<Value> = events.lock().unwrap()[events_before..].to_vec();
+    let of_keeper = told.iter().filter(|event| {
+        event["type"] == "user-notification" && event["session"] == keeper.as_str()
+    });
+    assert_eq!(of_keeper.count(), 0, "{told:?}");
+    assert_eq!(pushed_of(&keeper).len(), pushed_before);
+    // Its request and its document are in neither list, and the lock screen counts neither it,
+    // which was at work, nor its request.
+    assert_eq!((attention_of(&keeper_id), inbox_of(&keeper)), (0, 0));
+    for chip in &chips()[chips_before..] {
+        let agents = chip["agents"].as_array().unwrap();
+        assert!(
+            agents
+                .iter()
+                .all(|agent| agent["session"] != keeper.as_str()),
+            "{chip}"
+        );
+        assert_eq!(chip["decisions"], 0, "{chip}");
+    }
+    // A janitor asks nothing of its user and publishes nothing for it: refused as an agent the
+    // Host has not, and nothing is pushed.
+    let (status, refused) = host.ask("POST", "/decisions", Some(&ask));
+    assert_eq!(status, 409, "{refused}");
+    let (status, refused) = host.ask("POST", "/artifacts", Some(&document));
+    assert_eq!(status, 409, "{refused}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(pushed_of(&keeper).len(), pushed_before);
+    assert_eq!((attention_of(&keeper_id), inbox_of(&keeper)), (0, 0));
+}
+
 fn janitors_tool(place: &Place, closing: &str) -> PathBuf {
     let claude = place.root.join("claude");
     let script = [

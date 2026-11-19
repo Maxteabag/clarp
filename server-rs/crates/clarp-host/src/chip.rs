@@ -70,10 +70,13 @@ pub struct Chip {
     _limits: UnboundedSender<Limited>,
 }
 
-/// What the Host knows of every agent, as the chip's rules read it.
+/// What the Host knows of every agent, as the chip's rules read it: the janitors too, since the
+/// stream of turns the chip follows tells of their turns as well, and a quiet agent's work is not
+/// "agents working" (the kernel's one definition of quiet).
 fn roster(app: &App) -> Fleet {
     let directory = app.fleet.directory();
-    let agents = directory.members.iter().map(|member| {
+    let everyone = directory.members.iter().chain(directory.janitors.iter());
+    let agents = everyone.map(|member| {
         let record = &member.record;
         let helper_of = match (&record.parent_agent_id, record.is_helper()) {
             (Some(parent), true) => parent.clone(),
@@ -84,7 +87,7 @@ fn roster(app: &App) -> Fleet {
             persona: record.persona.clone(),
             helper_of,
             archived: record.archived_at_ms.is_some(),
-            janitor: false,
+            janitor: record.is_quiet(),
             activity: Value::Null,
         };
         (record.agent_id.clone(), shown)

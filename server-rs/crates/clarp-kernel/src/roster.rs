@@ -22,6 +22,14 @@ pub fn display_name(said: &str) -> Option<String> {
     (!name.is_empty() && name.chars().count() <= NAME_MAX).then_some(name)
 }
 
+/// Whether an agent is quiet: one whose activity never claims its owner's attention by itself.
+/// Its turns tell nobody (`notify`, `janitor-maintenance`) and its row says `quiet`; its chat stays
+/// readable when it is opened. Today exactly the janitors: the Python Host's one definition
+/// (`quiet_agents.is_quiet`), held by `tests/quiet_agents_vectors.rs`.
+pub fn quiet(is_janitor: bool) -> bool {
+    is_janitor
+}
+
 /// Whether two names are one contact: compared without the case of their letters and
 /// without the white space at their ends. One agent has a name at a time: who is written
 /// to by name must be one agent.

@@ -2114,6 +2114,23 @@ the reference limits. Display and delegated speech now share a creation-ordered 
 personas, retaining the first casefolded spelling. Under R109 both omit archived names. A settings
 preview reads the roster and saved values without creating a vocabulary audit.
 
+**Quiet agents** (19 Nov 2026; Host feature `quiet_agents`, 56). An agent whose activity never claims its owner's
+attention by itself is quiet: today exactly the janitors, by the kernel's one definition (`roster::quiet`, held to
+the Python Host's `quiet_agents.is_quiet` over agent rows of every shape). It is asked where a record of either kind
+can appear: the snapshot's row (`quiet`), what a turn tells (`wire::user_notification` gives it to the kernel's
+rule, which suppresses it `janitor-maintenance` whatever began the turn), and the Live Activity, whose stream of
+turns tells of a janitor's turns as well: its roster now has the janitors, each marked quiet, and their work is not
+"agents working" (the Host test found a janitor's run on the lock screen before). A janitor's own runs were suppressed
+before by their origin, and a turn a person began cannot end as a janitor's here: an agent at work, or with work
+waiting, is not made a janitor (409 `agent_busy`), and a janitor's chat takes no message (403); the rule stands all the
+same, held by the notification's own test. Where only the roster's members are walked, the attention
+list, the Updates, the badge, a request's push, the separation of members and janitors is the rule, and a branch for quiet there would never run: a janitor which asks or publishes is refused as an agent the
+Host has not, and what it made as a member leaves the lists with it. Held by
+`a_janitor_reaches_none_of_its_owners_attention_and_its_turns_tell_nobody` (a phone pushed to and showing the agents at
+work; Keeper asks and publishes as a member, is refused as a janitor while its turn runs, is made one once idle, is
+refused a message, and its own run is held while Mike works: no notification, no push, nothing in `/attention`, the
+inbox or the chip, and its new request and document are refused) and the wrong rules `tools/plants/quiet-agents.py`.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

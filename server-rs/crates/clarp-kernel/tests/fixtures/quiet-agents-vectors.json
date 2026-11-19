@@ -1,0 +1,70 @@
+{
+ "rows": [
+  {
+   "what": "a janitor",
+   "row": {
+    "agent_id": "a-1",
+    "is_janitor": 1,
+    "role": "janitor"
+   },
+   "quiet": true
+  },
+  {
+   "what": "an agent of the roster",
+   "row": {
+    "agent_id": "a-2",
+    "is_janitor": 0,
+    "role": ""
+   },
+   "quiet": false
+  },
+  {
+   "what": "a helper",
+   "row": {
+    "agent_id": "a-3",
+    "is_janitor": 0,
+    "role": "helper"
+   },
+   "quiet": false
+  },
+  {
+   "what": "a janitor put away",
+   "row": {
+    "agent_id": "a-4",
+    "is_janitor": 1,
+    "role": "janitor",
+    "archived_at": 5
+   },
+   "quiet": true
+  },
+  {
+   "what": "an agent put away",
+   "row": {
+    "agent_id": "a-5",
+    "is_janitor": 0,
+    "archived_at": 5
+   },
+   "quiet": false
+  },
+  {
+   "what": "a row without the column",
+   "row": {
+    "agent_id": "a-6"
+   },
+   "quiet": false
+  },
+  {
+   "what": "a column that is empty",
+   "row": {
+    "agent_id": "a-7",
+    "is_janitor": null
+   },
+   "quiet": false
+  },
+  {
+   "what": "no row",
+   "row": null,
+   "quiet": false
+  }
+ ]
+}
