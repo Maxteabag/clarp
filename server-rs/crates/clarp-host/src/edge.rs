@@ -653,46 +653,6 @@ const PICTURES: &str = "/static/";
 /// a push carries, for a phone that shows the notification without the app's token.
 const SIGNED_PICTURES: &str = "/notification-avatars/";
 
-/// What a device with limited scope may send. Whatever it may read, it may read.
-const LIMITED_POSTS: &[&str] = &[
-    "/send",
-    "/transcribe",
-    "/select",
-    "/focus",
-    "/upload",
-    "/clog",
-    "/clips/ack",
-    "/voice-events",
-    "/location",
-];
-
-/// What a device with limited scope is kept from altogether, also from reading: the Host's
-/// logins and software, its owner's settings, what is on its disk, calls. The Python Host's
-/// list (`_DEVICE_FULL_ONLY_PREFIXES`), whether or not this Host has the route yet: a route
-/// that is built later is closed from its first day.
-const FULL_ONLY: &[&str] = &[
-    "/backend-auth",
-    "/harness-providers",
-    "/server-update",
-    "/managed-skills",
-    "/hotseat/desk",
-    "/hotseat/switch",
-    "/hotseat/resume",
-    "/orchestrator/",
-    "/herald/",
-    "/personalities/",
-    "/automation-settings",
-    "/avatar-settings",
-    "/paired-devices",
-    "/tts/providers",
-    "/network/",
-    "/server-terminal",
-    "/oracle/",
-    "/agent-file",
-    "/janitor-runs/",
-    "/calls",
-];
-
 /// Whether a request is one of the Oracle's: `/oracle` and what is under it, read or done.
 fn of_the_oracle(request: &Request, path: &str) -> bool {
     let method = request.method();
@@ -720,22 +680,13 @@ fn out_of_scope(principal: &Principal, method: &Method, path: &str) -> bool {
     else {
         return false;
     };
-    let closed = |prefix: &&str| path == prefix.trim_end_matches('/') || path.starts_with(*prefix);
-    if FULL_ONLY.iter().any(closed) || path.starts_with("/pairing/issue") {
-        return true;
-    }
-    // What is on this machine's disk, by a path the caller chooses.
-    if matches!(path, "/dirs" | "/past-sessions") {
-        return true;
-    }
-    // And an agent's own tool in a terminal: whatever its user types there, it does.
-    if path.starts_with("/terminal/") && method == Method::GET {
-        return true;
-    }
-    if method == Method::GET || method == Method::HEAD {
-        return false;
-    }
-    !(method == Method::POST && LIMITED_POSTS.contains(&path))
+    // A request for a head is answered as a read.
+    let method = if method == Method::HEAD {
+        "GET"
+    } else {
+        method.as_str()
+    };
+    clarp_kernel::devices::limited_refused(method, path)
 }
 
 /// A request's headers as the rules of trust read them: each as it was sent, a value byte
@@ -834,7 +785,7 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 let why = if matches!(principal, Principal::Tools) {
                     "an agent's tools may ask for tools only"
                 } else {
-                    "this device may not do that"
+                    clarp_kernel::devices::LIMITED_REFUSAL
                 };
                 ApiError::new(StatusCode::FORBIDDEN, why).into_response()
             }

@@ -481,6 +481,112 @@ impl PushBook {
     }
 }
 
+/// What a device a user paired with limited access is refused with: the Python Host's words.
+pub const LIMITED_REFUSAL: &str = "full device access required";
+
+/// What a device with limited access is kept from altogether, also from reading: the Host's
+/// logins and software, its owner's settings, what is on its disk, calls. The Python Host's
+/// list (`_DEVICE_FULL_ONLY_PREFIXES`), whether or not this Host has the route yet: a route
+/// that is built later is closed from its first day.
+pub const FULL_ONLY: [&str; 20] = [
+    "/backend-auth",
+    "/harness-providers",
+    "/server-update",
+    "/managed-skills",
+    "/hotseat/desk",
+    "/hotseat/switch",
+    "/hotseat/resume",
+    "/orchestrator/",
+    "/herald/",
+    "/personalities/",
+    "/automation-settings",
+    "/avatar-settings",
+    "/paired-devices",
+    "/tts/providers",
+    "/network/",
+    "/server-terminal",
+    "/oracle/",
+    "/agent-file",
+    "/janitor-runs/",
+    "/calls",
+];
+
+/// What a device with limited access may send (`_LIMITED_DEVICE_POST_EXACT`). Whatever it
+/// may read, it may read.
+pub const LIMITED_POSTS: [&str; 11] = [
+    "/send",
+    "/transcribe",
+    "/upload",
+    "/select",
+    "/focus",
+    "/clips/ack",
+    "/clog",
+    "/location",
+    "/calendar/response",
+    "/remote-action",
+    "/voice-events",
+];
+
+/// Where the actions a controller offers are, and how one of them is invoked.
+const CONTROLLER_ACTIONS: &str = "/controller-actions";
+const INVOKE: &str = "/invoke";
+
+/// The action a request invokes (`POST /controller-actions/<id>/invoke`), its id read with
+/// its `%XX`: none where the id is empty or holds a slash.
+fn invoked(path: &str) -> Option<String> {
+    let id = path
+        .strip_prefix(CONTROLLER_ACTIONS)?
+        .strip_prefix('/')?
+        .strip_suffix(INVOKE)?;
+    let bytes = id.as_bytes();
+    let mut read = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let hex = bytes
+            .get(at + 1..at + 3)
+            .and_then(|two| std::str::from_utf8(two).ok())
+            .and_then(|two| u8::from_str_radix(two, 16).ok());
+        match (bytes[at], hex) {
+            (b'%', Some(byte)) => {
+                read.push(byte);
+                at += 3;
+            }
+            (byte, _) => {
+                read.push(byte);
+                at += 1;
+            }
+        }
+    }
+    let id = String::from_utf8_lossy(&read).into_owned();
+    (!id.is_empty() && !id.contains('/')).then_some(id)
+}
+
+/// Whether a device with limited access is refused a request (the Python Host's
+/// `Handler._device_forbidden`, as its handlers of each method ask it): what is closed to it
+/// altogether, what is on the disk or in a terminal, and every change but what it may send
+/// and the actions it may invoke. A PATCH is looked at only under `/schedules/`.
+pub fn limited_refused(method: &str, path: &str) -> bool {
+    if method == "PATCH" && !path.starts_with("/schedules/") {
+        return false;
+    }
+    let closed = |prefix: &&str| path == prefix.trim_end_matches('/') || path.starts_with(*prefix);
+    if FULL_ONLY.iter().any(closed) {
+        return true;
+    }
+    if matches!(path, "/dirs" | "/past-sessions")
+        || (path.starts_with("/terminal/") && method == "GET")
+    {
+        return true;
+    }
+    if method == "GET" {
+        return false;
+    }
+    if path == CONTROLLER_ACTIONS || path.starts_with("/controller-actions/") {
+        return !(method == "POST" && invoked(path).is_some());
+    }
+    method != "POST" || !LIMITED_POSTS.contains(&path)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
