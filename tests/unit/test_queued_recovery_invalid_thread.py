@@ -20,6 +20,7 @@ from lib.account_failover import Attempt
 from lib.protocol import AgentState
 from lib.turn_dispatch import DispatchError, TurnDispatchService
 import lib.turn_dispatch as _td
+from tests.qa.fake_codex import rollout_path
 from tests.unit.test_codex_app_server import _install_fake_codex, _spawn_fake_turn
 
 THREAD = "c59fbeda-de2d-4989-a7a8-4683580325e9"
@@ -37,7 +38,7 @@ def _local_dispatch_runtime(monkeypatch, codex_pool_lifecycle):
 def broken(tmp_path, monkeypatch, codex_pool_lifecycle):
     home = _install_fake_codex(tmp_path, monkeypatch, codex_pool_lifecycle)
     (home / "sessions").mkdir()
-    (home / "sessions" / f"rollout-{THREAD}.jsonl").write_text("")
+    rollout_path(home / "sessions", THREAD).write_text("")
     agent_id = agents_db.create_agent(
         persona="Miso", voice_id="v", cwd=str(tmp_path), session="miso",
         backend="codex")
@@ -167,7 +168,7 @@ def test_an_account_recovery_wait_is_not_overridden(broken):
 
 def test_the_codex_unreadable_thread_error_is_one_failure_whatever_the_thread(broken):
     other = "0a1b2c3d-ab3f-4e5f-9a8b-112233445566"
-    (broken.home / "sessions" / f"rollout-{other}.jsonl").write_text("")
+    rollout_path(broken.home / "sessions", other).write_text("")
     errors = []
     for thread in (THREAD, other):
         with pytest.raises(RuntimeError) as caught:
@@ -226,7 +227,7 @@ def _account_wait(agent_id, trace):
 def test_an_account_recovery_release_launches_the_queued_message_once(broken):
     agent_id = broken.agent_id
     # The thread is readable here: the account wait is the only thing holding.
-    (broken.home / "sessions" / f"rollout-{THREAD}.jsonl").write_text(
+    rollout_path(broken.home / "sessions", THREAD).write_text(
         json.dumps({"type": "session_meta", "payload": {"id": THREAD}}) + "\n")
     failover = _account_wait(agent_id, "tA")
     try:
