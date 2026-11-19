@@ -50,7 +50,7 @@ def record(work):
     alias = work / 'alias'
     alias.symlink_to(store)
     locations = []
-    for path in ['file', 'in-link', 'out-link', 'twice', 'loop', 'absent', 'missing-link']:
+    for path in ['file', 'in-link', 'out-link', 'twice', 'loop', 'absent', 'missing-link', '.']:
         candidate = alias / path
         inside = paths.inside('claude', alias, candidate)
         locations.append([path, inside is not None and candidate.is_file()])
@@ -62,7 +62,7 @@ def record(work):
             ts.replace('T', 't'), ts.replace('-', ':', 1), ts.replace('15-', '15:'),
             ts.replace('19', 'XX'), ts.replace('2026', chr(0x0662) * 4), 'copy']
     files = [f'rollout-{stamp}-a1.jsonl' for stamp in when]
-    files += [f'rollout-{ts}-ba1.jsonl', f'prefix-rollout-{ts}-a1.jsonl',
+    files += [f'{ts}-a1.jsonl', f'rollout-{ts}-ba1.jsonl', f'prefix-rollout-{ts}-a1.jsonl',
               f'rollout-{ts}-a1.jsonl.bak', f'rollout-{ts}-a1_jsonl', 'a1.jsonl']
     rollouts = []
     for i, filename in enumerate(files):
