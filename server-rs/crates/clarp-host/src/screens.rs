@@ -138,14 +138,6 @@ async fn no_pictures() -> ApiError {
 
 // ---- how the Host speaks up and judges ---------------------------------------------------------
 
-async fn judgments() -> Json<Value> {
-    Json(kept("/judgments/settings"))
-}
-
-async fn no_judgments() -> ApiError {
-    not_built("Judgments are")
-}
-
 async fn diagnostics() -> Json<Value> {
     Json(kept("/diagnostics/settings"))
 }
@@ -222,40 +214,6 @@ async fn podcasts() -> Json<Value> {
 
 async fn podcast_sources() -> Json<Value> {
     Json(json!({ "next_offset": null, "sources": [] }))
-}
-
-// ---- the vocabulary an engine is asked to listen for ---------------------------------------------
-
-async fn vocab_packs() -> Json<Value> {
-    Json(json!({ "packs": [] }))
-}
-
-async fn vocab_terms(Query(asked): Asked) -> Answered {
-    let pack = asked.get("pack_id").map_or("", |said| said.trim());
-    if pack.is_empty() {
-        return Err(bad("pack_id is required"));
-    }
-    Ok(Json(json!({ "pack_id": pack, "terms": [] })))
-}
-
-async fn vocab_profiles() -> Json<Value> {
-    Json(json!({ "profiles": [] }))
-}
-
-async fn vocab_profile() -> ApiError {
-    ApiError::new(StatusCode::NOT_FOUND, "no such profile")
-}
-
-async fn vocab_assignments() -> Json<Value> {
-    Json(json!({ "assignments": [] }))
-}
-
-async fn vocab_runs() -> Json<Value> {
-    Json(json!({ "runs": [] }))
-}
-
-async fn no_vocabulary() -> ApiError {
-    not_built("The vocabulary is")
 }
 
 // ---- the Oracle --------------------------------------------------------------------------------
@@ -407,7 +365,6 @@ pub fn routes() -> Router<App> {
             get(portrait_generation).post(no_pictures),
         )
         .route("/avatar-settings", get(avatar_settings).post(no_pictures))
-        .route("/judgments/settings", get(judgments).post(no_judgments))
         .route(
             "/diagnostics/settings",
             get(diagnostics).post(no_diagnostics),
@@ -420,18 +377,6 @@ pub fn routes() -> Router<App> {
         .route("/hotseat/{action}", post(no_hotseat))
         .route("/podcast-history", get(podcasts))
         .route("/podcast-history/sources", get(podcast_sources))
-        .route("/vocab/packs", get(vocab_packs).post(no_vocabulary))
-        .route("/vocab/terms", get(vocab_terms).post(no_vocabulary))
-        .route("/vocab/profiles", get(vocab_profiles).post(no_vocabulary))
-        .route("/vocab/profile", get(vocab_profile).post(no_vocabulary))
-        .route(
-            "/vocab/assignments",
-            get(vocab_assignments).post(no_vocabulary),
-        )
-        .route("/vocab/runs", get(vocab_runs))
-        .route("/vocab/run", post(no_vocabulary))
-        .route("/vocab/preview", post(no_vocabulary))
-        .route("/vocab/profiles/workspace", post(no_vocabulary))
         .route("/oracle/calls/status", get(oracle_calls))
         .route("/oracle/{*rest}", post(no_oracle))
 }

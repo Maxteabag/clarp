@@ -52,11 +52,11 @@ const KEPT_FOR: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// the whole of what was said, not a guess along the way: it waits rather than be dropped.
 const WAITS: Duration = Duration::from_secs(10);
 
-/// How many of the fleet's names an engine is asked to listen for.
-const NAMES: usize = 40;
-
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
+    pub(crate) vocab: crate::vocabulary::Desk,
+    pub(crate) workspace: Arc<crate::vocabulary::workspace::Cache>,
+    pub(crate) judge: crate::vocabulary::judge::Judge,
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
     own: Option<(Arc<dyn Listener>, String)>,
@@ -161,6 +161,9 @@ impl Ears {
         };
         Self {
             own,
+            judge: Default::default(),
+            vocab: Default::default(),
+            workspace: Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
             ink: ink("ink-2"),
@@ -397,23 +400,6 @@ fn refuse(status: StatusCode, why: impl Into<String>) -> Told {
 }
 
 /// The names an engine is asked to listen for: what the agents on this Host are called.
-fn names(app: &App) -> String {
-    let directory = app.fleet.directory();
-    let mut names: Vec<&str> = Vec::new();
-    for member in &directory.members {
-        let record = &member.record;
-        let there = record.deleted_at_ms.is_none() && record.archived_at_ms.is_none();
-        let name = record.persona.trim();
-        if there && !name.is_empty() && !name.contains(',') && !names.contains(&name) {
-            names.push(name);
-        }
-        if names.len() == NAMES {
-            break;
-        }
-    }
-    names.join(", ")
-}
-
 /// `POST /transcribe`: a clip of speech is the body. Headers say which engine the app asks
 /// for (`X-Transcription-Model`), what the job is called (`X-Transcription-ID`) and whether
 /// it was said hands-free (`X-Hands-Free`). Answered with the text and the trace the
@@ -479,14 +465,26 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let directory = app.fleet.directory();
     let (own, language) = spoken_to(&directory, &ears.language);
     let order = ears.order(&requested, &own, &ears.default_engine(&directory));
-    let listen_for = names(app);
+    let trace = ids::hex(8);
+    let session = directory
+        .focus
+        .as_deref()
+        .and_then(|id| directory.named(id))
+        .map_or("", |m| m.record.session.as_str());
+    let selected = order.first().map_or(requested.as_str(), String::as_str);
+    let began = std::time::Instant::now();
+    let (audit, run_id) =
+        crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
+            .await
+            .unwrap_or_default();
+    let listen_for = audit["payload"].as_str().unwrap_or("");
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
         let heard = ears
             .heard_by(
                 model,
                 &language,
-                &listen_for,
+                listen_for,
                 (&audio, content_type.as_str()),
             )
             .await;
@@ -522,8 +520,41 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
     };
     // What the engine was sure was speech, unless it is something engines invent on silence.
-    let text = heard::kept(&heard::joined(&said.segments));
-    let mut answer = heard::answer(&text, &ids::hex(8), hands_free);
+    let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
+    let mut answer = heard::answer(&text, &trace, hands_free);
+    if run_id > 0 {
+        let _ = app
+            .ears
+            .vocab
+            .finish(
+                &app.fleet,
+                run_id,
+                text.clone(),
+                began.elapsed().as_millis() as i64,
+            )
+            .await;
+        answer["vocab_run_id"] = json!(run_id);
+    }
+    if crate::vocabulary::audio::enabled(&app.fleet.directory()) {
+        let root = app.config.data_dir.clone();
+        let (trace, model, session) = (trace.clone(), requested.clone(), session.to_string());
+        let now = app.clock.now_ms();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::vocabulary::audio::retain(
+                &root,
+                crate::vocabulary::audio::Clip {
+                    trace: &trace,
+                    data: &audio,
+                    kind: &content_type,
+                    session: &session,
+                    run: run_id,
+                    model: &model,
+                },
+                now,
+            )
+        })
+        .await;
+    }
     // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
     // the app is told, and sends nothing.
     if !text.is_empty() && app.mouth.heard(&text).await {
@@ -674,6 +705,15 @@ fn long_form_threshold(directory: &Directory) -> i64 {
     kept.and_then(|kept| kept.parse().ok()).unwrap_or(30)
 }
 
+async fn vocabulary_budgets(State(app): State<App>) -> Json<Value> {
+    let directory = app.fleet.directory();
+    Json(json!({
+        "budgets": *clarp_kernel::vocabulary::BUDGETS,
+        "engine": app.ears.default_engine(&directory),
+        "models": cloud_models(&app.ears),
+    }))
+}
+
 /// The settings of speech in, as an app's screen draws them.
 fn status(app: &App) -> Value {
     let ears = &app.ears;
@@ -700,7 +740,7 @@ fn status(app: &App) -> Value {
         "call_engines": "",
         "call_policy_error": "",
         "turn_taking": turn_taking(&directory),
-        "retain_audio": false,
+        "retain_audio": crate::vocabulary::audio::enabled(&directory),
         "long_form_model": "",
         "long_form_threshold_sec": long_form_threshold(&directory),
         "long_form_threshold_range": { "min": 1, "max": 3600 },
@@ -773,10 +813,10 @@ async fn set_providers(
         return Err(bad(&format!("unknown turn-taking strategy: {strategy}")));
     }
     match named("retain_audio") {
-        Some(Value::Bool(false)) | None => {}
-        Some(Value::Bool(true)) => {
-            return Err(bad("clips are not kept on this Host yet (retain_audio)"));
+        Some(Value::Bool(value)) => {
+            settings.push(("transcription.retain_audio".into(), value.to_string()))
         }
+        None => {}
         Some(_) => return Err(bad("retain_audio must be boolean")),
     }
     match named("long_form_model") {
@@ -850,6 +890,7 @@ pub fn routes() -> Router<App> {
         .route("/transcribe", post(transcribe))
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
+        .route("/vocab/budgets", get(vocabulary_budgets))
         .route(
             "/transcription-providers",
             get(providers).post(set_providers),

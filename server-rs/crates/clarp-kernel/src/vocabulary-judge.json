@@ -1,0 +1,8 @@
+{
+ "type": "noul",
+ "instructions": "`transcript` came from a speech recogniser that invents text on silence or background noise: typically video outros, subtitle credits, calls to subscribe, music captions and stray fragments. Is `transcript` such an invented artefact rather than something the user actually said?",
+ "criteria": {
+  "true": "Invented artefact; the user most likely said nothing",
+  "false": "A plausible thing for a user to say to a coding assistant, even if very short"
+ }
+}
