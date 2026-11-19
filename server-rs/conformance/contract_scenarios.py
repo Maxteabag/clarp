@@ -158,9 +158,9 @@ SCENARIOS = [
     },
     {
         'id': 'delivery-of-a-held-send',
-        'what': "what a user's plain send to a busy agent is shown of its delivery (send_delivery_state): the user's "
-                'Stop holds it and it is shown stopped, the same id is sent again, a resume runs it and it is '
-                'handed over; the feed of its changes, from the start',
+        'what': "what a user's plain send to a busy agent is shown of its delivery (send_delivery_state): handed "
+                "over once the queue keeps it, the user's Stop holds it, a resume runs it; the feed of the sends, "
+                'from the start',
         'steps': [
             send(SLOW + 'synthetic task to stop', 'papa'),
             {'op': 'wait_busy', 'busy': True},
@@ -169,9 +169,6 @@ SCENARIOS = [
             {'op': 'wait_busy', 'busy': False},
             {'op': 'quiesce', 'held': True},
             get(f'/log?session={AGENT}&delivery_since=0'),
-            send('synthetic held quebec', 'quebec'),
-            {'op': 'quiesce', 'held': True},
-            LOG,
             post('/turn-queue/resume', {'session': AGENT}),
             {'op': 'wait_reply', 'after': 'u-quebec'},
             {'op': 'quiesce'},

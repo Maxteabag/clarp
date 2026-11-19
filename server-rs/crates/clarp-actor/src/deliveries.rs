@@ -43,7 +43,7 @@ pub fn names(client_id: &str, trace_id: Option<&str>) -> Option<(String, String)
 
 impl Deliveries {
     /// A send changed: it comes, or it moves. Answers whether it moved in a way a client is
-    /// told of (fenced by the user's Stop, or handed over).
+    /// told of: fenced by the user's Stop. (A launch of its tool is told apart.)
     pub fn changed(&mut self, send: Send, names: Option<(String, String)>) -> bool {
         let known = self.sends.get(&send.turn).map(|kept| kept.send.clone());
         let Some((client_msg_id, trace_id)) = names.or_else(|| {
@@ -60,7 +60,7 @@ impl Deliveries {
         self.by_seq.insert(send.seq, send.turn);
         self.latest = self.latest.max(send.seq);
         self.by_trace.insert(trace_id.clone(), send.turn);
-        let told = moved && (send.handed || send.fenced);
+        let told = moved && send.fenced && !send.handed;
         self.sends.insert(
             send.turn,
             Kept {
@@ -189,7 +189,7 @@ mod tests {
         let named = names("m1", Some("t1"));
         assert!(!held.changed(send(1, 1, 5, false, false), named));
         assert!(held.changed(send(1, 2, 9, true, false), None));
-        assert!(held.changed(send(1, 3, 12, true, true), None));
+        assert!(!held.changed(send(1, 3, 12, true, true), None));
         assert_eq!(held.by_seq.keys().copied().collect::<Vec<_>>(), [12]);
         assert_eq!(held.message_id(1).as_deref(), Some("u-m1"));
         assert_eq!(held.receipt("ag", "t1").unwrap()["state"], "attempted");

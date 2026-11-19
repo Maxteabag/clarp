@@ -493,6 +493,11 @@ impl Send {
 pub struct Ledger {
     waiting: std::collections::BTreeMap<u64, Send>,
     changed: Vec<Send>,
+    /// The turns of shown sends whose tool was just launched, in order: each launch is told
+    /// (`delivery-updated`), also a launch anew after a wait for an account.
+    launched: Vec<u64>,
+    /// The shown sends whose turn is not over: what a launch of a turn is told for.
+    open: std::collections::BTreeSet<u64>,
     folding: bool,
 }
 
@@ -522,6 +527,18 @@ impl Ledger {
         std::mem::take(&mut self.changed)
     }
 
+    /// The turns of shown sends launched since this was last asked, oldest first.
+    pub fn take_launched(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.launched)
+    }
+
+    /// A turn's tool is launched: told where its send is shown.
+    pub(crate) fn launch(&mut self, turn: u64) {
+        if self.open.contains(&turn) && !self.folding {
+            self.launched.push(turn);
+        }
+    }
+
     fn tell(&mut self, send: Send) {
         if !self.folding {
             self.changed.push(send);
@@ -548,6 +565,7 @@ impl Ledger {
         };
         self.tell(send.clone());
         self.waiting.insert(turn, send);
+        self.open.insert(turn);
     }
 
     /// The user's Stop: every send that is pending is fenced, each with its own revision.
@@ -575,6 +593,7 @@ impl Ledger {
 
     /// Its turn is over without its tool having had it: it stays as it is, and can change no more.
     pub(crate) fn over(&mut self, turn: u64) {
+        self.open.remove(&turn);
         if let Some(send) = self.waiting.remove(&turn) {
             self.tell(Send {
                 rev: send.rev,
@@ -612,9 +631,34 @@ mod tests {
         }
     }
 
+    fn paused(agent: &mut Agent, at: u64) {
+        agent.at(at);
+        let by = "user".to_string();
+        agent
+            .apply(&AgentEvent::Paused { by, at_ms: 2_000 })
+            .unwrap();
+    }
+
+    fn told(agent: &mut Agent) -> Vec<(u64, bool, bool, u64, u64)> {
+        let changed = agent.deliveries_mut().take();
+        changed
+            .iter()
+            .map(|s| (s.turn, s.fenced, s.handed, s.rev, s.seq))
+            .collect()
+    }
+
     #[test]
-    fn a_send_is_admitted_fenced_by_the_users_stop_and_handed_over_at_its_own_revisions() {
+    fn a_send_is_handed_over_at_its_launch_or_its_queue_and_fenced_by_the_users_stop() {
         let mut agent = Agent::new();
+        let thinking = || TurnEvent::Moved {
+            activity: Activity::Thinking,
+            at_ms: 1_200,
+        };
+        let completed = || TurnEvent::Settled {
+            outcome: Outcome::Completed,
+            at_ms: 1_300,
+        };
+        // A send to an idle agent: admitted, and handed over when its tool is launched.
         turn(
             &mut agent,
             2,
@@ -622,7 +666,16 @@ mod tests {
             accepted(1, 1, Origin::User, Admission::Queue),
         );
         turn(&mut agent, 3, 1, TurnEvent::Started { at_ms: 1_100 });
-        // A send behind the busy turn waits; one left for later, and an agent's, are not shown.
+        assert_eq!(
+            told(&mut agent),
+            [
+                (1, false, false, 1, revision(2, 0)),
+                (1, false, true, 2, revision(3, 0))
+            ]
+        );
+        assert_eq!(agent.deliveries_mut().take_launched(), [1]);
+        // One behind the busy turn is handed to the queue that keeps it, at once. One left for
+        // later, and an agent's, are not shown.
         turn(
             &mut agent,
             5,
@@ -639,79 +692,50 @@ mod tests {
             agent_id: "helper".into(),
         };
         turn(&mut agent, 9, 4, accepted(4, 8, other, Admission::Queue));
-        let told = agent.deliveries_mut().take();
         assert_eq!(
-            told.iter()
-                .map(|s| (s.turn, s.rev, s.seq))
-                .collect::<Vec<_>>(),
+            told(&mut agent),
             [
-                (1, 1, revision(2, 0)),
-                (1, 2, revision(3, 0)),
-                (2, 1, revision(5, 0))
+                (2, false, false, 1, revision(5, 0)),
+                (2, false, true, 2, revision(5, 1))
             ]
         );
-        assert_eq!(told[2].stops_at, 0);
-        // The user stops the agent: the one that waits is fenced, once.
-        agent.at(10);
+        // The user's Stop: nothing pending to fence; the generation moves.
+        paused(&mut agent, 10);
+        assert!(told(&mut agent).is_empty());
+        assert_eq!(agent.user_stop_generation(), 1);
+        // The held one runs after a resume: no change, and its launch is told.
+        turn(&mut agent, 11, 1, thinking());
+        turn(&mut agent, 12, 1, completed());
+        agent.at(13);
+        let by = "user".to_string();
         agent
-            .apply(&AgentEvent::Paused {
-                by: "user".into(),
-                at_ms: 2_000,
-            })
+            .apply(&AgentEvent::Resumed { by, at_ms: 3_000 })
             .unwrap();
-        agent.at(11);
-        agent
-            .apply(&AgentEvent::Paused {
-                by: "user".into(),
-                at_ms: 2_100,
-            })
-            .unwrap();
-        assert_eq!(agent.user_stop_generation(), 2);
-        let fenced = agent.deliveries_mut().take();
-        assert_eq!(
-            fenced
-                .iter()
-                .map(|s| (s.turn, s.fenced, s.rev, s.seq))
-                .collect::<Vec<_>>(),
-            [(2, true, 2, revision(10, 0))]
+        turn(&mut agent, 14, 2, TurnEvent::Started { at_ms: 3_200 });
+        assert!(told(&mut agent).is_empty());
+        assert_eq!(agent.deliveries_mut().take_launched(), [2]);
+        // A send admitted while nothing runs and stopped before its tool is launched is fenced,
+        // and shown stopped.
+        turn(&mut agent, 15, 2, thinking());
+        turn(&mut agent, 16, 2, completed());
+        turn(
+            &mut agent,
+            17,
+            5,
+            accepted(5, 17, Origin::User, Admission::Queue),
         );
-        let stopped = fenced[0].receipt("ag", "m2", "t2");
+        paused(&mut agent, 18);
+        let fenced = agent.deliveries_mut().take();
+        let last = fenced.last().unwrap();
+        assert_eq!(
+            (last.turn, last.fenced, last.rev, last.seq),
+            (5, true, 2, revision(18, 0))
+        );
+        let stopped = last.receipt("ag", "m5", "t5");
         assert_eq!(
             project(&stopped, "ag", 2, None, None).unwrap()["state"],
             STOPPED
         );
-        // Resumed, the first turn over, the held one runs: handed over at its start.
-        agent.at(12);
-        agent
-            .apply(&AgentEvent::Resumed {
-                by: "user".into(),
-                at_ms: 3_000,
-            })
-            .unwrap();
-        let running = TurnEvent::Moved {
-            activity: Activity::Thinking,
-            at_ms: 3_050,
-        };
-        turn(&mut agent, 13, 1, running);
-        let ended = TurnEvent::Settled {
-            outcome: Outcome::Completed,
-            at_ms: 3_100,
-        };
-        turn(&mut agent, 14, 1, ended);
-        turn(&mut agent, 15, 2, TurnEvent::Started { at_ms: 3_200 });
-        let handed = agent.deliveries_mut().take();
-        assert_eq!(
-            handed
-                .iter()
-                .map(|s| (s.turn, s.handed, s.rev, s.seq))
-                .collect::<Vec<_>>(),
-            [(2, true, 3, revision(15, 0))]
-        );
-        assert_eq!(
-            project(&handed[0].receipt("ag", "m2", "t2"), "ag", 2, None, None).unwrap()["state"],
-            HANDED_OVER
-        );
-        assert_eq!(agent.deliveries().waiting().count(), 0);
         // Folding the log tells nothing.
         let mut folded = Agent::new();
         folded.deliveries_mut().folding(true);
@@ -721,8 +745,10 @@ mod tests {
             1,
             accepted(1, 1, Origin::User, Admission::Queue),
         );
+        turn(&mut folded, 3, 1, TurnEvent::Started { at_ms: 1_100 });
         assert!(folded.deliveries_mut().take().is_empty());
-        assert_eq!(folded.deliveries().waiting().count(), 1);
+        assert!(folded.deliveries_mut().take_launched().is_empty());
+        assert_eq!(folded.deliveries().waiting().count(), 0);
     }
 
     #[test]
