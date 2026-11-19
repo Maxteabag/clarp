@@ -228,3 +228,18 @@ def test_idle_checks_back_off_persist_across_restarts_and_a_report_resets(monkey
     assert (lane["current_interval_seconds"], lane["last_activity"]) == (3600, "worked")
     [run] = janitors.list_runs(env["session"])
     assert (run["activity"], run["activity_summary"]) == ("worked", "Checked 1 working labels; 1 look wrong")
+
+
+def test_whatever_raises_after_the_answer_closes_the_run_with_its_reason(monkeypatch, env):
+    """R100's sweep: a raise after Jev answered left the run running."""
+    _enable_site(monkeypatch)
+    _jev(monkeypatch, "waiting_for_user", WAITING)
+    _lena()
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("planted")
+    monkeypatch.setattr(label_audit, "report", broken)
+    with pytest.raises(RuntimeError, match="planted"):           # the loop logs it
+        _worker().label_audit_once()
+    [run] = janitors.list_runs(env["session"])
+    assert run["status"] == "failed" and "RuntimeError" in run["error"]
