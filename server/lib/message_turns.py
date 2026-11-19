@@ -122,16 +122,22 @@ class TurnIndex:
             spans[trace] = (began, end)
         return spans
 
-    def trace_at(self, timestamp: Any) -> str:
-        return self.running_at(timestamp)[0]
+    def trace_at(self, timestamp: Any, *, reply: bool = False) -> str:
+        return self.running_at(timestamp, reply=reply)[0]
 
-    def running_at(self, timestamp: Any) -> tuple[str, int | None]:
+    def running_at(self, timestamp: Any, *, reply: bool = False) -> tuple[str, int | None]:
         """The turn that was running at ``timestamp``: its trace and when it
-        began (ms); ("", None) when there was none."""
+        began (ms); ("", None) when there was none. A prompt may be written a
+        moment before its turn is recorded, so for a prompt a turn that began
+        up to _START_SLACK_MS after it counts. A reply is never written before
+        its turn began: it is the latest turn's that had begun by its time,
+        also when that turn had settled (within its reach), never one that
+        began after it (R91: the agent's next turn, opened just after the
+        reply, took it from its own)."""
         ms = iso_ms(timestamp)
         if ms is None or not self._starts:
             return "", None
-        index = bisect.bisect_right(self._starts, ms + _START_SLACK_MS) - 1
+        index = bisect.bisect_right(self._starts, ms + (0 if reply else _START_SLACK_MS)) - 1
         if index < 0:
             return "", None
         row = self._rows[index]

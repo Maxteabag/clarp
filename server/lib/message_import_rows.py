@@ -132,6 +132,8 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
         key: list(rows) for key, rows in provenance._by_text.items()})
         if provenance is not None else None)
     trace_at = getattr(turn_index, "trace_at", lambda _: "")
+    reply_at = ((lambda stamp: turn_index.trace_at(stamp, reply=True))
+                if hasattr(turn_index, "trace_at") else (lambda _: ""))
     running_at = getattr(turn_index, "running_at", lambda _: ("", None))
     ended_before = getattr(turn_index, "ended_before", None)
     outcomes = getattr(turn_index, "outcomes", {})
@@ -142,7 +144,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
         if role == "assistant":
             if not turn.get("failed"):
                 unanswered_key = ""
-            trace = current_trace or trace_at(stamp)
+            trace = current_trace or reply_at(stamp)
         elif role == "user":
             text = str(turn.get("text") or "")
             if not text.lstrip().startswith(CALL_OPENING_OPEN):
@@ -786,7 +788,8 @@ def _upsert_row(database, *, agent_id: str, backend_session_id: str,
         (msg_id,),
     ).fetchone()
     row_trace = (request_trace if role == "assistant" else str(turn.get("trace_id") or "")) \
-        or turn_index.trace_at(timestamp) or ((existing["trace_id"] or "") if existing else "")
+        or turn_index.trace_at(timestamp, reply=role == "assistant") \
+        or ((existing["trace_id"] or "") if existing else "")
     outcome = turn_index.outcomes.get(row_trace)
     tools = message_turns.settle_statuses(tools, outcome)
     display_cells = message_turns.settle_statuses(display_cells, outcome)
