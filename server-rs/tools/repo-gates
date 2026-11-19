@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the repository's two gates (make test-critical, make test-guards) on the build machine.
-# Set CLARP_BUILD_FIRST=1 for a landing that needs the next available build slot.
+# Set CLARP_BUILD_FIRST=1 for a single priority step. A driver run by tools/build lease
+# passes its reservation to this command automatically.
 #
 #   server-rs/tools/repo-gates        prints critical_exit=N and guards_exit=N; exit 0 only if both are 0
 #
@@ -20,7 +21,7 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote" || exit 3
 rsync -a --delete --exclude .git --exclude .venv --exclude node_modules --exclude target/ --exclude __pycache__ \
     --exclude .pytest_cache --exclude 'desktop-rs/target' -e "ssh ${ssh_opts[*]}" "$root/" "$HOST:$remote/" || exit 3
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $(basename "$root") repo-gates"
-printf -v queued '%q ' env "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 server-rs/tools/build-queue.py "$who" bash -c '
+printf -v queued '%q ' env "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 server-rs/tools/build-queue.py "$who" bash -c '
     nice -n 19 ionice -c3 make test-critical
     c=$?
     echo critical_exit=$c

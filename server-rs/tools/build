@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Compile and test server-rs on the build machine, one job at a time.
-# Set CLARP_BUILD_FIRST=1 for a landing that needs the next available build slot.
+# Set CLARP_BUILD_FIRST=1 for a single priority step. For a whole landing, use
+# tools/build lease ./landing-driver; its build and repo-gates commands inherit the reservation.
 #
 #   server-rs/tools/build check            type-check the workspace (the inner loop: seconds once warm)
 #   server-rs/tools/build test [args...]   cargo test --workspace [args...]
@@ -12,6 +13,7 @@
 #                                          answered, compared with nothing: for a scenario without a reference yet
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
+#   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
 #   server-rs/tools/build status           who holds the queue, the machine's load and free build space
 # A build that needs more free space sets CLARP_BUILD_MIN_FREE_BYTES to its required byte count.
 #
@@ -69,9 +71,18 @@ remote="/var/tmp/clarp-build/$name"
 # Two checkouts of one name share that copy (a working tree and the clean checkout a landing is
 # built from). One of them at a time copies its sources and builds: the other waits here, so
 # that nothing is built from the sources of both.
+if [ "${1:-}" = lease ]; then
+    shift
+    exec python3 "$here/tools/build-queue.py" --drive "$HOST" "$name" "${CLAUDE_PWA_SESSION:-$(whoami)} $name" "$@"
+fi
 if [ "${1:-}" != status ]; then
-    exec 9>"/var/tmp/clarp-build-$name.lock"
-    flock 9
+    if [[ -z "${CLARP_BUILD_LEASE:-}" || "${CLARP_BUILD_LEASE_CHECKOUT:-}" != "$name" ]]; then
+        exec 9>"/var/tmp/clarp-build-$name.lock"
+        flock 9
+    fi
+    # A step outliving its driver still owns its copy until it finishes.
+    exec 8>"/var/tmp/clarp-build-$name.step.lock"
+    flock 8
 fi
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15)
 cmd="${1:-check}"; shift || true
@@ -121,7 +132,7 @@ if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
 fi
 who="${CLAUDE_PWA_SESSION:-$(whoami)}@$(hostname) $name $cmd"
 set +e
-printf -v queued '%q ' env "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$who" bash -c "
+printf -v queued '%q ' env "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$who" bash -c "
     source tools/build
     build_has_space $floor || exit \$?
     CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
