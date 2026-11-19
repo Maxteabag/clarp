@@ -40,7 +40,10 @@ impl Upstream {
     pub async fn open(app: &App, key: &str) -> Option<Self> {
         let choice = super::voice_told(app, &app.fleet.directory());
         if choice["provider"] == "gemini"
-            && app.oracle.calls.healthy()
+            && app
+                .oracle
+                .calls
+                .healthy(Duration::from_millis(app.config.second_voice_hold_ms))
             && let Some(secret) = app.ears.key("gemini")
         {
             let endpoint = &app.config.gemini_live_endpoint;

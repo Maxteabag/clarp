@@ -6,8 +6,14 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 pub const SETUP_SECONDS: u64 = 10;
+/// How long the second voice is passed over after it failed (`FAILURE_HOLD_SECONDS`).
+pub const HOLD_SECONDS: f64 = 600.;
 pub fn healthy(now: f64, failed_at: Option<f64>) -> bool {
-    failed_at.is_none_or(|at| now - at >= 600.)
+    healthy_for(now, failed_at, HOLD_SECONDS)
+}
+/// The same, with a hold the Host was told.
+pub fn healthy_for(now: f64, failed_at: Option<f64>, hold_seconds: f64) -> bool {
+    failed_at.is_none_or(|at| now - at >= hold_seconds)
 }
 
 #[derive(Debug)]

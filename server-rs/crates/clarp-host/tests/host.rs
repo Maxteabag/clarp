@@ -26671,7 +26671,9 @@ else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","t
         ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
     ];
-    let start = || place.start_in("private", &[], &world);
+    // The explainer's model is given five seconds here, not the product's 45: the slow one
+    // below is given up within the test's other work.
+    let start = || place.start_in("private", &["--explain-within-ms", "5000"], &world);
     let h = start();
     let anna = h.new_agent("Anna");
     let mike = h.new_agent("Mike");
@@ -27021,7 +27023,7 @@ else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","t
         scheduled_run["configuration"]["effective_chain"],
         json!({"source":"global","revision":6,"chain":[c1,c2]})
     );
-    // Run the explanation on a real clock while the routing transport is exercised below.
+    // The explanation runs out its five seconds while the routing transport is exercised below.
     let slow_model = json!({"provider":"codex","model":"timeout-explanation"});
     assert_eq!(
         save(
@@ -27275,7 +27277,7 @@ else:print(answer)
             .unwrap()["error"],
         legacy
     );
-    wait_a_minute("the explanation model's timeout", || {
+    wait_for("the explanation model's timeout", || {
         slow_explanation()["items"][0]["status"] == "failed"
     });
     assert_eq!(
@@ -27286,6 +27288,9 @@ else:print(answer)
     let finished = &runs["runs"][0];
     assert_eq!(finished["status"], "failed", "{finished}");
     assert_eq!(finished["demand_result"]["reason"], "timeout", "{finished}");
+    // Given up at the time the Host was told, not at the product's 45 seconds.
+    let took = finished["finished_at"].as_i64().unwrap() - finished["created_at"].as_i64().unwrap();
+    assert!(took < 40_000, "{finished}");
     assert_eq!(
         calls()
             .iter()
@@ -32243,13 +32248,16 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
 fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it_only_asks() {
     const ADMIN: &str = "the-administrators-token";
     const LIVE: &str = "agent_live_v1";
+    // How long a silent phone keeps the call: two seconds here, not the product's thirty.
+    const IDLE: Duration = Duration::from_secs(2);
     let place = Place::new("live-idle");
     let voice = stand_in_live_voice();
     let world = [
         ("CLARP_LIVE_ENDPOINT", voice.address.as_str()),
         ("OPENAI_API_KEY", "a-key-of-the-test"),
     ];
-    let host = place.start_in(ADMIN, &[], &world);
+    let idle_ms = IDLE.as_millis().to_string();
+    let host = place.start_in(ADMIN, &["--phone-idle-ms", &idle_ms], &world);
     let theo = host.new_agent("Theo");
     let agents = host.get("/agents/snapshot")["agents"].clone();
     let theo_id = agents[0]["agent_id"].as_str().unwrap().to_string();
@@ -32269,7 +32277,7 @@ fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it
     // Host is there: for longer than a silent phone is waited for, the call goes on.
     let began = Instant::now();
     for _ in 0..7 {
-        std::thread::sleep(Duration::from_secs(5));
+        std::thread::sleep(IDLE / 6);
         door.send(tungstenite::Message::Ping(Vec::new().into()))
             .unwrap();
     }
@@ -32278,7 +32286,7 @@ fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it
         next_words(&mut door),
         json!({ "type": "oracle_v2.playback_flush" })
     );
-    assert!(began.elapsed() >= Duration::from_secs(35));
+    assert!(began.elapsed() >= IDLE * 7 / 6);
     // Then it gives no sign of life at all, and the call is over for that.
     let silent_since = Instant::now();
     let stream = door.get_ref();
@@ -32296,7 +32304,8 @@ fn a_live_call_is_over_when_its_phone_gives_no_sign_of_life_and_goes_on_while_it
     assert_eq!(last, closed);
     let silent_for = silent_since.elapsed();
     assert!(
-        silent_for >= Duration::from_secs(29) && silent_for < Duration::from_secs(40),
+        silent_for >= IDLE.saturating_sub(Duration::from_millis(500))
+            && silent_for < IDLE * 2 + Duration::from_secs(2),
         "{silent_for:?}"
     );
     wait_for("the voice to be told that the call is over", || {
@@ -36798,6 +36807,7 @@ fn a_call_of_the_oracle_is_told_the_words_its_owner_prepared_for_its_contact() {
 
 #[test]
 fn a_call_of_the_oracle_uses_its_second_voice() {
+    const SECOND_VOICE_HOLD: Duration = Duration::from_secs(5);
     let place = Place::new("oracle-second-voice");
     let gpt = stand_in_oracle_voice();
     let router = stand_in_oracle_router();
@@ -36908,6 +36918,12 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         .arg("--cwd")
         .arg(place.root.join("work"))
         .args(["--listen", "127.0.0.1:0"])
+        // The second voice is passed over for five seconds after it failed, not the
+        // product's ten minutes: the test waits that out.
+        .args([
+            "--second-voice-hold-ms",
+            &SECOND_VOICE_HOLD.as_millis().to_string(),
+        ])
         .envs(world.iter().copied())
         .env("CLARP_HOST_TOKEN", "admin")
         .stdout(Stdio::piped())
@@ -37131,9 +37147,13 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
     held.told_of("session.started", 1);
     assert_eq!(connections.load(Ordering::SeqCst), before + 1);
     check_status(&host, true, true);
+    assert!(
+        failed_by.elapsed() < SECOND_VOICE_HOLD,
+        "the hold was over before the held call was looked at"
+    );
     held.says(&json!({"type":"session.close"}));
     held.ends();
-    std::thread::sleep(Duration::from_secs(600).saturating_sub(failed_by.elapsed()));
+    std::thread::sleep(SECOND_VOICE_HOLD.saturating_sub(failed_by.elapsed()));
     let recovered = open();
     let _socket = end();
     assert_eq!(

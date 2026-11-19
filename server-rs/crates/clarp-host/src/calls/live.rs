@@ -809,7 +809,7 @@ async fn session(app: &App, line: &mut Line, joined: Joined) {
     }
     let mut tick = tokio::time::interval(Duration::from_secs_f64(rules::TICK_S));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let idle = Duration::from_secs_f64(rules::PHONE_IDLE_S);
+    let idle = Duration::from_millis(app.config.phone_idle_ms);
     let mut phone_spoke = Instant::now();
     let mut signs_seen = line.signs_of_life();
     let (found, mut discoveries) = mpsc::channel(1);
