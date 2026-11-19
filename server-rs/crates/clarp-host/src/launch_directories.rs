@@ -15,22 +15,12 @@ use std::{
 
 async fn zoxide(args: &[&str]) -> Option<(bool, String)> {
     let program = std::env::var_os("CLARP_ZOXIDE_PROGRAM").unwrap_or_else(|| "zoxide".into());
-    let mut cmd = tokio::process::Command::new(program);
+    let mut cmd = crate::child::asynchronous(program);
     cmd.args(args)
         .kill_on_drop(true)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    for name in crate::OWN_SECRETS {
-        cmd.env_remove(name);
-    }
-    for (name, value) in crate::child_environment() {
-        if let Some(value) = value {
-            cmd.env(name, value);
-        } else {
-            cmd.env_remove(name);
-        }
-    }
     let child = cmd.spawn().ok()?;
     let output = tokio::time::timeout(Duration::from_millis(500), child.wait_with_output())
         .await
