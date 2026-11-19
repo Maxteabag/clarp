@@ -164,3 +164,58 @@ def test_a_copy_without_its_own_row_takes_none_sent_for_another_turn(sent, chose
     assert message_import_rows._own_turns_row(
         None, rows, "turn-2", BASE + 40_000, trace_ids=traces,
         ran_at=lambda trace: index.ran_at(trace, copy_at)) == chosen
+
+
+@pytest.mark.parametrize("second", ["its own turn a minute later", "steered into the first turn"])
+def test_the_same_words_sent_twice_by_the_user_link_each_copy_to_its_own_row(tmp_path, monkeypatch, second):
+    """Two 'yes' a minute apart, each its own turn; or the second steered into the first turn while it
+    runs (its row has a trace with no turn of its own). Each transcript copy takes its own row: no
+    copy is stored beside its row, and each reply carries the turn it answers."""
+    now = [BASE]
+    monkeypatch.setattr(time, 'time', lambda: now[0] / 1000)
+    aid = agents.create_agent(persona='Ann', session='ann', voice_id='v', cwd=str(tmp_path), backend='claude')
+    agents.bind_backend_session(aid, 'native')
+    path = tmp_path / 'native.jsonl'
+    path.write_text('')
+
+    def line(role, content, at):
+        with path.open('a') as stream:
+            stream.write(json.dumps({'type': role, 'uuid': f'{role}-{at}', 'timestamp': clock.iso_from_ms(at),
+                                     'message': {'role': role, 'model': 'synthetic-fixture', 'content': content}}) + '\n')
+
+    def send(cid, trace, at, *, opens):
+        now[0] = at
+        agents.record_user_message(agent_id=aid, backend_session_id='native', client_msg_id=cid, text="yes",
+                                   trace_id=trace, origin="user")
+        if opens:
+            agents.open_turn(agent_id=aid, source='pwa', trace_id=trace)
+            turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROMPT_ADMITTED, {'trace_id': trace, 'origin': 'user'})
+
+    def settle(trace, at):
+        now[0] = at
+        turn_lifecycle.transition(aid, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK, {'trace_id': trace})
+
+    send("first", "turn-a", BASE, opens=True)
+    line('user', "yes", BASE + 500)
+    if second == "steered into the first turn":
+        send("again", "steered-b", BASE + 3000, opens=False)
+        line('user', "yes", BASE + 3500)
+        line('assistant', [{'type': 'text', 'text': "Done, both noted."}], BASE + 6000)
+        settle("turn-a", BASE + 7000)
+        expected = {"Done, both noted.": "turn-a"}
+    else:
+        line('assistant', [{'type': 'text', 'text': "Noted the first."}], BASE + 4000)
+        settle("turn-a", BASE + 5000)
+        send("again", "turn-b", BASE + 60_000, opens=True)
+        line('user', "yes", BASE + 60_500)
+        line('assistant', [{'type': 'text', 'text': "Noted the second."}], BASE + 64_000)
+        settle("turn-b", BASE + 65_000)
+        expected = {"Noted the first.": "turn-a", "Noted the second.": "turn-b"}
+    for _ in range(2):
+        now[0] += 5
+        transcript_incremental.import_transcript(backend='claude', path=path, agent_id=aid,
+                                                 backend_session_id='native')
+        db.close_local()
+        rows = message_store.list_messages(agent_id=aid, backend_session_id='native')
+        assert [row["id"] for row in rows if row["role"] == "user"] == ["u-first", "u-again"]
+        assert {row["text"]: row["trace_id"] for row in rows if row["role"] == "assistant"} == expected
