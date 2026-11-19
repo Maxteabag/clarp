@@ -12,7 +12,7 @@ from typing import Any, NamedTuple
 from .clock import now_ms
 from .message_text import (_related, _strip_voice_markup, strip_injected_blocks,
                            strip_delivery_context, CALL_OPENING_OPEN)  # noqa: F401 - _related is used from here too
-from .message_turns import iso_ms
+from .message_turns import _START_SLACK_MS, iso_ms
 from .message_import_common import (
     _FINAL_TWIN_WINDOW_S,
     _norm_text,
@@ -133,7 +133,7 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
         if provenance is not None else None)
     trace_at = getattr(turn_index, "trace_at", lambda _: "")
     running_at = getattr(turn_index, "running_at", lambda _: ("", None))
-    ran_at = getattr(turn_index, "ran_at", None)
+    ended_before = getattr(turn_index, "ended_before", None)
     outcomes = getattr(turn_index, "outcomes", {})
     result = {}
     for index, turn in enumerate(turns):
@@ -160,8 +160,9 @@ def _parsed_traces(turns, turn_index, provenance, client_traces, *,
                     if rows:
                         running, began = running_at(stamp)
                         own = _own_turns_row(
-                            None, rows, running, began, trace_ids=client_traces,
-                            ran_at=None if ran_at is None else (lambda sent, at=stamp: ran_at(sent, at)))
+                            None, rows, running, began, trace_ids=client_traces, written_at=stamp,
+                            ended_before=None if ended_before is None else (
+                                lambda sent, at=stamp: ended_before(sent, at)))
                     if rows and own is not None:
                         chosen = copied.take(key, rows, own)
                         current_trace = client_traces.get(chosen[0]) or ""
@@ -523,7 +524,7 @@ class _ClientProvenance:
 
 
 def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *,
-                   trace_ids=None, ran_at=None) -> int | None:
+                   trace_ids=None, written_at: Any = None, ended_before=None) -> int | None:
     """Which of several client rows with the same words a transcript turn
     belongs to. ``trace`` and ``began`` are the turn that was running when
     the provider wrote its copy (from the turn index).
@@ -540,12 +541,13 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     (issue 285: the same words sent three times to an agent that could not
     run, then a fourth time).
 
-    Neither fallback takes a row sent for another turn that was not running
-    when the copy was written (``ran_at``): that row is its own turn's. Taken
-    by a copy that has no row of its own, it left its turn without one, and
-    that turn took the next one's: with the same words every time, every
-    later reply carried an earlier or later prompt's trace, and the last an
-    old failed send's (R89). None: no row is this copy's."""
+    Neither fallback takes a row that cannot be this copy's: one sent after
+    the copy was written (``written_at``, give or take _START_SLACK_MS), or
+    one sent for a turn that had ended before it (``ended_before``). With the
+    same words every time, a copy with no row of its own took the next
+    turn's row, that turn the one after, and the last an old failed send's:
+    every later reply carried another prompt's trace (R89). None: no row is
+    this copy's, and it is stored as itself."""
     if not trace:
         return 0
 
@@ -556,12 +558,21 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
             "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
         return (sent["trace_id"] or "") if sent is not None else ""
 
-    sent = [sent_trace(row) for row in rows]
-    for index, sent_for in enumerate(sent):
-        if sent_for == trace:
-            return index
-    free = [index for index, sent_for in enumerate(sent)
-            if ran_at is None or not sent_for or ran_at(sent_for) is not False]
+    if len(rows) > 1 or ended_before is not None or written_at is not None:
+        sent = [sent_trace(row) for row in rows]
+        for index, sent_for in enumerate(sent):
+            if sent_for == trace:
+                return index
+    else:
+        return 0
+    copy_at = iso_ms(written_at)
+
+    def could_be(index):
+        sent_at = iso_ms(rows[index][3])
+        if copy_at is not None and sent_at is not None and sent_at > copy_at + _START_SLACK_MS:
+            return False
+        return not (sent[index] and ended_before is not None and ended_before(sent[index]))
+    free = [index for index in range(len(rows)) if could_be(index)]
     if began is not None:
         for index in free:
             sent_at = iso_ms(rows[index][3])

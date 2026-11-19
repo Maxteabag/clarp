@@ -115,7 +115,8 @@ def test_every_reply_carries_its_own_prompts_trace_and_none_is_shown_twice(
 
 
 def test_replies_given_another_prompts_trace_carry_their_own_after_the_next_import(tmp_path, monkeypatch):
-    monkeypatch.setattr(message_turns.TurnIndex, "ran_at", lambda self, trace, timestamp: None)   # as before
+    monkeypatch.setattr(message_import_rows, "_START_SLACK_MS", 10**15)      # as before: no row is ruled out
+    monkeypatch.setattr(message_turns.TurnIndex, "ended_before", lambda self, trace, timestamp: False)
     world = _Automation(tmp_path, monkeypatch, unsent=(2,), old_sends=3)
     imported, left = world.replies()
     assert sum(carried != right for _at, carried, right in imported) == 12 and left == ["turn-2"]
@@ -132,16 +133,16 @@ def _index(*turns):
           "outcome": "completed"} for trace, started, settled in sorted(turns, key=lambda turn: turn[1])])
 
 
-def test_a_turn_runs_from_two_seconds_before_it_began_until_it_settled_or_the_next_began():
+def test_a_turn_ended_when_it_settled_or_the_next_turn_began():
     index = _index(("t", 10_000, 20_000), ("t", 11_000, 21_000), ("never", 30_000, None),
                    ("never", 31_000, 32_000), ("late", 40_000, 60_000), ("next", 50_000, None))
-    assert [index.ran_at("t", BASE + at) for at in (7_999, 8_000, 21_000, 21_001)] == [False, True, True, False]
+    assert [index.ended_before("t", BASE + at) for at in (21_000, 21_001)] == [False, True]
     # One row never settled: the turn ended when the next turn began, not never.
-    assert [index.ran_at("never", BASE + at) for at in (32_000, 40_000, 40_001)] == [True, True, False]
+    assert [index.ended_before("never", BASE + at) for at in (40_000, 40_001)] == [False, True]
     # Settled after the next turn began: it ended at that start.
-    assert [index.ran_at("late", BASE + at) for at in (50_000, 50_001)] == [True, False]
-    assert index.ran_at("next", BASE + 10**9) is True                  # the latest still runs
-    assert index.ran_at("steered", BASE + 15_000) is None
+    assert [index.ended_before("late", BASE + at) for at in (50_000, 50_001)] == [False, True]
+    assert index.ended_before("next", BASE + 10**9) is False             # the latest still runs
+    assert index.ended_before("steered", BASE + 15_000) is False         # no turn of its own
 
 
 def _rows(*sent):
@@ -149,21 +150,23 @@ def _rows(*sent):
 
 
 @pytest.mark.parametrize("sent, chosen", [
-    ((("turn-3", 60_000), ("turn-4", 80_000)), None),                  # both sent for later turns
-    ((("old-0", -900_000), ("turn-4", 80_000)), None),                 # an old failed send, a later turn's
-    ((("steered", 41_000), ("turn-4", 80_000)), 0),                    # steered into this turn: no turn of its own
+    ((("turn-3", 60_000), ("turn-4", 80_000)), None),                  # both sent after the copy
+    ((("old-0", -900_000), ("turn-4", 80_000)), None),                 # an old send's turn had ended
+    ((("steered", 41_000), ("turn-4", 80_000)), 0),                    # steered into this turn
     ((("turn-4", 80_000), ("turn-2", 39_000)), 1),                     # its own row, wherever it stands
-    ((("racing", 41_500),), 0),                                        # a turn beginning just after the copy
-], ids=["later turns", "old and later", "steered", "its own", "running at the time"])
-def test_a_copy_without_its_own_row_takes_none_sent_for_another_turn(sent, chosen):
+    ((("late", 40_500),), 0),                                          # sent before; its turn recorded later
+    ((("old-0", -900_000),), None),                                    # the one row left is an old send's
+], ids=["sent after the copy", "old and later", "steered", "its own", "a turn recorded late",
+        "only an old send"])
+def test_a_copy_without_its_own_row_takes_none_that_cannot_be_its_own(sent, chosen):
     index = _index(("turn-2", 40_000, 55_000), ("turn-3", 60_000, 75_000), ("turn-4", 80_000, 95_000),
-                   ("old-0", -900_000, -899_000), ("racing", 42_000, 50_000))
+                   ("old-0", -900_000, None), ("late", 300_000, 301_000))
     rows = _rows(*sent)
     traces = {row[0]: trace for row, (trace, _at) in zip(rows, sent)}
-    copy_at = BASE + 41_000
+    copy_at = clock.iso_from_ms(BASE + 41_000)
     assert message_import_rows._own_turns_row(
-        None, rows, "turn-2", BASE + 40_000, trace_ids=traces,
-        ran_at=lambda trace: index.ran_at(trace, copy_at)) == chosen
+        None, rows, "turn-2", BASE + 40_000, trace_ids=traces, written_at=copy_at,
+        ended_before=lambda trace: index.ended_before(trace, copy_at)) == chosen
 
 
 @pytest.mark.parametrize("second", ["its own turn a minute later", "steered into the first turn"])
