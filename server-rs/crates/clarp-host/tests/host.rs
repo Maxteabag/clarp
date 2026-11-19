@@ -15824,8 +15824,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     assert!(
         lines
             .iter()
-            .any(|line| **line
-                == format!("requestBodyLarge family=/artifacts bytes={DEFAULT}"))
+            .any(|line| **line == format!("requestBodyLarge family=/artifacts bytes={DEFAULT}"))
     );
 }
 
