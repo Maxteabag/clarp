@@ -10,6 +10,7 @@
 //! message, and the request's mark that it was told is written in the same append: an
 //! answer is told once, also across a kill of the Host between the two.
 
+pub(crate) mod events;
 use std::sync::Arc;
 
 use axum::extract::{Extension, Path, Query, RawQuery, State};
@@ -674,6 +675,44 @@ async fn get_artifact(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let rest = rest.trim_matches('/');
+    if let Some(id) = rest.strip_suffix("/events-config") {
+        events::full(&principal)?;
+        return Ok(Json(events::configure(&app, id, None).await?).into_response());
+    }
+    if let Some(id) = rest.strip_suffix("/events") {
+        events::full(&principal)?;
+        let integer = |key: &str| {
+            query
+                .get(key)
+                .filter(|v| !v.is_empty())
+                .map(|s| {
+                    python::int(s).ok_or_else(|| {
+                        refused(
+                            StatusCode::BAD_REQUEST,
+                            format!("invalid literal for int() with base 10: '{s}'"),
+                        )
+                    })
+                })
+                .transpose()
+        };
+        let page = events::page(
+            &app,
+            id,
+            integer("after")?.unwrap_or(0),
+            integer("limit")?.unwrap_or(100),
+            integer("through")?,
+        )
+        .await?;
+        return match query.get("format").map(String::as_str).unwrap_or("json") {
+            "" | "json" => Ok(Json(page).into_response()),
+            "jsonl" => Ok((
+                [(header::CONTENT_TYPE, "application/x-ndjson")],
+                events::jsonl(&page),
+            )
+                .into_response()),
+            _ => Err(refused(StatusCode::BAD_REQUEST, "unsupported event format")),
+        };
+    }
     if let Some(artifact_id) = rest.strip_suffix("/html") {
         return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, &headers).await;
     }
@@ -928,9 +967,28 @@ async fn made(
 async fn post_artifact(
     State(app): State<App>,
     Path(rest): Path<String>,
+    Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, ApiError> {
+    let path = rest.trim_matches('/');
+    if let Some(id) = path.strip_suffix("/events") {
+        events::full(&principal)?;
+        let data = clarp_kernel::artifacts::form_events::posted(&body)
+            .map_err(|why| refused(StatusCode::CONFLICT, why))?;
+        return Ok(Json(events::append(&app, id, &data).await?));
+    }
+    if let Some(id) = path.strip_suffix("/events-config") {
+        events::full(&principal)?;
+        return Ok(Json(
+            events::configure(
+                &app,
+                id,
+                Some(&serde_json::from_slice(&body).unwrap_or(Value::Null)),
+            )
+            .await?,
+        ));
+    }
     let capable = render_spec::capable(&app, &headers);
     if let Some(artifact_id) = rest.trim_matches('/').strip_suffix("/submit") {
         return Ok(Json(

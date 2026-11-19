@@ -225,6 +225,7 @@ async fn serve(config: Config) -> Result<(), String> {
     });
     let app = App {
         turns,
+        form_event_writer: Arc::default(),
         android_chip: Arc::default(),
         android,
         config: config.clone(),

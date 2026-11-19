@@ -99,6 +99,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_reports", 19),
     ("html_report_revisions", 49),
     ("html_form_network", 59),
+    ("html_form_events", 51),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
     // Pairing codes and devices with tokens of their own.
@@ -281,6 +282,7 @@ const HEARTBEAT: Duration = Duration::from_secs(10);
 /// Everything a handler can reach.
 #[derive(Clone)]
 pub struct App {
+    pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
     pub turns: Arc<crate::turn_identity::Signer>,
