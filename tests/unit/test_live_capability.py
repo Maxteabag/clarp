@@ -12,6 +12,8 @@ from lib.live_hub import LiveFanout, LiveHub, LiveRelay
 from lib.runtime_rpc_server import RuntimeRPCServer
 import pytest
 
+from short_sockets import socket_path as short_socket
+
 pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
 LIVE_FEATURES = {"live_items", "live_activity_push"}
@@ -54,9 +56,9 @@ def _wait(predicate, timeout=5.0):
 def test_a_relay_serves_only_while_its_runtime_has_a_live_hub(tmp_path):
     from lib.audio_stream import AudioStream
 
-    old = RuntimeRPCServer(tmp_path / "old.sock", dispatch_service=_Dispatch(), status_provider=lambda: {})
+    old = RuntimeRPCServer(short_socket("old.sock"), dispatch_service=_Dispatch(), status_provider=lambda: {})
     threading.Thread(target=old.serve_forever, daemon=True).start()
-    relay = LiveRelay(tmp_path / "old.sock", AudioStream(tmp_path / "a1")).start()
+    relay = LiveRelay(short_socket("old.sock"), AudioStream(tmp_path / "a1")).start()
     try:
         time.sleep(0.5)
         assert relay.serving is False          # an older runtime: no hub, no live events
@@ -66,11 +68,11 @@ def test_a_relay_serves_only_while_its_runtime_has_a_live_hub(tmp_path):
         old.server_close()
 
     fanout = LiveFanout()
-    new = RuntimeRPCServer(tmp_path / "new.sock", dispatch_service=_Dispatch(), status_provider=lambda: {})
+    new = RuntimeRPCServer(short_socket("new.sock"), dispatch_service=_Dispatch(), status_provider=lambda: {})
     new.live_fanout = fanout
     new.live_hub = LiveHub(sink=fanout.publish)
     threading.Thread(target=new.serve_forever, daemon=True).start()
-    relay = LiveRelay(tmp_path / "new.sock", AudioStream(tmp_path / "a2")).start()
+    relay = LiveRelay(short_socket("new.sock"), AudioStream(tmp_path / "a2")).start()
     try:
         assert _wait(lambda: relay.serving is True)
         new.shutdown()

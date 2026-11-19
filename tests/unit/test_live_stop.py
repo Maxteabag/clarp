@@ -17,6 +17,7 @@ from lib.live_hub import LiveFanout, LiveHub
 from lib.runtime_bridge import RuntimeClient
 from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.turn_lifecycle import TurnEvent
+from short_sockets import socket_path as short_socket
 
 
 class _Dispatch:
@@ -36,12 +37,12 @@ def split_host(tmp_path):
     server (no hub of its own, a runtime client configured)."""
     fanout = LiveFanout()
     hub = LiveHub(sink=fanout.publish)
-    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=_Dispatch(),
+    runtime = RuntimeRPCServer(short_socket("rt.sock"), dispatch_service=_Dispatch(),
                                status_provider=lambda: {})
     runtime.live_fanout, runtime.live_hub = fanout, hub
     threading.Thread(target=runtime.serve_forever, daemon=True).start()
     live_hub.install(None)
-    backends.configure_runtime_client(RuntimeClient(tmp_path / "rt.sock"))
+    backends.configure_runtime_client(RuntimeClient(short_socket("rt.sock")))
     try:
         yield hub
     finally:

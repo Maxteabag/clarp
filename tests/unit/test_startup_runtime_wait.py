@@ -21,6 +21,7 @@ import pytest
 
 from lib import runtime_release
 from lib.runtime_bridge import RuntimeClient, RuntimeUnavailable
+from short_sockets import socket_path as short_socket
 
 
 _REPO_SERVER = pathlib.Path(__file__).resolve().parents[2] / "server" / "server.py"
@@ -53,7 +54,7 @@ server = _repo_server()
 @pytest.fixture
 def silent_runtime(tmp_path):
     """A runtime socket that accepts connections and never answers."""
-    path = tmp_path / "rt.sock"
+    path = short_socket("rt.sock")
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(str(path))
     srv.listen(8)

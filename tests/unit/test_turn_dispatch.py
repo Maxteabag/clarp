@@ -16,6 +16,7 @@ from lib.turn_dispatch import (
     clear_for_agent,
 )
 import lib.turn_dispatch as _td
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -2224,7 +2225,7 @@ def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monk
     service.dispatch(text="delegated work", requested_session="mike", trace_id="oracle-work",
                      origin="oracle")
     monkeypatch.setattr(registry, "interrupt", lambda *_: 0)
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=service)
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"), dispatch_service=service)
     try:
         params = {"agent_id": agent_id, "backend": "claude", "strict": True, "hold": True}
         # Ordinary in-flight work still requires confirmed interruption.
@@ -2967,7 +2968,7 @@ def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, mon
     from lib.prompt_admissions import PromptAdmission
     from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, agent_id = _make_service(tmp_path)
-    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    runtime = RuntimeRPCServer(short_socket("rt.sock"), dispatch_service=owner)
     try:
         client = _wire_runtime(runtime)
         http = TurnDispatchService(
@@ -3001,7 +3002,7 @@ def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch)
     from lib import janitor_autonomy
     from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, _agent_id = _make_service(tmp_path)
-    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    runtime = RuntimeRPCServer(short_socket("rt.sock"), dispatch_service=owner)
     checks = []
     monkeypatch.setattr(janitor_autonomy, "validate_dispatch",
                         lambda *args: checks.append(args) or False)
