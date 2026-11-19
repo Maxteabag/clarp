@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use crate::edge::{ApiError, App};
 use crate::library;
-use crate::tools::{NOT_HERE, ToolAnswer, ToolCall};
+use crate::tools::{ToolAnswer, ToolCall};
 
 const USAGE: &str = "usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | \
 publish-render-spec REQUEST_FILE [--validate-only] | \
@@ -580,6 +580,97 @@ async fn publish_render_spec(app: &App, call: &ToolCall, rest: &[String]) -> Too
     }
 }
 
+async fn form_events(app: &App, call: &ToolCall, args: &[String]) -> Result<Value, String> {
+    use library::events;
+    use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::Path};
+    let options = parse(
+        args,
+        &["--after", "--limit", "--draft-key", "--output"],
+        &["--overwrite"],
+        &["artifact_id"],
+    )?;
+    let id = &options.positional[0];
+    let number = |name| {
+        options
+            .option(name)
+            .map(|s| {
+                clarp_kernel::python::int(s)
+                    .ok_or_else(|| format!("argument {name}: invalid int value: '{s}'"))
+            })
+            .transpose()
+    };
+    let mut after = number("--after")?.unwrap_or(0);
+    let limit = number("--limit")?.unwrap_or(100);
+    if let Some(key) = options.option("--draft-key") {
+        let data = json!({"draft_key":(!key.is_empty()).then_some(key)});
+        return events::configure(app, id, Some(&data))
+            .await
+            .map_err(|e| refusal(&e));
+    }
+    let mut page = events::page(app, id, after, limit, None)
+        .await
+        .map_err(|e| refusal(&e))?;
+    let Some(output) = options.option("--output") else {
+        return Ok(page);
+    };
+    let target = Path::new(&call.cwd).join(output);
+    let overwrite = options.flags.contains("--overwrite");
+    if !overwrite && target.exists() {
+        return Err("output already exists; use --overwrite to refresh it".into());
+    }
+    let parent = target.parent().ok_or("output needs a parent directory")?;
+    let temp = parent.join(format!(".form-events-{}", crate::ids::uuid()));
+    let io = |e: std::io::Error| e.to_string();
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temp)
+        .map_err(io)?;
+    struct Temporary(std::path::PathBuf);
+    impl Drop for Temporary {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let temporary = Temporary(temp);
+    let snapshot = page["snapshot_seq"]
+        .as_i64()
+        .ok_or("invalid snapshot cursor")?;
+    let mut total = 0;
+    loop {
+        file.write_all(events::jsonl(&page).as_bytes())
+            .map_err(io)?;
+        total += page["events"].as_array().map_or(0, Vec::len);
+        if page["has_more"] != true {
+            break;
+        }
+        let next = i128::from(page["next_seq"].as_i64().ok_or("invalid event cursor")?);
+        if next <= after {
+            return Err("event cursor did not advance".into());
+        }
+        after = next;
+        page = events::page(app, id, after, limit, Some(snapshot.into()))
+            .await
+            .map_err(|e| refusal(&e))?;
+    }
+    file.sync_all().map_err(io)?;
+    if overwrite {
+        fs::rename(&temporary.0, &target).map_err(io)?;
+    } else {
+        fs::hard_link(&temporary.0, &target).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "output appeared during export; refusing to replace it".into()
+            } else {
+                e.to_string()
+            }
+        })?;
+    }
+    Ok(
+        json!({"artifact_id":id,"output":target,"events":total,"snapshot_seq":snapshot,"next_seq":page["next_seq"]}),
+    )
+}
+
 /// Answers the tool.
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     let failed = |why: String| ToolAnswer::said(1, format!("agent_artifacts: {why}"));
@@ -588,15 +679,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     };
     let printed = |value: &Value| ToolAnswer::printed(0, value.to_string());
     let result: Result<Value, String> = match (cmd.as_str(), rest.len()) {
-        ("form-events", _) => {
-            return ToolAnswer::said(
-                NOT_HERE,
-                format!(
-                    "clarp-agent-artifacts {cmd}: not available on this Host yet (the Rust \
-                     Host). Nothing was done."
-                ),
-            );
-        }
+        ("form-events", _) => form_events(app, call, rest).await,
         ("publish-render-spec", _) => return publish_render_spec(app, call, rest).await,
         ("create-form", _) => create_form(app, call, rest).await,
         ("create-report", _) => create_report(app, call, rest).await,
