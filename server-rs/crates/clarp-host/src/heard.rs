@@ -17,6 +17,7 @@
 //! lose what was said. Only the last one's failure is the answer. These are settings the
 //! owner makes from an app (`POST /transcription-providers`), kept with the fleet.
 
+pub(crate) mod call;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -60,6 +61,7 @@ pub struct Ears {
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
     own: Option<(Arc<dyn Listener>, String)>,
+    settings_lock: tokio::sync::Mutex<()>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
     /// Deepgram Nova, which is there when its key is.
@@ -106,6 +108,10 @@ struct Chosen {
 type Refused = (StatusCode, String);
 
 impl Ears {
+    fn available(&self) -> bool {
+        self.own.is_some() || PROVIDERS.iter().any(|p| self.has(p.id))
+    }
+
     /// The engines this Host was configured with. The Host's own is started at once, so
     /// that its model is loaded when the first clip comes.
     pub fn new(config: &Config) -> Self {
@@ -164,6 +170,7 @@ impl Ears {
             judge: Default::default(),
             vocab: Default::default(),
             workspace: Default::default(),
+            settings_lock: Default::default(),
             scribe: Arc::new(scribe),
             nova: Arc::new(nova),
             ink: ink("ink-2"),
@@ -229,8 +236,7 @@ impl Ears {
     /// The engine a name stands for on this Host. With the engine comes what is said while
     /// it loads.
     fn engine_of(&self, model: &str) -> Result<Chosen, Refused> {
-        let built = ["elevenlabs", "deepgram", "google"];
-        if self.own.is_none() && !built.iter().any(|provider| self.has(provider)) {
+        if !self.available() {
             return Err((StatusCode::SERVICE_UNAVAILABLE, heard::DISABLED.to_string()));
         }
         let own_id = self.own_id();
@@ -286,6 +292,7 @@ impl Ears {
         language: &str,
         listen_for: &str,
         clip: (&axum::body::Bytes, &str),
+        observed: &mut Option<String>,
     ) -> Result<Heard, Told> {
         let chosen = self
             .engine_of(model)
@@ -311,18 +318,23 @@ impl Ears {
                 language: handed.as_deref(),
                 wait: WAITS,
             };
-            engine.hear(clip, asked)
+            let mut captured = None;
+            let result = engine.hear_observed(clip, asked, &mut captured);
+            (result, captured)
         })
         .await;
-        match said {
-            Ok(Ok(said)) => Ok(said),
-            Ok(Err(Deaf::Loading)) => Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading)),
-            Ok(Err(Deaf::Busy)) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY)),
-            Ok(Err(Deaf::Failed(why))) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why)),
-            Err(_) => {
-                let cut_off = "the clip could not be heard";
-                Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, cut_off))
-            }
+        let (result, captured) = said.map_err(|_| {
+            refuse(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "the clip could not be heard",
+            )
+        })?;
+        *observed = captured;
+        match result {
+            Ok(said) => Ok(said),
+            Err(Deaf::Loading) => Err(refuse(StatusCode::SERVICE_UNAVAILABLE, chosen.loading)),
+            Err(Deaf::Busy) => Err(refuse(StatusCode::TOO_MANY_REQUESTS, heard::BUSY)),
+            Err(Deaf::Failed(why)) => Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, why)),
         }
     }
 
@@ -432,15 +444,56 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
     let hands_free = heard::truthy(Some(&header_text(headers, "x-hands-free")));
     let job = heard::job_id(Some(&header_text(headers, "x-transcription-id")))
         .map_err(|why| refuse(StatusCode::BAD_REQUEST, why))?;
-    let fingerprint = heard::fingerprint(&audio, &content_type, &requested, hands_free);
-    if headers.contains_key("x-clarp-call-id") {
-        // A clip that names its call is heard by its call's own rules, or not at all: it is
-        // never taken as said in a chat. This Host has calls, and not yet rules of their own
-        // for how each is heard; an app sends such a clip only to a Host that says it has.
-        let why = "how the clips of a call are heard is not built on this Host yet";
-        let none = json!({ "ok": false, "error": why });
-        return Err((StatusCode::CONFLICT, none));
-    }
+    let scope = if headers.contains_key("x-clarp-call-id") {
+        use crate::edge::Principal;
+        let owner = match parts.extensions.get::<Principal>() {
+            Some(Principal::Device { device_id, .. }) => device_id.as_str(),
+            Some(Principal::Administrator) if app.config.auth_token.is_empty() => "",
+            Some(Principal::Administrator) => clarp_kernel::calls::ADMINISTRATOR,
+            Some(Principal::Tools) => {
+                return Err(refuse(
+                    StatusCode::FORBIDDEN,
+                    "an agent's tools may ask for tools only",
+                ));
+            }
+            None => return Err(refuse(StatusCode::UNAUTHORIZED, "authentication required")),
+        };
+        let id = header_text(headers, "x-clarp-call-id");
+        let session = header_text(headers, "x-transcription-session");
+        let scope = app
+            .calls
+            .ask(app, |calls, at, _, _| {
+                let record = calls
+                    .record(clarp_kernel::python::strip(&id))
+                    .map(|(owner, call)| (owner, call.told(at.now_ms)));
+                clarp_kernel::call_transcription::scope(
+                    owner,
+                    at.host_id,
+                    &id,
+                    &session,
+                    record.as_ref().map(|(o, c)| (*o, c)),
+                )
+            })
+            .await
+            .map_err(|e| refuse(StatusCode::SERVICE_UNAVAILABLE, e.0))?
+            .map_err(|e| {
+                (
+                    StatusCode::from_u16(e.status).unwrap_or(StatusCode::CONFLICT),
+                    e.body,
+                )
+            })?;
+        Some(scope)
+    } else {
+        None
+    };
+
+    let fingerprint = heard::scoped_fingerprint(
+        &audio,
+        &content_type,
+        &requested,
+        hands_free,
+        scope.as_ref(),
+    );
 
     // The same job is answered once at a time: a request that comes again while the first
     // is still being heard waits for it, and is then given what the first was given.
@@ -460,32 +513,129 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         }
     }
 
-    // The clip is for the agent its user is looking at: that agent's engines, when it has
-    // its own, and its language.
-    let directory = app.fleet.directory();
-    let (own, language) = spoken_to(&directory, &ears.language);
-    let order = ears.order(&requested, &own, &ears.default_engine(&directory));
     let trace = ids::hex(8);
-    let session = directory
-        .focus
-        .as_deref()
-        .and_then(|id| directory.named(id))
-        .map_or("", |m| m.record.session.as_str());
-    let selected = order.first().map_or(requested.as_str(), String::as_str);
     let began = std::time::Instant::now();
-    let (audit, run_id) =
-        crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
-            .await
-            .unwrap_or_default();
-    let listen_for = audit["payload"].as_str().unwrap_or("");
+    let directory = app.fleet.directory();
+    let session = scope
+        .as_ref()
+        .map(|s| s.session.as_str())
+        .or_else(|| {
+            directory
+                .focus
+                .as_deref()
+                .and_then(|id| directory.named(id))
+                .map(|m| m.record.session.as_str())
+        })
+        .unwrap_or("");
+    let (said, report, run_id) = if scope.is_some() {
+        let (said, report, id) = call::hear(
+            app,
+            session,
+            &requested,
+            hands_free,
+            &trace,
+            (&audio, &content_type),
+        )
+        .await?;
+        (said, Some(report), id)
+    } else {
+        let (own, language) = spoken_to(&directory, &ears.language);
+        let order = ears.order(&requested, &own, &ears.default_engine(&directory));
+        let selected = order.first().map_or(requested.as_str(), String::as_str);
+        let (audit, id) =
+            crate::vocabulary::compile(app, session, selected, hands_free, Some(&trace))
+                .await
+                .unwrap_or_default();
+        let said = hear_chat(
+            &ears,
+            &order,
+            &language,
+            audit["payload"].as_str().unwrap_or(""),
+            &audio,
+            &content_type,
+        )
+        .await?;
+        (said, None, id)
+    };
+    let retained_model = report
+        .as_ref()
+        .and_then(|r| r["effective_engine"].as_str())
+        .unwrap_or(&requested)
+        .to_string();
+    // What the engine was sure was speech, unless it is something engines invent on silence.
+    let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
+    let mut answer = heard::answer(&text, &trace, hands_free);
+    if run_id > 0 {
+        let _ = app
+            .ears
+            .vocab
+            .finish(
+                &app.fleet,
+                run_id,
+                text.clone(),
+                began.elapsed().as_millis() as i64,
+                report.as_ref(),
+            )
+            .await;
+        answer["vocab_run_id"] = json!(run_id);
+    }
+    if crate::vocabulary::audio::enabled(&app.fleet.directory()) {
+        let root = app.config.data_dir.clone();
+        let (trace, model, session) = (trace.clone(), retained_model, session.to_string());
+        let now = app.clock.now_ms();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::vocabulary::audio::retain(
+                &root,
+                crate::vocabulary::audio::Clip {
+                    trace: &trace,
+                    data: &audio,
+                    kind: &content_type,
+                    session: &session,
+                    run: run_id,
+                    model: &model,
+                },
+                now,
+            )
+        })
+        .await;
+    }
+    if let Some(report) = report {
+        answer["stt"] = report;
+    }
+    // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
+    // the app is told, and sends nothing.
+    if !text.is_empty() && app.mouth.heard(&text).await {
+        answer["herald_consumed"] = json!(true);
+    }
+    if !job.is_empty() {
+        let (keeps, kept) = (ears.clone(), answer.clone());
+        let done = tokio::task::spawn_blocking(move || keeps.keep(&job, &fingerprint, &kept)).await;
+        if !matches!(done, Ok(Ok(()))) {
+            eprintln!("clarp-host: the answer to a clip could not be kept");
+            let not_kept = "transcription result persistence failed";
+            return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, not_kept));
+        }
+    }
+    Ok(answer)
+}
+
+async fn hear_chat(
+    ears: &Arc<Ears>,
+    order: &[String],
+    language: &str,
+    listen_for: &str,
+    audio: &axum::body::Bytes,
+    content_type: &str,
+) -> Result<Heard, Told> {
     let mut said = None;
     for (place, model) in order.iter().enumerate() {
         let heard = ears
             .heard_by(
                 model,
-                &language,
+                language,
                 listen_for,
-                (&audio, content_type.as_str()),
+                (audio, content_type),
+                &mut None,
             )
             .await;
         match heard {
@@ -519,57 +669,7 @@ async fn heard_in(app: &App, request: Request) -> Result<Value, Told> {
         let nobody = "no engine heard the clip";
         return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, nobody));
     };
-    // What the engine was sure was speech, unless it is something engines invent on silence.
-    let text = crate::vocabulary::judge::kept(app, heard::joined(&said.segments)).await;
-    let mut answer = heard::answer(&text, &trace, hands_free);
-    if run_id > 0 {
-        let _ = app
-            .ears
-            .vocab
-            .finish(
-                &app.fleet,
-                run_id,
-                text.clone(),
-                began.elapsed().as_millis() as i64,
-            )
-            .await;
-        answer["vocab_run_id"] = json!(run_id);
-    }
-    if crate::vocabulary::audio::enabled(&app.fleet.directory()) {
-        let root = app.config.data_dir.clone();
-        let (trace, model, session) = (trace.clone(), requested.clone(), session.to_string());
-        let now = app.clock.now_ms();
-        let _ = tokio::task::spawn_blocking(move || {
-            crate::vocabulary::audio::retain(
-                &root,
-                crate::vocabulary::audio::Clip {
-                    trace: &trace,
-                    data: &audio,
-                    kind: &content_type,
-                    session: &session,
-                    run: run_id,
-                    model: &model,
-                },
-                now,
-            )
-        })
-        .await;
-    }
-    // A yes or a no to an agent whose hand is up is a word to the herald, and no message:
-    // the app is told, and sends nothing.
-    if !text.is_empty() && app.mouth.heard(&text).await {
-        answer["herald_consumed"] = json!(true);
-    }
-    if !job.is_empty() {
-        let (keeps, kept) = (ears.clone(), answer.clone());
-        let done = tokio::task::spawn_blocking(move || keeps.keep(&job, &fingerprint, &kept)).await;
-        if !matches!(done, Ok(Ok(()))) {
-            eprintln!("clarp-host: the answer to a clip could not be kept");
-            let not_kept = "transcription result persistence failed";
-            return Err(refuse(StatusCode::INTERNAL_SERVER_ERROR, not_kept));
-        }
-    }
-    Ok(answer)
+    Ok(said)
 }
 
 /// `DELETE /transcription-results/<job>`: the app has sent what was said and will not ask
@@ -730,15 +830,16 @@ fn status(app: &App) -> Value {
         })
         .collect();
     let engine = ears.default_engine(&directory);
+    let call = call::policy(app, &directory);
     let (finds, usable) = finds_turns(ears, &engine);
     json!({
         "engine": engine,
         "language": languages::selected(directory.setting(languages::LANGUAGE_KEY), &ears.language),
         "agent_languages": told_map(languages::languages(directory.setting(languages::AGENT_LANGUAGES_KEY))),
         "agent_engines": told_map(languages::stored(directory.setting(languages::AGENT_ENGINES_KEY))),
-        "call_languages": "",
-        "call_engines": "",
-        "call_policy_error": "",
+        "call_languages": call.language,
+        "call_engines": call.engines.join(","),
+        "call_policy_error": call.error,
         "turn_taking": turn_taking(&directory),
         "retain_audio": crate::vocabulary::audio::enabled(&directory),
         "long_form_model": "",
@@ -777,6 +878,7 @@ async fn set_providers(
     if texts.iter().flatten().any(|value| !value.is_string()) {
         return Err(bad("engine and turn_taking must be strings"));
     }
+    let _save = app.ears.settings_lock.lock().await;
     let directory = app.fleet.directory();
     let mut settings: Vec<(String, String)> = Vec::new();
     // An engine the contract lists is one that can be named, whether this Host can use it
@@ -874,10 +976,17 @@ async fn set_providers(
     if let Some(strategy) = strategy {
         settings.push((TURN_TAKING_KEY.to_string(), strategy));
     }
-    if named("call_languages").is_some() || named("call_engines").is_some() {
-        return Err(bad(
-            "how the clips of a call are heard is not built on this Host yet",
-        ));
+    let call = call::policy(&app, &directory);
+    let (lang, models) = call
+        .change(named("call_languages"), named("call_engines"), &now)
+        .map_err(|why| bad(&why))?;
+    for (key, value) in [
+        (clarp_kernel::call_transcription::LANGUAGES, lang),
+        (clarp_kernel::call_transcription::ENGINES, models),
+    ] {
+        if let Some(v) = value {
+            settings.push((key.into(), v));
+        }
     }
     app.fleet.set(settings).await?;
     let mut told = status(&app);
