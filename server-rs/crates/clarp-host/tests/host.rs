@@ -25545,7 +25545,7 @@ else:print(json.dumps({"type":"item.completed","item":{"type":"agent_message","t
     );
     assert_eq!(
         h.ask_as(&limited, "POST", policy, Some(&update)),
-        (403, json!({"error":"this device may not do that"}))
+        (403, json!({"error":"full device access required"}))
     );
     assert_eq!(h.get(policy)["revision"], 0);
     assert_eq!(h.ask_as("wrong", "POST", policy, Some(&update)).0, 401);
