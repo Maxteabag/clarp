@@ -421,9 +421,7 @@ struct Fleet(Vec<(Arc<Member>, Arc<View>)>);
 impl Fleet {
     fn of(app: &App) -> Self {
         let directory = app.fleet.directory();
-        // The janitors' too: the Quota keeper asks its owner by a card in its own session,
-        // as the Python Host's janitors, which are agents there, do.
-        let agents = directory.members.iter().chain(&directory.janitors);
+        let agents = directory.members.iter();
         Self(
             agents
                 .map(|member| (member.clone(), member.agent.view()))
@@ -439,6 +437,22 @@ impl Fleet {
             && (session.is_empty() || m.record.session == session)
             && (id.is_empty() || m.record.agent_id == id)
         {
+            fleet.0.push((m.clone(), m.agent.view()));
+        }
+        fleet
+    }
+
+    /// The roster and the one janitor whose shelf holds this decision (its exact id): a card of
+    /// the Quota keeper answered by its id, as the Python Host's janitors, which are agents
+    /// there, ask their owner. Never a list the roster's members make.
+    fn holding(app: &App, decision_id: &str) -> Self {
+        let mut fleet = Self::of(app);
+        let dir = app.fleet.directory();
+        let holds = |m: &&Arc<Member>| {
+            let view = m.agent.view();
+            view.books.artifacts.of_decision(decision_id).is_some()
+        };
+        if let Some(m) = dir.janitors.iter().find(holds) {
             fleet.0.push((m.clone(), m.agent.view()));
         }
         fleet
@@ -1276,14 +1290,19 @@ fn push_request(app: &App, artifact: &Value) {
         return;
     }
     // An agent the user muted pages nobody, also when it asks. The request waits in the
-    // inbox like any other.
+    // inbox like any other. A quiet agent (a janitor: the Quota keeper's card) pages nobody
+    // either, as the Python Host's push of a request is suppressed for it (`quiet-agent`).
     let directory = app.fleet.directory();
     let asker = artifact["agent_id"].as_str().unwrap_or("");
     let muted = directory
         .members
         .iter()
         .any(|member| member.record.agent_id == asker && member.record.muted);
-    if muted {
+    let quiet = directory
+        .janitors
+        .iter()
+        .any(|janitor| janitor.record.agent_id == asker && janitor.record.is_quiet());
+    if muted || quiet {
         return;
     }
     let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
@@ -1421,7 +1440,7 @@ pub(crate) async fn decide(
             }
         }
     };
-    let fleet = Fleet::of(app);
+    let fleet = Fleet::holding(app, &decision_id);
     let Some(member) = fleet.asker(&decision_id) else {
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
@@ -1542,7 +1561,7 @@ pub(crate) fn decisions_of(app: &App, session: &str) -> Vec<Value> {
         by_creation: true,
         ..Listing::default()
     };
-    let fleet = Fleet::of(app);
+    let fleet = Fleet::scoped(app, session, "");
     artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
 }
 

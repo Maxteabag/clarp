@@ -41781,19 +41781,28 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
         std::fs::write(&owners, named).unwrap();
         (place, own, asked, owners)
     };
+    // A Host pushes through a relay where one is given (`relay`, an address; empty: none).
+    let start_pushing =
+        |place: &Place, own: &std::path::Path, owners: &std::path::Path, relay: &str| {
+            let codex = place.root.join("codex");
+            let world = [
+                ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+                ("CODEX_HOME", own.to_str().unwrap()),
+                ("CLARP_PUSH_CREDENTIAL", "the-hosts-own-account"),
+            ];
+            let mut more = vec![
+                "--accounts",
+                "select",
+                "--speech-keys",
+                owners.to_str().unwrap(),
+            ];
+            if !relay.is_empty() {
+                more.extend(["--push-relay", relay]);
+            }
+            place.start_in("secret", &more, &world)
+        };
     let start = |place: &Place, own: &std::path::Path, owners: &std::path::Path| {
-        let codex = place.root.join("codex");
-        let world = [
-            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
-            ("CODEX_HOME", own.to_str().unwrap()),
-        ];
-        let more = [
-            "--accounts",
-            "select",
-            "--speech-keys",
-            owners.to_str().unwrap(),
-        ];
-        place.start_in("", &more, &world)
+        start_pushing(place, own, owners, "")
     };
     let set = |host: &Host, mode: &str| {
         let keeper = host.get(KEEPER)["janitor"].clone();
@@ -41848,9 +41857,24 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
     // WHEN THE OWNER SAYS SO: the keeper asks by a card in its own session; nothing is
     // recovered until the owner accepts it, and then once.
     let (place, own, asked, owners) = host_of("quota-asks");
-    let host = start(&place, &own, &owners);
+    // A phone that is pushed to: the keeper is quiet, and its card pages nobody.
+    let relay = StandInRelay::start();
+    let relay_at = format!("http://{}", relay.address);
+    let host = start_pushing(&place, &own, &owners, &relay_at);
     let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
     let cody = made["session"].as_str().unwrap().to_string();
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let device = json!({ "token": "a1".repeat(32), "session": cody, "push_grant": grant });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&device)),
+        (200, json!({ "ok": true }))
+    );
     host.send(&cody, "quick work", "u-1");
     wait_for("the turn to be done", || host.state(&cody) == "done");
     set(&host, "ask");
@@ -41867,6 +41891,24 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
     );
     let asked_for = &card["payload"]["quota_recovery"];
     assert_eq!(asked_for["provider"], "codex");
+    // The keeper is quiet: its card is read in its own session, pages nobody, and is in none of
+    // the lists the roster's members make, neither what claims attention nor the Updates.
+    let keeper_id = card["agent_id"].clone();
+    assert!(keeper_id.is_string(), "{card}");
+    let attention = host.get("/attention?decision_format=2")["items"].clone();
+    let attention = attention.as_array().cloned().unwrap_or_default();
+    assert!(
+        attention.iter().all(|item| item["agent_id"] != keeper_id),
+        "{attention:?}"
+    );
+    let updates = host.get("/attention/inbox")["artifacts"].clone();
+    let updates = updates.as_array().cloned().unwrap_or_default();
+    assert!(
+        updates
+            .iter()
+            .all(|row| row["session"] != "clarp-quota-monitor"),
+        "{updates:?}"
+    );
     wait_for("the run to be kept", || {
         runs(&host)[0]["status"] == "completed"
     });
@@ -41883,6 +41925,16 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
         Some(&accepted),
     );
     assert_eq!(status, 200, "{said}");
+    // By now the card was made long since (the run kept, the card answered): it paged nobody.
+    let decision_pushed = relay.taken().iter().any(|(path, _, body)| {
+        path == "/v1/push/send"
+            && body["notifications"][0]["payload"]["decision_id"] == card["decision"]["decision_id"]
+    });
+    assert!(
+        !decision_pushed,
+        "the keeper's card was pushed: {:?}",
+        relay.taken()
+    );
     drop(host);
     let receipts = kept_records(&place, "quota-keeper-receipt");
     let receipt = receipts.values().next().unwrap();
