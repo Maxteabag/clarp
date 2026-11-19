@@ -112,3 +112,73 @@ def test_the_budget_is_characters_with_prefix_separators_and_full_stop_and_may_b
     assert _prompt(["Ann", "Bob", "Cy"], len(exact)) == exact            # 22 characters: Cy skipped
     assert _prompt(["Ann", "Bob", "Cy"], len(exact) - 1) == "Agent names: Ann, Cy."
     assert _prompt(["Ann", "Bob", "Cy"], len(exact) + 4) == "Agent names: Ann, Bob, Cy."
+
+
+# The engine (R109, Maximus's reading): /transcribe hands the FULL ordered list to the compile,
+# which makes the 'agents' pack of it and cuts it to the provider's budget (vocab_budget.select).
+
+def test_the_engine_keeps_the_first_names_of_the_ordered_list_when_the_fleet_is_too_big(fleet):
+    """A CamelCase helper, created last and never used, is last in the order; its shape once rated
+    it rarer than the others, so the compile put it first. Now every agent name scores alike."""
+    _agent("DevBot", helper=True, created_at=30_000)
+    _agent("sol_helper", helper=True, created_at=30_001)
+    _used(fleet["Own-agent-number-31"], 9_000)
+    ordered = _names()
+    assert ordered[0] == "Own-agent-number-31" and ordered[-2:] == ["DevBot", "sol_helper"]
+    payload = VocabService(lambda: None).for_transcription(
+        delegated=True, requested_model="faster-whisper").payload
+    sent = [term.strip(" .") for term in payload.split(",")]
+    picked = [name for name in reversed(sent) if name in ordered]      # rendered best last
+    assert 2 <= len(picked) < len(ordered)                             # the budget did cut
+    assert picked == [name for name in ordered if name in picked]      # the order kept
+    assert picked[0] == "Own-agent-number-31"                          # the likeliest first
+    assert "DevBot" not in picked and "sol_helper" not in picked
+    # A name before the last one taken is left out only because it did not fit what was left:
+    # it costs more than every name taken after it (the budget's skip rule, vocab_budget.select).
+    from lib.vocab_budget import estimate_tokens
+    last = ordered.index(picked[-1])
+    for position, name in enumerate(ordered[:last]):
+        if name not in picked:
+            later = [n for n in ordered[position + 1:last + 1] if n in picked]
+            assert estimate_tokens(name) > max(estimate_tokens(n) for n in later)
+
+
+# The compile's cut, pinned for each budget kind (R109 (a), ruled): every agent name scores the
+# same, so the order given is the order chosen, and the cut takes the first names that fit.
+
+from lib import vocab_compile                                   # noqa: E402
+from lib.vocab_budget import Budget, Pack, Term, Unit, compile_packs   # noqa: E402
+
+ORDERED = ("Theo", "Arnold", "Maximus", "Nori", "hazel", "Rachel", "Knut Thomas", "Bea", "Ola",
+           "DevBot", "sol_helper")                      # the two identifier-shaped names last
+
+
+def _agent_terms(result):
+    return [t.text for t in result.terms if t.pack == "agents"]
+
+
+@pytest.mark.parametrize("budget", [Budget("p", "m", Unit.TOKENS, 20), Budget("p", "m", Unit.TERMS, 5),
+                                    Budget("p", "m", Unit.WORDS, 6)], ids=["tokens", "terms", "words"])
+def test_each_budget_kind_keeps_the_first_names_of_the_order(budget):
+    result = compile_packs(vocab_compile.dynamic_packs(vocab_compile.Sources(agent_names=ORDERED)), budget)
+    picked = _agent_terms(result)
+    assert 2 <= len(picked) < len(ORDERED)
+    assert picked == list(ORDERED[:len(picked)])
+    assert "DevBot" not in picked and "sol_helper" not in picked
+
+
+def test_every_agent_name_has_the_same_score():
+    terms = vocab_compile.dynamic_packs(vocab_compile.Sources(agent_names=ORDERED))[0].terms
+    assert {t.rarity for t in terms} == {0.9} and [t.text for t in terms] == list(ORDERED)
+
+
+def test_the_floor_keeps_the_first_two_names_of_the_order():
+    """A pack that outscores every agent name takes the rest of the budget; the agents pack's
+    floor of 2 still ships two names: the first two of the order, equal scores broken by the
+    order given (the sort is stable)."""
+    rival = Pack(name="rival", priority=3.0,
+                 terms=tuple(Term(text=f"RivalTerm{n}", pack="rival", rarity=0.98) for n in range(20)))
+    packs = [rival, *vocab_compile.dynamic_packs(vocab_compile.Sources(agent_names=ORDERED[::-1]))]
+    result = compile_packs(packs, Budget("p", "m", Unit.TERMS, 4))
+    assert _agent_terms(result) == ["sol_helper", "DevBot"]            # the first two of THIS order
+    assert len(result.terms) == 4
