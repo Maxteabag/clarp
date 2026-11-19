@@ -3,9 +3,10 @@
 //!
 //! The rules are the kernel's ([`clarp_kernel::janitors`]): what a Host offers, what a
 //! janitor's job may be, and the book that is kept of them. Here is what is kept (the book,
-//! whole, with the fleet), who a janitor is (a member of the fleet that is no agent of the
-//! roster: [`crate::fleet::Directory::janitors`]), the seven janitors a Host installs for
-//! itself, and the routes, which answer as the Python Host's do
+//! with the fleet: each row of its tables a record of its own, so that a change of one
+//! janitor or one run writes that and nothing else), who a janitor is (a member of the fleet
+//! that is no agent of the roster: [`crate::fleet::Directory::janitors`]), the seven janitors
+//! a Host installs for itself, and the routes, which answer as the Python Host's do
 //! (`server/lib/janitor_http.py`): the same statuses, bodies and words.
 //!
 //! **What runs: a scheduled task, and the router.** A janitor whose job is a scheduled task
@@ -13,7 +14,9 @@
 //! seconds at what the book says is due ([`clarp_kernel::janitors::runs`]), hands a run to
 //! the janitor's own mailbox as a message the Host sends by itself, and tells the book how
 //! the turn stands. The janitor that finds whom a spoken message is for runs too, once for
-//! each message, when it is on ([`crate::router`]). No other job runs yet: turning such a
+//! each message, when it is on ([`crate::router`]). The Quota keeper looks when its look is
+//! due, in this runner too ([`crate::quota_keeper`]). Every job of
+//! [`clarp_kernel::janitors::RUN_HERE`] runs; no other yet: turning such a
 //! janitor on is refused in words, with the Python Host's word for a Host that cannot run
 //! it (`janitor_runtime_unavailable`), and the janitors of the Host's own are installed
 //! paused, where the Python Host starts three.
@@ -43,9 +46,81 @@ use crate::edge::App;
 use crate::fleet::{Amend, Directory, JanitorSeed, NotMade};
 use crate::ids;
 
-/// The kind of thing the janitors' book is, among what is left with the fleet.
+/// The kind of thing the janitors' book is, among what is left with the fleet: what is left
+/// of it once its tables are kept apart.
 const KIND: &str = "janitors";
 const ALL: &str = "all";
+/// The book's tables, each a kind of its own with one record a row: a run of a janitor, or
+/// one change of one, writes what changed of it and nothing of the rest. A book kept whole
+/// before is read, and kept apart at once.
+const TABLES: [(&str, &str); 6] = [
+    ("configs", "janitor-config"),
+    ("triggers", "janitor-trigger"),
+    ("builtins", "janitor-builtin"),
+    ("runs", "janitor-run"),
+    ("progress", "janitor-progress"),
+    ("creations", "janitor-creation"),
+];
+
+/// A record written with a change of the book, by a desk that keeps its own beside it.
+pub(crate) type Row = (&'static str, String, Vec<u8>);
+/// A record let go with a change of the book.
+pub(crate) type Gone = (&'static str, String);
+
+/// What one change of the book writes: each row of a table that is new or changed, each
+/// that went, and what is left of the book where that changed. `before`: nothing, where all
+/// of it is written.
+fn written(before: Option<&Book>, after: &Book) -> (Vec<Row>, Vec<Gone>) {
+    let as_value = |book: &Book| serde_json::to_value(book).unwrap_or(Value::Null);
+    let mut after = as_value(after);
+    let mut before = before.map(as_value).unwrap_or(Value::Null);
+    let (mut rows, mut gone) = (Vec::new(), Vec::new());
+    for (table, kind) in TABLES {
+        let table_of = |book: &mut Value| {
+            let fields = book.as_object_mut();
+            fields
+                .and_then(|fields| fields.remove(table))
+                .unwrap_or(Value::Null)
+        };
+        let (now, was) = (table_of(&mut after), table_of(&mut before));
+        let (now, was) = (
+            now.as_object().cloned().unwrap_or_default(),
+            was.as_object().cloned().unwrap_or_default(),
+        );
+        for (key, row) in &now {
+            if was.get(key) != Some(row) {
+                rows.push((
+                    kind,
+                    key.clone(),
+                    serde_json::to_vec(row).unwrap_or_default(),
+                ));
+            }
+        }
+        let went = was.keys().filter(|key| !now.contains_key(*key));
+        gone.extend(went.map(|key| (kind, key.clone())));
+    }
+    if after != before {
+        rows.push((
+            KIND,
+            ALL.to_string(),
+            serde_json::to_vec(&after).unwrap_or_default(),
+        ));
+    }
+    (rows, gone)
+}
+
+/// Keeps a change of the book, and what a desk keeps beside it, in one write.
+async fn keep(
+    app: &App,
+    before: Option<&Book>,
+    after: &Book,
+    (mut rows, mut gone): (Vec<Row>, Vec<Gone>),
+) -> Result<(), Unavailable> {
+    let (book, went) = written(before, after);
+    rows.extend(book);
+    gone.extend(went);
+    app.fleet.change_together(rows, gone).await
+}
 /// What a schedule is taken to be apart when it cannot be read: a day.
 const A_DAY_S: i64 = 86_400;
 /// The tool a janitor of the Host's own runs on where its job recommends one this Host
@@ -160,9 +235,29 @@ impl Desk {
         let mut held = self.book.lock().await;
         if held.is_none() {
             let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
+            let mut whole: Value = kept
+                .and_then(|kept| serde_json::from_slice(&kept).ok())
+                .filter(Value::is_object)
+                .unwrap_or_else(|| json!({}));
+            let filled = |table: &str, whole: &Value| {
+                whole[table]
+                    .as_object()
+                    .is_some_and(|rows| !rows.is_empty())
+            };
+            let kept_whole = TABLES.iter().any(|(table, _)| filled(table, &whole));
+            for (table, kind) in TABLES {
+                for (key, row) in app.fleet.kept_all(kind).await? {
+                    if let Ok(row) = serde_json::from_slice::<Value>(&row) {
+                        whole[table][key] = row;
+                    }
+                }
+            }
             // What cannot be read is a book with nothing in it.
-            let book = kept.and_then(|kept| serde_json::from_slice(&kept).ok());
-            *held = Some(book.unwrap_or_default());
+            let book: Book = serde_json::from_value(whole).unwrap_or_default();
+            if kept_whole {
+                keep(app, None, &book, Default::default()).await?;
+            }
+            *held = Some(book);
         }
         Ok(held)
     }
@@ -207,8 +302,7 @@ impl Desk {
             }
         };
         if *book != before {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
-            app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            keep(app, Some(&before), book, Default::default()).await?;
         }
         for effect in effects {
             let (agent_id, amend) = match effect {
@@ -239,6 +333,8 @@ impl Desk {
         for run in cut_off {
             take_back(app, &run.agent_id, &run.run_id).await;
         }
+        // The Quota keeper may have been turned on, off or set anew.
+        app.quota_keeper.disarm();
         Ok(book.shown(key, &Around::new(app), now_ms))
     }
 
@@ -260,8 +356,7 @@ impl Desk {
         let now_ms = app.clock.now_ms();
         let begun = book.begin_creation(request_id, payload, &mut Around::new(app), now_ms);
         if *book != before {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
-            app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            keep(app, Some(&before), book, Default::default()).await?;
         }
         Ok(begun)
     }
@@ -276,6 +371,28 @@ impl Desk {
     ) -> Result<T, Unavailable> {
         let changed = self.update(app, |book, around, now_ms| change(book, around, now_ms));
         Ok(changed.await?.0)
+    }
+
+    /// One change of the book by a desk of the Host that keeps records of its own beside
+    /// it: what the change answers, with the records to write and to let go, which are kept
+    /// in the same write as the book. Nobody else reads or changes the book meanwhile.
+    pub(crate) async fn with_kept<T>(
+        &self,
+        app: &App,
+        change: impl FnOnce(&mut Book, &dyn World, i64) -> (T, Vec<Row>, Vec<Gone>),
+    ) -> Result<T, Unavailable> {
+        let mut held = self.held(app).await?;
+        let Some(book) = held.as_mut() else {
+            return Err(Unavailable(
+                "the janitors' book could not be read".to_string(),
+            ));
+        };
+        let before = book.clone();
+        let (done, rows, gone) = change(book, &Around::new(app), app.clock.now_ms());
+        if *book != before || !rows.is_empty() || !gone.is_empty() {
+            keep(app, Some(&before), book, (rows, gone)).await?;
+        }
+        Ok(done)
     }
 
     /// One change of the book by the Host itself, kept when it changed anything. Answers
@@ -295,8 +412,7 @@ impl Desk {
         let done = change(book, &Around::new(app), app.clock.now_ms());
         let changed = *book != before;
         if changed {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
-            app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            keep(app, Some(&before), book, Default::default()).await?;
         }
         Ok((done, changed))
     }
@@ -464,6 +580,8 @@ async fn look(app: &App) -> Result<(), Unavailable> {
     // After every look, what was seen of clips is written down: the bookkeeper asks no
     // model and has no turn of its own.
     crate::audio::keep(app).await;
+    // And the Quota keeper looks where its look is due, beside the runner.
+    crate::quota_keeper::look(app);
     Ok(())
 }
 
@@ -1144,8 +1262,7 @@ pub async fn install(app: &App) -> Result<(), Unavailable> {
         book.install(role, &made.agent_id, config, taken);
     }
     if *book != before {
-        let kept = serde_json::to_vec(book).unwrap_or_default();
-        app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+        keep(app, Some(&before), book, Default::default()).await?;
     }
     Ok(())
 }

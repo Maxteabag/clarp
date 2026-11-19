@@ -65,6 +65,7 @@ pub mod process;
 pub mod push;
 pub mod pusher;
 pub mod quota;
+pub mod quota_keeper;
 pub mod relay;
 pub mod render_spec;
 pub mod request_tool;

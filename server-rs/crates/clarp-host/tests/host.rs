@@ -25158,23 +25158,10 @@ else:
     }
 }
 
-#[test]
-fn what_codex_wrote_of_its_accounts_limits_is_shown_and_its_limits_are_told() {
-    let place = Place::new("codex-limits");
-    let own = place.root.join("codex-own");
-    std::fs::create_dir_all(&own).unwrap();
-    // A login of a made-up account, as Codex keeps one.
-    let login = |account: &str, token: &str| {
-        let tokens = json!({ "account_id": account, "access_token": token });
-        let kept = json!({ "auth_mode": "chatgpt", "tokens": tokens });
-        std::fs::write(own.join("auth.json"), kept.to_string()).unwrap();
-    };
-    login("an-account", "a-token");
-    // A stand-in for Codex that writes its conversation's record where Codex writes it, and
-    // in it, with a count of tokens, how much of its account's windows is used: what the
-    // test wrote down for it to say.
-    let codex = place.root.join("codex-says-its-limits");
-    let script = r#"#!/usr/bin/env python3
+/// A stand-in for Codex that writes its conversation's record where Codex writes it, and in
+/// it, with a count of tokens, how much of its account's windows is used: what the test wrote
+/// down for it to say in `limits.json` of its home.
+const CODEX_SAYS_ITS_LIMITS: &str = r#"#!/usr/bin/env python3
 import datetime, json, os, pathlib, sys
 if sys.argv[1:2] != ["exec"]:
     sys.exit(0)
@@ -25195,7 +25182,24 @@ with rollout.open("a") as out:
 say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "done"})
 say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
 "#;
-    program(&codex, script);
+
+#[test]
+fn what_codex_wrote_of_its_accounts_limits_is_shown_and_its_limits_are_told() {
+    let place = Place::new("codex-limits");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    // A login of a made-up account, as Codex keeps one.
+    let login = |account: &str, token: &str| {
+        let tokens = json!({ "account_id": account, "access_token": token });
+        let kept = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+        std::fs::write(own.join("auth.json"), kept.to_string()).unwrap();
+    };
+    login("an-account", "a-token");
+    // A stand-in for Codex that writes its conversation's record where Codex writes it, and
+    // in it, with a count of tokens, how much of its account's windows is used: what the
+    // test wrote down for it to say.
+    let codex = place.root.join("codex-says-its-limits");
+    program(&codex, CODEX_SAYS_ITS_LIMITS);
     let world = [
         ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
         ("CODEX_HOME", own.to_str().unwrap()),
@@ -37653,4 +37657,213 @@ fn a_call_of_the_oracle_is_carried_through_the_relay_as_it_is_at_the_door() {
     assert_eq!(second.told_of("session.close", 1).len(), 1);
     second.ends();
     assert!(router.asked.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_quota_keeper_tells_the_owner_once_where_a_window_runs_low() {
+    let relay = StandInRelay::start();
+    let place = Place::new("quota-keeper");
+    let own = place.root.join("codex-own");
+    std::fs::create_dir_all(&own).unwrap();
+    let tokens = json!({ "account_id": "an-account", "access_token": "a-token" });
+    let login = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+    std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+    let codex = place.root.join("codex-says-its-limits");
+    program(&codex, CODEX_SAYS_ITS_LIMITS);
+    let world = [
+        ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ("CODEX_HOME", own.to_str().unwrap()),
+    ];
+    let pushed_to = format!("http://{}", relay.address);
+    let start = |accounts: &str| {
+        let more = ["--push-relay", pushed_to.as_str(), "--accounts", accounts];
+        place.start_in("the-administrators-token", &more, &world)
+    };
+    let seconds = now_ms() / 1000;
+    // The five hours are four fifths used, the week a tenth.
+    let says = |five: f64| {
+        let window = |used: f64, minutes: i64, resets: i64| json!({ "used_percent": used, "window_minutes": minutes, "resets_at": resets });
+        let record = json!({
+            "limit_id": "codex", "limit_name": null,
+            "primary": window(five, 300, seconds + 4 * 3_600),
+            "secondary": window(10.0, 10_080, seconds + 96 * 3_600),
+            "credits": { "has_credits": false, "unlimited": false, "balance": null },
+            "individual_limit": null, "spend_control_reached": null, "plan_type": "pro",
+            "rate_limit_reached_type": null,
+        });
+        std::fs::write(own.join("limits.json"), record.to_string()).unwrap();
+    };
+    // What the phones were told of quota, as the stand-in for the relay took it.
+    let told = || -> Vec<String> {
+        let bodies = relay.taken().into_iter().filter_map(|(_, _, body)| {
+            let said = &body["notifications"][0]["payload"]["aps"]["alert"]["body"];
+            said.as_str().map(str::to_string)
+        });
+        bodies
+            .filter(|said| said.contains("quota remaining"))
+            .collect()
+    };
+    const KEEPER: &str = "/janitors/clarp-quota-monitor";
+    let runs = |host: &Host| host.get(&format!("{KEEPER}/runs"))["runs"].clone();
+
+    let host = start("none");
+    let (phone, _) = pair(&host, "Phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let device = json!({ "token": "a1".repeat(32), "session": "cody", "push_grant": grant });
+    let registered = host.ask_as(&phone, "POST", "/devices", Some(&device));
+    assert_eq!(registered, (200, json!({ "ok": true })));
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let agent = made["session"].as_str().unwrap().to_string();
+    says(80.0);
+    host.send(&agent, "one", "u-1");
+    let windows = |host: &Host| {
+        let shown = host.get("/backend-usage")["providers"]["codex"]["windows"].clone();
+        shown.as_array().cloned().unwrap_or_default()
+    };
+    wait_for("the windows to be shown", || windows(&host).len() == 2);
+    let five = windows(&host)
+        .into_iter()
+        .find(|window| window["used_percentage"] == 80.0)
+        .unwrap();
+    let label = five["label"].as_str().filter(|label| !label.is_empty());
+    let named = label.map_or("codex".to_string(), |label| format!("codex {label}"));
+    let low = format!("{named}: 20% quota remaining");
+
+    // Turned on, the keeper looks at once: the five hours are under its threshold, and the
+    // owner is told once. The week is not.
+    let keeper = host.get(KEEPER)["janitor"].clone();
+    let on = json!({ "expected_revision": keeper["revision"], "enabled": true });
+    let (status, turned) = host.ask("POST", &format!("{KEEPER}/enabled"), Some(&on));
+    assert_eq!(status, 200, "{turned}");
+    wait_for("the owner to be told", || !told().is_empty());
+    wait_for("the run to be kept", || {
+        runs(&host)[0]["status"] == "completed"
+    });
+    let run = runs(&host)[0].clone();
+    assert_eq!(
+        (&run["activity"], &run["activity_summary"]),
+        (
+            &json!("worked"),
+            &json!("Checked provider quota; 1 threshold notifications")
+        )
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(told(), std::slice::from_ref(&low));
+    assert_eq!(runs(&host).as_array().unwrap().len(), 1);
+    drop(host);
+
+    // What it keeps: what was last seen of each window, its receipt and when it looks next,
+    // each a record of its own; and its run, a record of the janitors' book, whose tables
+    // are kept apart.
+    let kept_windows = kept_records(&place, "quota-keeper-window");
+    let mut left: Vec<f64> = kept_windows
+        .values()
+        .map(|kept| kept["remaining"].as_f64().unwrap())
+        .collect();
+    left.sort_by(f64::total_cmp);
+    assert_eq!(left, [20.0, 90.0]);
+    let receipts = kept_records(&place, "quota-keeper-receipt");
+    let receipt = receipts.values().next().unwrap().clone();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipt["payload"]["preview"], low.as_str());
+    assert_eq!(receipt["payload"]["reason"], "quota_threshold");
+    assert_eq!(receipt["run_id"], run["run_id"]);
+    let delivered = json!({ "enabled": true, "sent": 1, "failed": 0, "disabled": 0 });
+    assert_eq!(receipt["delivery"], delivered);
+    let lane = kept_records(&place, "quota-keeper-lane")
+        .remove("quota-keeper")
+        .unwrap();
+    let last = lane["last_check"].as_i64().unwrap();
+    assert_eq!(lane["next_run_at"], last + 300_000);
+    assert_eq!(lane["last_activity"], "worked");
+    let book = kept_records(&place, "janitors");
+    assert_eq!(book.keys().collect::<Vec<_>>(), ["all"]);
+    for table in [
+        "configs",
+        "triggers",
+        "builtins",
+        "runs",
+        "progress",
+        "creations",
+    ] {
+        assert!(book["all"].get(table).is_none(), "{table}");
+    }
+    let kept_runs = kept_records(&place, "janitor-run");
+    assert!(kept_runs.contains_key(run["run_id"].as_str().unwrap()));
+    assert_eq!(kept_records(&place, "janitor-config").len(), 7);
+
+    // A book kept whole, as a Host before this one kept it, is read, and kept apart. Meanwhile
+    // the keeper was set anew, a long time after its last look, and remembers more left of
+    // the five hours than there is.
+    let mut configs = kept_records(&place, "janitor-config");
+    let (id, config) = configs
+        .iter_mut()
+        .find(|(_, config)| config["template_id"] == "quota-monitor")
+        .unwrap();
+    config["generation"] = json!(config["generation"].as_u64().unwrap() + 1);
+    keep_record(&place, "janitor-config", id, config);
+    let mut whole = book["all"].clone();
+    whole["configs"] = json!(configs);
+    whole["runs"] = json!(kept_records(&place, "janitor-run"));
+    keep_record(&place, "janitors", "all", &whole);
+    let mut due = lane.clone();
+    due.as_object_mut().unwrap().remove("next_run_at");
+    due["last_check"] = json!(1);
+    keep_record(&place, "quota-keeper-lane", "quota-keeper", &due);
+    let (key, seen) = kept_windows
+        .iter()
+        .find(|(_, kept)| kept["remaining"] == 20.0)
+        .unwrap();
+    let before = json!({ "stamp": seen["stamp"].as_i64().unwrap() - 1, "remaining": 90 });
+    keep_record(&place, "quota-keeper-window", key, &before);
+    // A receipt delivered more than thirty days ago is let go; one that still waits stays.
+    let old = |id: &str, delivery: Value| {
+        let payload = json!({ "agent_id": "an-agent-gone", "owner_generation": 1 });
+        let settled = if delivery.is_null() {
+            json!(null)
+        } else {
+            json!(1)
+        };
+        let receipt = json!({ "receipt_id": id, "run_id": "r", "payload": payload,
+                              "delivery": delivery, "created_at": 1, "settled_at": settled });
+        keep_record(&place, "quota-keeper-receipt", id, &receipt);
+    };
+    old("long-delivered", delivered.clone());
+    old("still-waiting", Value::Null);
+
+    // Beside another Host the reading crosses again: kept, and the owner is not told by this
+    // Host, which says why on the receipt.
+    let host = start("follow");
+    wait_for("the second run", || {
+        runs(&host).as_array().unwrap().len() == 2
+    });
+    wait_for("the second run to end", || {
+        runs(&host)[0]["status"] == "completed"
+    });
+    let second = runs(&host)[0].clone();
+    assert_eq!(
+        second["activity_summary"],
+        "Checked provider quota; 1 threshold notifications"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(told(), [low]);
+    drop(host);
+    let receipts = kept_records(&place, "quota-keeper-receipt");
+    let beside = receipts
+        .values()
+        .find(|receipt| receipt["run_id"] == second["run_id"])
+        .unwrap();
+    let not_delivered = "not delivered: the Host beside this one tells the owner";
+    assert_eq!(beside["delivery"], json!({ "cancelled": not_delivered }));
+    assert!(!receipts.contains_key("long-delivered"));
+    assert_eq!(receipts["still-waiting"]["delivery"], Value::Null);
+    assert_eq!(receipts.len(), 3);
+    let book = kept_records(&place, "janitors");
+    assert!(book["all"].get("runs").is_none() && book["all"].get("configs").is_none());
+    assert_eq!(kept_records(&place, "janitor-run").len(), 2);
 }

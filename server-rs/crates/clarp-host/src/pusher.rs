@@ -124,7 +124,8 @@ impl Counted {
 }
 
 enum Job {
-    Turn(TurnDone),
+    /// A finished turn, and who waits to hear what became of its push.
+    Turn(TurnDone, Option<tokio::sync::oneshot::Sender<Rang>>),
     Request(Requested),
     /// A ring, and who waits to hear what became of its pushes.
     Ring(Box<Rung>, Option<tokio::sync::oneshot::Sender<Rang>>),
@@ -139,7 +140,15 @@ pub struct Pusher {
 
 impl Pusher {
     pub fn turn_done(&self, told: TurnDone) {
-        let _ = self.tx.send(Job::Turn(told));
+        let _ = self.tx.send(Job::Turn(told, None));
+    }
+
+    /// The same, for one who is told what became of the push (`alert`): when every phone
+    /// was tried. A pusher that is gone answers nothing.
+    pub fn turn_done_and_told(&self, done: TurnDone) -> tokio::sync::oneshot::Receiver<Rang> {
+        let (told, answer) = tokio::sync::oneshot::channel();
+        let _ = self.tx.send(Job::Turn(done, Some(told)));
+        answer
     }
 
     pub fn requested(&self, asked: Requested) {
@@ -220,6 +229,7 @@ impl Waiting {
                 for job in self.rx {
                     let (job, told) = match job {
                         Job::Ring(rung, told) => (Job::Ring(rung, None), told),
+                        Job::Turn(done, told) => (Job::Turn(done, None), told),
                         other => (other, None),
                     };
                     let mut rang = Rang::default();
@@ -331,7 +341,7 @@ fn called(works: &Works, rung: &Rung) -> Value {
 fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a str) {
     let (avatar_url, avatar_custom) = face;
     match job {
-        Job::Turn(told) => (
+        Job::Turn(told, _) => (
             push::turn_done(&Told {
                 persona: &told.persona,
                 session: &told.session,
@@ -471,7 +481,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
     // The agent it is about: what the address of its own picture carries, when it has one,
     // and the picture this Host ships for it. A push for nobody by name shows no face.
     let (session, persona) = match job {
-        Job::Turn(told) => (&told.session, &told.persona),
+        Job::Turn(told, _) => (&told.session, &told.persona),
         Job::Request(asked) => (&asked.session, &asked.persona),
         Job::Ring(rung, _) => (&rung.ring.session, &rung.ring.persona),
     };
@@ -570,7 +580,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
         };
         let delivery = if row.provider == "fcm" {
             let mut context = serde_json::json!({"agent_id":agent_id});
-            if let Job::Turn(told) = job {
+            if let Job::Turn(told, _) = job {
                 context["badge"] = serde_json::json!(told.badge);
                 context["unread"] = serde_json::json!(told.unread);
             }

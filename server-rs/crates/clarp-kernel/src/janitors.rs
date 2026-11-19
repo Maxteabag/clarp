@@ -165,15 +165,16 @@ pub fn demand_roles() -> impl Iterator<Item = &'static String> {
 }
 
 /// The jobs whose janitor runs on every Rust Host when it is turned on: a scheduled task, the
-/// router of spoken messages, the explainer of tools, the Goal keeper and the audio
-/// bookkeeper. Every other janitor is made, set, paused, removed and shown, and nothing
+/// router of spoken messages, the explainer of tools, the Goal keeper, the audio bookkeeper
+/// and the Quota keeper. Every other janitor is made, set, paused, removed and shown, and nothing
 /// starts it.
-pub const RUN_HERE: [&str; 5] = [
+pub const RUN_HERE: [&str; 6] = [
     runs::SCHEDULED_TASK,
     crate::router::JOB,
     "tool-explainer",
     crate::goals::keeper::ROLE,
     audio::ROLE,
+    quota::ROLE,
 ];
 
 /// The job whose janitor runs only on a Host that keeps the machine's logins itself
@@ -714,28 +715,22 @@ mod tests {
             assert!(runs_here(job, false) && runs_here(job, true), "{job}");
         }
         assert!(!runs_here(SEATS_JOB, false) && runs_here(SEATS_JOB, true));
-        for job in [
-            "heartbeat-decider",
-            "quota-monitor",
-            "task-labels",
-            "label-auditor",
-            "",
-        ] {
+        for job in ["heartbeat-decider", "task-labels", "label-auditor", ""] {
             assert!(!runs_here(job, false) && !runs_here(job, true), "{job}");
         }
         assert_eq!(
             cannot_run(false),
-            "This Host does not run a janitor whose job is Heartbeat keeper, Quota keeper, \
-             Hotseat switcher, Task labels or Label checker: this janitor is made, set and paused \
-             here, and nothing starts it. Nothing was turned on. The Hotseat switcher runs on a \
+            "This Host does not run a janitor whose job is Heartbeat keeper, Hotseat switcher, \
+             Task labels or Label checker: this janitor is made, set and paused here, and nothing \
+             starts it. Nothing was turned on. The Hotseat switcher runs on a \
              Host that keeps the logins itself (--accounts select) and was told the owner's tool \
              for the account seats."
         );
         assert_eq!(
             cannot_run(true),
-            "This Host does not run a janitor whose job is Heartbeat keeper, Quota keeper, \
-             Task labels or Label checker: this janitor is made, set and paused here, and nothing \
-             starts it. Nothing was turned on."
+            "This Host does not run a janitor whose job is Heartbeat keeper, Task labels or \
+             Label checker: this janitor is made, set and paused here, and nothing starts it. \
+             Nothing was turned on."
         );
     }
 }
