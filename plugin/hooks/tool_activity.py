@@ -38,7 +38,7 @@ def main() -> int:
 
     try:
         agent = agents_db.resolve_for_hook(
-            backend_session_id=backend_session_id or None,
+            hook="PreToolUse", backend_session_id=backend_session_id or None,
             session=session or None,
         )
     except Exception as exc:
