@@ -35,7 +35,7 @@ use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::{AgentRecord, non_empty};
@@ -1215,6 +1215,12 @@ fn unavailable(error: &ActorError) -> Unavailable {
     Unavailable(error.to_string())
 }
 
+impl Drop for Worker {
+    fn drop(&mut self){
+        self.setup.speaks.counted(&self.setup.record.agent_id,&[]);
+    }
+}
+
 impl Worker {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
         let mut wait = REOPEN_FIRST;
@@ -2143,7 +2149,7 @@ impl Worker {
                     && let Some(turn) = sent.turn
                     && let Some(c) = &self.setup.hub.capture
                 {
-                    c.emit("agents",now,||json!({"kind":"accepted","turn":turn.0,"agent_id":self.setup.record.agent_id}));
+                    c.turn(now,"accepted",&self.setup.record.agent_id,turn.0);
                 }
                 answered(sent, answer)?
             }
@@ -3030,10 +3036,10 @@ impl Worker {
         let ended = status.last.as_ref().filter(|_| turn_ended);
         if let Some(c) = &self.setup.hub.capture {
             if let Some(live) = began {
-                c.emit("agents",now,||json!({"kind":"started","turn":live.turn.0,"agent_id":self.setup.record.agent_id}));
+                c.turn(now,"started",&self.setup.record.agent_id,live.turn.0);
             }
             if let Some(last) = ended {
-                c.emit("agents",now,||json!({"kind":"settled","turn":last.id.0,"agent_id":self.setup.record.agent_id}));
+                c.turn(now,"settled",&self.setup.record.agent_id,last.id.0);
             }
         }
         if let Some(last) = ended
