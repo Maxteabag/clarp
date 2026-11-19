@@ -464,7 +464,7 @@ fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
             assert_eq!(json!(next), step["next_run_at"], "{at}");
         }
     }
-    assert_eq!((ticks, runs, pushed, asked), (0, 0, 0, 0));
+    assert_eq!((ticks, runs, pushed, asked), (45, 42, 33, 4));
 }
 
 #[test]
