@@ -41,6 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
+      # The tool's own check of its registers (intended, awaited) and rules: no Host, no recording.
+      - name: The conformance tool checks itself
+        run: python3 server-rs/conformance/selftest.py
       - id: count
         run: python3 -c 'import sys; sys.path.insert(0, "server-rs/conformance"); import contract_plants as p; n = len(p.CHANGES); print(f"each={list(range(n))}"); print(f"count={n}")' >> "$GITHUB_OUTPUT"
 

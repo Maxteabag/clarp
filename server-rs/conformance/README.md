@@ -18,6 +18,8 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 | `conform.py` | The driver: `record`, `plants`, `compare`, `cross`; `selftest` tries its own rule for a reference that wavers, and starts no Host |
 | `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand. `golden-more/` is beside them when a run recorded a scenario a third time (below): it is committed with them, and removed when the next run made none |
 | `intended.txt` | Ids of differences that are meant to be there (the reasoning is in `../docs/differences.md`) |
+| `awaited.txt` | Ids of differences that are owed: the Python Host moved on main and this Host's port has not landed. Each with the reference's PR and the branch that owes the port |
+| `selftest.py` | The tool's own check of its registers and rules, on reports made up for it. Starts no Host; the workflow's first job runs it |
 
 ## Running it
 
@@ -48,6 +50,15 @@ Python Host. Every difference is exactly one of:
    difference and nothing else.
 3. **A defect of the reference.** Write it into `../docs/reference-defects.md` and report it
    to whoever owns the Python Host's releases.
+4. **Awaited.** The Python Host changed on main (a merged PR of its own) and the port of that
+   change to this Host has not landed. Add the id to `awaited.txt` with the PR, the branch that
+   owes the port and what it is, scenario first. The report gives it the kind `awaited` and
+   counts it apart, never as intended; a run with nothing unexplained and N awaited passes as
+   THE RUST HOST CONFORMS BUT FOR N AWAITED DIFFERENCE(S), naming the PRs and the ids. Nothing
+   in it is meant to stay, and two rules keep it true: **an awaited id the run did not show
+   fails the run** (named: take it out of `awaited.txt`), so the port's commit has to take its
+   lines out; and **an id in both `intended.txt` and `awaited.txt` is an error**. An awaited id
+   of a scenario the run did not run (a question about some scenarios) is not asked about.
 
 The suite counts only while its proof holds: every planted change is caught by a difference
 of the kind it names, in a scenario that ran to its end. A scenario that did not run to its
