@@ -1964,6 +1964,15 @@ GPT-Live and holds further Gemini attempts for ten minutes. Status continues to 
 choice and the keys. The adapter, cumulative usage and conversation effects are recorded from the Python
 Host by the Gemini (38 stories, 384 steps), Live usage (9 stories, 126 steps) and conversation
 (80 stories, 1623 steps) vector generators. The Gemini fixture uses the reference repaired in PR 430.
+**How a call participant is transcribed** (19 Nov 2026). Feature 74 lets a client mark a clip with
+its call and captured session. Before a cached reply or any speech engine sees the request, the Host
+checks the call's owner, Host, live state and reachable participant. The participant's language and
+engine list each override the call setting. A device model precedes the global engine. Settings are
+read together, and each engine attempt records its outcome and the language handed over. A live call
+shows the participant map at read time. The completed vocabulary run for a call clip records the validated
+session and the same `stt` report returned to the client. A cached retry reuses that run. The fleet commits each settings request in one store
+transaction before publishing its directory. Call-job fingerprints bind the validated principal,
+call ID and participant as specified for R87.
 
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes

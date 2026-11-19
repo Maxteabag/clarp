@@ -320,6 +320,7 @@ impl Whisper {
         running: &mut Running,
         path: &Path,
         asked: Asked<'_>,
+        observed: &mut Option<String>,
     ) -> Result<Vec<Segment>, Unheard> {
         let id = format!("c{}", self.clips.load(Ordering::Relaxed));
         let mut request = json!({
@@ -335,6 +336,13 @@ impl Whisper {
         if running.say(&request).is_err() {
             return Err(Unheard::Gone(ENDED));
         }
+        *observed = Some(
+            asked
+                .language
+                .or(self.worker.language.as_deref())
+                .unwrap_or("auto")
+                .to_string(),
+        );
         let until = Instant::now() + self.worker.hear_within;
         loop {
             let left = until.saturating_duration_since(Instant::now());
@@ -366,6 +374,14 @@ impl Whisper {
 
 impl Listener for Whisper {
     fn hear(&self, clip: Clip<'_>, asked: Asked<'_>) -> Result<Heard, Deaf> {
+        self.hear_observed(clip, asked, &mut None)
+    }
+    fn hear_observed(
+        &self,
+        clip: Clip<'_>,
+        asked: Asked<'_>,
+        observed: &mut Option<String>,
+    ) -> Result<Heard, Deaf> {
         let mut running = self.take(asked.wait)?;
         let started = Instant::now();
         let path = match self.written(clip) {
@@ -377,7 +393,7 @@ impl Listener for Whisper {
                 )));
             }
         };
-        let answered = self.ask(&mut running, &path, asked);
+        let answered = self.ask(&mut running, &path, asked, observed);
         let _ = std::fs::remove_file(&path);
         match answered {
             Ok(segments) => {

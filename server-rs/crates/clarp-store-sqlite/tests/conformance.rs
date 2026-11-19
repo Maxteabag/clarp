@@ -161,3 +161,30 @@ fn sqlite_passes_the_key_value_suite() {
     );
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_failed_key_value_batch_rolls_back_prior_writes_on_reopen() {
+    use clarp_ports::kv::KeyValueEngine;
+    let root = scratch_dir("kv-aborted-batch");
+    let db = root.join("fleet.db");
+    let engine = SqliteKeyValue;
+    let mut store = engine.open(&db).unwrap();
+    store.put("settings", "first", b"old").unwrap();
+    rusqlite::Connection::open(&db).unwrap().execute_batch("CREATE TRIGGER reject_second BEFORE INSERT ON kv WHEN NEW.key='second' BEGIN SELECT RAISE(ABORT,'cut'); END;").unwrap();
+    assert!(
+        store
+            .put_together(&[
+                ("settings".into(), "first".into(), Some(b"new".to_vec())),
+                ("settings".into(), "second".into(), Some(b"value".to_vec()))
+            ])
+            .is_err()
+    );
+    drop(store);
+    let reopened = engine.open(&db).unwrap();
+    assert_eq!(
+        reopened.list("settings").unwrap(),
+        vec![("first".to_string(), b"old".to_vec())]
+    );
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}

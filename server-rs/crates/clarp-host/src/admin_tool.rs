@@ -639,7 +639,7 @@ async fn call(app: &App, tool: &ToolCall, args: &[String]) -> ToolAnswer {
         by: &by,
     };
     let desk = app.calls.clone();
-    let asked = desk.ask(app, |calls, at, (roster, new_id), out| {
+    let asked = desk.ask_public(app, |calls, at, (roster, new_id), out| {
         match command.as_str() {
             "status" => calls.snapshot(asker, at, out),
             "start" => {
