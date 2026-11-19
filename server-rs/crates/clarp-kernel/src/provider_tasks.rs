@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
 
 pub const RECORD_LIMIT: usize = 4 * 1024 * 1024;
+pub const MAX_ACTIONS:usize=64;
 pub const OUTPUT_LIMIT: usize = 64 * 1024;
 const DAY: i64 = 86_400_000;
 pub fn valid_id(id: &str) -> bool {
@@ -395,10 +396,10 @@ impl From<&crate::jobs::Job> for Task {
 }
 
 impl crate::jobs::JobBook {
-    pub fn provider_observation(&self,id:&str,command:Observation<'_>,now:i64,revision:impl FnOnce()->u64)->Option<crate::jobs::JobRecord>{
+    pub fn provider_observation(&self,id:&str,pending:&[crate::jobs::JobRecord],command:Observation<'_>,now:i64,revision:impl FnOnce()->u64)->Option<crate::jobs::JobRecord>{
         use crate::jobs::{Job,JobRecord,Worker,DEFAULT_HEARTBEAT_TIMEOUT_MS};
         if !id.starts_with("claude-task:"){return None;}
-        let before=self.get(id);
+        let before=pending.iter().rev().find(|r|r.job.id==id).map(|r|&r.job).or_else(||self.get(id));
         if before.is_some_and(|j|!j.provider_owned()){return None;}
         let mut task=before.map(Task::from);
         let timeline=match command{
@@ -432,10 +433,14 @@ pub struct Attempt{pub turn:u64,pub attempt:u32}
 #[derive(Clone,Debug,Eq,PartialEq,Serialize,Deserialize)]
 pub struct TurnLink{pub attempt:Attempt,pub exited_at:Option<i64>}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
-pub struct FinalRead{pub attempt:Attempt,pub device:u64,pub inode:u64,pub end:u64,pub exited_at:i64}
+pub struct FinalRead{pub attempt:Option<Attempt>,pub successor:Option<Attempt>,pub device:u64,pub inode:u64,pub end:u64,pub exited_at:i64}
 #[derive(Clone,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Session{
-    pub revision:u64,pub cursor:Cursor,pub bound_at:i64,pub owner:Option<Attempt>,pub final_read:Option<FinalRead>,
+    pub revision:u64,pub cursor:Cursor,pub bound_at:i64,
+    #[serde(default)] pub cwd:String,
+    #[serde(default)] pub ended_at:Option<i64>,
+    pub owner:Option<Attempt>,pub final_read:Option<FinalRead>,
+    #[serde(default)] pub following:std::collections::VecDeque<FinalRead>,
     pub links:std::collections::BTreeMap<String,TurnLink>,
 }
 #[derive(Clone,Debug,Serialize,Deserialize)]
@@ -446,4 +451,27 @@ pub struct JournalEntry{
 pub struct Visit {
     pub native:String,pub expected:u64,pub cursor:Cursor,pub bound_at:i64,
     pub owner:Option<Attempt>,pub final_read:Option<FinalRead>,pub actions:Vec<Evidence>,pub eof:bool,
+}
+
+impl Session {
+    pub fn visit(&self,native:String)->Visit{
+        Visit{native,expected:self.revision,cursor:self.cursor.clone(),bound_at:self.bound_at,owner:self.owner,
+            final_read:self.final_read.clone(),actions:vec![],eof:false}
+    }
+    pub fn newest_owner(&self)->Option<Attempt>{
+        self.following.back().or(self.final_read.as_ref()).map_or(self.owner,|boundary|boundary.successor)
+    }
+}
+
+/// The runner visits at most two bindings in the same order as the provider
+/// observer. It wraps on the next visit, even if only one row remained.
+pub fn rotate_idle(mut bindings:Vec<(String,String)>,after:&(String,String))->Vec<(String,String)>{
+    bindings.sort_unstable();
+    bindings.dedup();
+    let start=bindings.partition_point(|id|id<=after);
+    let start=if start==bindings.len(){0}else{start};
+    bindings.into_iter().skip(start).take(2).collect()
+}
+pub fn visit_binding(ended:Option<i64>,unfinished:bool,now:i64)->bool{
+    unfinished || ended.is_none_or(|end|end>now.saturating_sub(DAY))
 }

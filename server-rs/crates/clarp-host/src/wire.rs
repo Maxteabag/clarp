@@ -577,6 +577,7 @@ pub fn job(record: &AgentRecord, job: &Job, now_ms: i64) -> Value {
     let signs = [job.heartbeat_at_ms, job.progress_at_ms];
     let last_sign = signs.iter().flatten().max();
     let freshness = match last_sign {
+        _ if job.provider_owned() => "unknown",
         _ if lost => "stale",
         None => "unknown",
         Some(at) if (now_ms - at).max(0) <= job.heartbeat_timeout_ms => "fresh",
