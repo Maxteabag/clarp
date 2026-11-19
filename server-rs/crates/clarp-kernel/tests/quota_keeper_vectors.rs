@@ -192,7 +192,8 @@ impl Story {
                         ticked.stopped = true;
                         return;
                     }
-                    let told = quota::after_push(&mut receipt.payload, self.answer.clone(), self.now);
+                    let told =
+                        quota::after_push(&mut receipt.payload, self.answer.clone(), self.now);
                     receipt.delivery = told;
                 }
             }
@@ -292,7 +293,6 @@ impl Story {
         lane
     }
 }
-
 
 #[test]
 fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {

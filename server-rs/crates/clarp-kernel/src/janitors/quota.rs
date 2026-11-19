@@ -370,8 +370,13 @@ pub fn transport_failed(delivery: &Value) -> bool {
 /// Whether the window a notice speaks of has begun anew by `now_ms` (`resets_at`, read as the
 /// Python Host's `_iso_to_ms` reads it: a moment without its offset is in UTC).
 pub fn window_has_reset(payload: &Value, now_ms: i64) -> bool {
-    let reset = payload["resets_at"].as_str().map(str::trim).filter(|at| !at.is_empty());
-    let reset = reset.and_then(instant).map(|(at, _)| (seconds(at) * 1000.0).trunc() as i64);
+    let reset = payload["resets_at"]
+        .as_str()
+        .map(str::trim)
+        .filter(|at| !at.is_empty());
+    let reset = reset
+        .and_then(instant)
+        .map(|(at, _)| (seconds(at) * 1000.0).trunc() as i64);
     reset.is_some_and(|reset| now_ms >= reset)
 }
 
@@ -406,7 +411,10 @@ pub fn delivering(
     let threshold = |payload: &Value| payload["reason"] == REASON;
     let mut newest: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
     for (id, _, payload) in &ordered {
-        if let Some(key) = payload["window_key"].as_str().filter(|key| threshold(payload) && !key.is_empty()) {
+        if let Some(key) = payload["window_key"]
+            .as_str()
+            .filter(|key| threshold(payload) && !key.is_empty())
+        {
             newest.insert(key, id);
         }
     }
@@ -416,7 +424,10 @@ pub fn delivering(
             continue;
         }
         if payload["owner_generation"] != generation {
-            done.push((id.to_string(), Deliver::Settle(json!({ "cancelled": SET_ANEW }))));
+            done.push((
+                id.to_string(),
+                Deliver::Settle(json!({ "cancelled": SET_ANEW })),
+            ));
             continue;
         }
         let retry = &payload["delivery_retry"];
