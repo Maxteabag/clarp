@@ -16,7 +16,7 @@ they are; what is new is a corpus that only does what a client can do, and a sec
 | `contract_scenarios.py` | The corpus. A scenario is steps; HTTP steps are compared, waits watch the snapshot and the conversation the way a client would. A step sends JSON, or a body as it is (`raw`: a file an agent publishes or a user attaches); it may say when it is sent (`body_now`: an app's report of itself) and keep something of its answer for a later step (`save`: a cursor) |
 | `contract_plants.py` | Deliberate changes to a copy of the Python server that the suite must see. A reviewer adds their own |
 | `conform.py` | The driver: `record`, `plants`, `compare`, `cross`; `selftest` tries its own rule for a reference that wavers, and starts no Host |
-| `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand. `golden-more/` is beside them when a run recorded a scenario a third time (below): it is committed with them, and removed when the next run made none |
+| `golden/`, `golden-again/` | What the Python Host answered, normalized, one file per scenario, recorded twice in the same run. Written by the workflow, committed by hand. `golden-more/` is beside them when a run recorded a scenario a third time (below): it is committed with them, and removed when the next run made none. `golden-asked-1/` to `-3/` are only in a report: what the reference answered when it was asked again (below), the scenarios asked and nothing else |
 | `intended.txt` | Ids of differences that are meant to be there (the reasoning is in `../docs/differences.md`) |
 | `awaited.txt` | Ids of differences that are owed: the Python Host moved on main and this Host's port has not landed. Each with the reference's PR and the branch that owes the port |
 | `selftest.py` | The tool's own check of its registers and rules, on reports made up for it. Starts no Host; the workflow's first job runs it |
@@ -122,6 +122,59 @@ which the reference did at most twice in 268 recordings of one scenario. The mar
 row that really changed after the snapshot (its turn settled later, as in older runs of
 `turn-timer`): that costs a recording more and changes no verdict.
 
+### The reference is asked again before a difference is unexplained
+
+A mark needs its family read first, and every family not yet read leaves the train red, so one
+rule covers all of them, known and unknown: **a difference is not called unexplained before
+the reference has been asked again.** In `cross` (the only mode with both Hosts), after the Rust
+Host has been judged, every scenario that would end with an unexplained difference is recorded
+again by the reference, up to three times (`MORE_TRIES`). Each answer that runs to its end is
+one more recording, and the scenario is judged again by the rule the tool already has: a place
+counts only where the Rust Host differs from every recording. A scenario stops being asked
+once nothing in it is unexplained (`asked_again`).
+
+- **The reference may waver; the Rust Host may not.** The Rust Host is never recorded again. A
+  place the reference never gives its answer at stays unexplained. A scenario where the Rust Host
+  did not run to its end is not asked about: it fails the run as before.
+- **It is said.** The report's `# Asked again` section names every scenario asked again and how
+  many recordings it took. For each place a later recording explained, it names the recording
+  and the try that gave the Rust Host's answer. That list goes to the release owner. A try that
+  did not run to its end is said too, and makes no recording.
+- **It is bounded.** At most five scenarios a run are asked about (`ASK_MOST`). A run with more
+  is a real difference: it is judged as it stands, and the report says it was not asked again
+  and names the scenarios.
+- **It is written down.** Each try's answers go to `golden-asked-<try>/` beside `golden/` in
+  the report, holding only the scenarios asked. `judge` reads them with the other recordings,
+  asks nothing itself, and says the same.
+
+Tried before every run (`selftest`, 12 cases): a sound later answer explains, and nothing is
+asked after it. No answer in three tries does not. A Rust Host that is late (an answer newer
+than its own cursor) or changed (an answer the reference never gives) is never asked away. A
+Rust Host that did not run to its end is not asked about. Nothing unexplained, or only what a
+register says, asks nothing. Two scenarios are asked each for as long as it needs. A try that
+did not run to its end is no recording. Six scenarios are not asked and five are. What was
+written down reads back as it was.
+
+What this rule could hide. If this Host regresses into one of the reference's rare answers, the
+regression passes whenever the reference happens to give that answer in one of its
+recordings. Before the rule a run had two recordings; now it can have up to five. The table of
+73 runs since 18 Nov puts the rare answers' rates at about 9% in `oracle-delegations` (most of
+that already marked as R19), 7% in `retried-turns`, 5% in `turn-timer-after-stop`, 3–4% for the
+late stamp (9 of 268 recordings), and 2% or less in the rest. A regression into a rate-*p* answer
+passes one run with chance 1 − (1 − *p*)^5 where it used to be 1 − (1 − *p*)^2:
+
+| *p* | before | now |
+|---|---|---|
+| 9% | 17% | 38% |
+| 7% | 14% | 30% |
+| 3.4% | 7% | 16% |
+| 1.4% | 3% | 7% |
+
+A regression is in every run after it, and each run draws again. At 7%, it passes three runs
+in a row with chance 3%. Every time it passes this way, the report's `# Asked again` section
+names the place and the recording that gave it. The same place in that list run after run is a
+regression, not the reference wavering.
+
 A test Host of the reference sometimes does not come to rest. On an agent's first turn the
 Python Host can take the tool's end before it has written down that the turn began; it refuses
 the end and then writes the beginning, and the agent stays busy (defect R43). It takes a tool
@@ -214,8 +267,8 @@ nothing else is.
 
 A run that was written down can be judged again without starting a Host, as the rules and the
 register are now: `conform.py judge --golden <report>/golden --out <report>` reads the
-recordings of the reference (`golden`, `golden-again`, `golden-more`) and what the Rust Host
-answered (`rust/`).
+recordings of the reference (`golden`, `golden-again`, `golden-more`, and `golden-asked-*` when the
+reference was asked again) and what the Rust Host answered (`rust/`).
 
 ## What is compared as what a client may rely on
 
