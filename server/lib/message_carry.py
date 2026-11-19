@@ -92,15 +92,18 @@ LIVE_ROWS = "carry_live_rows"
 # What a turn before the boundary reads of a turn row (message_writes,
 # message_import_rows, message_turns), all of it:
 # - by time, which turn was running at its timestamp: the latest turn that
-#   began up to _START_SLACK_MS after it, if the timestamp is within that
-#   turn's reach, which is settled_at + _SETTLED_REACH_MS once it has
-#   settled and started_at + _UNSETTLED_REACH_MS before; and, for a prompt's
-#   copy linked to a client row by its words, whether the turn a row was
-#   sent for had ended before the copy: settled, or the next turn began
-#   (TurnIndex.ended_before). A settle moves the reach and ends the
-#   running, and those are the only ways it can change which turn an old row
-#   belongs to. It cannot when every old row lies within both reaches and
-#   before the settle, or when the turn began after them all;
+#   began up to _START_SLACK_MS after it (a reply: by it), if the timestamp
+#   is within that turn's reach, which is its end + _SETTLED_REACH_MS once it
+#   has ended and started_at + _UNSETTLED_REACH_MS before; and, for a
+#   prompt's copy linked to a client row by its words, whether the turn a row
+#   was sent for had ended before the copy. A turn's end is one definition,
+#   TurnIndex.ended_at: the latest settle among its rows, else the start of
+#   the agent's next turn of another trace. A settle moves the reach and ends
+#   the turn, and a later turn's start ends one that never settled: those are
+#   the only ways it can change which turn an old row belongs to. A later
+#   turn begins after every old row; a settle cannot change one when every
+#   old row lies within both reaches and before the settle, or when the turn
+#   began after them all;
 # - whether a trace is a turn at all, which a settle does not change;
 # - the outcome, when it writes a row: the unfinished tools of an
 #   interrupted turn are written as 'interrupted'. A full import writes the
