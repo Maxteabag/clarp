@@ -15576,13 +15576,17 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
 #[test]
 fn body_framing_seen_at_the_local_door() {
     let place = Place::new("framing");
-    let host = place.start();
+    let host = place.start_with_token("framing-test");
     for (name, header) in [
         ("digits", "Content-Length: 0\r\n"),
         ("missing", ""),
         (
             "equal-duplicate",
             "Content-Length: 0\r\nContent-Length: 0\r\n",
+        ),
+        (
+            "different-lengths",
+            "Content-Length: 0\r\nContent-Length: 1\r\n",
         ),
         ("signed-negative", "Content-Length: -5\r\n"),
         ("signed-zero", "Content-Length: +0\r\n"),
@@ -15600,7 +15604,7 @@ fn body_framing_seen_at_the_local_door() {
             .unwrap();
         write!(
             stream,
-            "POST /voice-events HTTP/1.1\r\nHost: test\r\n{header}\r\n"
+            "POST /voice-events HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer framing-test\r\n{header}\r\n"
         )
         .unwrap();
         if name == "transfer" {
@@ -15644,14 +15648,111 @@ fn body_framing_seen_at_the_local_door() {
             }
             other => panic!("{name}: {other:?}"),
         };
-        writeln!(
-            std::io::stdout(),
-            "R86 observation {name}: {} closed={closed} body={}",
-            status.trim_end(),
-            String::from_utf8_lossy(&body)
-        )
-        .unwrap();
+        assert!(status.starts_with("HTTP/1.1 400 "), "{name}: {status}");
+        match name {
+            "digits" | "missing" | "leading-space" | "trailing-space" | "equal-duplicate" => {
+                assert!(!closed, "{name}");
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&body).unwrap(),
+                    json!({"error":"events must be a list"}),
+                    "{name}"
+                );
+            }
+            "transfer" => {
+                assert!(closed);
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&body).unwrap(),
+                    json!({"error":"bad json"})
+                );
+            }
+            _ => assert!(body.is_empty() && closed, "{name}"),
+        }
     }
+    // Ask for 100 Continue while withholding the first payload byte. The
+    // direct door must already answer and close, for binary routes as well.
+    for (method, path) in [
+        ("GET", "/server-info"),
+        ("POST", "/transcribe"),
+        ("DELETE", "/devices"),
+    ] {
+        let mut stream = TcpStream::connect(&host.address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(stream,"{method} {path} HTTP/1.1\r\nHost: test\r\nTransfer-Encoding: chunked\r\nExpect: 100-continue\r\n\r\n").unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 400 "));
+        assert!(
+            response
+                .to_ascii_lowercase()
+                .contains("\r\nconnection: close\r\n")
+        );
+    }
+    // HTTP/2 prior knowledge cannot start a session on this cleartext HTTP/1 listener.
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+        .unwrap();
+    let mut answer = Vec::new();
+    match stream.read_to_end(&mut answer) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {}
+        Err(e) => panic!("prior-knowledge probe: {e}"),
+    }
+    assert!(
+        answer.is_empty() || answer.starts_with(b"HTTP/1.1 4"),
+        "unexpected HTTP/2 acceptance: {answer:?}"
+    );
+}
+
+// Observe only header counts and classifications in a stand-in Tower service
+// using the Host's same axum::serve configuration.
+#[tokio::test]
+async fn measured_length_fields_delivered_by_hyper_to_tower() {
+    async fn lengths(headers: axum::http::HeaderMap) -> String {
+        let values = headers.get_all(http::header::CONTENT_LENGTH);
+        format!(
+            "{} fields; all digits={}",
+            values.iter().count(),
+            values
+                .iter()
+                .all(|v| !v.is_empty() && v.as_bytes().iter().all(u8::is_ascii_digit))
+        )
+    }
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = socket.local_addr().unwrap();
+    let service = axum::Router::new().route("/", axum::routing::post(lengths));
+    let task = tokio::spawn(async move { axum::serve(socket, service).await.unwrap() });
+    tokio::task::spawn_blocking(move || {
+        for (name, fields) in [
+            ("digits", "Content-Length: 0\r\n"),
+            ("same", "Content-Length: 0\r\nContent-Length: 0\r\n"),
+            ("spaces", "Content-Length:    0 \r\n"),
+        ] {
+            let mut stream = TcpStream::connect(addr).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            write!(
+                stream,
+                "POST / HTTP/1.1\r\nHost: test\r\nConnection: close\r\n{fields}\r\n"
+            )
+            .unwrap();
+            let mut answer = String::new();
+            stream.read_to_string(&mut answer).unwrap();
+            let (status, body) = answer.split_once("\r\n\r\n").unwrap();
+            assert!(status.starts_with("HTTP/1.1 200 "));
+            writeln!(std::io::stdout(), "R86 Tower measurement {name}: {body}").unwrap();
+            assert!(body.ends_with("all digits=true"));
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
 }
 
 #[test]
@@ -15907,28 +16008,6 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
         json!({"error":"request body too large"})
     );
     assert!(relay_refused.ended);
-    // Invalid HTTP framing is refused by Hyper; a missing length reaches the JSON policy.
-    for (extra, router_error) in [
-        ("", true),
-        ("Content-Length: nope\r\n", false),
-        ("Transfer-Encoding: chunked\r\n", true),
-    ] {
-        let mut stream = TcpStream::connect(&host.address).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        write!(stream,"POST /voice-events HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\n{extra}\r\n").unwrap();
-        let mut raw = String::new();
-        stream.read_to_string(&mut raw).unwrap();
-        assert!(raw.starts_with("HTTP/1.1 400 "), "{raw}");
-        if router_error {
-            let (_, body) = raw.split_once("\r\n\r\n").unwrap();
-            assert_eq!(
-                serde_json::from_str::<Value>(body).unwrap(),
-                json!({"error":"bad json"})
-            );
-        }
-    }
     // Larger than the common cap but inside each binary route's cap: each one
     // asks for the body. Drop the synthetic connection before sending media.
     for route in ["/upload", "/media", "/tools/media", "/transcribe"] {
