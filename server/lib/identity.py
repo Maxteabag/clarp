@@ -118,15 +118,6 @@ def resolve_backend_session(backend_session_id: object) -> AgentRef | None:
     return AgentRef.from_row(row) if row else None
 
 
-def resolve_hook(*, backend_session_id: object,
-                 session: object) -> AgentRef | None:
-    """The agent that fired a hook: backend session first, session name second."""
-    row = _agents.resolve_for_hook(
-        backend_session_id=_clean(backend_session_id) or None,
-        session=_clean(session) or None)
-    return AgentRef.from_row(row) if row else None
-
-
 def backend_session(agent: AgentRef | dict[str, Any] | str) -> str:
     """The most recent live runtime's backend conversation id, or ''."""
     ref = resolve(agent)

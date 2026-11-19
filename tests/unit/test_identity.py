@@ -61,7 +61,7 @@ def test_agent_id_shaped_session_names_still_resolve():
     assert not identity.looks_like_agent_id("mike")
 
 
-def test_backend_session_and_hook_resolution():
+def test_backend_session_resolution():
     agent_id = _agent()
     assert identity.backend_session("mike") == ""
     assert identity.resolve_backend_session("uuid-1") is None
@@ -72,10 +72,6 @@ def test_backend_session_and_hook_resolution():
     assert identity.backend_session(ref) == "uuid-1"
     assert identity.backend_session("nobody") == ""
     assert identity.resolve_backend_session(" uuid-1 ") == ref
-    assert identity.resolve_hook(backend_session_id="uuid-1", session=None) == ref
-    assert identity.resolve_hook(backend_session_id="", session="mike") == ref
-    assert identity.resolve_hook(backend_session_id="other", session="mike") == ref
-    assert identity.resolve_hook(backend_session_id=None, session=None) is None
 
 
 def test_turn_ref_binds_trace_to_the_current_runtime():

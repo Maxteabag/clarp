@@ -183,8 +183,9 @@ def test_a_claude_started_by_a_dispatched_turns_tool_owns_no_row_and_settles_not
     assert _rows(agent_id) == [("tr-1", "completed", 1)]
 
 
-def _real_stop_hook(monkeypatch, *, clarp_process):
-    """plugin/hooks/stop_state.py's main(), as the CLI runs it; returns the flag it sent."""
+def _real_stop_hook(monkeypatch, *, clarp_process, session_id):
+    """plugin/hooks/stop_state.py's main(), as the CLI runs it, reporting ``session_id``: the
+    session the dispatcher bound, as a real dispatched CLI does. Returns the flag it sent."""
     import pathlib
     hooks = str(pathlib.Path(__file__).resolve().parents[2] / "plugin" / "hooks")
     if hooks not in sys.path:
@@ -201,7 +202,7 @@ def _real_stop_hook(monkeypatch, *, clarp_process):
         sent.append(dict(detail or {}).get("dispatched", "absent"))
         return real(agent_id, event, detail, *args, **kwargs)
     monkeypatch.setattr(turn_lifecycle, "hook_transition", hook_transition)
-    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "claude-uuid"})))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": session_id})))
     assert stop_state.main() == 0
     return sent
 
@@ -211,7 +212,8 @@ def test_the_real_stop_hook_says_dispatched_only_in_a_process_the_dispatcher_sta
         tmp_path, monkeypatch, clarp_process):
     """The hook itself sends the flag (the tests above pass it to the transition by hand)."""
     call, agent_id = _dispatched(tmp_path, monkeypatch)
-    assert _real_stop_hook(monkeypatch, clarp_process=clarp_process) == [clarp_process]
+    bound = agents_db.live_backend_session(agent_id)                # the session the dispatcher bound
+    assert _real_stop_hook(monkeypatch, clarp_process=clarp_process, session_id=bound) == [clarp_process]
     if clarp_process:
         assert _rows(agent_id) == [("tr-1", None, 0)]               # the runner settles it
         call["on_result"](OK)
