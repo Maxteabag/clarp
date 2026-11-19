@@ -147,3 +147,7 @@ tests/unit/test_claude_transcript.py
 tests/unit/test_codex_transcript.py
 tests/unit/test_conversation_sync.py
 tests/unit/test_message_store_preview.py
+# Every message id that disappears raises replace_revision in the commit that removes it: the
+# apps merge /log deltas by id and never remove a row, so without it a reply shows twice.
+tests/unit/test_import_raises_replace.py
+tests/unit/test_live_writers_raise_replace.py
