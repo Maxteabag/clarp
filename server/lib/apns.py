@@ -1294,6 +1294,7 @@ def send_user_notification(notification: dict) -> dict:
             if not go:
                 failed += len(rows)
                 continue
+            counted = sent + failed + disabled
             try:
                 transport = _transport(cfg)
                 for row in rows:
@@ -1350,6 +1351,10 @@ def send_user_notification(notification: dict) -> dict:
                         log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
+                # A batch that raised (its transport could not even be built, or a row's
+                # payload) reached none of its rows not yet counted: they failed. 0 sent and
+                # 0 failed means one thing only: nobody was meant to get it (R105).
+                failed += len(rows) - (sent + failed + disabled - counted)
     log("apnsUserNotification",
         f"{persona} notification={notification_id} source={source_message_id} "
         f"preview={preview_hash} session={session} sent={sent} failed={failed} "
@@ -1474,6 +1479,7 @@ def send_decision_created(artifact: dict) -> dict:
             if not go:
                 failed += len(rows)
                 continue
+            counted = sent + failed + disabled
             try:
                 transport = _transport(cfg)
                 for row in rows:
@@ -1515,6 +1521,10 @@ def send_decision_created(artifact: dict) -> dict:
                         log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsBatchFail", e, detail=f"notification={notification_id}")
+                # A batch that raised (its transport could not even be built, or a row's
+                # payload) reached none of its rows not yet counted: they failed. 0 sent and
+                # 0 failed means one thing only: nobody was meant to get it (R105).
+                failed += len(rows) - (sent + failed + disabled - counted)
     log("apnsDecisionCreated",
         f"{persona} decision={decision_id} session={session} "
         f"time_sensitive={int(time_sensitive)} sent={sent} failed={failed} "
@@ -2031,6 +2041,7 @@ def send_agent_ring(ring: dict, kind: str, exclude_owners=None, tokens: list[dic
                 log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
     except Exception as e:  # noqa: BLE001
         log_exception("apnsRingBatchFail", e, detail=f"ring={ring.get('ring_id')}")
+        failed += len(tokens) - (sent + failed + disabled)    # the rows it never reached failed (R105)
     log("apnsAgentRing", f"ring={ring.get('ring_id')} kind={kind} sent={sent} failed={failed} disabled={disabled}")
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
 
@@ -2071,14 +2082,17 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
     payload = agent_ring_voip_payload(ring, server_instance_id=_server_instance_id(),
                                      show_reason=agent_rings.settings()["show_reason"])
     attempted = set()
+    targets: list[tuple[dict, str]] = []
     try:
-        transport = _DirectTransport(cfg)
         for row in tokens:
             principal = row.get("principal") or ""
             token = canonical_token(row.get("token"))
             if not token or token in attempted or not principal.startswith("device_") or not device_ok(principal):
                 continue
             attempted.add(token)
+            targets.append((row, token))
+        transport = _DirectTransport(cfg)
+        for row, token in targets:
             try:
                 status, reason, _apns_id = transport.send(
                     token, row.get("environment") or cfg.apns_environment, payload,
@@ -2096,5 +2110,6 @@ def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
                 log("apnsRingVoipReject", f"{reason or status} principal={row.get('principal')}")
     except Exception as e:  # noqa: BLE001
         log_exception("apnsRingVoipBatchFail", e, detail=f"ring={ring.get('ring_id')}")
+        failed += len(targets) - (sent + failed)    # the phones it never reached failed (R105)
     log("apnsAgentRingVoip", f"ring={ring.get('ring_id')} sent={sent} failed={failed}")
     return {"enabled": True, "sent": sent, "failed": failed}
