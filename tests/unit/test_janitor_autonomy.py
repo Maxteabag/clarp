@@ -222,3 +222,15 @@ def test_a_quota_warning_names_the_model_group_it_is_about(env):
     usage={'providers':{'agy':{'provider_instance_id':'opaque','windows':[{'window_id':'w','label':'Gemini Models','used_percentage':85,'observed_at':stamp,'freshness':'fresh'}]}}}
     service.AutonomyJanitors(lambda *_:True,lambda p:notifications.append(p)or {'sent':1},usage_read=lambda:usage).quota_once()
     assert notifications[0]['preview']=='agy Gemini Models: 15% quota remaining'
+
+
+def test_a_raise_after_the_decision_closes_the_heartbeat_run(env, monkeypatch):
+    """R100's sweep: a raise after the model answered left the run running."""
+    from lib import janitor_store
+    def broken(*_args, **_kwargs):
+        raise RuntimeError('planted')
+    w=service.AutonomyJanitors(lambda *_:pytest.fail('dispatched'),lambda _:None,lambda *_:{'action':'defer','delay_seconds':1200,'message':'','reason':'Waiting'})
+    monkeypatch.setattr(janitor_store,'save_continuity',broken)
+    w.heartbeat_once()
+    [run]=janitors.list_runs('clarp-heartbeat-decider')
+    assert run['status']=='failed' and 'RuntimeError' in run['error']
