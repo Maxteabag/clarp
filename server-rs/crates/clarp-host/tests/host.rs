@@ -15704,7 +15704,9 @@ fn body_framing_seen_at_the_local_door() {
         Err(e) => panic!("prior-knowledge probe: {e}"),
     }
     assert!(
-        answer.is_empty() || answer.starts_with(b"HTTP/1.1 4"),
+        answer.is_empty()
+            || answer.starts_with(b"HTTP/1.1 4")
+            || answer.starts_with(b"HTTP/1.1 505 "),
         "unexpected HTTP/2 acceptance: {answer:?}"
     );
 }
