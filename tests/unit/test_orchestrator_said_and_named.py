@@ -491,7 +491,8 @@ def test_a_failed_completion_is_logged_and_the_answer_still_sent_and_the_run_clo
     send = _sender(service, app=False)
     first = send()
     assert _said(first) == (200, "route", "antoni", "claude")
-    assert calls[1] == {"status": "route", "target_agent_id": _agent_id("antoni")}     # its least receipt
+    assert calls[1] == {"status": "route", "target_agent_id": _agent_id("antoni"), "answer_status": 200,
+                        "answer_dispatch": "claude", "answer_session": "antoni"}     # its least receipt
     assert "orchestratorReceiptFail" in capfd.readouterr().err
     assert _said(send()) == (200, "route", "antoni", "claude")      # not pending: the run is closed
 
@@ -546,3 +547,41 @@ def test_a_status_without_a_session_replays_the_requested_session(effects):
     receipt.pop("answer_session")
     db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
     assert _said(send()) == (200, "route", "mike", "claude")
+
+
+# ---- the third delta (06:36): a stored status is an HTTP status; a failed completion keeps the answer ----
+
+@pytest.mark.parametrize("stored, counts", [(0, False), (99, False), (100, True), (599, True), (600, False),
+                                            (-1, False), (200.0, False), (True, False)])
+def test_a_stored_status_is_the_answer_only_as_an_http_status(effects, stored, counts):
+    """0 would be answered as 'HTTP/1.1 0', which no client parses: a stored status counts only as an
+    integer from 100 to 599; anything else is an older receipt, replayed as main."""
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False)
+    send()
+    rowid, receipt = _stored_receipt()
+    receipt["answer_status"] = stored
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
+    assert _said(send()) == ((stored if counts else 200), "route", "antoni", "claude")
+
+
+@pytest.mark.parametrize("app", [False, True], ids=["voice", "app"])
+@pytest.mark.parametrize("kind", ["route", "clarify"])
+@pytest.mark.parametrize("failure", ["refused", "locked"])
+def test_after_a_failed_completion_every_replay_answers_the_first_answer(effects, monkeypatch, kind, app, failure):
+    import sqlite3
+    service = _service(_message("antoni") if kind == "route" else _message("antoni", 0.4), effects)
+    real = orchestrator.janitor_builtins.complete_run
+    calls = []
+
+    def fails_first(run_id, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise (orchestrator.janitors.JanitorError("Demand history accepts bounded metadata only")
+                   if failure == "refused" else sqlite3.OperationalError("database is locked"))
+        return real(run_id, *args, **kwargs)
+    monkeypatch.setattr(orchestrator.janitor_builtins, "complete_run", fails_first)
+    send = _sender(service, app=app)
+    first = send()
+    assert _said(send()) == _said(first) and _said(send()) == _said(first)
+    assert first.action == kind and first.status == 200
