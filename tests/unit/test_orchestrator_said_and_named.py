@@ -551,11 +551,14 @@ def test_a_status_without_a_session_replays_the_requested_session(effects):
 
 # ---- the third delta (06:36): a stored status is an HTTP status; a failed completion keeps the answer ----
 
-@pytest.mark.parametrize("stored, counts", [(0, False), (99, False), (100, True), (599, True), (600, False),
-                                            (-1, False), (200.0, False), (True, False)])
+@pytest.mark.parametrize("stored, counts", [
+    (0, False), (99, False), (100, False), (101, False), (199, False), (204, False), (304, False), (600, False),
+    (-1, False), (200.0, False), (True, False),
+    (200, True), (202, True), (203, True), (205, True), (303, True), (305, True), (404, True), (599, True)])
 def test_a_stored_status_is_the_answer_only_as_an_http_status(effects, stored, counts):
-    """0 would be answered as 'HTTP/1.1 0', which no client parses: a stored status counts only as an
-    integer from 100 to 599; anything else is an older receipt, replayed as main."""
+    """A stored status counts only as an integer from 200 to 599 other than 204 and 304: 0 is
+    answered as 'HTTP/1.1 0', 100 as a BadStatusLine, 1xx, 204 and 304 lose the body (the last delta,
+    07:12). Anything else is an older receipt, replayed as main."""
     service = _service(_message("antoni"), effects)
     send = _sender(service, app=False)
     send()
@@ -585,3 +588,63 @@ def test_after_a_failed_completion_every_replay_answers_the_first_answer(effects
     first = send()
     assert _said(send()) == _said(first) and _said(send()) == _said(first)
     assert first.action == kind and first.status == 200
+
+
+# ---- the last delta (07:12): one rule for a stored status, in both readers; the two fallbacks ----
+
+def _error_receipt(effects, http_status):
+    """A routed dispatch that failed 413, its receipt made an older one (no answer_* keys) whose
+    http_status is ``http_status`` (or none)."""
+    service = _service(_message("antoni"), effects)
+    send = _sender(service, app=False, dispatch=_dispatch_fails(413))
+    assert _said(send()) == (413, "error", "antoni", "")
+    rowid, receipt = _stored_receipt()
+    receipt = {key: value for key, value in receipt.items() if not key.startswith("answer_")}
+    receipt.pop("http_status", None)
+    if http_status != "<none>":
+        receipt["http_status"] = http_status
+    db.conn().execute("UPDATE janitor_demand_results SET result_json=? WHERE rowid=?", (json.dumps(receipt), rowid))
+    return send
+
+
+@pytest.mark.parametrize("stored, answered", [
+    (100, 500), (204, 500), ("abc", 500), (True, 500), ("<none>", 500), (404, 404), (413, 413), (503, 503)])
+def test_a_stored_http_status_is_read_by_the_same_rule(effects, stored, answered):
+    """The older receipt's http_status: a status that is not one a replay can answer with answers
+    500, as a missing one does (it could raise, 'abc', or be sent as written, 100 or 204)."""
+    send = _error_receipt(effects, stored)
+    assert _said(send()) == (answered, "error", "antoni", "")
+
+
+@pytest.mark.parametrize("kind", ["route", "clarify"])
+@pytest.mark.parametrize("refused", ["the session", "everything"])
+def test_the_least_receipts_two_fallbacks_close_the_run(effects, monkeypatch, kind, refused):
+    """No real input reaches them (the least receipt's values all fit), so the bound is stubbed, as the
+    reviewer's forced cases did: with the session refused, only the session is left out; with
+    everything refused, the bare status is stored. The run is closed either way, never left claimed."""
+    service = _service(_message("antoni") if kind == "route" else _message("antoni", 0.4), effects)
+    real = orchestrator.janitor_builtins.complete_run
+    stored = []
+
+    def fails_first(run_id, *args, **kwargs):
+        stored.append(kwargs.get("result"))
+        if len(stored) == 1:
+            raise orchestrator.janitors.JanitorError("Demand history accepts bounded metadata only")
+        return real(run_id, *args, **kwargs)
+
+    def fits(metadata):
+        if len(stored) == 0:
+            return True                                    # the first receipt, as it is written
+        return False if refused == "everything" else "answer_session" not in metadata
+    monkeypatch.setattr(orchestrator.janitor_builtins, "complete_run", fails_first)
+    monkeypatch.setattr(orchestrator.janitor_builtins, "fits_metadata", fits)
+    send = _sender(service, app=False)
+    first = send()
+    least = stored[1]
+    if refused == "everything":
+        assert least == {"status": kind}
+    else:
+        assert "answer_session" not in least and least["answer_status"] == 200 and least["status"] == kind
+    second = send()
+    assert second.action == kind and second.status == 200            # the run is closed: not pending
+    assert _said(first)[1] == kind
