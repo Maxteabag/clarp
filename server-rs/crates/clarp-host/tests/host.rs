@@ -35891,6 +35891,7 @@ fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them
     append(&receipt("managed",&time));
     wait_for("the running managed task reaches the registry",||job(&host,"managed")["status"]=="running");
     let shown=job(&host,"managed");
+    assert_eq!(shown["generation"],1);
     assert_eq!(shown["kind"],"provider-task");
     assert_eq!(shown["heartbeat_source"],"provider_event");
     assert!(shown["heartbeat_at"].is_null() && shown["worker_pid"].is_null());

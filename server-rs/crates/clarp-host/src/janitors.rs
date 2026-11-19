@@ -608,14 +608,17 @@ fn visit_idle_bindings(app:&App,after:&mut (String,String)){
         if view.broken.is_some(){continue;}
         let current=view.status.backend_session.as_deref();
         let unfinished=view.jobs.iter().any(|job|job.provider_owned() && job.status.is_active());
-        for (native,ended) in &view.provider_bindings{
+        for (native,ended,first_exit) in &view.provider_bindings{
+            if first_exit.is_some_and(|at|clarp_kernel::provider_tasks::turn_link_expired(at,now)){
+                member.agent.expire_provider_links(native);
+            }
             if (view.status.live.is_none() || current!=Some(native.as_str())) && visit_binding(*ended,unfinished,now){
                 bindings.push((member.record.agent_id.clone(),native.clone()));
             }
         }
         // Existing bindings that predate the observer have no cursor yet.
         if member.record.backend=="claude" && view.status.live.is_none() && let Some(native)=current
-            && !view.provider_bindings.iter().any(|(id,_)|id==native)
+            && !view.provider_bindings.iter().any(|(id,_,_)|id==native)
             && visit_binding(view.status.last.as_ref().map(|turn|turn.ended_at_ms),unfinished,now){
             bindings.push((member.record.agent_id.clone(),native.to_owned()));
         }

@@ -229,6 +229,23 @@ of them the user's). Not there of goals: the ledger and subgoals (`ledger`, `sub
 answer that they are not here yet), and what an account's usage limit does to a wake (accounts come later).
 The Goal keeper and its receipts are there: below.
 
+**Background Bash tasks in Claude's transcript** (19 Nov 2026). The agent reads a background Bash
+launch, its tool result and the provider's eventual task notice from its bound parent transcript.
+The agent's job book gives that task a stable id and shows it in the ordinary job list and
+timeline. A progress update is provider evidence. The Host owns no worker PID for it. An
+unmatched result creates nothing. A matching late completion can settle an inferred stop.
+
+The live reader shares a bounded file window with the helper cells. The Host's existing runner
+visits two eligible idle bindings in agent and session order. Each visit reads at most 256 KiB and
+keeps its place within a record with more than 64 actions. The record ceiling is 4 MiB including
+the newline. The actor writes the cursor, the launching attempt and the job records together.
+On rejoin it drains the final byte boundary and reconciles the ended attempt before publishing
+its job book. An interactive resume has no managed attempt to stop its jobs.
+
+The rules and binding rotation are in `clarp-kernel/src/provider_tasks.rs`. The generators
+`tools/provider-background-tasks-vectors.py` and `tools/provider-observer-vectors.py` record
+the Python Host's own functions, including 1,142 lifecycle steps and 320 binding selections.
+
 **What agents make and ask is there, for the plain kinds** (15 Nov 2026). The rules of `server/lib/artifacts.py`
 are in the kernel (`artifacts.rs`, `artifacts/decisions.rs`, held to the Python module by 264 recorded calls,
 123 of them refusals): documents, research, data, code changes, releases, directories and workflow runs; a

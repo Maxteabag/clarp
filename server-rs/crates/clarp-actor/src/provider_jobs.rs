@@ -9,6 +9,28 @@ impl Actor {
     pub fn provider_attempt(&self)->Option<Attempt>{
         self.live.as_ref().filter(|_|self.recorder.agent().live().is_some_and(Turn::has_process)).map(|live|Attempt{turn:live.turn.0,attempt:live.attempt})
     }
+    pub fn expire_provider_links(&mut self,native:&str,now:i64)->Result<bool,ActorError>{
+        let Some(saved)=self.provider_sessions.get(native) else{return Ok(false);};
+        if !saved.links.values().any(|link|link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now))){return Ok(false);}
+        let mut session=saved.clone();
+        session.links.retain(|_,link|!link.exited_at.is_some_and(|at|rules::turn_link_expired(at,now)));
+        session.revision+=1;
+        self.commit_provider(JournalEntry{native:native.into(),session,records:Vec::new()},now)?;
+        Ok(true)
+    }
+    /// An interactive resume has a runtime lifetime but owns no managed
+    /// attempt. Closing its terminal can make a task unknown, never stopped.
+    pub fn provider_terminal(&mut self,native:&str,open:bool,now:i64)->Result<(),ActorError>{
+        let mut session=self.provider_sessions.get(native).cloned().unwrap_or_default();
+        if session.bound_at==0 {session.bound_at=now;session.cwd=self.profile.cwd.to_string_lossy().into_owned();}
+        if session.newest_owner().is_some(){return Ok(());}
+        let ended=(!open).then_some(now);
+        if session.ended_at==ended && session.revision>0{return Ok(());}
+        session.ended_at=ended;
+        session.revision+=1;
+        self.commit_provider(JournalEntry{native:native.into(),session,records:Vec::new()},now)?;
+        Ok(())
+    }
     /// Pin the end of the previous attempt before its successor's shim
     /// may append. Unread older records keep their original turn ownership.
     pub fn provider_boundary(&mut self,native:&str,successor:Option<Attempt>,identity:(u64,u64,u64),now:i64)->Result<(),ActorError>{

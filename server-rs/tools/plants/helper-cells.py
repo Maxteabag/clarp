@@ -90,10 +90,10 @@ for label,old,new in [
     ("each refresh reads every metadata file again","|(was, _)| *was == stamp","|_| false"),
     ("a changed sidecar keeps a cached alias","|(was, _)| *was == stamp","|_| true"),
     ("ignore the metadata size bound","stamp.bytes > META_BYTES","false"),
-    ("an append starts a full transcript parse","stamp.bytes > old.bytes || old == stamp","old == stamp"),
-    ("seek back to zero when the parent grows","SeekFrom::Start(self.parent.offset)","SeekFrom::Start(0)"),
-    ("read a live-only parent without imported cells","imported && self.read_parent","true && self.read_parent"),
-    ("forget a partial appended line","self.fragment = fragment;","self.fragment.clear();"),
+    ('an append starts a full transcript parse', 'old.bytes==stamp.bytes && old!=stamp', 'old.bytes!=stamp.bytes || old!=stamp'),
+    ('seek back to zero when the parent grows', 'file.seek(SeekFrom::Start(start))', 'file.seek(SeekFrom::Start(0))'),
+    ('read a live-only parent without imported cells', 'if request.parent {next.min(self.parent.offset)}', 'if true {next.min(self.parent.offset)}'),
+    ('forget a partial appended line', 'self.lines=lines;', 'self.lines=Default::default();'),
 ]:
     PLANTS.append((F,"reads",label,old,new))
 if __name__=="__main__":

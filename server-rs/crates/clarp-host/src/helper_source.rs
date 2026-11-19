@@ -301,6 +301,7 @@ impl RefreshClock {
         }
         live.then(|| self.checked.map_or(now, |t| t + Duration::from_secs(1)))
     }
+    pub fn finish_later(&mut self){self.final_due=true;}
     pub fn started(&mut self, now: Instant) {
         self.final_due = false;
         self.checked = Some(now);
@@ -369,11 +370,14 @@ mod tests {
         let mut exact=record(0..1);
         exact.push_str(&" ".repeat(RECORD_LIMIT-exact.len()-1));
         exact.push('\n');
+        let mut over_by_one=record(900..901);
+        over_by_one.push_str(&" ".repeat(RECORD_LIMIT-over_by_one.len()));
+        over_by_one.push('\n');
         let mut oversized=record(1000..1001);
         oversized.push_str(&" ".repeat(RECORD_LIMIT-oversized.len()+1));
-        std::fs::write(&f.parent,format!("{exact}{oversized}")).unwrap();
+        std::fs::write(&f.parent,format!("{exact}{over_by_one}{oversized}")).unwrap();
         let mut seen=Vec::new();
-        for _ in 0..(2*RECORD_LIMIT/(VISIT_BYTES as usize)+1){
+        for _ in 0..(3*RECORD_LIMIT/(VISIT_BYTES as usize)+1){
             let before=source.io_counts[1];
             source.read_visit(&f.root,"/fixture",&mut read,now).unwrap();
             assert!(source.io_counts[1]-before<=VISIT_BYTES as usize);
@@ -382,7 +386,9 @@ mod tests {
         assert_eq!(seen,["tool-0"]);
         assert!(read.visit.cursor.discarding);
         let mut file=fs::OpenOptions::new().append(true).open(&f.parent).unwrap();
-        writeln!(file).unwrap();
+        // This suffix could be decoded as a fresh record if the persisted
+        // discard flag were lost on restart.
+        writeln!(file,"{}",record(777..778)).unwrap();
         let start=file.metadata().unwrap().len();
         let many=record(1..131);
         writeln!(file,"{many}").unwrap();
@@ -476,6 +482,7 @@ mod tests {
             );
         }
         assert_eq!(source.counts, [2, 0, 0]);
+        assert_eq!(source.io_counts, [2, 0]);
         let child = f.children.join("agent-fixture.jsonl");
         fs::write(&child, "synthetic").unwrap();
         let meta = f.children.join("agent-fixture.meta.json");

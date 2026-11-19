@@ -97,6 +97,7 @@ pub struct Spoke {
 /// What an agent's thread is asked.
 pub enum Ask {
     VisitProvider(String),
+    ExpireProviderLinks(String),
     HistoricalRead { source: Box<crate::helper_source::HelperSource>, visit:Option<clarp_kernel::provider_tasks::Visit>, generation:u64 },
     HelperRead {
         source: Box<crate::helper_source::HelperSource>,
@@ -104,6 +105,7 @@ pub enum Ask {
         cwd: String,
         generation: u64,
         provider:Option<clarp_kernel::provider_tasks::Visit>,
+        more_helpers:bool,
         changed: bool,
     },
     Send {
@@ -378,7 +380,7 @@ pub struct View {
     /// The agent's background jobs: the ones that run, and the ones that ended within a day.
     pub jobs: Vec<Job>,
     /// Idle native bindings and the last known runtime end, for the shared runner.
-    pub provider_bindings: Vec<(String,Option<i64>)>,
+    pub provider_bindings: Vec<(String,Option<i64>,Option<i64>)>,
     /// What the agent made and asks, and its goals: what the apps read across agents.
     pub books: Arc<Books>,
     /// What the agent says aloud, and the clips it became: where a clip is looked for.
@@ -446,6 +448,9 @@ pub struct AgentHandle {
 }
 
 impl AgentHandle {
+    pub(crate) fn expire_provider_links(&self,native:&str){
+        let _=self.tx.send(Ask::ExpireProviderLinks(native.to_owned()));
+    }
     pub(crate) fn visit_provider(&self,native:&str){
         let _=self.tx.send(Ask::VisitProvider(native.to_owned()));
     }
@@ -902,7 +907,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
         helper_rows: Default::default(),
         helper_source: Some(Default::default()),
         helper_clock: Default::default(),
-        provider_requested:false, historical_reading:false, historical_sources:BTreeMap::new(),
+        provider_requested:false, provider_retry_at:None,historical_reading:false, historical_sources:BTreeMap::new(),
         helper_generation: 0,
         helper_owner: None,
         jobs_checked: Instant::now(),
@@ -967,6 +972,7 @@ struct Worker {
     helper_source: Option<Box<crate::helper_source::HelperSource>>,
     helper_clock: crate::helper_source::RefreshClock,
     provider_requested:bool,
+    provider_retry_at:Option<Instant>,
     historical_reading:bool,
     historical_sources:BTreeMap<String,Box<crate::helper_source::HelperSource>>,
     helper_generation: u64,
@@ -1271,19 +1277,27 @@ impl Worker {
         let (live, session) = actor.helper_context();
         let now = Instant::now();
         let helper_due = self.helper_clock.due(live, now);
+        if let Some(retry)=self.provider_retry_at.take() && retry>now{
+            self.provider_retry_at=Some(retry);
+            return Some(retry);
+        }
         self.helper_source.as_ref()?;
-        let session=session?.to_owned();
+        let session=session.or_else(||actor.provider_session(&self.setup.profile.conversation_id)
+            .map(|_|self.setup.profile.conversation_id.as_str()))?.to_owned();
         let attempt=actor.provider_attempt();
-        let mut saved=actor.provider_session(&session).cloned().unwrap_or_default();
-        if saved.newest_owner().is_some() && saved.newest_owner()!=attempt {
+        let newest=actor.provider_session(&session).and_then(|s|s.newest_owner());
+        if newest.is_some() && newest!=attempt {
             let root=crate::past::projects(&crate::config::home());
-            if let Ok(identity)=crate::helper_source::boundary(&root,&self.setup.record.cwd,&session){
-                if actor.provider_boundary(&session,None,identity,now_ms).is_err(){return Some(now+Duration::from_secs(1));}
-                saved=actor.provider_session(&session)?.clone();
+            if crate::helper_source::boundary(&root,&self.setup.record.cwd,&session)
+                .ok().is_none_or(|identity|actor.provider_boundary(&session,None,identity,now_ms).is_err()){
+                let retry=now+Duration::from_secs(1);self.provider_retry_at=Some(retry);return Some(retry);
             }
         }
-        let due=if saved.final_read.is_some() || self.provider_requested {now}else{helper_due?};
+        let saved=actor.provider_session(&session);
+        let due=if saved.is_some_and(|s|s.final_read.is_some()) || self.provider_requested {now}else{helper_due?};
         if due>now{return Some(due)}
+        let mut visit=saved.map_or_else(||clarp_kernel::provider_tasks::Session::default().visit(session.clone()),|s|s.visit(session.clone()));
+        if visit.bound_at==0{visit.bound_at=self.setup.record.created_at_ms;}
         let helpers=helper_due.is_some_and(|t|t<=now) && actor.track_helpers(&mut self.helper_rows).unwrap_or(false);
         if helper_due.is_some_and(|t|t<=now){self.helper_clock.started(now);}
         self.provider_requested=false;
@@ -1301,24 +1315,22 @@ impl Worker {
             None
         };
         let at=now_ms;
-        let owner=saved.owner;
         let mut request=crate::helper_source::ProviderRead{helpers,parent:helpers && (self.helper_rows.has_imported || missed.is_some()),
-            visit:clarp_kernel::provider_tasks::Visit {
-            native:session.clone(),expected:saved.revision,cursor:saved.cursor,bound_at:self.setup.record.created_at_ms,
-            owner,final_read:saved.final_read,actions:Vec::new(),eof:false
-        }};
+            visit};
         let generation = self.helper_generation;
         let tx = self.tx.clone();
         self.setup.runtime.spawn_blocking(move || {
             let root = crate::past::projects(&crate::config::home());
             let result=source.read_visit(&root,&cwd,&mut request,at);
+            let complete=result.is_ok() && request.visit.eof;
+            let more_helpers=result.is_ok() && request.parent && !complete;
             let provider=result.is_ok().then_some(request.visit);
             let changed=result.unwrap_or(false);
-            if missed.is_some() {
+            if missed.is_some() && complete {
                 source.recovered_through = missed;
             }
             let _ = tx.send(Ask::HelperRead {
-                source,provider,
+                source,provider,more_helpers,
                 cwd,
                 session,
                 generation,
@@ -1794,7 +1806,7 @@ impl Worker {
                 return Ok(());
             }
             Ask::Terminal { open } => {
-                self.terminal(open);
+                self.terminal(open)?;
                 return Ok(());
             }
             Ask::ClaimLine { answer } => {
@@ -1953,6 +1965,10 @@ impl Worker {
                 }
                 answered(result, answer)?
             }
+            Ask::ExpireProviderLinks(native)=>{
+                if actor.expire_provider_links(&native,now)?{self.publish_view();}
+                return Ok(());
+            }
             Ask::HistoricalRead{source,visit,generation}=>{
                 if generation!=self.helper_generation{return Ok(());}
                 self.historical_reading=false;
@@ -1967,7 +1983,7 @@ impl Worker {
                 return Ok(());
             }
             Ask::HelperRead {
-                source,provider,
+                source,provider,more_helpers,
                 cwd,
                 session,
                 generation,
@@ -1975,9 +1991,11 @@ impl Worker {
             } => {
                 if self.helper_generation == generation {
                     if self.setup.record.cwd == cwd
-                        && actor.helper_context().1 == Some(session.as_str())
+                        && actor.helper_context().1.unwrap_or(&self.setup.profile.conversation_id) == session.as_str()
                     {
                         {
+                            if provider.is_none(){self.provider_retry_at=Some(Instant::now()+Duration::from_secs(1));}
+                            if more_helpers {self.helper_clock.finish_later();}
                             let mut jobs_changed=false;
                             if let Some(visit)=provider {
                                 let more=!visit.eof;
@@ -2150,15 +2168,23 @@ impl Worker {
     /// A terminal on the agent's own tool was opened, or closed. When one is closed, the
     /// launch that waited is carried out by the way of any launch: where another terminal
     /// is still open it waits again.
-    fn terminal(&mut self, open: bool) {
+    fn terminal(&mut self, open: bool)->Result<(),ActorError> {
+        if self.setup.record.backend=="claude" && ((open && self.terminals==0)||(!open && self.terminals==1)){
+            let now=self.now_ms();
+            if let Some(actor)=self.actor.as_mut() && let Some(native)=actor.helper_context().1.map(str::to_owned){
+                actor.provider_terminal(&native,open,now)?;
+                self.publish_view();
+            }
+        }
         if open {
             self.terminals += 1;
-            return;
+            return Ok(());
         }
         self.terminals = self.terminals.saturating_sub(1);
         if let Some(order) = self.behind_terminal.take() {
             self.carry_out(Action::Launch(order));
         }
+        Ok(())
     }
 
     /// Starts the next attempt of a turn whose wait is over.
@@ -2589,7 +2615,7 @@ impl Worker {
             ended: self.ended.clone(),
             finished: self.finished.clone(),
             backend: actor.backend_id(),
-            provider_bindings:actor.provider_sessions().map(|(id,s)|(id.clone(),s.ended_at)).collect(),
+            provider_bindings:actor.provider_sessions().map(|(id,s)|(id.clone(),s.ended_at,s.links.values().filter_map(|link|link.exited_at).min())).collect(),
             jobs: actor
                 .jobs()
                 .jobs()
@@ -3044,7 +3070,7 @@ fn refuse_for(
                 | Ask::LaunchFailed { .. }
                 | Ask::LoginChanged
                 | Ask::HelperRead { .. }
-                | Ask::VisitProvider(_) | Ask::HistoricalRead{..}
+                | Ask::VisitProvider(_) | Ask::ExpireProviderLinks(_) | Ask::HistoricalRead{..}
                 | Ask::Terminal { .. }
                 | Ask::AccountStop
                 | Ask::AccountBack
