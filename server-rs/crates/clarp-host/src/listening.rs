@@ -46,20 +46,46 @@ const SAY_THE_REST: &str = r#"{"type": "CloseStream"}"#;
 /// How long the engine is given to take its own socket's end.
 const ENDS_WITHIN: Duration = Duration::from_secs(2);
 
-/// What this Host keeps of a stream's turns: a name for each. It writes no runs down and
-/// keeps no sound: it has no vocabulary to write runs of yet, and keeps no clips.
-struct Named;
+/// Records completed turns and retains their WAV only while the setting is enabled.
+struct Named {
+    vocab: crate::vocabulary::Desk,
+    session: String,
+    model: String,
+    fleet: crate::fleet::FleetHandle,
+    root: std::path::PathBuf,
+    clock: std::sync::Arc<dyn clarp_ports::clock::Clock + Send + Sync>,
+}
 
 impl Keeps for Named {
     fn new_trace(&mut self) -> String {
         crate::ids::hex(8)
     }
 
-    fn record(&mut self, _run: &Run<'_>) -> Option<i64> {
-        None
+    fn record(&mut self, run: &Run<'_>) -> Option<i64> {
+        tokio::runtime::Handle::current().block_on(crate::vocabulary::stream_run(
+            &self.vocab,
+            &self.fleet,
+            run,
+            self.clock.now_ms(),
+        ))
     }
 
-    fn retain(&mut self, _trace_id: &str, _wav: Vec<u8>) {}
+    fn retain(&mut self, trace_id: &str, wav: Vec<u8>) {
+        if crate::vocabulary::audio::enabled(&self.fleet.directory()) {
+            let _ = crate::vocabulary::audio::retain(
+                &self.root,
+                crate::vocabulary::audio::Clip {
+                    trace: trace_id,
+                    data: &wav,
+                    kind: "audio/wav",
+                    session: &self.session,
+                    run: 0,
+                    model: &self.model,
+                },
+                self.clock.now_ms(),
+            );
+        }
+    }
 }
 
 /// Reaches the engine at its address, with the owner's key. `Err`: why it could not be
@@ -102,11 +128,16 @@ fn said(value: &Value) -> Told {
 
 /// Carries one stream: sound up, what the engine says of turns down, until either side is
 /// done.
-async fn carried(mut line: Line, engine: Engine, mut ledger: Ledger, names: (String, String)) {
+async fn carried(
+    mut line: Line,
+    engine: Engine,
+    mut ledger: Ledger,
+    names: (String, String),
+    mut keeps: Named,
+) {
     let (engine_name, stream_trace) = names;
     let (mut up, mut down) = engine.split();
     let began = Instant::now();
-    let mut keeps = Named;
     let ready = rules::ready(&engine_name, ledger.keyterms.len(), &stream_trace);
     line.tell(said(&ready)).await;
     // Once the phone has said that it is done, it is heard no more, and the engine is
@@ -138,7 +169,11 @@ async fn carried(mut line: Line, engine: Engine, mut ledger: Ledger, names: (Str
                 let Some(event) = rules::meant(&message) else {
                     continue;
                 };
-                let told = ledger.apply(&event, began.elapsed().as_secs_f64(), &mut keeps);
+                let at=began.elapsed().as_secs_f64();
+                let told=if event.kind=="end" {
+                    let Ok((next,book,told))=tokio::task::spawn_blocking(move||{let told=ledger.apply(&event,at,&mut keeps);(ledger,keeps,told)}).await else {return};
+                    ledger=next;keeps=book;told
+                }else{ledger.apply(&event,at,&mut keeps)};
                 if !line.tell(said(&told)).await {
                     break;
                 }
@@ -200,8 +235,17 @@ async fn stream(
         return refused(StatusCode::SERVICE_UNAVAILABLE, none);
     };
     let model = listed.turn_detection_model;
-    // This Host has no vocabulary yet: the engine is asked to listen for no words.
-    let keyterms: Vec<String> = Vec::new();
+    let trace = crate::ids::hex(8);
+    let (audit, _) = crate::vocabulary::compile(
+        &app,
+        session,
+        &format!("{provider}:nova-3"),
+        false,
+        Some(&trace),
+    )
+    .await
+    .unwrap_or_default();
+    let keyterms = clarp_speech::listen::terms(audit["payload"].as_str().unwrap_or(""));
     let Some(address) = rules::flux_url(model, &Tuning::of(of), &keyterms) else {
         let none = "eot_timeout_ms is no number of milliseconds".to_string();
         return refused(StatusCode::BAD_REQUEST, none);
@@ -217,8 +261,16 @@ async fn stream(
     };
     let capacity = listed.models.first().map_or(0, |model| model.capacity);
     let ledger = Ledger::new(session, &provider, model, keyterms, capacity);
-    let names = (format!("{provider}:{model}"), crate::ids::hex(8));
-    socket.open(move |line| carried(line, engine, ledger, names))
+    let names = (format!("{provider}:{model}"), trace);
+    let keeps = Named {
+        vocab: app.ears.vocab.clone(),
+        session: session.into(),
+        model: format!("{provider}:{model}"),
+        fleet: app.fleet.clone(),
+        root: app.config.data_dir.clone(),
+        clock: app.clock.clone(),
+    };
+    socket.open(move |line| carried(line, engine, ledger, names, keeps))
 }
 
 pub fn routes() -> Router<App> {

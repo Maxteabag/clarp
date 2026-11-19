@@ -1,0 +1,58 @@
+[
+ {
+  "provider": "faster-whisper",
+  "model": "*",
+  "unit": "tokens",
+  "capacity": 223,
+  "max_term_chars": null,
+  "supports_prose": true
+ },
+ {
+  "provider": "whisper.cpp",
+  "model": "*",
+  "unit": "tokens",
+  "capacity": 223,
+  "max_term_chars": null,
+  "supports_prose": true
+ },
+ {
+  "provider": "deepgram",
+  "model": "nova-3",
+  "unit": "terms",
+  "capacity": 50,
+  "max_term_chars": null,
+  "supports_prose": false
+ },
+ {
+  "provider": "cartesia",
+  "model": "ink-2",
+  "unit": "terms",
+  "capacity": 100,
+  "max_term_chars": 49,
+  "supports_prose": false
+ },
+ {
+  "provider": "elevenlabs",
+  "model": "scribe_v2",
+  "unit": "terms",
+  "capacity": 100,
+  "max_term_chars": 49,
+  "supports_prose": false
+ },
+ {
+  "provider": "google",
+  "model": "chirp_3",
+  "unit": "terms",
+  "capacity": 0,
+  "max_term_chars": null,
+  "supports_prose": false
+ },
+ {
+  "provider": "assemblyai",
+  "model": "universal-3",
+  "unit": "words",
+  "capacity": 1500,
+  "max_term_chars": null,
+  "supports_prose": true
+ }
+]
