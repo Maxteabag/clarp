@@ -43,6 +43,7 @@ pub mod journal;
 pub mod kept_portraits;
 pub mod languages;
 pub mod live;
+pub mod launch_directories;
 pub mod live_call;
 pub mod live_session;
 pub mod located;
