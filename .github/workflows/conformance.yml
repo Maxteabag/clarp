@@ -34,7 +34,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The planted changes are counted once, where they are written (`contract_plants.py`).
+  plants:
+    runs-on: ubuntu-24.04
+    outputs: {each: "${{ steps.count.outputs.each }}", count: "${{ steps.count.outputs.count }}"}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - id: count
+        run: python3 -c 'import sys; sys.path.insert(0, "server-rs/conformance"); import contract_plants as p; n = len(p.CHANGES); print(f"each={list(range(n))}"); print(f"count={n}")' >> "$GITHUB_OUTPUT"
+
   conformance:
+    needs: plants
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -56,12 +67,13 @@ jobs:
       - name: Conformance
         env:
           SCENARIOS: ${{ inputs.scenarios }}
+          PLANTS: ${{ needs.plants.outputs.count }}
         run: |
           set -o pipefail
           mkdir -p conformance-report
           # The whole corpus: the planted changes are tried in the jobs beside this one, and
           # this one refuses when their number is not the suite's.
-          if [ -n "$SCENARIOS" ]; then part=(--scenarios "$SCENARIOS"); else part=(--plants-beside 8); fi
+          if [ -n "$SCENARIOS" ]; then part=(--scenarios "$SCENARIOS"); else part=(--plants-beside "$PLANTS"); fi
           bash scripts/ci_contained.sh .venv/bin/python server-rs/conformance/conform.py cross \
             --build . --rust server-rs/target/debug/clarp-host --out conformance-report \
             "${part[@]}" \
@@ -78,13 +90,14 @@ jobs:
   # run to its end in is set aside and said (three at most). No Rust is built here. As many as
   # the suite has planted changes (`contract_plants.py`); `conformance` refuses another number.
   proof:
+    needs: plants
     if: ${{ inputs.scenarios == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        plant: [0, 1, 2, 3, 4, 5, 6, 7]
+        plant: ${{ fromJSON(needs.plants.outputs.each) }}
     steps:
       - uses: actions/checkout@v4
         with:
