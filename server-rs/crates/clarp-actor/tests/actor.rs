@@ -2477,3 +2477,97 @@ fn a_legacy_goal_gets_only_its_surviving_history_and_one_status_baseline() {
         assert_eq!(plan["goal"]["history_offset"], 300);
     }
 }
+
+#[test]
+fn the_principals_mailbox_orders_delegation_changes_and_preserves_them_on_reopen() {
+    use clarp_actor::delegation::{Binding, Transition};
+    let mut world = World::new("delegation-authority");
+    let binding = Binding {
+        delegation_id: "dg-a".into(),
+        delegate_agent_id: "helper".into(),
+    };
+    let start = Transition::Start {
+        binding: binding.clone(),
+    };
+    let stop = Transition::Stop {
+        binding: binding.clone(),
+        reason: "finished".into(),
+    };
+    let mut actor = world.open();
+    assert!(!actor.admits_delegate("dg-a", Some("helper")));
+    assert!(actor.change_delegation(start.clone(), 100).unwrap());
+    assert!(actor.change_delegation(start.clone(), 101).unwrap());
+    assert!(actor.admits_delegate("dg-a", Some("helper")));
+    assert!(!actor.admits_delegate("dg-other", Some("helper")));
+    assert!(!actor.admits_delegate("dg-a", None));
+    assert!(!actor.admits_delegate("dg-a", Some("stranger")));
+    let receipt = |actor: &mut Actor| {
+        actor.keep(
+            &clarp_actor::Kept {
+                applied_cursor: Some(("dg-a", 0)),
+                ..Default::default()
+            },
+            101,
+        )
+    };
+    assert!(
+        actor
+            .as_delegate("dg-a", Some("helper"), receipt)
+            .unwrap()
+            .is_some()
+    );
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(actor.active_delegation(), Some(&binding));
+    assert!(actor.change_delegation(stop.clone(), 102).unwrap());
+    assert!(!actor.admits_delegate("dg-a", Some("helper")));
+    drop(actor);
+    let mut actor = world.open();
+    let port = world
+        .engine
+        .open(&world.profile.dir, standard_set("none").unwrap())
+        .unwrap();
+    let before = port.last_seq().unwrap();
+    assert!(
+        actor
+            .as_delegate("dg-a", Some("helper"), receipt)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(port.last_seq().unwrap(), before);
+    assert_eq!(actor.active_delegation(), None);
+    assert_eq!(
+        actor.delegation_transition("dg-a").unwrap(),
+        Some(stop.clone())
+    );
+    assert!(actor.change_delegation(stop, 103).unwrap());
+    assert!(!actor.change_delegation(start, 104).unwrap());
+}
+
+#[test]
+fn the_delegates_baseline_is_the_revision_at_the_requested_message_offset() {
+    let mut world = World::new("delegate-baseline");
+    let mut actor = world.open();
+    assert_eq!(actor.delegation_baseline(0).unwrap(), 0);
+    let input = (0..301)
+        .map(|n| {
+            let id = format!("row-{n}");
+            ImportedRow {
+                id: id.clone(),
+                ts_ms: n,
+                row: json!({"id":id,"role":"user","text":"fixture"}),
+            }
+        })
+        .collect();
+    let (taken, _) = actor.import("source", None, input, 1000).unwrap();
+    assert_eq!(taken, Ok(301));
+    let rows = actor.tail_of_any(400).unwrap().entries;
+    assert_eq!(rows.len(), 301);
+    for offset in [0, 1, 199, 200, 255, 256, 300] {
+        assert_eq!(
+            actor.delegation_baseline(offset).unwrap(),
+            rows[300 - offset].revision as i64
+        );
+    }
+    assert_eq!(actor.delegation_baseline(301).unwrap(), 0);
+}

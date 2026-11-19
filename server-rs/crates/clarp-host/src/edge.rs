@@ -1649,7 +1649,11 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
     })
 }
 
-async fn create_agent(State(app): State<App>, body: axum::body::Bytes) -> Response {
+async fn create_agent(
+    State(app): State<App>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
     let asked = if body.is_empty() {
         json!({})
     } else {
@@ -1658,6 +1662,15 @@ async fn create_agent(State(app): State<App>, body: axum::body::Bytes) -> Respon
     let Some(asked) = asked.as_object() else {
         return ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response();
     };
+    if let Err(why) = crate::fleet::delegations::lineage(
+        &app,
+        asked.get("parent").and_then(Value::as_str).unwrap_or(""),
+        turn_of(&headers),
+    )
+    .await
+    {
+        return why.into_response();
+    }
     match make_agent(&app, asked).await {
         Ok(made) => Json(made).into_response(),
         Err((status, why)) => (status, Json(why)).into_response(),
@@ -2316,6 +2329,25 @@ async fn send_as(
     // a client may name; otherwise the user. What the Host stamps itself (a janitor, a
     // leader's tick) nobody may claim.
     let sender = sender(app, request.sender.as_ref());
+    if let Some(sender) = &sender
+        && app
+            .fleet
+            .delegation_view
+            .has_principal(&member.record.agent_id)
+    {
+        let delegation = app
+            .fleet
+            .goal_delegation(crate::fleet::delegations::Request::Current(
+                member.record.agent_id.clone(),
+            ))
+            .await?;
+        if delegation["delegate_agent_id"].as_str() == Some(sender.agent_id.as_str()) {
+            return Err(ApiError::plain(
+                StatusCode::FORBIDDEN,
+                "a bookkeeping delegate does not message its principal",
+            ));
+        }
+    }
     let from_agent = || Origin::Agent {
         agent_id: sender
             .as_ref()

@@ -429,6 +429,15 @@ async fn agent_create(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer
     if let Some(cwd) = parsed.option("--cwd").filter(|cwd| !cwd.is_empty()) {
         asked.insert("cwd".to_string(), json!(named_from(call, cwd)));
     }
+    let turn = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    if let Err(why) =
+        crate::fleet::delegations::lineage(app, parsed.option("--parent").unwrap_or(""), turn).await
+    {
+        return refused_by_host(why.status().as_u16(), &json!({"error":why.message()}));
+    }
     match edge::make_agent(app, &asked).await {
         Ok(made) => shown(&made),
         Err((status, why)) => refused_by_host(status.as_u16(), &why),
@@ -605,6 +614,13 @@ async fn agent_fork(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
         if let Some(value) = given(&format!("--{key}")) {
             asked.insert(key.to_string(), json!(value));
         }
+    }
+    let turn = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    if let Err(why) = crate::fleet::delegations::lineage(app, parent, turn).await {
+        return refused_by_host(why.status().as_u16(), &json!({"error":why.message()}));
     }
     match crate::forks::fork_agent(app, parent, &Value::Object(asked)).await {
         Ok(answer) => {
@@ -1813,11 +1829,64 @@ fn calendar(app: &App, args: &[String]) -> ToolAnswer {
 }
 
 /// Answers `clarp-admin`.
+async fn bookkeeping(app: &App, args: &[String]) -> ToolAnswer {
+    use crate::fleet::delegations::Request;
+    let Some((action, args)) = args.split_first() else {
+        return usage("bookkeeping requires enable, stop or status");
+    };
+    let flags: &[&str] = match action.as_str() {
+        "enable" => &["--principal", "--delegate", "--reason"],
+        "stop" => &["--delegation", "--reason"],
+        "status" => &["--session"],
+        _ => return usage("bookkeeping requires enable, stop or status"),
+    };
+    let fields = match parse(args, flags, &[], &[]) {
+        Ok(v) => v,
+        Err(why) => return usage(&why),
+    };
+    let missing: Vec<_> = flags
+        .iter()
+        .copied()
+        .filter(|key| fields.option(key).is_none())
+        .collect();
+    if !missing.is_empty() {
+        return usage(&format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        ));
+    }
+    let get = |key| fields.option(key).unwrap_or_default().to_owned();
+    let request = match action.as_str() {
+        "enable" => Request::Enable {
+            principal: get("--principal"),
+            delegate: get("--delegate"),
+            reason: get("--reason"),
+        },
+        "stop" => Request::Stop {
+            id: get("--delegation"),
+            reason: get("--reason"),
+        },
+        _ => Request::List(get("--session")),
+    };
+    match app.fleet.goal_delegation(request).await {
+        Ok(v) => shown(&v),
+        Err(e) => ToolAnswer::said(
+            if e.status().is_client_error() { 4 } else { 5 },
+            format!(
+                "clarp-admin bookkeeping: HTTP {}: {}",
+                e.status().as_u16(),
+                json!({"error":e.message()})
+            ),
+        ),
+    }
+}
+
 pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
     match call.argv.split_first() {
         Some((command, rest)) if command == "controller-action" => {
             crate::controller_action_tool::run(app, call, rest).await
         }
+        Some((command, rest)) if command == "bookkeeping" => bookkeeping(app, rest).await,
         Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),

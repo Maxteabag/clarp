@@ -498,3 +498,40 @@ pub(crate) fn after(
         begins_after: span.floor * REVISION_STEP,
     })
 }
+
+/// At creation, a delegate starts just before the newest `offset` distinct
+/// rows, across the owner's conversations. A row edited late counts at its
+/// latest revision. Read backwards until older items cannot change the answer.
+pub(crate) fn delegation_baseline(
+    log: &dyn AgentLog,
+    drafts: &[Draft],
+    offset: usize,
+) -> Result<i64, ActorError> {
+    let mut before = Seq::MAX;
+    let mut revisions = std::collections::HashMap::new();
+    for draft in drafts {
+        revisions.insert(draft.id.clone(), draft.revision);
+    }
+    loop {
+        let part = log.read_before(before, kind::CONVERSATION, CHUNK)?;
+        let Some(first) = part.first() else {
+            return Ok(0);
+        };
+        before = first.seq;
+        for row in rows(log, &part, Place::Newest, Which::All)? {
+            let rev = revisions.entry(row.entry.id().to_owned()).or_insert(0);
+            *rev = (*rev).max(row.revision);
+        }
+        if revisions.len() > offset {
+            let mut numbers: Vec<_> = revisions.values().copied().collect();
+            let (_, cut, _) = numbers.select_nth_unstable_by(offset, |a, b| b.cmp(a));
+            if *cut >= before.saturating_mul(REVISION_STEP) || part.len() < CHUNK {
+                return i64::try_from(*cut)
+                    .map_err(|_| ActorError::Corrupt("message revision exhausted".into()));
+            }
+        }
+        if part.len() < CHUNK {
+            return Ok(0);
+        }
+    }
+}

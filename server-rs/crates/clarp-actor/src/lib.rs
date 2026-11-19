@@ -39,6 +39,7 @@ use clarp_kernel::conversation::{
     ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
+pub mod delegation;
 mod goal_ledger;
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
@@ -613,6 +614,7 @@ pub struct Actor {
     provider_sessions: std::collections::BTreeMap<String, clarp_kernel::provider_tasks::Session>,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
+    delegation: Option<delegation::Binding>,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
@@ -1063,7 +1065,9 @@ impl Actor {
         // What was over long ago is in the log and nowhere else.
         speech.forget_before(now_ms - KEPT_FOR_MS);
         let shown = Hub::new(&profile.epoch, &profile.agent_id, &profile.session);
+        let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
+            delegation,
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,

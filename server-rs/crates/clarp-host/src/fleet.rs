@@ -4,6 +4,8 @@
 //! list as a whole whenever it changes, so that everyone else reads a list that is complete and
 //! never waits for the fleet to find an agent.
 
+pub(crate) mod delegations;
+
 use clarp_kernel::kept_portraits::Portrait;
 use clarp_kernel::launch_directories::{self as launches, Ledger, Owners};
 const LAUNCH_USAGE: &str = "launch-path-usage";
@@ -491,6 +493,11 @@ pub struct Works {
 }
 
 enum Ask {
+    DelegationMismatch(delegations::Mismatch),
+    GoalDelegation {
+        request: delegations::Request,
+        answer: Answer<Result<serde_json::Value, crate::edge::ApiError>>,
+    },
     /// The inner error is a refusal: the request cannot be met, and says why.
     Create {
         request: CreateAgentRequest,
@@ -682,7 +689,8 @@ enum Ask {
 /// The way to the fleet's thread, and the fleet as anyone may read it.
 #[derive(Clone)]
 pub struct FleetHandle {
-    tx: mpsc::Sender<Ask>,
+    pub(crate) delegation_view: delegations::Rejoin,
+    tx: Arc<mpsc::Sender<Ask>>,
     directory: watch::Receiver<Arc<Directory>>,
     log: crate::unkept::Log,
 }
@@ -1191,6 +1199,7 @@ impl FleetHandle {
 struct Fleet {
     launch_usage: Arc<Ledger>,
     cwd_owners: Arc<Owners>,
+    delegation_desk: delegations::Desk,
     works: Works,
     store: Box<dyn KeyValue>,
     members: Vec<Arc<Member>>,
@@ -1216,7 +1225,7 @@ pub(crate) fn non_empty(text: &str) -> Option<String> {
     Some(text.trim().to_string()).filter(|text| !text.is_empty())
 }
 
-fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
+fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Result<Setup, String> {
     let backend = clarp_backend::by_id(&record.backend)
         .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))?;
     let profile = Profile {
@@ -1244,6 +1253,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         epoch: works.hub.epoch().to_string(),
     };
     Ok(Setup {
+        delegation_rejoin: desk.for_worker(),
         runtime: works.runtime.clone(),
         opening_gate: works.opening_gate.clone(),
         record: record.clone(),
@@ -1310,12 +1320,16 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }
     let launch_usage = Arc::new(launch_usage);
     let mut owners = Owners::new();
+    let (tx, rx) = mpsc::channel();
+    let tx = Arc::new(tx);
+    let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let mut members = Vec::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
         let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
             format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
         })?;
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
+        delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
             if !record.ledger_retired {
                 retire_goals(&works, &record, at)?;
@@ -1327,7 +1341,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
             }
             continue;
         }
-        match setup(&works, &record) {
+        match setup(&works, &delegation_desk, &record) {
             Ok(setup) => members.push(Arc::new(Member {
                 record,
                 agent: agent::spawn(setup),
@@ -1407,11 +1421,12 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         settings: Arc::new(settings.clone()),
         personas: book.clone(),
     }));
-    let (tx, rx) = mpsc::channel();
     let log = works.log.clone();
+    let delegation_view = delegation_desk.for_worker();
     let fleet = Fleet {
         launch_usage,
         cwd_owners,
+        delegation_desk,
         works,
         store,
         members,
@@ -1430,6 +1445,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         .spawn(move || fleet.run(&rx))
         .map_err(|error| format!("the fleet's thread could not be started: {error}"))?;
     Ok(FleetHandle {
+        delegation_view,
         tx,
         directory: read,
         log,
@@ -1471,6 +1487,15 @@ impl Fleet {
             // Each answer goes to whoever asked. One who has gone by then is told nothing:
             // nobody is left to tell, and what was done is done (and said, where it failed).
             match ask {
+                Ask::DelegationMismatch(m) => {
+                    let id = m.id().to_owned();
+                    if let Err(why) = self.reconcile_mismatch(m) {
+                        self.works.log.unkept("delegation", &format!("{id}: {why}"));
+                    }
+                }
+                Ask::GoalDelegation { request, answer } => {
+                    let _ = answer.send(Ok(self.delegation_request(request)));
+                }
                 Ask::Create {
                     request,
                     forked,
@@ -2199,6 +2224,23 @@ impl Fleet {
         forked: Option<String>,
         contact: Option<ContactAsked>,
     ) -> Result<AgentRecord, NotMade> {
+        if let Some(parent) = request.parent.as_deref().filter(|s| !s.is_empty()) {
+            match self.has_delegated_ancestor(parent) {
+                Ok(true) => {
+                    return Err(Told::new(
+                        409,
+                        "a bookkeeping delegate does not start helpers or forks",
+                        "a bookkeeping delegate does not start helpers or forks",
+                    )
+                    .into());
+                }
+                Ok(false) => {}
+                Err(why) => {
+                    let code = "delegation_unavailable";
+                    return Err(Told::new(why.status().as_u16(), code, why.message()).into());
+                }
+            }
+        }
         // The contact asked for in place of a name of its own: its name, and no session of
         // its own (`agent_spec`: the session asked for is dropped).
         if let Some(contact) = contact {
@@ -2356,7 +2398,7 @@ impl Fleet {
             ..AgentRecord::default()
         };
         // Refused before anything is written: an agent whose backend this Host lacks.
-        let setup = setup(&self.works, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &record)?;
         // Its picture is kept before the agent that names it.
         if let Some((bytes, digest)) = &given {
             let kept = self.works.blobs.put(&picture_name(digest), bytes);
@@ -2415,7 +2457,7 @@ impl Fleet {
             voice_id: if by_request { "" } else { "{}" }.to_string(),
             ..AgentRecord::default()
         };
-        let setup = setup(&self.works, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &record)?;
         if by_request {
             self.put_launch(&record)?;
         } else {
@@ -2583,7 +2625,11 @@ impl Fleet {
         record: AgentRecord,
         took: oneshot::Sender<()>,
     ) -> Result<(), Unavailable> {
-        self.put(&record).map_err(Unavailable)?;
+        if record.archived_at_ms.is_some() && self.members[at].record.archived_at_ms.is_none() {
+            self.stop_for_roster(&record, "agent archived")?;
+        } else {
+            self.put(&record).map_err(Unavailable)?;
+        }
         self.replaced(at, record, took);
         Ok(())
     }
@@ -2821,7 +2867,7 @@ impl Fleet {
             record.conversation_id = ids::uuid();
         }
         record.deleted_at_ms = None;
-        let setup = setup(&self.works, &record)?;
+        let setup = setup(&self.works, &self.delegation_desk, &record)?;
         self.put(&record)?;
         let member = Arc::new(Member {
             record: record.clone(),
@@ -2836,6 +2882,7 @@ impl Fleet {
     }
 
     fn remember_owner(&mut self, record: &AgentRecord) {
+        self.delegation_desk.known_record(record);
         if !self
             .cwd_owners
             .get(&record.agent_id)
@@ -2922,7 +2969,7 @@ impl Fleet {
         };
         let mut record = self.members[at].record.clone();
         record.deleted_at_ms = Some(self.now_ms());
-        self.put(&record).map_err(Unavailable)?;
+        self.stop_for_roster(&record, "agent deleted")?;
         let member = self.members.remove(at);
         member.agent.close();
         let retired = retire_goals(

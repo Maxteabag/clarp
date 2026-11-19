@@ -475,6 +475,22 @@ async fn plan_reply(
             requester.record.persona
         ));
     }
+    if app
+        .fleet
+        .delegation_view
+        .has_principal(&requester.record.agent_id)
+    {
+        let delegation = app
+            .fleet
+            .goal_delegation(crate::fleet::delegations::Request::Current(
+                requester.record.agent_id.clone(),
+            ))
+            .await
+            .map_err(|why| why.message().to_owned())?;
+        if delegation["delegate_agent_id"] == replier.record.agent_id {
+            return Err("a bookkeeping delegate does not reply into its principal's goal".into());
+        }
+    }
     // The asker's goal that names this request, whatever its state: the last changed one.
     let key = requests::dependency_key(request_id);
     let plans = requester.agent.view().books.goals.list(app.clock.now_ms());
