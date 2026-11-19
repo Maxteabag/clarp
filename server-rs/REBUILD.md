@@ -1471,6 +1471,21 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+**Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
+zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
+and starts it without a shell. Each invocation has half a second. If it is absent,
+recent and explicit paths can still answer. Absolute path lookup requires full
+access. Favorites are launch counts and are readable by a limited paired device.
+
+The fleet loads one kept record per distinct launch directory at startup. The
+storage port accepts text keys with no separate key-length limit in either engine.
+The exact stripped path keys its count, first use and last use. Registration writes
+the agent and the updated count together. The ledger grows with distinct directories.
+Each read ranks the in-memory records without reading the store. A lookup may also
+ask zoxide twice, enumerate one parent for explicit completion, and check candidate
+directories until it has sixteen distinct matches. Launches before the ledger was
+introduced have no historical counts.
+
 **Checking working labels** (19 Nov 2026). The Janitor runner checks the labels site
 when its lane comes due. The checker starts paused and the site starts off. A pass
 uses the current roster, job and helper views in memory. It selects at most twelve
