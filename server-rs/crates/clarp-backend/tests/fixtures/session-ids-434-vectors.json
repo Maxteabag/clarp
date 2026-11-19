@@ -243,7 +243,8 @@
   ["twice", true],
   ["loop", false],
   ["absent", false],
-  ["missing-link", false]
+  ["missing-link", false],
+  [".", false]
  ],
  "rollouts": [
   ["rollout-2026-11-19T10-15-37-a1.jsonl", true],
@@ -259,6 +260,7 @@
   ["rollout-2026-11-XXT10-15-37-a1.jsonl", false],
   ["rollout-\u0662\u0662\u0662\u0662-11-19T10-15-37-a1.jsonl", true],
   ["rollout-copy-a1.jsonl", false],
+  ["2026-11-19T10-15-37-a1.jsonl", false],
   ["rollout-2026-11-19T10-15-37-ba1.jsonl", false],
   ["prefix-rollout-2026-11-19T10-15-37-a1.jsonl", false],
   ["rollout-2026-11-19T10-15-37-a1.jsonl.bak", false],
