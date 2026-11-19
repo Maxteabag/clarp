@@ -18895,6 +18895,82 @@ fn the_owner_turns_the_desk_of_the_seats_off_and_its_doors_are_no_routes() {
 }
 
 #[test]
+fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_no_route() {
+    const ADMIN: &str = "the-administrators-token";
+    let place = Place::new("action-doors");
+    let host = place.start_with_token(ADMIN);
+    let echo = host.new_agent("Echo");
+    let change = |path: &str| {
+        let body = json!({ "session": echo, "backend": "claude", "harness": "opencode" });
+        let got = fetch(
+            &host,
+            ADMIN,
+            "POST",
+            path,
+            &[("Content-Type", "application/json")],
+            body.to_string().as_bytes(),
+        );
+        (got.status, got.text())
+    };
+    // What the Python Host registers and this Host has not built: refused in words.
+    for (path, what) in [
+        (
+            "/backend-auth/login",
+            "Signing a tool in or out from an app is",
+        ),
+        (
+            "/backend-auth/login-code",
+            "Signing a tool in or out from an app is",
+        ),
+        (
+            "/backend-auth/logout",
+            "Signing a tool in or out from an app is",
+        ),
+        (
+            "/harness-providers/login",
+            "Signing a harness in to a provider of models is",
+        ),
+        (
+            "/harness-providers/logout",
+            "Signing a harness in to a provider of models is",
+        ),
+        ("/agent-goal/pause", "A goal of this kind is"),
+        ("/agent-goal/clear", "A goal of this kind is"),
+        ("/oracle/calls", "The Oracle is"),
+        ("/oracle/calls/close", "The Oracle is"),
+        ("/oracle/v2/calls", "The Oracle is"),
+        ("/oracle/v2/calls/control", "The Oracle is"),
+    ] {
+        let (status, said) = change(path);
+        let words = format!("{what} not built on this Host yet");
+        assert_eq!(
+            (
+                status,
+                serde_json::from_str::<Value>(&said).unwrap()["error"].as_str()
+            ),
+            (501, Some(words.as_str())),
+            "{path}"
+        );
+    }
+    // Anything else under those doors is no route, as there: the plain 404.
+    for path in [
+        "/backend-auth/whoami",
+        "/backend-auth/LOGIN",
+        "/backend-auth/log%69n",
+        "/harness-providers/models",
+        "/harness-providers/renew",
+        "/agent-goal/start",
+        "/agent-goal/stop",
+        "/oracle/nothing-there",
+        "/oracle/calls/x",
+        "/oracle/v2/calls/status",
+        "/oracle/realtime",
+    ] {
+        assert_eq!(change(path), (404, "not found".to_string()), "{path}");
+    }
+}
+
+#[test]
 fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refused_in_words() {
     let place = Place::new("screens");
     let host = place.start();
