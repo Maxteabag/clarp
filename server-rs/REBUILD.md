@@ -1332,6 +1332,30 @@ by two clips of a stand-in engine: nothing is written while it is paused, what w
 turned on (the six stages of a clip that was played, each once), a second playing adds nothing, a play that
 failed is told as that, and after the Host was killed the books are as they were.
 
+**The Quota keeper** (19 Nov 2026). The janitor job `quota-monitor`: it reads what is left of the tools'
+accounts and tells the owner where a window runs low. The rule is in the kernel (`janitors/quota.rs`): which
+windows of a reading count (fresh, a number used, a moment seen), the name a window is remembered by (its
+id, or for Claude its kind and the moment it begins anew to the nearest minute), when the owner is told (what
+is left falls to the threshold or under it from above, or to nothing), the receipt and its words, the run's
+line, and the lane's cadence. Held to the Python Host's own functions and to nine whole stories of its lane
+on a database of its own (`tools/quota-keeper-vectors.py`: 16 windows named, 13 sequences of readings around
+the threshold from both sides, the old name carried over, 75 steps of the lane in which 17 pushes go out).
+At the Host's edge (`quota_keeper.rs`) the keeper is a kind of due work of the janitors' one runner: the
+moment of its next look is known when a look ends, and the runner is armed for it; a change of any janitor
+disarms it. It reads what `GET /backend-usage` answers, which asks a provider only on a Host that was told to
+(`--ask-usage`). A look writes once: its run in the janitors' book, the windows that moved, its receipts and
+its lane, each a record of its own; then a receipt is pushed as the alert of a finished turn and what became
+of it is written on it. The book itself is kept as records of its tables (`janitor-config`, `janitor-run`,
+`janitor-progress`, ...), so that a run every five minutes writes its own rows, about two kilobytes, where
+the book was written whole, about thirty, at every change; a book kept whole before is read and kept apart
+at once. On a Host beside another (`--accounts follow`) a receipt is kept and marked as not delivered, and
+nothing is pushed; with `none` and `select` the owner is told. A recovery is asked of no runtime yet: a
+window with nothing left says what the Python Host says where none runs. Held through the Host by a stand-in
+Codex that says its limits and a stand-in relay: turned on, the keeper looks at once and the owner is told
+once; what it keeps is there after the Host stopped; a book kept whole is kept apart; beside another Host the
+next crossing is kept and not pushed; a receipt settled thirty days ago is let go and one that waits stays.
+Wrong rules: `tools/plants/quota-keeper.py`.
+
 **Grok and Muse** (18 Nov 2026). One CLI process serves each agent turn. Grok gets
 `--session-id` on its first turn and `--resume` thereafter. Muse takes `--session-id`
 for both. Under decision D26 the shim syncs the assigned session id to the turn spool

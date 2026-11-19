@@ -320,6 +320,8 @@ pub struct App {
     pub oracle: Arc<crate::oracle::Desk>,
     /// The Goal keeper: its own state of the goals it keeps, and its receipts.
     pub keeper: Arc<crate::keeper::Desk>,
+    /// The Quota keeper: when it looks next, and its receipts.
+    pub quota_keeper: Arc<crate::quota_keeper::Desk>,
     /// The audio bookkeeper: what was seen of clips, written down or not yet.
     pub audio: Arc<crate::audio::Desk>,
     /// What the tools said is left of their accounts.
