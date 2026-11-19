@@ -178,6 +178,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Agents that make agents: who made an agent, how a helper's work stands
     // (`/agent-helper-state`), and what an agent's row says of the ones it made.
     ("helper_agents", 13),
+    ("claude_subagent_cells", 14),
     // An agent forks itself into helpers that start from its conversation and each get a
     // task (`POST /agents/<session>/fork`). Each child starts from the conversation as
     // words (`fork: seed`): a tool's own copy of a conversation is not made here yet.
@@ -1398,6 +1399,7 @@ pub(crate) async fn make_agent(
                     return Ok(made_as(app, &member.record));
                 }
                 crate::past::Begins::With {
+                    helpers,
                     session,
                     turns,
                     parent,
@@ -1417,7 +1419,7 @@ pub(crate) async fn make_agent(
                     if !named(&request.model) && !model.is_empty() {
                         request.model = Some(model);
                     }
-                    Some((session, turns))
+                    Some((session, turns, helpers))
                 }
             };
             let forks = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
@@ -1428,19 +1430,19 @@ pub(crate) async fn make_agent(
             let forked = taken
                 .as_ref()
                 .filter(|_| forks)
-                .map(|(session, _)| session.clone());
+                .map(|(session, _, _)| session.clone());
             let made = app
                 .fleet
                 .create_as(request, forked)
                 .await
                 .map_err(unavailable)?;
             let record = made.map_err(not_made)?;
-            if let Some((session, turns)) = taken {
+            if let Some((session, turns, helpers)) = taken {
                 let member = app.fleet.directory().named(&record.agent_id).cloned();
                 let taken = match member {
                     Some(member) => {
                         let rows = crate::past::rows_of(&record.agent_id, &session, &turns);
-                        member.agent.take_up(session, rows).await
+                        member.agent.take_up(session, rows, helpers).await
                     }
                     None => Ok(Err("the agent is gone".to_string())),
                 };

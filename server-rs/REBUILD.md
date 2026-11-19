@@ -1611,6 +1611,22 @@ delegation is checked by one read of the director's intent. The contact's answer
 in bounded parts and is acknowledged after the voice transport accepts its first part.
 An opted-in transcript keeps text, receipts and pacing entries in the call's private directory.
 The receiver and sender flows are compared with `live-call-tools-vectors.json`.
+**A helper inside a Claude turn** (19 Nov 2026). Agent and Task calls appear as ephemeral
+cells on their parent message. The result or background notification updates that cell.
+Its lines show the task, type, mode, result or status, usage, and the child transcript path
+when available. The Host matches filenames and sidecar metadata within the parent's
+session directory. The path is a label. The child's words stay outside the parent's history.
+A live turn gets its state from its stream. The measured cost of one refresh is:
+- Idle agent: zero directory listings, zero metadata reads, zero parent transcript bytes.
+- Live turn with nothing new: one child-directory listing, zero metadata reads, zero parent transcript bytes.
+- Live turn with one new child and its sidecar: one listing and one metadata read (at most 64 KiB), zero parent transcript bytes.
+
+The blocking-pool reader makes one final check when the turn ends. For imported cells, the reader consumes appended parent bytes
+from its saved position, retaining incomplete lines. A replacement or truncation resets
+that cursor. An association that appears, disappears or changes revises the row and tells the app to
+read the transcript again. The same projection serves an imported conversation and its
+subsequent live turns (`claude_subagent_cells`, contract 14).
+
 *A ring that listens first* (18 Nov 2026). The answering phone claims its opening with
 a token and renews its epoch using a rotating nonce. The public ring carries neither.
 The greeting is admitted to the calling agent. A silence or microphone claim can instead

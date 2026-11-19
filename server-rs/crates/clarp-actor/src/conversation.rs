@@ -188,15 +188,45 @@ impl<'a> Reader<'a> {
             ..Versioned::of(entry, item.seq * REVISION_STEP, item.ts_ms)
         };
         let mut newest = item.seq;
+        if let Entry::Imported(import) = &mut row.entry
+            && import.row["display_cells"]
+                .as_array()
+                .is_some_and(|cells| cells.iter().any(|c| c["ephemeral"] == true))
+            && let Some((seq, cells)) =
+                super::helper_cells::current(self.log, &import.id, item.seq)?
+        {
+            import.row["display_cells"] = cells;
+            newest = newest.max(seq);
+        }
+        if let Entry::Tool(call) = &mut row.entry
+            && call
+                .cell
+                .as_ref()
+                .is_some_and(|cell| cell["ephemeral"] == true)
+            && let Some((seq, cell)) = super::helper_cells::current(self.log, &call.id, item.seq)?
+        {
+            call.cell = Some(cell);
+            newest = newest.max(seq);
+        }
         if let Entry::Reply(reply) = &row.entry {
             for id in &reply.tools {
                 let Some(stored) = self.log.find(id)? else {
                     continue; // told of and never written: the turn was cut off there
                 };
-                if let Some(Entry::Tool(call)) =
+                if let Some(Entry::Tool(mut call)) =
                     Entry::from_item(&stored).map_err(|error| corrupt(&stored, error))?
                 {
                     newest = newest.max(stored.seq);
+                    if call
+                        .cell
+                        .as_ref()
+                        .is_some_and(|cell| cell["ephemeral"] == true)
+                        && let Some((seq, cell)) =
+                            super::helper_cells::current(self.log, &call.id, stored.seq)?
+                    {
+                        call.cell = Some(cell);
+                        newest = newest.max(seq);
+                    }
                     row.tools.push(call);
                 }
             }
@@ -249,6 +279,13 @@ fn rows(
     let mut reader = Reader::new(log);
     let mut found: Vec<Versioned> = Vec::with_capacity(items.len());
     for item in items {
+        if let Some(id) = super::helper_cells::parent(item)? {
+            if place == Place::Newest {
+                found.retain(|r| r.entry.id() != id);
+                found.extend(reader.stored(&id, which)?);
+            }
+            continue;
+        }
         let Some(entry) = Entry::from_item(item).map_err(|error| corrupt(item, error))? else {
             continue;
         };

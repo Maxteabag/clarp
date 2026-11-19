@@ -236,6 +236,7 @@ mod at_the_port {
         let said: Arc<Mutex<Vec<String>>> = Arc::default();
         let heard = said.clone();
         let works = fleet::Works {
+            runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
             config: Arc::new(config),
             engine: Arc::new(MemEngine::new()),

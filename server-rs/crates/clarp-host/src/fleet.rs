@@ -422,6 +422,7 @@ pub enum Pushed {
 
 /// What every agent of a Host is given.
 pub struct Works {
+    pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
     pub config: Arc<Config>,
     pub engine: Arc<dyn LogEngine>,
@@ -1071,6 +1072,7 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
         epoch: works.hub.epoch().to_string(),
     };
     Ok(Setup {
+        runtime: works.runtime.clone(),
         opening_gate: works.opening_gate.clone(),
         record: record.clone(),
         profile,

@@ -138,6 +138,7 @@ async fn serve(config: Config) -> Result<(), String> {
         };
     let (opening_gate, opening_requests) = clarp_host::calls::opening_launch::channel();
     let works = Works {
+        runtime: tokio::runtime::Handle::current(),
         opening_gate,
         config: config.clone(),
         engine,
