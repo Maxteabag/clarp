@@ -1874,11 +1874,16 @@ impl Fleet {
 
     /// The contact of a launch that asked for one (`agent_spec`, `NeedsContact`): the first
     /// free contact of its tool's pool, or one minted for it, which is written now.
-    fn contact_of_launch(&mut self, backend: &str, contact: &ContactAsked) -> Result<String, NotMade> {
+    fn contact_of_launch(
+        &mut self,
+        backend: &str,
+        contact: &ContactAsked,
+    ) -> Result<String, NotMade> {
         let pooled = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let wearers =
+                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
@@ -1896,12 +1901,17 @@ impl Fleet {
 
     /// The contact `POST /agent-assign` gives the member at `at` with `auto`
     /// (`contact_assignment.assign_contact`): `None` where none could be minted.
-    fn contact_of_assignment(&mut self, at: usize, fetched: &[String]) -> Result<Option<String>, Unavailable> {
+    fn contact_of_assignment(
+        &mut self,
+        at: usize,
+        fetched: &[String],
+    ) -> Result<Option<String>, Unavailable> {
         let record = self.members[at].record.clone();
         let decided = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let wearers =
+                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
             let agent = clarp_kernel::contacts::Assignee {
                 agent_id: &record.agent_id,
                 persona: &record.persona,
@@ -1912,7 +1922,9 @@ impl Fleet {
         };
         match decided {
             Ok(clarp_kernel::contacts::Assigned::Take(name)) => Ok(Some(name)),
-            Ok(clarp_kernel::contacts::Assigned::Mint) => self.mint_contact(&record.backend, fetched),
+            Ok(clarp_kernel::contacts::Assigned::Mint) => {
+                self.mint_contact(&record.backend, fetched)
+            }
             _ => Ok(None),
         }
     }
@@ -1921,7 +1933,11 @@ impl Fleet {
     /// the owner's with its tier's first free name, a voice nobody speaks with and the tier's
     /// way of speaking for that name, written now, without telling the apps the personas
     /// changed. Its name; `None` where none was made.
-    fn mint_contact(&mut self, backend: &str, fetched: &[String]) -> Result<Option<String>, Unavailable> {
+    fn mint_contact(
+        &mut self,
+        backend: &str,
+        fetched: &[String],
+    ) -> Result<Option<String>, Unavailable> {
         let personas = self.personas_listed();
         let existing: Vec<String> = personas
             .iter()
@@ -1932,7 +1948,8 @@ impl Fleet {
             .iter()
             .map(|member| member.record.persona.clone())
             .collect();
-        let Some((name, tier)) = clarp_kernel::contacts::given_name(backend, &occupied, &existing) else {
+        let Some((name, tier)) = clarp_kernel::contacts::given_name(backend, &occupied, &existing)
+        else {
             return Ok(None);
         };
         let said = PersonaSaid {
@@ -1941,7 +1958,9 @@ impl Fleet {
             ..PersonaSaid::default()
         };
         let made = self.persona_write(None, &said, fetched, false)?;
-        Ok(made.ok().and_then(|persona| persona["name"].as_str().map(str::to_string)))
+        Ok(made
+            .ok()
+            .and_then(|persona| persona["name"].as_str().map(str::to_string)))
     }
 
     fn owner_of_name(&self, name: &str, except: &str) -> Option<&AgentRecord> {
