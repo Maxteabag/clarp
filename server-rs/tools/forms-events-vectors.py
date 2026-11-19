@@ -65,6 +65,27 @@ def reference(root):
     return inputs
 
 
+def reply_cases():
+    from lib import dispatch_adapters, html_forms
+    from unittest.mock import Mock, patch
+    rows=[]
+    for flag in [None,False,True]:
+        submission=dict(session='speaker',prompt='the answers',submission_id='submission-example')
+        if flag is not None: submission['synthesize_audio']=flag
+        for fails in [False,True]:
+            service=Mock()
+            if fails: service.submit.side_effect=ValueError('scripted failure')
+            adapter=dispatch_adapters.DispatchAdapters(None,lambda _:service,new_trace_id=lambda:'test-trace')
+            with patch.object(html_forms,'mark_delivered') as mark, patch.object(dispatch_adapters,'log_exception'):
+                adapter.deliver_html_form(submission)
+                command=service.submit.call_args.args[0]
+                rows.append(dict(input=submission,failed=fails,delivered=mark.called,
+                    session=command.requested_session,text=command.text,client_msg_id=command.client_msg_id,
+                    synthesize_audio=command.synthesize_audio,queue_if_busy=command.queue_if_busy,origin=command.origin))
+    return rows
+
+
 if __name__ == '__main__':
     with tempfile.TemporaryDirectory() as root:
         OUT.write_text(json.dumps(reference(Path(root)),ensure_ascii=True,separators=(',',':'))+'\n')
+        (OUT.parent/'form-reply-dispatch.json').write_text(json.dumps(reply_cases(),ensure_ascii=True,separators=(',',':'))+'\n')

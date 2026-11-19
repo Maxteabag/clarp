@@ -194,11 +194,12 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
     // still take it back, and starts at once when the agent is free.
     for (artifact_id, submission_id) in actor.artifacts().untold() {
         let told = actor.artifacts().told(&artifact_id, &submission_id, now);
-        let Some((form, prompt, _spoken)) = told else {
+        let Some((form, prompt, spoken)) = told else {
             continue;
         };
         let message = Message {
             id: format!("u-html-form-{submission_id}"),
+            speak: spoken,
             text: prompt,
             origin: Origin::User,
             trace_id: Some(ids::hex(8)),
