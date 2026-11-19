@@ -66,6 +66,17 @@ _TOP_KEYS = {"version", "profile_id", "story", "source", "event", "opening_text"
 _EVENT_LIMITS = {"id": 128, "time": 64, "camera_id": 128, "camera_label": 256, "when_text": 64,
                  "what_text": 8192}
 _EVENT_REQUIRED = ("id", "time", "camera_id", "what_text")
+
+# An event's time, one stated grammar (RFC 3339 date-time, strict), the same on every interpreter
+# and in the Rust Host: YYYY-MM-DD 'T' HH ':' MM ':' SS [ '.' 1 to 9 digits ] ( 'Z' | ('+'|'-') HH ':' MM ).
+# ASCII digits only; capital T and Z; nothing before or after; year 0001 to 9999; hour 00 to 23,
+# minute and second 00 to 59; zone hours 00 to 23 and minutes 00 to 59. Checked before
+# datetime.fromisoformat, which then judges the calendar day and the zone and may only refuse more
+# (CPython 3.12, 3.13 and 3.14 accept different strings each; this grammar decides, R90).
+_EVENT_TIME = re.compile(
+    r"(?!0000)[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+    r"T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,9})?"
+    r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])", re.ASCII)
 _META_LIMITS = {"room": 512, "item": 512, "seen": 8192}
 LOG_LINES, LOG_LINE_CHARS, OPENING_TEXT_CHARS = 64, 512, 600
 _PROFILE_ID = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
@@ -139,6 +150,8 @@ def validate_context(context: Any, opening_line: str) -> dict:
         raise CallError(400, CONTEXT_INVALID)
     for key, limit in _EVENT_LIMITS.items():
         _string(event[key], limit, required=key in _EVENT_REQUIRED)
+    if not _EVENT_TIME.fullmatch(event["time"]):
+        raise CallError(400, CONTEXT_INVALID)
     try:
         when = datetime.fromisoformat(event["time"])
     except ValueError:
