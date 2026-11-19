@@ -1265,3 +1265,50 @@ fn of_the_status(status: &Value) -> (Vec<Value>, Option<i64>) {
     }
     (accounts, newest)
 }
+
+/// What the doors of the desk (`GET /hotseat/desk`, `POST /hotseat/switch`, `POST
+/// /hotseat/resume`) answer before the desk is asked anything.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gate {
+    /// The desk is turned off: the plain 404 of any route that is not there.
+    Off,
+    /// No desk to ask: 503 with these words.
+    Unavailable,
+    /// What was sent is no JSON object: 400 with these words.
+    NoObject,
+    /// The desk is asked, with what was sent (an empty body is an empty object).
+    Asked(Value),
+}
+
+/// The words of a desk that is not there, and of a body that is no JSON object.
+pub const UNAVAILABLE: &str = "hotseat desk unavailable";
+pub const NO_OBJECT: &str = "bad json";
+
+/// The gate of the desk's doors, in the Python Host's order (`_hotseat_desk`, then the body
+/// of `_handle_hotseat_switch` and `_handle_hotseat_resume`): whether the owner turned it
+/// off (`[hotseat] desk = false`), whether it is there, and for a door that changes
+/// something (`body` given), whether the body is a JSON object as that Host reads one.
+pub fn gate(on: bool, there: bool, body: Option<&[u8]>) -> Gate {
+    if !on {
+        return Gate::Off;
+    }
+    if !there {
+        return Gate::Unavailable;
+    }
+    let Some(body) = body else {
+        return Gate::Asked(Value::Object(Map::new()));
+    };
+    if body.is_empty() {
+        return Gate::Asked(Value::Object(Map::new()));
+    }
+    match crate::artifacts::render_spec::json::read(body).map(|read| read.to_value()) {
+        Some(asked @ Value::Object(_)) => Gate::Asked(asked),
+        _ => Gate::NoObject,
+    }
+}
+
+/// Whether the owner's own setting turns the desk off: only a `desk` that is `false` in the
+/// table `[hotseat]` does (`config.hotseat_desk_enabled`).
+pub fn turned_off(desk: Option<&Value>) -> bool {
+    desk == Some(&Value::Bool(false))
+}
