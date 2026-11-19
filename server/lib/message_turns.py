@@ -81,30 +81,45 @@ class TurnIndex:
         self._spans = None
 
     def ran_at(self, trace: str, timestamp: Any) -> bool | None:
-        """Whether a turn of ``trace`` was running at ``timestamp``, counting
-        from _START_SLACK_MS before it began until it settled; None when the
-        trace has no turn (a message steered into another turn) or the time
-        is not known."""
+        """Whether a turn of ``trace`` was running at ``timestamp``: from
+        _START_SLACK_MS before it began until it settled, and never past the
+        start of a later turn of another trace (an agent runs one turn at a
+        time, so a turn that never settled ended when the next began). None
+        when the trace has no turn (a message steered into another turn) or
+        the time is not known."""
         if self._spans is None:
-            spans: dict[str, tuple[int, int | None]] = {}
-            for row in self._rows:
-                trace_id = str(row["trace_id"] or "")
-                if not trace_id:
-                    continue
-                start = int(row["started_at"])
-                settled = None if row["settled_at"] is None else int(row["settled_at"])
-                if trace_id in spans:
-                    first, last = spans[trace_id]
-                    start = min(start, first)
-                    settled = None if last is None or settled is None else max(last, settled)
-                spans[trace_id] = (start, settled)
-            self._spans = spans
+            self._spans = self._turn_spans()
         span = self._spans.get(trace)
         ms = iso_ms(timestamp)
         if span is None or ms is None:
             return None
-        start, settled = span
-        return start - _START_SLACK_MS <= ms and (settled is None or ms <= settled)
+        start, end = span
+        return start - _START_SLACK_MS <= ms and (end is None or ms <= end)
+
+    def _turn_spans(self) -> dict[str, tuple[int, int | None]]:
+        first: dict[str, int] = {}
+        last: dict[str, int] = {}
+        settled: dict[str, int | None] = {}
+        for row in self._rows:
+            trace = str(row["trace_id"] or "")
+            if not trace:
+                continue
+            start = int(row["started_at"])
+            first[trace] = min(first.get(trace, start), start)
+            last[trace] = max(last.get(trace, start), start)
+            done = None if row["settled_at"] is None else int(row["settled_at"])
+            settled[trace] = None if trace in settled and settled[trace] is None or done is None \
+                else max(settled.get(trace) or done, done)
+        spans = {}
+        for trace, began in first.items():
+            later = bisect.bisect_right(self._starts, last[trace])
+            cut = next((int(row["started_at"]) for row in self._rows[later:]
+                        if str(row["trace_id"] or "") != trace), None)
+            end = settled[trace]
+            if cut is not None:
+                end = cut if end is None else min(end, cut)
+            spans[trace] = (began, end)
+        return spans
 
     def trace_at(self, timestamp: Any) -> str:
         return self.running_at(timestamp)[0]

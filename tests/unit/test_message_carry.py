@@ -480,8 +480,9 @@ def test_a_turn_row_above_the_mark_is_put_back_to_unsettled_and_no_other():
 
 @pytest.mark.parametrize("started,settled,covers", [
     (LATEST + 2_001, LATEST + 5_000, True),          # began and ended after every old turn
-    (1_000, LATEST - 120_000, True),                 # two minutes before the last old turn: just covers
-    (1_000, LATEST - 120_001, False),                # a millisecond short: the last old turn falls out
+    (1_000, LATEST, True),                           # settled at the last old turn: covers
+    (1_000, LATEST - 1, False),                      # before it: a reply it held while running may move
+    (1_000, LATEST - 120_001, False),                # out of the two minutes' reach as well
     (1_000, LATEST + 50_000, True),
     (LATEST - 6 * HOURS, LATEST + 1, True),          # six hours before: the old reach just covered it
     (LATEST - 6 * HOURS - 1, LATEST + 1, False),     # a millisecond more: the turn would gain it
