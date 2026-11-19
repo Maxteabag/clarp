@@ -312,30 +312,49 @@ pub fn compact_ascii(value: &Value) -> String {
     out
 }
 
-/// A text as Python's `int()` reads it: the space around it left out, a sign, digits, and
-/// an underscore only between two digits. `None`: Python says it is no whole number. A
-/// number too long to count with is read as the largest there is.
+/// All Unicode decimal digit blocks consist of ten consecutive code points.
+fn decimal_digit(sign: char) -> Option<u32> {
+    if sign.is_ascii() {
+        return sign.to_digit(10);
+    }
+    #[allow(clippy::expect_used)]
+    static ZEROES: LazyLock<Vec<u32>> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("python/decimal-zeroes.json"))
+            .expect("reference Unicode decimal digit blocks")
+    });
+    let n = u32::from(sign);
+    let at = ZEROES.partition_point(|&zero| zero <= n).checked_sub(1)?;
+    let digit = n - ZEROES[at];
+    (digit < 10).then_some(digit)
+}
+
+/// Python's decimal int(text), saturated to the range of the kernel's i128.
+/// Only decimal digits count toward the interpreter's 4,300-digit input limit.
 pub fn int(text: &str) -> Option<i128> {
-    let text = clarp_speech::listen::strip(text);
+    let text = text.trim();
     let (negative, digits) = match text.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, text.strip_prefix('+').unwrap_or(text)),
     };
-    let signs: Vec<char> = digits.chars().collect();
-    let mut plain = String::with_capacity(signs.len());
-    for (at, sign) in signs.iter().enumerate() {
-        let digit = |place: Option<&char>| place.is_some_and(char::is_ascii_digit);
-        match sign {
-            '_' if at > 0 && digit(signs.get(at - 1)) && digit(signs.get(at + 1)) => {}
-            sign if sign.is_ascii_digit() => plain.push(*sign),
-            _ => return None,
+    let mut value = 0_i128;
+    let mut count = 0;
+    let mut after_digit = false;
+    for sign in digits.chars() {
+        if sign == '_' && after_digit {
+            after_digit = false;
+            continue;
         }
+        let digit = i128::from(decimal_digit(sign)?);
+        count += 1;
+        if count > 4300 {
+            return None;
+        }
+        value = value
+            .saturating_mul(10)
+            .saturating_add(if negative { -digit } else { digit });
+        after_digit = true;
     }
-    if plain.is_empty() {
-        return None;
-    }
-    let number = plain.parse::<i128>().unwrap_or(i128::MAX);
-    Some(if negative { -number } else { number })
+    after_digit.then_some(value)
 }
 
 /// The lines of a text without their ends, as Python's `str.splitlines()` gives them: a line
