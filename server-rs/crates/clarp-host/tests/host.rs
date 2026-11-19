@@ -604,6 +604,12 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     host.send(&session, "sleep 60", "m1");
     wait_for("the turn to run", || host.state(&session) == "thinking");
     host.send(&session, "later", "m2");
+    // One left for later has no delivery at any step, as the Python Host keeps no receipt of it.
+    let left = host.post(
+        "/send",
+        json!({ "session": session, "text": "left for later", "client_msg_id": "m3", "queue_if_busy": true }),
+    );
+    assert_eq!(left["queued"], true, "{left}");
     let log = |query: &str| host.get(&format!("/log?session={session}{query}"));
     let delivery = |log: &Value, id: &str| {
         let turns = log["turns"].as_array().unwrap();
@@ -630,6 +636,7 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     host.post("/stop", json!({ "session": session }));
     wait_for("the turn to end", || host.state(&session) == "interrupted");
     let held = log("&delivery_since=0");
+    assert_eq!(delivery(&held, "u-m3"), Value::Null, "{held}");
     let stopped = delivery(&held, "u-m2");
     assert_eq!(
         (&stopped["state"], &stopped["rev"]),
