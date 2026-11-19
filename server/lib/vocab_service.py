@@ -33,7 +33,9 @@ class VocabService:
         (not janitors). The user's own agents before helpers; within each, the most recently
         used first (the latest turn's start, read through the turns(agent_id, started_at)
         index, one seek per agent); ties by creation, so the order holds from one call to the
-        next while nothing is used. The prompt's budget then cuts from the end."""
+        next while nothing is used. A helper is an agent whose role is 'helper' or that has a
+        parent (parent_agent_id). The prompt's budget then takes the names in this order and
+        skips one that does not fit (vocab.build_initial_prompt)."""
         names: list[str] = []
         seen: set[str] = set()
 
