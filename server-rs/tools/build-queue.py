@@ -40,14 +40,24 @@ def clean_children():
     print(f'Build leftovers: {len(names)}' + ''.join(f' {name}' for name in names), flush=True)
 
 
-def locked_by(lock):
-    st = os.fstat(lock)
-    inode = f'{os.major(st.st_dev):02x}:{os.minor(st.st_dev):02x}:{st.st_ino}'
-    for line in Path('/proc/locks').read_text().splitlines():
-        fields = line.split()
-        if len(fields) >= 6 and fields[1] == 'FLOCK' and fields[5] == inode:
-            return fields[4]
-    return None
+def recorded_holder(identity):
+    # Some filesystems report a different device number in /proc/locks
+    # than in stat. Ask the recorded owner's actual descriptor instead.
+    fields = identity.split(':')
+    if len(fields) != 3 or not all(field.isdecimal() for field in fields):
+        return False
+    pid, start, fd = fields
+    proc = Path('/proc') / pid
+    try:
+        if process_start(pid) != start or not (proc / 'fd' / fd).samefile(LOCK):
+            return False
+        for line in (proc / 'fdinfo' / fd).read_text().splitlines():
+            words = line.split()
+            if words[:1] == ['lock:'] and words[2:6] == ['FLOCK', 'ADVISORY', 'WRITE', pid]:
+                return True
+    except OSError:
+        pass
+    return False
 
 
 def process_start(pid):
@@ -103,16 +113,15 @@ def status(lock):
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        owner = locked_by(lock)
         try:
-            pid, _, description = HOLDER.read_text().strip().partition(' ')
+            identity, _, description = HOLDER.read_text().strip().partition(' ')
         except FileNotFoundError:
-            pid, description = '', ''
-        if pid == owner and description:
+            identity, description = '', ''
+        if description and recorded_holder(identity):
             print(f'building: {description}')
         else:
             users = subprocess.run(['fuser', str(LOCK)], capture_output=True, text=True)
-            names = [executable(pid) for pid in users.stdout.split() if pid.isdecimal()]
+            names = [executable(pid) for pid in users.stdout.split() if pid.isdecimal() and int(pid) != os.getpid()]
             print('queue: held without a current holder record; file users:', *names)
     else:
         print('queue: free')
@@ -136,7 +145,8 @@ def run(lock, who, command):
     try:
         prefix = 'landing ' if landing else ''
         since = datetime.datetime.now().strftime('%H:%M:%S')
-        HOLDER.write_text(f'{os.getpid()} {prefix}{who} since {since}\n')
+        identity = f'{os.getpid()}:{process_start(os.getpid())}:{lock}'
+        HOLDER.write_text(f'{identity} {prefix}{who} since {since}\n')
         child = subprocess.Popen(command)
         result = child.wait()
         return result if result >= 0 else 128 - result
