@@ -1,7 +1,7 @@
 """Incorrect provider-evidence rules checked against isolated reference stories."""
 import runner
 
-RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"]}
+RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"],"output":["test","--lib","a_provider_log_comes_only"]}
 PLANTS=[
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
@@ -138,6 +138,45 @@ PLANTS=[
     ('clarp-host/src/helper_source.rs', 'reader', 'discard a valid in-store session alias', 'let meta = match std::fs::metadata(&named)', 'let meta = match std::fs::symlink_metadata(&named)'),
     ('clarp-host/src/helper_source.rs', 'reader', 'keep a stale resolved target after a link changes', 'if *old == stamp', 'if true'),
     ('clarp-host/src/helper_source.rs', 'reader', 'accept an invalid or escaping session boundary as absent', 'let path = clarp_backend::past::claude_source(root, cwd, session, false)\n        .map_err(|_| io::Error::other("provider parent outside its store"))?', 'let path=clarp_backend::past::claude_source(root,cwd,session,false).ok().flatten()'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow other tools to receive Bash context', 'tool!=Some("Bash")', 'false'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'accept the wrong background flag', 'Some(&Value::Bool(true))', 'Some(&Value::Bool(false))'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'ignore the nested tool name', 'Value::Null=>payload["tool"]["name"].as_str()', 'Value::Null=>None'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'ignore nested tool arguments', 'payload["tool"]["input"].as_object()', 'None'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'omit native trimming', 'unwrap_or_default().trim()', 'unwrap_or_default()'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'omit agent validation', '[agent,native,call]', '[native,call]'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'omit native validation', '[agent,native,call]', '[agent,call]'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'omit invocation validation', '[agent,native,call]', '[agent,native]'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'lose supplemental Bash arguments', 'let mut updated=input.clone();', 'let mut updated=serde_json::Map::new();'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'prefix a previously tagged command again', '!command.starts_with(&prefix)', 'true'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'omit the actual command', 'Value::String(prefix+command)', 'Value::String(prefix)'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'emit context for a terminal resume', 'if has_turn', 'if true'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'lose the pre-tool event name', '"hookEventName":"PreToolUse"', '"hookEventName":"PostToolUse"'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'issue permission approval', '"hookEventName":"PreToolUse"', '"hookEventName":"PreToolUse","permissionDecision":"allow"'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'deny valid input rewrites', 'result["updatedInput"]', 'result["otherInput"]'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'lose the detached job wake advice', 'run_detached_job.sh --goal', 'run_detached_job.sh --no-wake'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'refuse an exactly 2000 character origin', 'count()>2000', 'count()>=2000'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'admit a 2001 character origin', 'count()>2000', 'count()>2001'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'refuse max-length tool identity', 'count()<=160', 'count()<160'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'accept oversized tool identity', 'count()<=160', 'count()<=161'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'accept empty tool identity', '!id.is_empty() && id.chars()', 'id.chars()'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'ignore origin owner', 'agent==self.agent_id', 'true'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'ignore origin backend', 'backend==self.provider', 'true'),
+    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'ignore native binding', 'bound==Some(self.native_session_id.as_str())', 'true'),
+    ('clarp-host/src/joblog.rs', 'output', 'read an output root through a link', 'resolved(&dir)!=dir', 'false'),
+    ('clarp-host/src/joblog.rs', 'output', 'expose an unredacted tail', 'json!(safe_text(text))', 'json!(text)'),
+    ('clarp-host/src/joblog.rs', 'output', 'wrong native task output basename', 'format!("{task}.output")', 'format!("{task}.log")'),
+    ('clarp-host/src/joblog.rs', 'output', 'read beyond the tail ceiling', '&[dir],TAIL_BYTES', '&[dir],TAIL_BYTES+65536'),
+    ('clarp-host/src/joblog.rs', 'output', 'accept invalid metadata path components', 'filter(|name|valid_id(name))', 'filter(|_|true)'),
+    ('clarp-host/src/edge.rs', 'host', 'cancel a provider job as an ordinary worker', 'if current.provider_owned()', 'if false'),
+    ('clarp-host/src/edge.rs', 'host', 'claim the expected generation matches', '*generation!=current.generation', 'false'),
+    ('clarp-host/src/agent.rs', 'host', 'omit managed Claude settings', '"--settings".into(),settings', '"--other-settings".into(),settings'),
+    ('clarp-host/src/launcher.rs', 'host', 'register the wrong hook event', '"PreToolUse":[', '"PostToolUse":['),
+    ('clarp-shim/src/main.rs', 'host', 'reject the largest permitted hook input', 'bytes.len() as u64>MAX_INPUT', 'bytes.len() as u64>=MAX_INPUT'),
+    ('clarp-shim/src/main.rs', 'host', 'accept an oversized hook input', 'bytes.len() as u64>MAX_INPUT', 'false'),
+    ('clarp-shim/src/main.rs', 'host', 'advisory hook rejects malformed calls', 'background_hook(argv.next());\n        return ExitCode::SUCCESS;', 'background_hook(argv.next());return ExitCode::FAILURE;'),
+    ('clarp-host/src/agent.rs', 'host', 'lose mirrored event revision', 'json!(event.revision)', 'json!(0)'),
+    ('clarp-host/src/edge.rs', 'host', 'expose superseded jobs in snapshot', '!member.agent.view().provider_mirrors.contains_key(&job.id)', 'true'),
+    ('clarp-actor/src/lib.rs', 'host', 'leave the old link visible', 'std::iter::once(&record.job.metadata).chain(previous)', 'std::iter::once(&record.job.metadata)'),
 ]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
