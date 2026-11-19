@@ -23720,12 +23720,20 @@ fn a_refused_live_binding_is_reported_once_for_each_agent() {
     let second = host.new_agent("Second");
     let report = "transcriptSessionIdRefused backend=scripted";
     let notices = |host: &Host| {
-        host.heard.lock().unwrap().lines()
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
             .filter(|line| line.starts_with("transcriptSessionIdRefused"))
-            .map(str::to_owned).collect::<Vec<_>>()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
     };
     let bind = |host: &Host, who: &str, name: &str, message: &str| {
-        host.send(who, &json!({"session":name,"reply":message}).to_string(), message);
+        host.send(
+            who,
+            &json!({"session":name,"reply":message}).to_string(),
+            message,
+        );
         wait_for("the tool to finish its binding turn", || {
             host.conversation(who).last() == Some(&("assistant".to_string(), message.to_string()))
         });
