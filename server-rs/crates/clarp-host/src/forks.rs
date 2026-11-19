@@ -59,7 +59,7 @@ fn written(path: &str) -> PathBuf {
 /// One command of git in a directory: whether it went well, what it printed, what it
 /// complained of. A command that does not end in time did not go well, and is ended.
 async fn git(directory: &Path, args: &[&str]) -> (bool, String, String) {
-    let mut command = tokio::process::Command::new("git");
+    let mut command = crate::child::asynchronous("git");
     command.arg("-C").arg(directory).args(args);
     command.stdin(std::process::Stdio::null());
     command.kill_on_drop(true);

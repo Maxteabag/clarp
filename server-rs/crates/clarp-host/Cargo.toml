@@ -37,5 +37,9 @@ tower.workspace = true
 ureq.workspace = true
 webpki-roots.workspace = true
 
+[dev-dependencies]
+proc-macro2 = "1"
+syn = { version = "2", features = ["full", "visit"] }
+
 [lints]
 workspace = true

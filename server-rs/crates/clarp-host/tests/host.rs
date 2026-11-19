@@ -14540,8 +14540,11 @@ fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turn
     // processes ran while it did, puts "another account" in place (the limit is over), and
     // says that an account serves.
     let selector = at("selector");
+    let identity = at("selector-environment");
     let script = [
         "#!/bin/sh\n",
+        &format!(r#"printf '%s|%s|%s\n' "${{CLARP_HOST_TOKEN+given}}" "${{CLARP_PROVIDER_TURN+given}}" "$CLARP_QA_PROVIDER_ROOT" > '{}'
+"#, identity.display()),
         &format!(
             "cat >> \"{}\"\necho >> \"{}\"\n",
             asked.display(),
@@ -14564,14 +14567,18 @@ fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turn
     );
     std::fs::write(&owners, named).unwrap();
     let host = place.start_in(
-        "",
+        "synthetic-host-token",
         &[
             "--accounts",
             "select",
             "--speech-keys",
             owners.to_str().unwrap(),
         ],
-        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_PROVIDER_TURN", "foreign"),
+            ("CLARP_QA_PROVIDER_ROOT", "fixture-provider"),
+        ],
     );
     let made = |name: &str| -> String {
         let made = host.post("/agents", json!({ "name": name, "backend": "claude" }));
@@ -14613,6 +14620,7 @@ fn a_host_that_runs_the_selector_stops_what_runs_asks_it_once_and_takes_the_turn
         host.state(&first) == "done" && host.state(&second) == "done"
     });
     assert_eq!(lines(&asked), vec![r#"{"models": [""]}"#.to_string()]);
+    assert_eq!(lines(&identity), ["||fixture-provider"]);
     assert_eq!(lines(&ran_meanwhile), vec!["0".to_string()]);
     assert_eq!(runs(), 0);
     // Each turn ran twice: once into the limit or the stop, once taken up. The tool, which
@@ -28443,10 +28451,12 @@ fn a_routing_tool_that_fails_is_told_by_its_facts_and_never_by_the_question_it_r
     // input. What each does is in a file: repeat the question and fail, say words of its own
     // and fail, refuse while repeating it, fail in a way no reading knows, or answer.
     let script = r#"#!/usr/bin/env python3
-import json, pathlib, sys
+import json, os, pathlib, sys
 root = pathlib.Path(__file__).parent
 provider = pathlib.Path(__file__).name
 asked = sys.stdin.read()
+(root / "child-paths").write_text(json.dumps([os.environ.get(k) for k in
+    ("CLARP_HOST_TOKEN","CLARP_PROVIDER_TURN","CLAUDE_PWA_DB","CLARP_SHARE_DIR","CLARP_QA_PROVIDER_ROOT")]))
 with (root / "asked").open("a") as out:
     out.write(json.dumps([provider, asked]) + "\n")
 mode = (root / f"{provider}-mode").read_text()
@@ -28475,6 +28485,10 @@ else:
     let (codex, claude) = (place.root.join("codex"), place.root.join("claude"));
     let world = [
         ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_PROVIDER_TURN", "foreign"),
+        ("CLAUDE_PWA_DB", "/fixture/foreign"),
+        ("CLARP_SHARE_DIR", "/fixture/share"),
+        ("CLARP_QA_PROVIDER_ROOT", "fixture-provider"),
         ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
     ];
@@ -28521,6 +28535,13 @@ else:
     let before = asked().len();
     let (status, _) = dictate("one");
     assert_eq!(status, 200);
+    // A one-off model sees this Host's tool directory and its provider fixture.
+    let child_paths: Value =
+        serde_json::from_slice(&std::fs::read(place.root.join("child-paths")).unwrap()).unwrap();
+    assert_eq!(
+        child_paths,
+        json!([null, null, null, "/fixture/share", "fixture-provider"])
+    );
     let tools: Vec<String> = asked()[before..].iter().map(|(t, _)| t.clone()).collect();
     assert_eq!(&tools[..2], ["codex", "claude"]);
     let decided = newest();
@@ -30551,7 +30572,9 @@ secrets = sorted(name for name in os.environ if name in (
     'CLARP_HOST_TOKEN', 'CLARP_PUSH_CREDENTIAL', 'CLARP_SOURCE_TOKEN', 'CLARP_PEER_TOKEN'))
 say(f'started: pid={os.getpid()} args={sys.argv[1:]} cwd={os.getcwd()} term={os.environ.get("TERM")} '
     f'lang={os.environ.get("LANG")} kept={os.environ.get("KEPT")} secrets={secrets} size={size()} '
-    f'leads={os.getsid(0) == os.getpid()} own={own} .')
+    f'leads={os.getsid(0) == os.getpid()} own={own} '
+    f'turn={os.environ.get("CLARP_PROVIDER_TURN", "missing")} db={os.environ.get("CLAUDE_PWA_DB", "missing")} '
+    f'share={os.environ.get("CLARP_SHARE_DIR", "missing")} qa={os.environ.get("CLARP_QA_PROVIDER_ROOT", "missing")} .')
 while True:
     line = sys.stdin.readline()
     if not line:
@@ -30787,7 +30810,17 @@ impl Screen {
 fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("terminal");
-    let (host, home) = host_with_a_shell(&place, ADMIN, &[], &[]);
+    let (host, home) = host_with_a_shell(
+        &place,
+        ADMIN,
+        &[],
+        &[
+            ("CLARP_PROVIDER_TURN", "foreign"),
+            ("CLAUDE_PWA_DB", "/fixture/foreign"),
+            ("CLARP_SHARE_DIR", "/fixture/share"),
+            ("CLARP_QA_PROVIDER_ROOT", "fixture-provider"),
+        ],
+    );
     let features = host.get("/server-info")["contract"]["features"].clone();
     assert_eq!(features["server_home_terminal"], 48, "{features}");
 
@@ -30845,6 +30878,10 @@ fn the_hosts_own_terminal_is_a_shell_in_its_home_carried_on_a_socket() {
         "{started}"
     );
     assert_eq!(of("secrets"), "[]", "{started}");
+    assert_eq!(
+        [of("turn"), of("db"), of("share"), of("qa")],
+        ["missing", "missing", "/fixture/share", "fixture-provider"]
+    );
     assert_eq!(of("size"), "80x24", "{started}");
     assert_eq!((of("leads").as_str(), of("own").as_str()), ("True", "True"));
     let shell = of("pid");

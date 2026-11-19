@@ -21,6 +21,7 @@ pub mod artifact_tool;
 pub mod audio;
 pub mod calendar;
 pub mod calls;
+pub(crate) mod child;
 pub mod chip;
 pub mod compact;
 pub mod config;
@@ -106,60 +107,7 @@ pub const TOOL_TOKEN_ENV: &str = "CLARP_TOOL_TOKEN";
 pub const SCRIPT_URL_ENV: &str = "CLARP_SERVER_URL";
 pub const SCRIPT_TOKEN_ENV: &str = "CLARP_AUTH_TOKEN";
 
-/// What in the Host's environment is the Host's alone. Nothing the Host starts is given these:
-/// a turn's environment is read by every command an agent runs, and what an agent prints is in
-/// its conversation.
-pub const OWN_SECRETS: &[&str] = &[
-    "CLARP_HOST_TOKEN",
-    "CLARP_PUSH_CREDENTIAL",
-    "CLARP_SOURCE_TOKEN",
-    "CLARP_PEER_TOKEN",
-];
-
-/// The common part of the launch order, captured when the Host starts. A
-/// missing value explicitly removes the name. A turn then adds its own identity.
-pub fn child_environment() -> &'static [(&'static str, Option<std::ffi::OsString>)] {
-    use ChildVariable::{Clear, FromHost};
-    use std::ffi::OsString;
-    use std::sync::LazyLock;
-
-    enum ChildVariable {
-        Clear,
-        FromHost,
-    }
-    const NAMES: &[(&str, ChildVariable)] = &[
-        (clarp_backend::SESSION_ENV, Clear), // Agent named to provider hooks and skills.
-        ("CLARP_SESSION", Clear),            // Agent calling a Clarp tool.
-        (turn_identity::TURN_ENV, Clear),    // Host-issued identity of the calling turn.
-        ("CLARP_BACKGROUND_ORIGIN", Clear),  // Originating native Bash invocation.
-        (clarp_backend::MANAGED_CLAUDE_ENV, Clear), // Rust-managed Claude process.
-        ("CLARP_AGY_MANAGED_TURN", Clear),   // Managed Antigravity stream owns its callbacks.
-        ("CLARP_BACKGROUND_WORKER_PID", Clear), // Worker speaking for a registered job.
-        ("CLAUDE_CODE_SESSION_ID", Clear),   // Native Claude session used by adopt and status-fork.
-        ("CLARP_CODE_ROOT", Clear),          // Python code a Clarp tool would import.
-        ("CLAUDE_PWA_DB", Clear),            // Python Host database.
-        ("CLAUDE_PWA_LOG_DIR", Clear),       // Python Host logs.
-        ("CLARP_CACHE_DIR", Clear),          // Python Host cache.
-        ("CLARP_DATA_DIR", Clear),           // Python Host data.
-        ("CLAUDE_PWA_CONFIG", FromHost),     // Config file used by a tool to locate this Host.
-        ("CLARP_CONFIG_DIR", FromHost),      // Config directory used if no file was named.
-        ("CLARP_SHARE_DIR", FromHost),       // Installation whose wrappers serve this Host.
-    ];
-
-    static ORDER: LazyLock<Vec<(&str, Option<OsString>)>> = LazyLock::new(|| {
-        NAMES
-            .iter()
-            .map(|&(name, ref rule)| {
-                let value = match rule {
-                    Clear => None,
-                    FromHost => std::env::var_os(name),
-                };
-                (name, value)
-            })
-            .collect()
-    });
-    &ORDER
-}
+pub use child::{OWN_SECRETS, child_environment};
 
 /// The token an agent's own tools present, on a Host whose administrator has this token.
 ///

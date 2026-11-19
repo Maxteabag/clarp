@@ -233,14 +233,11 @@ pub async fn probe_grok(row: &mut Value) {
     let Some(program) = clarp_backend::program("grok") else {
         return;
     };
-    let mut command = tokio::process::Command::new(program);
+    let mut command = crate::child::asynchronous(program);
     command
         .arg("models")
         .stdin(std::process::Stdio::null())
         .kill_on_drop(true);
-    for key in crate::OWN_SECRETS {
-        command.env_remove(key);
-    }
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), command.output()).await;
     let (valid, error) = match result {
         Ok(Ok(done)) => {

@@ -469,6 +469,13 @@ The Host takes `CLAUDE_PWA_CONFIG`, `CLARP_CONFIG_DIR` and `CLARP_SHARE_DIR` at 
 explicitly supplies their configured values to its children. The first two let a tool find its
 Host's configuration, and the third lets an installed wrapper find this Host's tools. A
 one-off tool with a restricted environment still receives only the settings its order permits.
+Every process the Host starts goes through the command constructors in
+`clarp-host/src/child.rs`, including the account selector, git helpers and the terminal.
+The synchronous, asynchronous and PTY constructors use the same table. A Rust source test
+checks production modules for direct command construction. The selector, a routing tool and
+a terminal report their effective environments through stand-ins in the Host tests.
+`tools/plants/one-door.py` exercises the table, caller overrides, the allowlist and the guard.
+
 An enabled Python Host plugin can receive prompt, pre-tool,
 post-tool, stop, pre-compact, notification and subagent-stop hooks from a Rust Claude turn.
 When the Python registry resolves the same live or archived agent, those hooks can record
