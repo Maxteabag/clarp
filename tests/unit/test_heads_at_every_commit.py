@@ -16,7 +16,7 @@ import sqlite3
 
 import pytest
 
-from lib import agents, db, message_previews, message_store, turn_lifecycle
+from lib import agents, db, message_previews, message_store, message_writes, turn_lifecycle
 
 _WRITES = re.compile(r"\b(INSERT|UPDATE|DELETE|REPLACE)\b[^;]*?\b(messages|conversation_heads)\b", re.I | re.S)
 _ENDS = re.compile(r"^\s*(COMMIT|END)\b", re.I)
@@ -110,7 +110,65 @@ WRITERS = {
         message_store.store_transcript_turns(
             agent_id=aid, backend_session_id="bs", source_file="/t/one.jsonl",
             turns=[{"role": "user", "text": "A prompt, reworded"}, {"role": "assistant", "text": "A reply"}])),
+    # R119: the writers the rows above did not reach (each probed to reach its function).
+    "a conversation carried to the next": lambda aid: (
+        message_store.record_user_message(agent_id=aid, backend_session_id="bs-old", client_msg_id="old",
+                                          text="Said in the old conversation"),
+        message_writes.carry_conversation(agent_id=aid, from_session_id="bs-old", to_session_id="bs")),
+    "the assistant rows restored": lambda aid: _restored(aid),
+    "an agy turn committed": lambda aid: _agy_committed(aid),
+    "a queued message edited": lambda aid: _queued_edit(aid),
+    "a turn stamped by its import": lambda aid: (
+        message_store.record_user_message(agent_id=aid, backend_session_id="bs", client_msg_id="stamped",
+                                          text="Stamp this turn", trace_id="t-stamped"),
+        message_store.store_transcript_turns(
+            agent_id=aid, backend_session_id="bs", source_file="/t/stamp.jsonl",
+            turns=[{"role": "user", "text": "Stamp this turn"}, {"role": "assistant", "text": "Stamped."}])),
+    "an import slot cleared for a client turn": lambda aid: (
+        message_store.store_transcript_turns(
+            agent_id=aid, backend_session_id="bs", source_file="/t/clear.jsonl",
+            turns=[{"role": "user", "text": "Clear my slot"}, {"role": "assistant", "text": "Cleared."}]),
+        message_store.record_user_message(agent_id=aid, backend_session_id="bs", client_msg_id="clear",
+                                          text="Clear my slot", trace_id="t-clear"),
+        message_store.store_transcript_turns(
+            agent_id=aid, backend_session_id="bs", source_file="/t/clear.jsonl",
+            turns=[{"role": "user", "text": "Clear my slot"}, {"role": "assistant", "text": "Cleared."}])),
 }
+
+
+def _restored(aid):
+    agents.open_turn(agent_id=aid, source="pwa", trace_id="t-restore")
+    snapshot = agents.capture_assistant_state(agent_id=aid, backend_session_id="bs")
+    message_store.upsert_live_assistant_message(agent_id=aid, backend_session_id="bs", trace_id="t-restore",
+                                                text="Words to be undone")
+    agents.restore_assistant_state(agent_id=aid, backend_session_id="bs", trace_id="t-restore", snapshot=snapshot)
+
+
+def _agy_committed(aid):
+    agents.open_turn(agent_id=aid, source="pwa", trace_id="t-agy")
+    snapshot = agents.capture_assistant_state(agent_id=aid, backend_session_id="bs")
+    message_store.upsert_live_assistant_message(agent_id=aid, backend_session_id="bs", trace_id="t-agy",
+                                                text="Streamed by agy")
+    agents.commit_agy_assistant_turn(agent_id=aid, backend_session_id="bs", trace_id="t-agy", snapshot=snapshot,
+                                     terminal_status="success", text="The agy turn's answer.")
+
+
+def _queued_edit(aid):
+    """The edit's real path: turn_queue.update_text, whose transaction the admission's edit joins."""
+    from lib import turn_queue
+    admission_id = _admitted(aid)
+    message_store.record_user_message(agent_id=aid, backend_session_id="bs", client_msg_id="queued-edit",
+                                      text="A prompt in the queue", prompt_admission_id=admission_id)
+    turn_queue.enqueue(queue_id="queued-edit", agent_id=aid, session="writer", text="A prompt in the queue",
+                       trace_id="trace-queued-edit", client_msg_id="queued-edit", synthesize_audio=False,
+                       origin="user", sender_agent_id="", prompt_admission_id=admission_id)
+    assert turn_queue.update_text("queued-edit", "A prompt, edited in the queue") is True
+
+
+def _admitted(aid):
+    from test_prompt_history import _admit
+    session = db.conn().execute("SELECT session FROM agents WHERE agent_id=?", (aid,)).fetchone()[0]
+    return _admit(aid, session=session, client_id="queued-edit", text="A prompt in the queue", observed_at=1000)
 
 
 @pytest.mark.parametrize("writer", list(WRITERS))
