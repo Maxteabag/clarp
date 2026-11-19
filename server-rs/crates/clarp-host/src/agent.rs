@@ -104,7 +104,30 @@ pub struct Spoke {
 }
 
 /// What an agent's thread is asked.
+pub enum DelegationCommand {
+    Inspect(Option<String>),
+    Baseline(usize),
+    #[cfg(test)]
+    Receipt {
+        id: String,
+        caller: String,
+    },
+    Change(clarp_actor::delegation::Transition),
+}
+
+#[derive(Debug)]
+pub struct DelegationState {
+    pub active: Option<clarp_actor::delegation::Binding>,
+    pub prior: Option<(clarp_actor::delegation::Transition, i64)>,
+    pub accepted: bool,
+    pub baseline: i64,
+}
+
 pub enum Ask {
+    Delegation {
+        command: DelegationCommand,
+        answer: mpsc::Sender<Result<DelegationState, Unavailable>>,
+    },
     VisitProvider(String),
     ExpireProviderLinks(String),
     HistoricalRead {
@@ -423,6 +446,7 @@ pub struct View {
 
 /// Everything an agent's thread is given.
 pub struct Setup {
+    pub(crate) delegation_rejoin: crate::fleet::delegations::Rejoin,
     pub runtime: tokio::runtime::Handle,
     pub opening_gate: crate::calls::opening_launch::Gate,
     pub record: AgentRecord,
@@ -927,6 +951,37 @@ impl AgentHandle {
     /// a tool's use on its row. Does not wait.
     pub fn explained(&self, item: String, fields: Value) {
         let _ = self.tx.send(Ask::Explained { item, fields });
+    }
+
+    /// The fleet is a serial worker. Wait for the principal's mailbox reply before
+    /// releasing any reservation. The actor never asks the fleet to handle this command.
+    pub(crate) fn delegation(
+        &self,
+        command: DelegationCommand,
+    ) -> Result<DelegationState, Unavailable> {
+        self.delegation_reply(command)?
+    }
+    /// A mailbox timeout is distinct from a refusal returned by the actor.
+    /// Do not undo a START that might still be executing.
+    pub(crate) fn delegation_reply(
+        &self,
+        command: DelegationCommand,
+    ) -> Result<Result<DelegationState, Unavailable>, Unavailable> {
+        // Three seconds allows a durable append while bounding how long this
+        // single fleet worker can delay unrelated requests per mailbox ask.
+        self.enqueue_delegation(command)?
+            .recv_timeout(Duration::from_secs(3))
+            .map_err(|e| Unavailable(format!("delegation mailbox unavailable: {e}")))
+    }
+    pub(crate) fn enqueue_delegation(
+        &self,
+        command: DelegationCommand,
+    ) -> Result<mpsc::Receiver<Result<DelegationState, Unavailable>>, Unavailable> {
+        let (answer, reply) = mpsc::channel();
+        self.tx
+            .send(Ask::Delegation { command, answer })
+            .map_err(|_| Unavailable("the agent is closed".into()))?;
+        Ok(reply)
     }
 
     /// Ends the agent's thread. Its turn, if one runs, is not touched.
@@ -1595,6 +1650,9 @@ impl Worker {
             self.now_ms(),
         )
         .map_err(|error| error.to_string())?;
+        self.setup
+            .delegation_rejoin
+            .reconcile(&mut actor, self.now_ms());
         if self.setup.record.backend == "claude" {
             // No jobs view escapes this rejoin until every ended attempt's
             // final byte boundary has been consumed and its tasks reconciled.
@@ -1850,6 +1908,34 @@ impl Worker {
         let Some(actor) = self.actor.as_mut() else {
             return Ok(());
         };
+        if let Some(active) = actor.active_delegation() {
+            use goaltool::Ask as Goal;
+            let guarded = matches!(
+                ask,
+                Goal::Create { .. }
+                    | Goal::Step { .. }
+                    | Goal::Act { .. }
+                    | Goal::Finish { .. }
+                    | Goal::Subgoal { .. }
+            );
+            if guarded {
+                let ancestry = &self.setup.delegation_rejoin;
+                let (id, kind, verified) = match &caller {
+                    GoalCaller::Verified(id) => (id.as_str(), "owner", true),
+                    GoalCaller::Peer(id, verified) => (id.as_str(), "peer", *verified),
+                    GoalCaller::Default => (self.setup.record.agent_id.as_str(), "owner", false),
+                };
+                if let Err(why) = clarp_kernel::goals::delegation::guard(
+                    kind,
+                    verified,
+                    ancestry.descends_from(id, &active.delegate_agent_id),
+                    ancestry.backend(id).as_deref(),
+                ) {
+                    let _ = answer.send(Ok(ToolAnswer::said(4, format!("agent_tasks: {why}"))));
+                    return Ok(());
+                }
+            }
+        }
         let owner = Owner {
             agent_id: &self.setup.record.agent_id,
             session: &self.setup.record.session,
@@ -2401,6 +2487,63 @@ impl Worker {
             }
             Ask::JobTimeline { id, limit, answer } => {
                 return read(actor.job_timeline(&id, limit), answer);
+            }
+            Ask::Delegation { command, answer } => {
+                let result = (|| -> Result<DelegationState, ActorError> {
+                    let mut baseline = 0;
+                    let (prior, accepted) = match command {
+                        #[cfg(test)]
+                        DelegationCommand::Receipt { id, caller } => {
+                            let written = actor.as_delegate(&id, Some(&caller), |a| {
+                                a.keep(
+                                    &Kept {
+                                        applied_cursor: Some((&id, 0)),
+                                        ..Kept::default()
+                                    },
+                                    now,
+                                )
+                            })?;
+                            (None, written.is_some())
+                        }
+                        DelegationCommand::Baseline(offset) => {
+                            baseline = actor.delegation_baseline(offset)?;
+                            (None, true)
+                        }
+                        DelegationCommand::Inspect(id) => (
+                            match id {
+                                Some(id) => actor.recorded_delegation(&id)?,
+                                None => None,
+                            },
+                            true,
+                        ),
+                        DelegationCommand::Change(t) => {
+                            let id = match &t {
+                                clarp_actor::delegation::Transition::Start { binding }
+                                | clarp_actor::delegation::Transition::Stop { binding, .. } => {
+                                    binding.delegation_id.clone()
+                                }
+                            };
+                            let accepted = actor.change_delegation(t, now)?;
+                            (actor.recorded_delegation(&id)?, accepted)
+                        }
+                    };
+                    Ok(DelegationState {
+                        baseline,
+                        active: actor.active_delegation().cloned(),
+                        prior,
+                        accepted,
+                    })
+                })();
+                match result {
+                    Ok(state) => {
+                        let _ = answer.send(Ok(state));
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        let _ = answer.send(Err(unavailable(&error)));
+                        return Err(error);
+                    }
+                }
             }
             Ask::KeeperEvents {
                 plan,
@@ -3467,6 +3610,7 @@ fn refuse_for(
             Ok(Ask::Hold { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Delegation { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),

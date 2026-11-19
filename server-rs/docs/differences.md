@@ -426,3 +426,8 @@ with its port (19 Nov 2026).
 | A render spec made with the agent's tool's `create` (not `publish-render-spec`) whose payload writes `-0` | the tool reads the payload and writes it again: `0`, taken | the tool reads `-0` as a fraction: refused, `number_form` | `publish-render-spec` sends the agent's bytes on both Hosts and is what the skill names |
 | Where a refused render spec is logged (`renderSpecRefused code=<code> path=<pointer>`) | the Host's log and its telemetry | the Host's standard error | This Host has no telemetry; both write the code and the pointer and nothing the caller wrote |
 | An agent with render specs that moves to this Host (`clarp-host import`) | (it is the Host moved from) | a render spec is refused as a kind the import does not take (`unsupported artifact type`) | Not built: moving one, with what was answered and not yet told, is the mover's contract (contract 0.5, section 7) |
+
+The bookkeeping delegation lifecycle is available through `/goal-ledger/delegations` and
+`clarp-admin bookkeeping`. Until the listener is ported, an enable response reports
+`listener.started: false` with the reason. The delegation itself is active from the principal's
+START entry. The feature flag covers the listener and delegated batches as well.

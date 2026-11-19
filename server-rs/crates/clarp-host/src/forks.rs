@@ -335,6 +335,7 @@ pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Ans
 async fn fork_route(
     State(app): State<App>,
     Named(session): Named<String>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Response {
     // Nothing at all is an empty object, and what is no object is no request: as the
@@ -344,6 +345,12 @@ async fn fork_route(
         Ok(request @ Value::Object(_)) => request,
         _ => return ApiError::new(StatusCode::BAD_REQUEST, "bad json").into_response(),
     };
+    let token = headers
+        .get(crate::turn_identity::HEADER)
+        .and_then(|v| v.to_str().ok());
+    if let Err(why) = crate::fleet::delegations::lineage(&app, &session, token).await {
+        return why.into_response();
+    }
     match fork_agent(&app, &session, &request).await {
         Ok(answer) => Json(answer).into_response(),
         Err((status, why)) => (status, Json(why)).into_response(),

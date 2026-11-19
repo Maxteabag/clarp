@@ -28,6 +28,38 @@ impl LogEngine for CutOpen {
     }
 }
 
+pub(super) fn test_works(dir: &Path, engine: Arc<dyn LogEngine>, log: crate::unkept::Log) -> Works {
+    let path = dir.to_str().unwrap();
+    let config = Config::from_args(
+        ["--data", path, "--run", path, "--cwd", path]
+            .into_iter()
+            .map(String::from),
+    )
+    .unwrap();
+    Works {
+        runtime: tokio::runtime::Handle::current(),
+        opening_gate: crate::calls::opening_launch::channel().0,
+        config: Arc::new(config),
+        engine,
+        codecs: clarp_codec::standard_set("none").unwrap(),
+        launcher: Arc::new(Launcher::by_name("direct", dir.join("no-shim")).unwrap()),
+        clock: Arc::new(SystemClock),
+        hub: Arc::new(Hub::new(0)),
+        revisions: Arc::default(),
+        tool_env: vec![],
+        pusher: crate::pusher::pusher().0,
+        blobs: MemBlobs::new().open(dir).unwrap(),
+        speaks: crate::voice::mouth().0,
+        telling: crate::telling::Telling::new(crate::owner::OwnerFile::new(Some(
+            dir.join("absent"),
+        ))),
+        tally: crate::usage::tally().0,
+        turns: Arc::default(),
+        pools: vec![],
+        log,
+    }
+}
+
 #[tokio::test]
 async fn a_durable_removal_reports_success_and_retries_failed_retirement_on_restart() {
     let dir = std::env::temp_dir().join(format!("clarp-retirement-{}", crate::ids::hex(8)));
@@ -39,39 +71,12 @@ async fn a_durable_removal_reports_success_and_retries_failed_retirement_on_rest
     let roster = MemKeyValue::new();
     let messages = Arc::new(Mutex::new(Vec::new()));
     let boot = || {
-        let path = dir.to_str().unwrap();
-        let config = Config::from_args(
-            ["--data", path, "--run", path, "--cwd", path]
-                .into_iter()
-                .map(String::from),
-        )
-        .unwrap();
-        let log = messages.clone();
-        let works = Works {
-            runtime: tokio::runtime::Handle::current(),
-            opening_gate: crate::calls::opening_launch::channel().0,
-            config: Arc::new(config),
-            engine: engine.clone(),
-            codecs: clarp_codec::standard_set("none").unwrap(),
-            launcher: Arc::new(Launcher::by_name("direct", dir.join("no-shim")).unwrap()),
-            clock: Arc::new(SystemClock),
-            hub: Arc::new(Hub::new(0)),
-            revisions: Arc::default(),
-            tool_env: vec![],
-            pusher: crate::pusher::pusher().0,
-            blobs: MemBlobs::new().open(&dir).unwrap(),
-            speaks: crate::voice::mouth().0,
-            telling: crate::telling::Telling::new(crate::owner::OwnerFile::new(Some(
-                dir.join("absent"),
-            ))),
-            tally: crate::usage::tally().0,
-            turns: Arc::default(),
-            pools: vec![],
-            log: crate::unkept::Log::to(
-                move |s| log.lock().unwrap().push(s.to_string()),
-                Arc::new(SystemClock),
-            ),
-        };
+        let messages = messages.clone();
+        let log = crate::unkept::Log::to(
+            move |s| messages.lock().unwrap().push(s.to_string()),
+            Arc::new(SystemClock),
+        );
+        let works = test_works(&dir, engine.clone(), log);
         start(works, roster.open(&dir).unwrap()).unwrap()
     };
     let fleet = boot();
