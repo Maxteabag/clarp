@@ -210,9 +210,10 @@ def drive(host, checkout, who, command):
 
 def status(lock):
     markers = waiting_landings()
-    for waiting in markers.values():
+    for identity, waiting in markers.items():
         if waiting.startswith('lease '):
-            print(f'landing lease: {waiting[6:]}')
+            pid = identity.partition('-')[0]
+            print(f'landing lease: {waiting[6:]} (keeper PID {pid}; ending this process releases the reservation)')
         else:
             print(f'landing waiting: {waiting}')
     try:
