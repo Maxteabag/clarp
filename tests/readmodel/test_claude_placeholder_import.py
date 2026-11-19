@@ -4,12 +4,27 @@ The real importer preserves user IDs and genuine identical/quoted text; this
 is parser provenance only, with no durable final-answer/carry certificate.
 """
 import json
+import time
 
 import pytest
 
 from lib import db, message_store, transcript_incremental as inc
 from tests.readmodel import corpus, world
 
+
+
+# The transcript's copy of the request is dated 2026-11-06T10:00:00Z, while the test recorded its
+# client row at the real time: a copy before its own send, which a copy cannot be. As 505a7b0a did
+# for three other files, this file's clock starts two seconds before that copy and runs on at the
+# real pace, so the send comes just before its copy.
+_COPY_AT_S = 1793959200              # 2026-11-06T10:00:00Z
+
+
+@pytest.fixture(autouse=True)
+def _clock_before_the_copy(monkeypatch):
+    real = time.time
+    offset = (_COPY_AT_S - 2) - real()
+    monkeypatch.setattr(time, "time", lambda: real() + offset)
 
 @pytest.mark.parametrize('noise_kind', ['model', 'api-error', 'nested-api-error', 'meta-parent'])
 def test_structural_noise_is_absent_from_rows_while_genuine_same_text_and_user_ids_survive(
