@@ -18,6 +18,15 @@ PLANTS=[]
 def change(file,run,why,old,new):
     PLANTS.append((file,run,why,old,new))
 
+change(D, 'vectors', 'identifier-shaped names jump ahead of equally ranked personas',
+       't.rarity = 0.9;', 't.rarity = t.rarity.max(0.9);')
+change(D, 'vectors', 'the agents pack reverses the ranked roster',
+       '.agent_names\n            .iter()', '.agent_names\n            .iter().rev()')
+change(D, 'vectors', 'the agents pack pre-cuts the roster before the provider budget',
+       '.agent_names\n            .iter()', '.agent_names\n            .iter().take(50)')
+RUNS['ranked'] = ['test','--test','host','transcription_guidance_reaches_the_phone_and_the_speech_engine']
+change(C, 'ranked', 'delegated speech reverses the route order at the worker boundary',
+       'sources.agent_names = self.names;', 'sources.agent_names = self.names.into_iter().rev().collect();')
 for why,old,new in [
         ('wrong default budget','&BUDGETS[0]','&BUDGETS[2]'),
         ('spaces in provider id prevent selection','provider.trim().to_lowercase()','provider.to_lowercase()'),

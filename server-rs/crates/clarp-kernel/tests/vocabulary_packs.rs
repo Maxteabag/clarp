@@ -3,6 +3,51 @@ use clarp_kernel::vocabulary::{self, Budget, Pack};
 use serde_json::{Value, json};
 
 #[test]
+fn the_full_guidance_roster_enters_the_agents_pack_before_provider_selection() {
+    use vocabulary::{guidance, sources::Sources};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/vocabulary-packs-vectors.json")).unwrap();
+    let story = &fixture["ranked_names"];
+    let names = guidance::active_names(story["agents"].as_array().unwrap().iter().map(|row| {
+        guidance::Agent {
+            id: row["id"].as_str().unwrap(),
+            persona: row["name"].as_str().unwrap(),
+            created: row["created"].as_i64().unwrap(),
+            role: row["role"].as_str().unwrap(),
+            parent: "",
+            latest_start: row["starts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_i64().unwrap())
+                .max()
+                .unwrap_or(0),
+            archived: false,
+            deleted: false,
+            janitor: false,
+        }
+    }));
+    let route = guidance::payload(true, "", &names);
+    assert_eq!(route["active_agent_names"], story["route"]);
+    let packs = Sources {
+        agent_names: names,
+        ..Sources::default()
+    }
+    .packs();
+    let agents = packs.iter().find(|p| p.name == "agents").unwrap();
+    let terms: Vec<_> = agents.terms.iter().map(|t| &t.text).collect();
+    assert_eq!(json!(terms), route["active_agent_names"]);
+    assert_eq!(json!(terms), story["pack"]);
+    for case in story["providers"].as_array().unwrap() {
+        let budget = vocabulary::budget_for(
+            case["provider"].as_str().unwrap(),
+            case["model"].as_str().unwrap(),
+        );
+        assert_eq!(vocabulary::compile(&packs, &budget), case["audit"]);
+    }
+}
+
+#[test]
 fn budgets_and_compilations_match_the_python_reference() {
     let v: Value =
         serde_json::from_str(include_str!("fixtures/vocabulary-packs-vectors.json")).unwrap();
