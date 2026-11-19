@@ -66,6 +66,18 @@ impl Launcher {
         }
     }
 
+    /// The CLI combines this invocation's hook with its usual settings.
+    /// Omit it when the configured executable has no usable absolute name.
+    pub fn claude_settings(&self,agent:&str)->Option<String>{
+        let (Self::Direct{shim} | Self::SystemdScope{shim})=self;
+        let path=if shim.components().count()==1 && shim.is_relative(){
+            std::env::split_paths(&std::env::var_os("PATH")?).map(|p|p.join(shim)).find(|p|p.is_file())?
+        }else{shim.clone()};
+        let absolute=std::fs::canonicalize(path).ok()?;
+        let command=format!("{} claude-background-hook {}",clarp_kernel::python::shell_quote(absolute.to_str()?),clarp_kernel::python::shell_quote(agent));
+        Some(serde_json::json!({"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":command,"timeout":3}]}]}}).to_string())
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::Direct { .. } => "direct",

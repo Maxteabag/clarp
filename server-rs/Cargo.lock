@@ -233,6 +233,7 @@ dependencies = [
  "clarp-child",
  "clarp-codec",
  "clarp-ports",
+ "clarp-provider-hook",
  "clarp-speech",
  "clarp-store-mem",
  "clarp-tool-args",
@@ -261,10 +262,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarp-provider-hook"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "clarp-shim"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "clarp-provider-hook",
  "clarp-spool",
  "clarp-tool-args",
  "minreq",
