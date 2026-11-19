@@ -1427,8 +1427,8 @@ impl Book {
         }
         if for_an_agent {
             match valid(agents, &shown, &decision.target_session).map(str::to_string) {
+                // A question: whom its row names is said when it is kept (`finish`).
                 None => {
-                    target = requested.to_string();
                     action = Some(CLARIFY);
                     decision = as_question(decision, NO_VALID_TARGET.text);
                     if aloud {
@@ -1439,7 +1439,6 @@ impl Book {
                     action = Some(CLARIFY);
                     let words = format!("Was that for {}?", name_of(agents, &agent));
                     decision = as_question(decision, &words);
-                    target = agent;
                     if aloud {
                         self.hold(&decision, routing, hold_as, around, &mut effects);
                     }
@@ -1519,7 +1518,6 @@ impl Book {
                 // two of that name, or one this conversation cannot answer about (put
                 // away, outside the call, a janitor).
                 action = Some(CLARIFY);
-                target = requested.to_string();
                 let refusal = match found.len() {
                     0 => NO_SUCH_AGENT,
                     1 => CANNOT_CHECK,
@@ -1530,7 +1528,7 @@ impl Book {
             effects.push(router_says(text));
         }
         // The agent a command acts on: a command carried out names it by now, by the name it was
-        // given or as the agent the message was said to (`command_check`).
+        // given or as the agent the message was said to (`command_check`), and is kept for it.
         let on = decision.target_session.clone();
         if action.is_none() && kind == CONTROL {
             action = Some(CONTROL);
@@ -1561,13 +1559,11 @@ impl Book {
                         agent_id: agent.agent_id.clone(),
                         session: on.clone(),
                     }));
-                    target = on;
                 }
                 "stop" | "stop_agent" | "interrupt" => {
                     effects.extend(agent.map(|agent| Effect::Stop {
                         agent_id: agent.agent_id.clone(),
                     }));
-                    target = on;
                 }
                 "create" => {
                     let payload = decision.control_payload.as_ref();
@@ -1591,7 +1587,6 @@ impl Book {
                 _ => {
                     let words = "I am not sure how to do that yet.";
                     effects.extend(self.as_agent(requested, words, "", around).map(Effect::Say));
-                    target = on;
                 }
             }
         }
