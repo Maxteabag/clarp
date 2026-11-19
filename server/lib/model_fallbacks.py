@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from contextlib import contextmanager
 
 from . import lifecycle as lk
@@ -139,55 +140,76 @@ def _unescaped(text, *, utf8_bytes=False):
     def one(match):
         code = match.group(1)
         if code[0] in "uUx":
-            return chr(int(code[1:], 16))
+            value = int(code[1:], 16)
+            # Above U+10FFFF no character exists (chr raises ValueError on 3.13, OverflowError on
+            # 3.12 from 2**31): the escape stays as written.
+            return chr(value) if value <= sys.maxunicode else match.group(0)
         return _ESCAPED.get(code, code)
     return _ESCAPE.sub(one, text)
 
 
-def _nfc(text):
+def _nfkc(text):
     import unicodedata
-    return unicodedata.normalize("NFC", text)
+    return unicodedata.normalize("NFKC", text)
 
 
 def echoes(text, prompt):
     """Whether ``text`` shares a run of ECHO_RUN characters (the whole prompt when it is shorter)
     with ``prompt``, read as written or with its string escapes undone; white space compared as
-    one space, both sides NFC-normalised. Covered: JSON and Python string escapes (also \\xNN and
-    \\UXXXXXXXX, a bytes repr read as UTF-8), ascii() and unicode_escape, decomposed letters,
-    newlines and tabs written as spaces. Not covered: base64, percent or HTML encoding, an echo
-    wrapped at a narrow width with a prefix on every line, a run broken by an inserted ellipsis."""
-    request = _plain(_nfc(prompt or ""))
+    one space, both sides NFKC-normalised. Covered: JSON and Python string escapes (also \\xNN and
+    \\UXXXXXXXX up to U+10FFFF, a bytes repr read as UTF-8), ascii() and unicode_escape, decomposed
+    letters, full-width forms and ligatures, newlines and tabs written as spaces. Not covered:
+    base64, percent or HTML encoding, an echo wrapped at a narrow width with a prefix on every
+    line, a run broken by an inserted ellipsis."""
+    request = _plain(_nfkc(prompt or ""))
     if not request:
         return False
     run = min(ECHO_RUN, len(request))
-    for form in {_plain(_nfc(text)), _plain(_nfc(_unescaped(text))),
-                 _plain(_nfc(_unescaped(text, utf8_bytes=True)))}:
+    for form in {_plain(_nfkc(text)), _plain(_nfkc(_unescaped(text))),
+                 _plain(_nfkc(_unescaped(text, utf8_bytes=True)))}:
         if any(form[at:at + run] in request for at in range(0, len(form) - run + 1)):
             return True
     return False
+
+
+def _kept_line(words, prompt):
+    """The CLI's own words as one line of at most KEPT_MOST characters, or "" when they hold any of
+    the request."""
+    line = _plain(words)[:KEPT_MOST]
+    return "" if not line or echoes(line, prompt) else line
 
 
 def cli_failure(backend, output, *, prompt, returncode=None):
     """What a routing CLI's failure says, wherever it is caught: its own words as one line of at
     most KEPT_MOST characters when they hold none of the request, else "<backend> exited with
     status N (<category>)". The category is always kept: the fallback chain and the attempt rows
-    read it, never the words."""
+    read it, never the words.
+
+    It never raises because of the words: the category and the refusal are read from the raw words
+    first, and the kept line is worked out in its own step; if that step raises, the exception's
+    type is logged and the line dropped, so the failure keeps its category and facts with no CLI text."""
     from . import error_classify
+    from .log import log_exception_type
 
     words = (output or "").strip()
     category = error_classify.classify_error(words)
     if category != error_classify.INTERRUPTED and category not in PROVIDER_FAILURES:
         category = error_classify.RUNNER_EXIT
+    denied = bool(_DENIED_RE.search(words))
     status = f"exited with status {returncode}" if returncode is not None else "failed"
-    line = _plain(words)[:KEPT_MOST]
-    if not line or echoes(line, prompt):
-        line = f"{backend} {status} ({category})"
+    try:
+        line = _kept_line(words, prompt)
+    except Exception as error:  # noqa: BLE001 -- the words never cost the failure its facts
+        # Its type only: a message raised while reading the words may quote them (issue 360).
+        log_exception_type("cliFailureLineDropped", type(error).__name__, str(backend))
+        line = ""
+    line = line or f"{backend} {status} ({category})"
     if category == error_classify.INTERRUPTED:
         return Cancelled(line)
     failure = ProviderFailure(line, category)
     # A failure's facts are attributes, read by the code; its words are for a person (R85, ruled):
     # whatever text is kept, a refusal stays a refusal and the exit stays known.
-    failure.denied = bool(_DENIED_RE.search(words))
+    failure.denied = denied
     failure.backend = backend
     failure.returncode = returncode
     return failure

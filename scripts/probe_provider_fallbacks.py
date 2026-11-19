@@ -63,7 +63,8 @@ def probe(backend, model, timeout):
             "backend": backend,
             "model": model,
             "answered": False,
-            "provider_failure": model_fallbacks.is_provider_failure(error),
+            # The live decision: whether the fallback chain would move on from this error.
+            "provider_failure": model_fallbacks._as_provider_failure(error) is not None,
             "category": getattr(error, "category", ""),
             "error": str(error)[:300],
             "elapsed_seconds": round(time.monotonic() - started, 2),

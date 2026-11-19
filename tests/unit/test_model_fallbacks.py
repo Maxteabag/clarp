@@ -129,6 +129,30 @@ def test_exhausted_fallbacks_are_bounded_and_visible(agent, monkeypatch):
 # The live decision is _as_provider_failure, on the error raised around a model call
 # (is_provider_failure, which took a dispatcher category, had no caller and is gone, R85).
 
+
+@pytest.mark.parametrize(
+    "category, message",
+    [
+        ("usage_limit", "You've hit your usage limit. Try again at Sep 13th"),
+        ("connection", "fetch failed"),
+        ("transient", "Error 529: overloaded"),
+        ("runner_exit", "agy exited rc=1"),
+        ("timeout", "turn timed out"),
+    ],
+)
+def test_provider_failures_are_the_only_retry_trigger(category, message):
+    promoted = fallback._as_provider_failure(RuntimeError(message))
+    assert promoted is not None and promoted.category == category
+
+
+@pytest.mark.parametrize("message", ["something odd happened", "2 tests failed"])
+def test_a_cli_that_exited_without_a_refusals_or_an_interrupts_facts_is_a_failed_runner(message):
+    """A CLI that exits non-zero with words no pattern names (once 'unknown'), or a clean turn's
+    '2 tests failed', is a failed runner: the chain moves on, on main and since. The old expectation
+    (must not switch) was asserted on is_provider_failure, which no live path read (R85, ruled)."""
+    promoted = fallback._as_provider_failure(RuntimeError(message))
+    assert promoted is not None and promoted.category == "runner_exit"
+
 @pytest.mark.parametrize(
     "message",
     [
@@ -236,3 +260,29 @@ def test_an_attempt_finishes_once_and_only_with_a_declared_status(agent):
     assert (row["status"], row["result_json"]) == ("failed", '{"why": "quota"}')
     assert row["finished_at"] is not None
     assert not db.conn().in_transaction
+
+
+def _probe_script():
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "probe_provider_fallbacks.py"
+    spec = importlib.util.spec_from_file_location("probe_provider_fallbacks", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("raised, switches, category", [
+    (fallback.ProviderFailure("usage limit reached", "usage_limit"), True, "usage_limit"),
+    (fallback.cli_failure("claude", "permission denied", prompt="x", returncode=1), False, "runner_exit"),
+    (fallback.Cancelled("turn_aborted"), False, ""),
+], ids=["a quota", "a refusal", "a stop"])
+def test_the_paid_probe_reports_the_live_decision_when_a_provider_fails(monkeypatch, raised, switches, category):
+    """scripts/probe_provider_fallbacks.py's failure branch, with a stub in place of the paid call."""
+    probe = _probe_script()
+
+    def failing(*args, **kwargs):
+        raise raised
+    monkeypatch.setattr(fallback, "json_call", failing)
+    result = probe.probe("claude", "", timeout=1)
+    assert (result["answered"], result["provider_failure"], result["category"]) == (False, switches, category)

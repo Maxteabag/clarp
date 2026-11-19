@@ -283,8 +283,8 @@ def test_invalid_utf8_in_a_bytes_repr_is_left_as_written_and_never_raises():
 
 
 @pytest.mark.parametrize("words, category", [
-    # The classifier names no timeout by its words (a timeout reaches the router as its exception);
-    # a timed-out connection does: ETIMEDOUT.
+    # A timed-out connection is named by ETIMEDOUT. (Five phrases name a timeout, "turn timed out"
+    # among them; an ordinary "timed out" ends as unknown and so runner_exit: R93.)
     ("connect ETIMEDOUT 104.18.32.47:443", "connection"),
     ("You've hit your usage limit. Try again at Sep 13th", "usage_limit"),
     ("Error 529: overloaded", "transient"),
@@ -301,3 +301,112 @@ def test_a_refusal_named_after_1500_characters_is_still_a_refusal():
     failure = model_fallbacks.cli_failure("claude", "x" * 1500 + " permission denied", prompt="an unrelated request",
                                           returncode=3)
     assert failure.denied is True and model_fallbacks._as_provider_failure(failure) is None
+
+
+# ---- R85, the hold of 06:49: an escape above U+10FFFF, a raise while reading the words, NFKC ----
+
+ABOVE = ("\\UFFFFFFFF", "\\U0011FFFF", "\\U00110000")       # no character: left as written
+LAST = "\\U0010FFFF"                                       # the last one there is: undone
+REFUSAL = "permission denied; bad escape {}"
+RATE_LIMIT = "rate limited: too many requests; bad escape {}"
+
+
+@pytest.mark.parametrize("escape", ABOVE)
+def test_an_escape_above_the_last_character_is_left_as_written(escape):
+    assert model_fallbacks._unescaped(f"x {escape} y") == f"x {escape} y"
+
+
+def test_the_last_character_there_is_is_undone():
+    assert model_fallbacks._unescaped(f"x {LAST} y") == "x \U0010ffff y"
+
+
+@pytest.fixture
+def chained(monkeypatch):
+    """An agent whose fallback chain holds one more model than its primary."""
+    agents.create_agent(persona="Robot", voice_id="", cwd="/tmp", session="robot", backend="codex")
+    agent = agents.get_by_session("robot")
+
+    def run(provider, prompt):
+        second = {"backend": "claude" if provider != "claude" else "codex", "model": "", "effort": ""}
+        monkeypatch.setattr(model_fallbacks, "get", lambda agent_id: {"models": [second], "revision": 1})
+        calls = []
+
+        def invoke(model):
+            calls.append(model["backend"])
+            return model_fallbacks.json_call(model, prompt, SCHEMA)
+        with pytest.raises(Exception) as caught:
+            model_fallbacks.execute(agent["agent_id"], "request", {"backend": provider, "model": "", "effort": ""},
+                                    invoke)
+        return caught.value, calls, model_fallbacks.attempts(agent["agent_id"], "request")
+    return run
+
+
+@pytest.mark.parametrize("escape", ABOVE + (LAST,))
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_refusal_with_any_escape_never_falls_back(failing, chained, provider, escape):
+    failing("said", SAID=REFUSAL.format(escape))
+    failure, calls, attempts = chained(provider, f"{START} the plan")
+    assert isinstance(failure, model_fallbacks.ProviderFailure) and failure.denied is True
+    assert calls == [provider] and attempts == []                     # the refusal propagates
+    assert str(failure) == REFUSAL.format(escape)                     # the CLI's own words, as written
+
+
+@pytest.mark.parametrize("escape", ABOVE + (LAST,))
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_rate_limit_with_any_escape_falls_back_once(failing, chained, provider, escape):
+    from lib import error_classify
+    failing("said", SAID=RATE_LIMIT.format(escape))
+    failure, calls, attempts = chained(provider, f"{START} the plan")
+    assert isinstance(failure, model_fallbacks.ProviderFailure)
+    assert failure.category == error_classify.classify_error(RATE_LIMIT.format("")) != "runner_exit"
+    assert len(calls) == 2 and [row["reason"] for row in attempts] == ["ProviderFailure"]
+    assert str(failure) == RATE_LIMIT.format(escape)
+
+
+@pytest.mark.parametrize("said, denied", [(REFUSAL.format("x"), True), (RATE_LIMIT.format("x"), False)],
+                         ids=["a refusal", "a rate limit"])
+def test_a_raise_while_reading_the_words_costs_the_failure_nothing_but_its_text(monkeypatch, capfd, said, denied):
+    plain = model_fallbacks.cli_failure("claude", said, prompt="an unrelated request", returncode=3)
+
+    def planted(words, prompt):
+        raise RuntimeError(f"planted while reading {words}")
+    monkeypatch.setattr(model_fallbacks, "_kept_line", planted)
+    failure = model_fallbacks.cli_failure("claude", said, prompt="an unrelated request", returncode=3)
+    assert (failure.category, failure.denied, failure.returncode) == (plain.category, plain.denied, 3)
+    assert failure.denied is denied and failure.category in model_fallbacks.PROVIDER_FAILURES
+    assert (model_fallbacks._as_provider_failure(failure) is None) is denied     # the chain decides alike
+    assert str(failure) == f"claude exited with status 3 ({failure.category})"   # the line is dropped
+    err = capfd.readouterr().err
+    assert "cliFailureLineDropped" in err and "RuntimeError" in err and said not in err   # logged, words not
+
+
+CJK = "请在周五之前，把客户门户的新登录方式发给比约恩，并说明为什么需要更改。"
+FULL_WIDTH = "Ｐｌｅａｓｅ ｓｅｎｄ ｔｈｅ ｎｅｗ ｌｏｇｉｎ ｔｏ Ｂｊｏｒｎ ｂｅｆｏｒｅ Ｆｒｉｄａｙ"
+LIGATURE = "The ﬁnal ﬁgures for the ﬂoor plan go to the oﬃce before the ﬁrst of December"
+EMOJI = "🚀🔥 Deploy 🎉 the 🧪 tests 🐛 then 🛠️ fix 🚦 the 📦 build 🎯 before 🌙 night 🔔 and 📣 tell 🧑‍💻 the 🧭 team"
+DENSE_NFD = "Øyvind på Ås må få søknadene før åtte, så Ærø og Åse får svar på nøyaktig én måte"
+
+
+def _nfkd(text):
+    import unicodedata
+    return unicodedata.normalize("NFKD", text)
+
+
+@pytest.mark.parametrize("prompt, echoed", [
+    (CJK, _nfkd(CJK)),                                             # full-width commas become ASCII
+    (FULL_WIDTH, _nfkd(FULL_WIDTH)),                               # a full-width prompt echoed in ASCII
+    (LIGATURE, LIGATURE.replace("ﬁ", "fi").replace("ﬂ", "fl").replace("ﬃ", "ffi")),
+    (EMOJI, ascii(EMOJI)),                                         # needs \U undone
+    (EMOJI, EMOJI.encode("unicode_escape").decode("ascii")),
+], ids=["cjk under nfkd", "full-width", "a ligature", "emoji as ascii()", "emoji as unicode_escape"])
+def test_an_echo_in_a_compatibility_form_is_never_kept(prompt, echoed):
+    failure = model_fallbacks.cli_failure("claude", "error: " + echoed, prompt=prompt, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"
+
+
+def test_a_prompt_written_decomposed_and_echoed_composed_is_never_kept():
+    import unicodedata
+    prompt = unicodedata.normalize("NFD", DENSE_NFD)
+    assert prompt != DENSE_NFD
+    failure = model_fallbacks.cli_failure("claude", "error: " + DENSE_NFD, prompt=prompt, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"
