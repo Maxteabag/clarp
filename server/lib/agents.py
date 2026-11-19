@@ -96,22 +96,42 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
 
 
 def resolve_for_hook(*, backend_session_id: str | None,
-                     session: str | None) -> dict[str, Any] | None:
-    """Find the agent that fired a hook.
+                     session: str | None, hook: str = "") -> dict[str, Any] | None:
+    """Find the agent that fired a hook, or None: the hook then acts for nobody.
 
     Order:
-      1. backend_session_id from the hook payload — always reliable, comes from
-         Claude Code directly.
-      2. session — identity hint for the first prompt of a new agent
-         (no backend_session_id in the live runtime row yet).
-    """
+      1. backend_session_id from the hook payload, which Claude Code gives: the
+         agent whose live runtime is bound to it.
+      2. session, the CLAUDE_PWA_SESSION a process inherited: only when the
+         hook's own session id is that agent's live session, or the agent has
+         none yet (the first prompt of a new agent, a terminal's fresh start).
+
+    A hook that reached its agent only through the inherited variable while its
+    own session id is another one (a claude started inside a dispatched turn's
+    shell with the plugin) is FOREIGN: it binds nothing, makes no transition,
+    opens and settles no row, writes no flag. One eventlog line, and None. The
+    rule is applied here once, for every hook (R96)."""
     if backend_session_id:
         a = get_by_backend_session(backend_session_id)
         if a:
             return a
-    if session:
-        return get_by_session(session)
-    return None
+    if not session:
+        return None
+    a = get_by_session(session)
+    if a is None or not backend_session_id:
+        return a
+    live = live_backend_session(a["agent_id"])
+    if live and live != backend_session_id:
+        try:
+            from .eventlog import emit
+            emit("hook", "foreignSession", detail={
+                "hook": hook or "?", "agent": str(a["agent_id"])[:8],
+                "session_id": str(backend_session_id)[:8]})
+        except Exception as exc:  # noqa: BLE001 - a hook never fails over its report
+            from .log import log_exception
+            log_exception("hookForeignReportFail", exc, detail=str(a["agent_id"])[:8])
+        return None
+    return a
 
 
 def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:

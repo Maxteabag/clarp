@@ -40,7 +40,7 @@ def main() -> int:
 
     try:
         agent = _agents.resolve_for_hook(
-            backend_session_id=backend_session_id or None,
+            hook="Stop", backend_session_id=backend_session_id or None,
             session=session or None,
         )
     except Exception as e:
