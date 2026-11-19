@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use clarp_kernel::janitors::quota::{self, Lane, Memory, Owner};
+use clarp_kernel::janitors::quota::{self, Deliver, Lane, Memory, Owner};
 use clarp_kernel::recovery::Accounts;
 use serde_json::{Value, json};
 
@@ -167,25 +167,35 @@ impl Story {
         Lane::of(self.lane.clone(), &self.agent_id, self.generation)
     }
 
-    /// What waits to be delivered is delivered, or cancelled where the keeper was set anew.
+    /// What waits to be delivered, as the kernel says: pushed, settled without a push, or left.
     fn deliver(&mut self, ticked: &mut Ticked) {
-        for receipt in self.receipts.iter_mut().filter(|r| r.delivery.is_none()) {
-            if receipt.payload["agent_id"] != json!(self.agent_id) {
-                continue;
+        let waiting: Vec<(String, i64, Value)> = self
+            .receipts
+            .iter()
+            .filter(|r| r.delivery.is_none())
+            .map(|r| (r.id.clone(), r.created_at, r.payload.clone()))
+            .collect();
+        let waiting: Vec<quota::Waiting<'_>> = waiting
+            .iter()
+            .map(|(id, at, payload)| (id.as_str(), *at, payload))
+            .collect();
+        let interval = self.options["interval_seconds"].as_i64().unwrap();
+        let owner = (self.agent_id.as_str(), self.generation);
+        for (id, action) in quota::delivering(&waiting, owner, interval, self.now) {
+            let receipt = self.receipts.iter_mut().find(|r| r.id == id).unwrap();
+            match action {
+                Deliver::Wait => {}
+                Deliver::Settle(settled) => receipt.delivery = Some(settled),
+                Deliver::Push => {
+                    ticked.pushed.push(quota::pushed_of(&receipt.payload));
+                    if self.answer == "raise" {
+                        ticked.stopped = true;
+                        return;
+                    }
+                    let told = quota::after_push(&mut receipt.payload, self.answer.clone(), self.now);
+                    receipt.delivery = told;
+                }
             }
-            if receipt.payload["owner_generation"] != json!(self.generation) {
-                receipt.delivery = Some(json!({ "cancelled": quota::SET_ANEW }));
-                continue;
-            }
-            ticked.pushed.push(receipt.payload.clone());
-            if self.answer == "raise" {
-                ticked.stopped = true;
-                return;
-            }
-            receipt.delivery = Some(match &self.answer {
-                Value::Null => json!({}),
-                answer => answer.clone(),
-            });
         }
     }
 
@@ -243,7 +253,16 @@ impl Story {
         }
         self.deliver(&mut ticked);
         if ticked.stopped {
+            // The push raised (the reference's push; this Host's never does): the look's run is
+            // closed as failed, what it read before kept, and its lane told (R100).
+            let why = quota::stopped("RuntimeError");
+            lane.record(bounds, ("failed", &why), self.now);
             self.lane = Some(lane);
+            ticked.run = Some(json!({
+                "status": "failed", "outcome": "failed", "activity": "failed",
+                "activity_summary": why, "created_at": self.now, "finished_at": self.now,
+                "generation": self.generation, "result": {},
+            }));
             return ticked;
         }
         let (activity, summary, result) = quota::ran(told, &recoveries);
@@ -274,8 +293,6 @@ impl Story {
     }
 }
 
-/// Where a story here goes another way than on the Python Host, and why.
-const BROKE_THERE: &str = "a window dated with nothing breaks the whole look on the Python Host";
 
 #[test]
 fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
@@ -300,10 +317,6 @@ fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
             memory: Kept::default(),
             receipts: Vec::new(),
         };
-        if name == BROKE_THERE {
-            the_story_that_breaks_there(&mut story, steps);
-            continue;
-        }
         for (number, step) in steps.iter().enumerate() {
             let at = format!("{name}, step {number} ({})", step["do"]);
             story.now = step["now"].as_i64().unwrap();
@@ -324,16 +337,9 @@ fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
                     let ticked = story.tick();
                     assert_eq!(json!(ticked.pushed), step["pushed"], "{at}");
                     let theirs = step["runs"].as_array().unwrap();
-                    if ticked.stopped {
-                        // The push broke the Python Host's look: its run is left running. A
-                        // push here says what became of it, and does not break.
-                        assert_eq!(theirs.len(), 1, "{at}");
-                        assert_eq!(theirs[0]["status"], "running", "{at}");
-                    } else {
-                        let ours: Vec<Value> = ticked.run.into_iter().collect();
-                        assert_eq!(json!(ours), json!(theirs), "{at}");
-                        runs += ours.len();
-                    }
+                    let ours: Vec<Value> = ticked.run.into_iter().collect();
+                    assert_eq!(json!(ours), json!(theirs), "{at}");
+                    runs += ours.len();
                     pushed += step["pushed"].as_array().unwrap().len();
                     ticks += 1;
                 }
@@ -346,34 +352,7 @@ fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
             assert_eq!(json!(next), step["next_run_at"], "{at}");
         }
     }
-    assert_eq!((ticks, runs, pushed), (26, 22, 18));
-}
-
-/// A window whose time of seeing is nothing: the Python Host breaks its look there, after
-/// the windows before it, and on every look after; this Host passes the window over.
-fn the_story_that_breaks_there(story: &mut Story, steps: &[Value]) {
-    story.generation = steps[0]["generation"].as_u64().unwrap();
-    story.options = steps[0]["options"].clone();
-    story.usage = json!({ "providers": steps[0]["providers"] });
-    let broke: Vec<&Value> = steps.iter().filter(|step| step["do"] == "tick").collect();
-    assert!(broke.iter().all(|step| step["broke"] == "AttributeError"
-        || step["runs"][0]["status"] == "running"));
-    let ticked = story.tick();
-    let previews: Vec<&Value> = ticked.pushed.iter().map(|p| &p["preview"]).collect();
-    assert_eq!(
-        previews,
-        [
-            &json!("codex 5h: 20% quota remaining"),
-            &json!("codex 5h: 5% quota remaining")
-        ]
-    );
-    let run = ticked.run.unwrap();
-    assert_eq!(run["status"], "completed");
-    assert_eq!(run["result"]["item_count"], 2);
-    // There: only the window before the one with nothing, and not delivered in that look.
-    let theirs = steps[1]["receipts"].as_array().unwrap();
-    assert_eq!(theirs.len(), 1);
-    assert_eq!(theirs[0]["delivery"], Value::Null);
+    assert_eq!((ticks, runs, pushed), (33, 30, 26));
 }
 
 #[test]

@@ -22,9 +22,11 @@
 //! name the Python Host gives its memory), its receipts (`quota-keeper-receipt`, one record
 //! a receipt) and its lane (`quota-keeper-lane`: when it looks next). Then each receipt is
 //! pushed as the Python Host pushes it (the alert of a finished turn), and what became of the
-//! push is written on it, as there: a push that went to no phone (a relay that is down) is
-//! counted as failed and not tried again, on both Hosts. One the pusher never answered (it is
-//! gone) waits, and is tried again at the next look, as the Python Host tries a push that
+//! push is written on it, as there (R105): a notice nobody got because the transport failed
+//! (a relay that is down) waits, its attempts written on it, and is tried again past the
+//! keeper's interval until a phone takes it, a newer crossing of its window replaces it, its
+//! window resets or the keeper is set anew ([`quota::delivering`], [`quota::after_push`]). One
+//! the pusher never answered (it is gone) waits too, as the Python Host leaves one whose push
 //! raised.
 //!
 //! **Who tells the owner.** Where an automatic Hotseat switcher is on, it tells of Claude and
@@ -41,7 +43,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use clarp_kernel::janitors::book::Book;
-use clarp_kernel::janitors::quota::{self, Lane, Memory, Owner, ROLE};
+use clarp_kernel::janitors::quota::{self, Deliver, Lane, Memory, Owner, ROLE};
 use clarp_kernel::janitors::{SEATS_JOB, adaptive, option_values};
 use clarp_kernel::recovery::Accounts;
 use serde::{Deserialize, Serialize};
@@ -439,48 +441,62 @@ async fn pass(app: &App) {
 /// What waits to be delivered is pushed, or cancelled where its keeper was set anew since,
 /// and what became of each is written on it, in one write.
 async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Receipt>) {
-    let mut waiting: Vec<&mut Receipt> = receipts
-        .values_mut()
+    let waiting: Vec<quota::Waiting<'_>> = receipts
+        .values()
         .filter(|receipt| receipt.delivery.is_none())
-        .filter(|receipt| receipt.payload["agent_id"] == json!(keeper.agent_id))
+        .map(|receipt| (receipt.receipt_id.as_str(), receipt.created_at, &receipt.payload))
         .collect();
     if waiting.is_empty() {
         return;
     }
-    waiting.sort_by(|a, b| (a.created_at, &a.receipt_id).cmp(&(b.created_at, &b.receipt_id)));
     let now = app.clock.now_ms();
+    let owner = (keeper.agent_id.as_str(), keeper.generation);
+    let actions = quota::delivering(&waiting, owner, keeper.bounds().0, now);
     let mut rows = Vec::new();
-    for receipt in waiting {
-        let delivery = if receipt.payload["owner_generation"] != json!(keeper.generation) {
-            json!({ "cancelled": quota::SET_ANEW })
-        } else if app.config.accounts == Accounts::Follow {
-            json!({ "cancelled": BESIDE })
-        } else {
-            let said = |key: &str| {
-                receipt.payload[key]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string()
-            };
-            let done = TurnDone {
-                badge: false,
-                unread: false,
-                session: said("session"),
-                persona: said("persona"),
-                notification_id: said("notification_id"),
-                preview: said("preview"),
-                needs_response: false,
-            };
-            // A pusher that never answers (it is gone) leaves the receipt waiting, to be
-            // tried at the next look, as the Python Host leaves one whose push raised.
-            let Ok(rang) = app.pusher.turn_done_and_told(done).await else {
-                continue;
-            };
-            rang.alert
-                .map_or_else(|| json!({}), |counted| counted.told())
+    for (id, action) in actions {
+        let Some(receipt) = receipts.get_mut(&id) else {
+            continue;
         };
-        receipt.delivery = Some(delivery);
-        receipt.settled_at = Some(now);
+        let settled = match action {
+            Deliver::Wait => continue,
+            Deliver::Settle(settled) => Some(settled),
+            // Beside another Host, the other tells the owner.
+            Deliver::Push if app.config.accounts == Accounts::Follow => {
+                Some(json!({ "cancelled": BESIDE }))
+            }
+            Deliver::Push => {
+                let said = |key: &str| {
+                    receipt.payload[key]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let done = TurnDone {
+                    badge: false,
+                    unread: false,
+                    session: said("session"),
+                    persona: said("persona"),
+                    notification_id: said("notification_id"),
+                    preview: said("preview"),
+                    needs_response: false,
+                };
+                // A pusher that never answers (it is gone) leaves the receipt waiting, to be
+                // tried at the next look, as the Python Host leaves one whose push raised.
+                let Ok(rang) = app.pusher.turn_done_and_told(done).await else {
+                    continue;
+                };
+                let told = rang
+                    .alert
+                    .map_or_else(|| json!({}), |counted| counted.told());
+                // One nobody got because the transport failed waits, its attempt written on it,
+                // and is tried again past the keeper's interval (R105).
+                quota::after_push(&mut receipt.payload, told, now)
+            }
+        };
+        if let Some(settled) = settled {
+            receipt.delivery = Some(settled);
+            receipt.settled_at = Some(now);
+        }
         rows.push(row(RECEIPTS, &receipt.receipt_id, &*receipt));
     }
     let gone: Vec<Gone> = Vec::new();

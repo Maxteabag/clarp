@@ -69,9 +69,18 @@ PLANTS = [
     (B, 'host', 'the runner does not look at the keeper', '    crate::quota_keeper::look(app);', ''),
     (B, 'host', "the book's tables are kept in its one record too", '                .and_then(|fields| fields.remove(table))', '                .and_then(|fields| fields.get(table).cloned())'),
     (B, 'host', 'a book kept whole stays whole', '            if kept_whole {', '            if false {'),
-    (K, 'host', 'a Host beside another pushes too', '        } else if app.config.accounts == Accounts::Follow {', '        } else if false {'),
-    (K, 'host', 'what became of a push is not written', '        receipt.delivery = Some(delivery);', '        let _ = delivery;'),
     (K, 'host', 'a receipt settled long ago is kept for ever', '                .is_some_and(|at| at + SETTLED_KEPT_MS <= now)', '                .is_some_and(|_| false)'),
+    (K, 'host', 'a Host beside another pushes too', '            Deliver::Push if app.config.accounts == Accounts::Follow => {', '            Deliver::Push if false => {'),
+    (K, 'host', 'what became of a push is not written', '            receipt.delivery = Some(settled);', '            let _ = settled;'),
+    # ---- a notice that reached nobody (R105)
+    (Q, 'kernel', 'a push some phone took is not delivered', '    count("sent") == 0 && count("failed") >= 1', '    count("sent") <= 1 && count("failed") >= 0'),
+    (Q, 'kernel', 'a newer crossing of the window does not replace a notice that waits', '            .filter(|newer| **newer != *id)', '            .filter(|_| false)'),
+    (Q, 'kernel', 'a notice that waits for a window that reset is sent all the same', '        if attempts > 0 && window_has_reset(payload, now_ms) {', '        if false && window_has_reset(payload, now_ms) {'),
+    (Q, 'kernel', "a notice tried is tried again before the keeper's interval is over", '        if attempts > 0 && now_ms < last + interval_seconds * 1000 {', '        if attempts > 0 && now_ms <= last + interval_seconds * 1000 {'),
+    (Q, 'kernel', 'what became of a push does not count its attempts', '        delivery["attempts"] = json!(attempts + 1);', '        delivery["attempts"] = json!(attempts);'),
+    (Q, 'kernel', "a notice's tries are pushed with it", '        fields.remove("delivery_retry");', ''),
+    (Q, 'kernel', 'a notice does not say when its window resets', '                "resets_at": window.get("resets_at").cloned().unwrap_or(Value::Null),', '                "resets_at": Value::Null,'),
+    (Q, 'kernel', 'a look that stopped says nothing of what it kept', '    format!("The check stopped ({why}); what it read before is kept")', '    format!("The check stopped ({why})")'),
 ]
 
 
