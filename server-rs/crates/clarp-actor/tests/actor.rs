@@ -2001,3 +2001,53 @@ fn what_an_agent_last_finished_for_its_user_is_the_end_of_the_turn_their_newest_
         the("u-9", "the first answer of the new one", ninth)
     );
 }
+
+#[test]
+fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(){
+    use clarp_kernel::provider_tasks::{self as rules,Attempt,Cursor,FinalRead,Visit};
+    use clarp_kernel::jobs::JobStatus;
+    let mut world=World::new("native-task");
+    let mut actor=world.open();
+    let id=rules::job_id(&world.profile.agent_id,"fixture","tool");
+    let owner=Attempt{turn:1,attempt:2};
+    let mut visit=Visit{native:"fixture".into(),bound_at:90,owner:Some(owner),expected:0,cursor:Cursor{device:1,inode:2,offset:256,..Default::default()},
+        final_read:None,actions:vec![serde_json::from_value(json!({"tool":"tool","at":100,"state":"launching","title":"Read","project":"fixture"})).unwrap(),
+        serde_json::from_value(json!({"tool":"tool","at":101,"state":"running","task":"child"})).unwrap()],eof:true};
+    let revision=std::cell::Cell::new(500);
+    let next=||{revision.set(revision.get()+1);revision.get()};
+    actor.apply_provider_visit(visit.clone(),101,next).unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Running);
+    assert_eq!(actor.job_timeline(&id,10).unwrap().len(),2);
+    // A stale read cannot advance the file position or retire this attempt.
+    visit.final_read=Some(FinalRead{attempt:owner,exited_at:200,device:1,inode:2,end:900});
+    visit.cursor.offset=500;visit.actions.clear();visit.eof=false;
+    actor.apply_provider_visit(visit.clone(),200,next).unwrap();
+    assert_eq!(actor.provider_session("fixture").unwrap().cursor.offset,256);
+    visit.expected=1;
+    actor.apply_provider_visit(visit.clone(),200,next).unwrap();
+    drop(actor);
+    let mut actor=world.open();
+    let saved=actor.provider_session("fixture").unwrap();
+    assert_eq!(saved.final_read,visit.final_read);
+    assert_eq!(saved.links[&id].attempt,owner);
+    assert_eq!(actor.jobs().get(&id).unwrap().heartbeat_at_ms,None);
+    visit.expected=saved.revision;visit.cursor.offset=900;visit.eof=true;
+    actor.apply_provider_visit(visit.clone(),202,next).unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().outcome_state(),"unknown");
+    assert_eq!(actor.jobs().get(&id).unwrap().metadata["stop_basis"],"turn_exit");
+    let mut actor=world.open();
+    let saved=actor.provider_session("fixture").unwrap();assert_eq!(saved.final_read,None);
+    visit.expected=saved.revision;visit.owner=None;visit.final_read=None;visit.cursor.offset+=100;
+    visit.actions.push(serde_json::from_value(json!({"tool":"tool","at":180,"state":"completed","task":"child","require_receipt":true})).unwrap());
+    actor.apply_provider_visit(visit,205,next).unwrap();
+    assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Succeeded);
+    assert_eq!(actor.job_timeline(&id,10).unwrap().len(),4);
+    let log=world.engine.open(&world.profile.dir,standard_set("zstd").unwrap()).unwrap();
+    let entries=log.read_after(0,clarp_ports::log::Kinds::only(kind::PROVIDER_JOBS),10).unwrap();
+    assert_eq!(entries.len(),4);
+    for item in entries{
+        let kept:serde_json::Value=serde_json::from_slice(&item.body).unwrap();
+        assert!(kept.get("actions").is_none());
+        assert!(kept["session"]["cursor"].is_object() && kept["records"].is_array());
+    }
+}
