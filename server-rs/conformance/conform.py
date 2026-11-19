@@ -731,30 +731,38 @@ def ranked(value, held: dict, row=False, conversation=''):
 # the Python Host counts every transition of the Host in one counter, the Rust Host an agent's in
 # the revisions of its own log. What a client can tell of them is their order: a cursor is newer
 # or older than a send's last change. They are compared as their place among all of them in the
-# capture.
+# capture, among those of the same agent (the scope an answer names): the Python Host's counter is
+# one for all of its agents, and an agent's feed is read for that agent alone.
 DELIVERY_ORDER_KEYS = ('delivery_cursor', 'delivery_until')
 
 
-def delivery_numbers(value, found: set) -> None:
+def delivery_agent(value, agent=None):
+    scope = value.get('delivery_scope') if isinstance(value, dict) else None
+    return scope.get('agent_id') if isinstance(scope, dict) else agent
+
+
+def delivery_numbers(value, found: dict, agent=None) -> None:
     if isinstance(value, list):
         for item in value:
-            delivery_numbers(item, found)
+            delivery_numbers(item, found, agent)
     elif isinstance(value, dict):
+        agent = delivery_agent(value, agent)
         for key, item in value.items():
-            whole = isinstance(item, int) and not isinstance(item, bool)
-            if whole and key in DELIVERY_ORDER_KEYS:
-                found.add(item)
-            elif key == 'delivery' and isinstance(item, dict) and isinstance(item.get('seq'), int):
-                found.add(item['seq'])
+            if key == 'delivery' and isinstance(item, dict) and isinstance(item.get('seq'), int):
+                found.setdefault(agent, set()).add(item['seq'])
             else:
-                delivery_numbers(item, found)
+                delivery_numbers(item, found, agent)
 
 
-def delivery_ranked(value, order: list):
-    place = lambda number: order.index(number) + 1 if number in order else number
+def delivery_ranked(value, order: dict, agent=None):
     if isinstance(value, list):
-        return [delivery_ranked(item, order) for item in value]
+        return [delivery_ranked(item, order, agent) for item in value]
     if isinstance(value, dict):
+        agent = delivery_agent(value, agent)
+        mine = order.get(agent, [])
+        # How many of the agent's sends had changed by then: a seq is its rank, a cursor at
+        # the end of the feed is all of them, wherever the Host's own counter stands.
+        place = lambda number: bisect.bisect_right(mine, number)
         out = {}
         for key, item in value.items():
             whole = isinstance(item, int) and not isinstance(item, bool)
@@ -763,7 +771,7 @@ def delivery_ranked(value, order: list):
             elif key == 'delivery' and isinstance(item, dict) and isinstance(item.get('seq'), int):
                 out[key] = {**item, 'seq': place(item['seq'])}
             else:
-                out[key] = delivery_ranked(item, order)
+                out[key] = delivery_ranked(item, order, agent)
         return out
     return value
 
@@ -920,9 +928,9 @@ def core(raw: dict) -> dict:
     cursors([exchange['body'] for exchange in http], found)
     held = {conversation: sorted(values - {0}) for conversation, values in found.items()}
     names = agent_rows(http)
-    numbers: set = set()
+    numbers: dict = {}
     delivery_numbers([exchange['body'] for exchange in http], numbers)
-    order = sorted(numbers - {0})
+    order = {agent: sorted(found - {0}) for agent, found in numbers.items()}
     http = [{**exchange, 'body': renamed(delivery_ranked(ranked(exchange['body'], held), order), names)}
             for exchange in http]
     sse = [{**frame, 'data': renamed(frame.get('data'), names)} for frame in sse]
