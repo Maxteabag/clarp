@@ -89,5 +89,22 @@ rules(K,'door',[
     ('in-flight debounce has wrong flag', 'answer["debounced"] = true.into()', 'answer["debounced"] = false.into()'),
 ])
 rules('clarp-host/src/edge.rs','door',[('contract is off by one','("controller_actions", 63)','("controller_actions", 64)')])
+rules(H,'door',[
+    ('omit the invalid-entry journal notice','eprintln!("controllerActionAllowedUrlInvalid")','eprintln!("controllerActionConfig")'),
+    ('audit uses another bound on reads','.clamp(0, 500)', '.clamp(0, 499)'),
+    ('delete the newest audit row instead of the oldest','rows.drain(..rows.len() - rule::AUDIT_KEEP);','rows.truncate(rule::AUDIT_KEEP);'),
+    ('failure receipts report success on retry','result["duplicate"] = true.into();','result["ok"] = true.into(); result["duplicate"] = true.into();'),
+    ('the stored user agent changes','"User-Agent", "clarp-controller-action"','"User-Agent", "action"'),
+    ('put the wrong status on a retained HTTP failure','rule::http_result(status,','rule::http_result(status.saturating_add(1),'),
+])
+rules(K,'door',[
+    ('audit retains one fewer row','AUDIT_KEEP: usize = 500;', 'AUDIT_KEEP: usize = 499;'),
+    ('audit retains one extra row','AUDIT_KEEP: usize = 500;', 'AUDIT_KEEP: usize = 501;'),
+])
+rules(CLI,'door',[
+    ('an empty update reports success','ToolAnswer::said(1, "nothing to update")','ToolAnswer::said(0, "nothing to update")'),
+    ('a mapping is missing from the printed list','← {prefix}', '- {prefix}'),
+    ('a failed run exits successfully','if v["ok"] == true { 0 } else { 1 }','0'),
+])
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
