@@ -39,6 +39,15 @@ def _role(role: str) -> str:
     return role
 
 
+def fits_metadata(value) -> bool:
+    """Whether ``value`` is metadata the demand history takes (named keys, bounded scalars)."""
+    try:
+        _metadata(value)
+    except janitors.JanitorError:
+        return False
+    return True
+
+
 def _metadata(value) -> dict:
     if value is None:
         return {}
