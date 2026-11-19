@@ -30,6 +30,8 @@ pub mod scripted;
 /// The environment variable that tells a tool, its hooks and its skills which agent they work for.
 /// The name is the Python Host's: every skill written for it reads this.
 pub const SESSION_ENV: &str = "CLAUDE_PWA_SESSION";
+/// R111: this provider process belongs to a managed Rust Claude turn.
+pub const MANAGED_CLAUDE_ENV: &str = "CLARP_RUST_MANAGED_TURN";
 
 /// What a backend needs to know to start one turn.
 #[derive(Debug, Clone, PartialEq, Eq)]

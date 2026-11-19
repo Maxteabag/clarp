@@ -149,8 +149,14 @@ fn started(program: &Program) -> Option<(pty_process::Pty, tokio::process::Child
     if std::env::var_os("LANG").is_none() {
         command = command.env("LANG", "en_US.UTF-8");
     }
-    for secret in crate::OWN_SECRETS {
-        command = command.env_remove(secret);
+    for name in crate::OWN_SECRETS {
+        command = command.env_remove(name);
+    }
+    for (name, value) in crate::child_environment() {
+        command = match value {
+            Some(value) => command.env(name, value),
+            None => command.env_remove(name),
+        };
     }
     for (name, value) in &program.env {
         command = command.env(name, value);
