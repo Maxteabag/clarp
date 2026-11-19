@@ -116,7 +116,7 @@ def test_whatever_raises_inside_the_look_closes_the_run_and_delivers_what_was_re
     [run] = _runs(owner)
     assert run["status"] == "failed" and "RuntimeError" in run["error"]   # closed, with its reason
     receipts = [r[0] for r in db.conn().execute("SELECT receipt_id FROM janitor_quota_receipts")]
-    assert len(receipts) == 1 and [p["notification_id"] for p in sent] == receipts   # kept and delivered
+    assert len(receipts) == 1 and [p["notification_id"] for p in sent] == receipts   # kept and delivered, once
     _look_again()
     worker.quota_once()                                            # the next look works
     newest = _runs(owner)[0]
@@ -130,3 +130,26 @@ def test_a_window_with_no_moment_at_all_is_passed_over_and_logged(owner, logged)
     _worker(usage, sent).quota_once()
     assert len(sent) == 2 and _runs(owner)[0]["status"] == "completed"
     assert ["window=bare" in line for line in _passed_over(logged)] == [True]
+
+
+def test_a_push_that_raises_at_the_looks_delivery_is_tried_once_in_that_look_and_once_at_the_next(owner):
+    """The close delivers only what was read before a raise: a raise from the look's own delivery
+    is not delivered again at once (a second push could reach a phone that took the first)."""
+    calls = []
+
+    def notify(payload):
+        calls.append(payload["notification_id"])
+        if len(calls) == 1:
+            raise RuntimeError("the transport raised")
+        return {"sent": 1}
+    worker = service.AutonomyJanitors(lambda *_: True, notify, usage_read=lambda: _usage(_window("first", GOOD)))
+    with pytest.raises(RuntimeError, match="the transport raised"):
+        worker.quota_once()
+    assert len(calls) == 1                                          # one attempt in that look
+    [run] = _runs(owner)
+    assert run["status"] == "failed"
+    assert db.conn().execute("SELECT delivery_json FROM janitor_quota_receipts").fetchone()[0] is None
+    _look_again()
+    worker.quota_once()
+    assert len(calls) == 2 and calls[0] == calls[1]                 # the same notice, once more, at the next look
+    assert db.conn().execute("SELECT delivery_json FROM janitor_quota_receipts").fetchone()[0] == '{"sent": 1}'

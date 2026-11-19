@@ -430,10 +430,15 @@ class AutonomyJanitors:
         # Whatever raises inside the look, the run opened above is closed with its reason and what
         # was read before is delivered; the raise then goes on to the loop, which logs it, as before,
         # and the next look starts clean (R100).
-        try:self._quota_look(owner,run,usage,base,now)
+        # A raise from the look's own delivery is not delivered again in this look: a second push
+        # of the same notice could reach a phone that already took it; its receipts wait for the
+        # next look, as before (R100).
+        reached={'delivery':False}
+        try:self._quota_look(owner,run,usage,base,now,reached)
         except Exception as exc:
             error=f'The check stopped ({type(exc).__name__}); what it read before is kept'
-            self._close_unfinished(run,error,owner=owner,lane='quota-keeper',base=base,now=now,deliver=True)
+            self._close_unfinished(run,error,owner=owner,lane='quota-keeper',base=base,now=now,
+                                   deliver=not reached['delivery'])
             raise
 
     def _close_unfinished(self,run,error,*,owner=None,lane=None,base=None,now=None,deliver=False):
@@ -451,7 +456,7 @@ class AutonomyJanitors:
             try:self.deliver_notifications(owner)
             except Exception as exc:log_exception('janitorDeliverFail',exc,detail=run['run_id'])
 
-    def _quota_look(self,owner,run,usage,base,now):
+    def _quota_look(self,owner,run,usage,base,now,reached):
         from .log import log
         notifications=0;recovery_states=[]
         self.recover_approved(owner)
@@ -490,6 +495,7 @@ class AutonomyJanitors:
                         recovery_states.append(provider_id+': '+payload['recovery'].get('status','unknown'))
                     janitor_store.set_quota_receipt_payload(rid,json.dumps(payload))
                     if not suppressed:notifications+=1
+        reached['delivery']=True
         self.deliver_notifications(owner)
         summary=f'Checked provider quota; {notifications} threshold notifications'
         activity='worked' if notifications or recovery_states else 'idle'
