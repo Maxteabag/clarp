@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterator, Optional
 from .. import agents as agents_db
 from .. import turn_lifecycle
 from .. import events
+from ..hook_runtime import without_inherited_identity
 from ..stream_pacing import LivePacer
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
@@ -51,10 +52,10 @@ def popen_turn(cmd: list[str], *, cwd: Any, session: str,
     reaches descendants) and ``CLAUDE_PWA_SESSION`` so hooks and skills inside
     the CLI can identify the owning agent.
     """
-    env = {**os.environ, "CLAUDE_PWA_SESSION": session}
     # A turn's identity is only the one its spawn issues, never one the Host
-    # itself happened to inherit (a Host started from inside another turn).
-    env.pop("CLARP_PROVIDER_TURN", None)
+    # itself happened to inherit (a Host started from inside another turn, the
+    # Rust Host's included: its marker would silence this turn's hooks; R111).
+    env = {**without_inherited_identity(os.environ), "CLAUDE_PWA_SESSION": session}
     if env_extra:
         env.update(env_extra)
     return subprocess.Popen(
