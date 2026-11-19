@@ -23701,6 +23701,15 @@ echo '{"type":"turn.completed","usage":{}}'
         ("CODEX_HOME", codex_home.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
+    let sessions = |host: &Host| -> std::collections::BTreeSet<String> {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|agent| agent["session"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let before = sessions(&host);
     let bad = (
         400,
         json!({"error":"invalid session id","message":"invalid session id"}),
@@ -23725,7 +23734,7 @@ echo '{"type":"turn.completed","usage":{}}'
             );
         }
     }
-    assert_eq!(host.get("/agents/snapshot")["agents"], json!([]));
+    assert_eq!(sessions(&host), before);
     let made = host.post("/agents", json!({"name":"Restored", "backend":"codex", "resume_session_id":null, "fork_session_id":""}));
     let session = made["session"].as_str().unwrap();
     let replaced = json!({"name":"Replacement", "replace_sid":session, "fork_session_id":"."});
@@ -23789,10 +23798,16 @@ echo '{"type":"turn.completed","usage":{}}'
         )])
         .unwrap();
     let host = place.start_in("", &[], &world);
-    assert_ne!(
-        host.get("/agents/snapshot")["agents"][0]["backend_session_id"],
-        "_legacy"
-    );
+    let binding = || {
+        host.get("/agents/snapshot")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["session"] == session)
+            .unwrap()["backend_session_id"]
+            .clone()
+    };
+    assert_ne!(binding(), "_legacy");
     host.send(session, "a fresh turn", "after-restore");
     wait_for("the fresh Codex turn finishes", || {
         host.state(session) == "done"
@@ -23805,10 +23820,7 @@ echo '{"type":"turn.completed","usage":{}}'
             .any(|arg| matches!(arg, "resume" | "_legacy"))
     );
     assert_eq!(host.conversation(session).last().unwrap().1, "Fresh answer");
-    assert_eq!(
-        host.get("/agents/snapshot")["agents"][0]["backend_session_id"],
-        "fresh-id"
-    );
+    assert_eq!(binding(), "fresh-id");
 }
 
 #[test]
@@ -26637,7 +26649,8 @@ else:
         for (key, value, status) in [
             ("resume_session_id", id, 409),
             ("fork_session_id", id, 400),
-            ("resume_session_id", "../outside", 404),
+            ("resume_session_id", "../outside", 400),
+            ("resume_session_id", "abcdef00-1234", 404),
         ] {
             let body = json!({"name":"Duplicate","backend":tool,key:value});
             assert_eq!(host.ask("POST", "/agents", Some(&body)).0, status);
