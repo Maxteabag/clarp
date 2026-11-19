@@ -39,10 +39,20 @@ class _ClaudeLikeProvider(Provider):
 
 
 class _World(World):
+    provider_class = _ClaudeLikeProvider
+
     def _new_process(self):
-        super()._new_process()
-        self.provider = _ClaudeLikeProvider()
-        self.service.backends = self.provider
+        """World's process, with this provider in place BEFORE the boot recovery runs."""
+        import test_drain_pause_parity as parity
+        real = parity.Provider
+        parity.Provider = lambda: self.make_provider()
+        try:
+            super()._new_process()
+        finally:
+            parity.Provider = real
+
+    def make_provider(self):
+        return self.provider_class()
 
     def send(self, cid, *, origin="user", queue=False, trace=None):
         self.service.dispatch(
@@ -110,3 +120,87 @@ def test_a_resend_of_a_held_send_answers_from_the_first_and_runs_it_once(tmp_pat
     assert message_writes.client_message_trace("quebec") == "t-quebec"
     _resume(world)
     assert world.started.count("quebec") == 1, world.started
+
+
+# ---- (B) Codex can be steered: a receipt says ATTEMPTED only once the steer can have left ----
+
+class _CodexLikeProvider(_ClaudeLikeProvider):
+    """A backend that can be steered but answers False: nothing was sent (no active turn yet)."""
+
+    def __init__(self, *, raises=False):
+        super().__init__()
+        self.raises = raises
+
+    def steer_turn(self, backend, agent_id, text, **kwargs):
+        self.steers.append(kwargs.get("client_msg_id", ""))
+        if self.raises:
+            raise OSError("the app-server socket broke during turn/steer")
+        return False
+
+    def by_id(self, backend):
+        from types import SimpleNamespace
+        return SimpleNamespace(id="codex", supports_steer=True)
+
+
+class _CodexWorld(_World):
+    raises = False
+
+    def make_provider(self):
+        return _CodexLikeProvider(raises=self.raises)
+
+
+def _receipt(trace):
+    return (launch_receipts.get(trace) or {}).get("state")
+
+
+@pytest.mark.parametrize("then", ["stop and resume", "restart"])
+def test_a_codex_steer_answered_false_leaves_the_receipt_pending_and_the_send_runs_once(tmp_path, then):
+    world = _CodexWorld(tmp_path)
+    world.send("papa")
+    world._collect()
+    world.send("quebec")
+    assert world.provider.steers == ["quebec"]
+    assert _receipt("t-quebec") == launch_receipts.PENDING          # nothing left: not ATTEMPTED
+    if then == "stop and resume":
+        world.stop()
+        world.settle(recover=True)
+        assert world.started == ["papa"]
+        _resume(world)
+    else:
+        world.restart()
+    assert world.started.count("quebec") == 1, world.started
+
+
+def test_a_codex_steer_that_raised_stays_possibly_sent(tmp_path):
+    """An exception during the request may have sent it: the receipt stays ATTEMPTED, as before."""
+    _CodexWorld.raises = True
+    try:
+        world = _CodexWorld(tmp_path)
+        world.send("papa")
+        world._collect()
+        world.send("quebec")
+    finally:
+        _CodexWorld.raises = False
+    assert _receipt("t-quebec") == launch_receipts.ATTEMPTED
+
+
+def test_codex_answers_false_to_a_steer_only_before_it_sends_anything():
+    """Backend.steer's contract on Codex's client: no active turn, or one not yet started, answers
+    False and writes no request."""
+    import threading
+    from types import SimpleNamespace
+    from lib import codex_app_server
+    client = codex_app_server._Client.__new__(codex_app_server._Client)
+    sent = []
+    client.request = lambda method, params, *a, **k: sent.append(method)
+    client._actives, client.active = {}, None
+    assert client.steer("words", agent_id="agent-1") is False and sent == []
+    not_started = SimpleNamespace(handle=SimpleNamespace(is_alive=lambda: True),
+                                  steer_ready=SimpleNamespace(wait=lambda timeout: False), turn_id="")
+    client._actives = {"agent-1": not_started}
+    assert client.steer("words", agent_id="agent-1") is False and sent == []
+    started = SimpleNamespace(handle=SimpleNamespace(is_alive=lambda: True), steer_ready=threading.Event(),
+                              turn_id="turn-1", thread_id="thread-1", voice=True, session="s")
+    started.steer_ready.set()
+    client._actives = {"agent-1": started}
+    assert client.steer("words", agent_id="agent-1") is True and sent == ["turn/steer"]
