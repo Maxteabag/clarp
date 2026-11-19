@@ -46,7 +46,7 @@ const MAX_TOOL_OUTPUT: usize = 4_000;
 const PRINT_TIMEOUT: &str = "24h";
 /// What tells the tool's own hooks that this turn is the Host's, and not one somebody ran
 /// in a terminal.
-const MANAGED: &str = "CLARP_AGY_MANAGED_TURN";
+use clarp_child::MANAGED_AGY_ENV as MANAGED;
 /// What the ids of Antigravity's live items begin with.
 const SHOWN: &str = "ag";
 /// The tools of Antigravity under the names the conversation knows tools by: the ten the

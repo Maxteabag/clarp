@@ -22,7 +22,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -174,7 +174,7 @@ fn locked(state: &Mutex<State>) -> MutexGuard<'_, State> {
 
 /// Starts a worker and has it load its model.
 fn load(worker: &Worker) -> Result<Running, String> {
-    let mut command = Command::new(&worker.program);
+    let mut command = clarp_child::command(&worker.program);
     command
         .args(&worker.args)
         .envs(worker.env.iter().map(|(name, value)| (name, value)))
@@ -476,6 +476,21 @@ mod tests {
     use super::*;
 
     static PLACES: AtomicU32 = AtomicU32::new(0);
+
+    #[test]
+    fn speech_child_drops_the_host_token() {
+        if crate::run_with_fixture_host_token("whisper::tests::speech_child_drops_the_host_token") {
+            return;
+        }
+        let script = "test -z \"${CLARP_HOST_TOKEN+x}\" || exit 9";
+        let mut worker = Worker::new("/bin/sh", "synthetic");
+        worker.args = vec![
+            "-c".into(),
+            format!("{script}; read -r line; echo '{{\"event\":\"ready\"}}'; read -r line"),
+        ];
+        worker.load_within = Duration::from_secs(3);
+        assert!(load(&worker).is_ok());
+    }
 
     #[test]
     fn a_model_is_given_half_the_cores_four_at_most_and_one_at_least() {

@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/clarp-host",
+    "crates/clarp-child",
     "crates/clarp-actor",
     "crates/clarp-backend",
     "crates/clarp-ports",
@@ -23,6 +24,7 @@ edition = "2024"
 publish = false
 
 [workspace.dependencies]
+clarp-child = { path = "crates/clarp-child" }
 clarp-ports = { path = "crates/clarp-ports" }
 clarp-codec = { path = "crates/clarp-codec" }
 clarp-store-mem = { path = "crates/clarp-store-mem" }

@@ -22,7 +22,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 /// The environment variable a turn's token is given in.
-pub const TURN_ENV: &str = "CLARP_PROVIDER_TURN";
+pub use clarp_child::TURN_ENV;
 /// How long a token names its agent after its turn ended: a worker a turn left behind keeps it, as
 /// the Python Host keeps an ended turn's for seven days (`TURN_RETENTION_MS`).
 pub const KEPT_MS: i64 = 7 * 86_400_000;

@@ -46,7 +46,7 @@ PLANTS = [
     (K, 'host', 'a live turn is refused', '        Standing::Live => true,', '        Standing::Live => false,'),
     (K, 'host', 'a turn the log does not know names its agent', '        Standing::Unknown => false,', '        Standing::Unknown => true,'),
     (K, 'vectors', 'a token is kept for a day', 'pub const KEPT_MS: i64 = 7 * 86_400_000;', 'pub const KEPT_MS: i64 = 86_400_000;'),
-    (K, 'host', 'the token is given under another name', 'pub const TURN_ENV: &str = "CLARP_PROVIDER_TURN";', 'pub const TURN_ENV: &str = "CLARP_TURN";'),
+    ('clarp-child/src/lib.rs', 'host', 'the token is given under another name', 'pub const TURN_ENV: &str = "CLARP_PROVIDER_TURN";', 'pub const TURN_ENV: &str = "CLARP_TURN";'),
     # The key, and the reading of a token against the agent's log.
     (H, 'host', 'the key is made anew at every start', OPENED, f'            Ok(Some(_)) => ({MADE}, None),\n'),
     (H, 'host', 'a key that cannot be read is replaced by a new one', OPENED, f'            Ok(Some(kept)) => (key_of(&kept).or_else(|| {MADE}), None),\n'),

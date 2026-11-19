@@ -10,7 +10,7 @@
 //! after a moment; nothing was heard yet, so nothing is said twice.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{ChildStdin, Command, Stdio};
+use std::process::{ChildStdin, Stdio};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -269,7 +269,7 @@ impl Speaker for Gemini {
                 "ffmpeg is required for Gemini TTS".to_string(),
             ));
         };
-        let mut encoder = match Command::new(program)
+        let mut encoder = match clarp_child::command(program)
             .args(given)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -423,6 +423,19 @@ mod tests {
         };
         let said = engine.speak(line, &mut |piece| heard.extend_from_slice(piece));
         (said, heard)
+    }
+
+    #[test]
+    fn speech_child_drops_the_host_token() {
+        if crate::run_with_fixture_host_token("gemini::tests::speech_child_drops_the_host_token") {
+            return;
+        }
+        let script = "test -z \"${CLARP_HOST_TOKEN+x}\" || exit 9; exec cat";
+        let (address, _) = stand_in(vec![("200 OK", events(&[ONE]))]);
+        let codec = engine(&address).encoded_by(vec!["/bin/sh".into(), "-c".into(), script.into()]);
+        let (result, bytes) = say(&codec, "Kore");
+        assert!(result.is_ok());
+        assert_eq!(bytes, b"pcm-one");
     }
 
     #[test]

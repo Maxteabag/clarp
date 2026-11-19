@@ -27,3 +27,26 @@ pub mod whisper;
 
 pub mod ink;
 mod speech_socket;
+
+/// Run the selected test with a synthetic Host secret in an isolated parent.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+fn run_with_fixture_host_token(test: &str) -> bool {
+    if std::env::var_os("FIXTURE_SPEECH_PARENT").is_some() {
+        assert_eq!(std::env::var("CLARP_HOST_TOKEN").unwrap(), "synthetic");
+        return false;
+    }
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test])
+        .env("FIXTURE_SPEECH_PARENT", "1")
+        .env("CLARP_HOST_TOKEN", "synthetic")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("1 passed"));
+    true
+}
