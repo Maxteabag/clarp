@@ -418,7 +418,25 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         # (every path showed a 90 s maximum, the keep-alive timeout).
         self._request_started_wall = time.time()
         self._request_started_monotonic = time.perf_counter()
-        return super().parse_request()
+        if not super().parse_request():
+            return False
+        if self._unread_framing():
+            self.close_connection = True
+        return True
+
+    # A Content-Length this Host reads a body by: digits and nothing else (int() would also take a
+    # sign, spaces and underscores).
+    _LENGTH = re.compile(r"[0-9]+")
+
+    def _unread_framing(self) -> bool:
+        """Whether this request's body is framed in a way the Host does not read it by: a
+        Transfer-Encoding (the reader reads Content-Length bytes and nothing else), more than one
+        Content-Length, or one that is not plain digits. What is left of such a body would be read
+        as the next request on a kept-alive connection, so the connection closes after the answer
+        (issue 360, R86)."""
+        lengths = self.headers.get_all("Content-Length") or []
+        return (self.headers.get("Transfer-Encoding") is not None or len(lengths) > 1
+                or (bool(lengths) and not self._LENGTH.fullmatch(lengths[0])))
 
     def _drain_request_body(self):
         """Consume an unread request body before writing a response.
@@ -1053,7 +1071,10 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
 
     def _read_json_once(self) -> dict | None:
         try:
-            n = int(self.headers.get("Content-Length", "0"))
+            length = self.headers.get("Content-Length", "0")
+            if not self._LENGTH.fullmatch(length):
+                raise ValueError("Content-Length is not a length")      # R86: a sign, spaces, ...
+            n = int(length)
             self._body_consumed = True
             raw = self.rfile.read(n) if n > 0 else b""
             if raw and json_depth.too_deep(raw):

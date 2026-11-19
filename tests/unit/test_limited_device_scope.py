@@ -7,6 +7,8 @@ filesystem browsing needs full scope.
 """
 from __future__ import annotations
 
+import email.message
+
 import pytest
 
 import server as host
@@ -16,6 +18,7 @@ from lib import terminal_ws
 def _handler(path, *, scope="limited"):
     handler = host.Handler.__new__(host.Handler)
     handler.path = path
+    handler.headers = email.message.Message()     # a dispatched request has headers (R81 reads them)
     handler._request_device_scope = scope
     handler._request_auth_validated = True
     handler._request_principal = "synthetic-device"
