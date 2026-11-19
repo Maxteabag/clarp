@@ -444,7 +444,13 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
     let waiting: Vec<quota::Waiting<'_>> = receipts
         .values()
         .filter(|receipt| receipt.delivery.is_none())
-        .map(|receipt| (receipt.receipt_id.as_str(), receipt.created_at, &receipt.payload))
+        .map(|receipt| {
+            (
+                receipt.receipt_id.as_str(),
+                receipt.created_at,
+                &receipt.payload,
+            )
+        })
         .collect();
     if waiting.is_empty() {
         return;
