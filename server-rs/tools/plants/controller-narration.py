@@ -38,7 +38,7 @@ rules(K, 'vectors', [
 ])
 rules(H, 'door', [
     ('an invalid line has the wrong explanation', 'text required (at most 240 characters)', 'text required'),
-    ('a missing voice is a synthesis failure', 'StatusCode::SERVICE_UNAVAILABLE, "narration voice unavailable"', 'StatusCode::BAD_GATEWAY, "narration voice unavailable"'),
+    ('a missing voice is a synthesis failure', 'StatusCode::SERVICE_UNAVAILABLE,\n            "narration voice unavailable"', 'StatusCode::BAD_GATEWAY, "narration voice unavailable"'),
     ('the refusal omits narration', '"narration voice unavailable"', '"voice unavailable"'),
     ('a cache hit bypasses the key check', 'voice.filter(|_| app.mouth.has_key("cartesia", &owners))', 'voice'),
     ('ask for the wrong persona', 'settings.cartesia_voice_for(PERSONA)', 'settings.cartesia_voice_for("Nobody")'),
@@ -54,7 +54,7 @@ rules(V, 'door', [
     ('a hit is synthesized again', 'return Ok(hit);', 'drop(hit);'),
     ('cache parent permits a linked directory', 'crate::files::open(&self.previews, true)', 'std::fs::File::open(&self.previews)'),
     ('a dangling cache link loses its refusal', 'if self.previews.is_symlink()', 'if false'),
-    ('the store is created without owner execute permission', 'recursive(true).mode(0o700)', 'recursive(true).mode(0o600)'),
+    ('the store is created without owner execute permission', '.mode(0o700)\n                .create(&self.previews)', '.mode(0o600)\n                .create(&self.previews)'),
     ('a cached range ignores its start', 'file.read_at(&mut bytes, at)', 'file.read_at(&mut bytes, 0)'),
 
 ])
