@@ -74,18 +74,25 @@ def build_initial_prompt(
     include_technical_glossary: bool,
     max_prompt_chars: int = MAX_PROMPT_CHARS,
 ) -> str:
-    """Build a bounded previous-transcript hint, prioritising active names."""
+    """Build a bounded previous-transcript hint.
+
+    The names come likeliest first (VocabService.active_agent_names) and are
+    walked in that order (R109): a name is taken when the names part with it,
+    "Agent names: " + the names joined by ", " + ".", is still at most
+    ``max_prompt_chars`` characters (prefix, separators and the full stop
+    counted) and at most PROMPT_TOKEN_LIMIT estimated tokens. A name that does
+    not fit in what is left is skipped and the walk goes on, so one over-long
+    name never ends the list; the same names give the same prompt."""
     if not include_agent_names and not include_technical_glossary:
         return ""
-    names = _unique_names(active_agent_names)
     name_prefix = "Agent names: "
+    names: list[str] = []
+    for name in _unique_names(active_agent_names):
+        candidate = ", ".join([*names, name])
+        if (len(name_prefix) + len(candidate) + 1 <= max_prompt_chars
+                and estimated_prompt_tokens(f"{name_prefix}{candidate}.") <= PROMPT_TOKEN_LIMIT):
+            names.append(name)
     name_text = ", ".join(names)
-    while names and (
-        len(name_prefix) + len(name_text) + 1 > max_prompt_chars
-        or estimated_prompt_tokens(f"{name_prefix}{name_text}.") > PROMPT_TOKEN_LIMIT
-    ):
-        names.pop(0)
-        name_text = ", ".join(names)
     names_prompt = (
         f"{name_prefix}{name_text}." if include_agent_names and name_text else "")
 
