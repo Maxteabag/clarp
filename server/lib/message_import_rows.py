@@ -546,10 +546,12 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
     one sent for a turn that had ended before it (``ended_before``). With the
     same words every time, a copy with no row of its own took the next
     turn's row, that turn the one after, and the last an old failed send's:
-    every later reply carried another prompt's trace (R89). None: no row is
-    this copy's, and it is stored as itself."""
-    if not trace:
-        return 0
+    every later reply carried another prompt's trace (R89). The exclusions
+    hold also when no turn was running at the copy's time: then there is no
+    "sent since its turn began", and of the rows left the oldest is taken.
+    None: no row is this copy's, and it is stored as itself."""
+    if ended_before is None and written_at is None and (not trace or len(rows) < 2):
+        return 0            # a caller that gives neither bound: as before
 
     def sent_trace(row):
         if trace_ids is not None:
@@ -558,13 +560,11 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
             "SELECT trace_id FROM messages WHERE message_id=?", (row[0],)).fetchone()
         return (sent["trace_id"] or "") if sent is not None else ""
 
-    if len(rows) > 1 or ended_before is not None or written_at is not None:
-        sent = [sent_trace(row) for row in rows]
+    sent = [sent_trace(row) for row in rows]
+    if trace:
         for index, sent_for in enumerate(sent):
             if sent_for == trace:
                 return index
-    else:
-        return 0
     copy_at = iso_ms(written_at)
 
     def could_be(index):
@@ -573,7 +573,7 @@ def _own_turns_row(database, rows: list, trace: str, began: int | None = None, *
             return False
         return not (sent[index] and ended_before is not None and ended_before(sent[index]))
     free = [index for index in range(len(rows)) if could_be(index)]
-    if began is not None:
+    if trace and began is not None:
         for index in free:
             sent_at = iso_ms(rows[index][3])
             if sent_at is not None and sent_at > began:

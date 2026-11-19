@@ -287,3 +287,132 @@ def test_two_sends_of_the_same_words_into_a_running_turn_link_in_the_order_they_
     assert reply_sender() == ["agent"]                              # again, as a tail
     monkeypatch.setattr(inc, "parser_version", lambda backend: "a-new-importer")
     assert reply_sender() == ["agent"]                              # a full import decides the same
+
+
+# ---- the hold of 03:55: the two exclusions hold also when no turn was running at the copy's time ----
+
+HOSTS = {"carry_live_rows": True, "tail_yield_after_first_write": True, "carry_settled_turns": True,
+         "boundary_skips_dropped_records": True, "tail_keeps_frontier_when_grown": True,
+         "audit_grown_by_digest": True, "full_digest_while_parsing": True, "carry_live_rows_by_words": True,
+         "tail_hashes_while_parsing": True}       # tests/readmodel/rm_n14_harness.HOSTS_SWITCHES
+CONFIGURATIONS = pytest.mark.parametrize("configuration", ["defaults", "hosts"])
+
+
+def _configured(monkeypatch, configuration):
+    from lib import transcript_incremental as inc
+    if configuration == "hosts":
+        settings = dict(inc._DEFAULTS, **HOSTS)
+        monkeypatch.setattr(inc, "settings", lambda: dict(settings))
+
+
+class _Cli:
+    """An agent whose transcript gets prompts typed in its terminal (no client row) and sends."""
+
+    def __init__(self, tmp_path, monkeypatch):
+        self.now = [BASE]
+        monkeypatch.setattr(time, 'time', lambda: self.now[0] / 1000)
+        self.monkeypatch = monkeypatch
+        self.id = agents.create_agent(persona='Cleo', session='cleo', voice_id='v', cwd=str(tmp_path),
+                                      backend='claude')
+        agents.bind_backend_session(self.id, 'native')
+        self.path = tmp_path / 'native.jsonl'
+        self.path.write_text('')
+
+    def line(self, role, content, at):
+        with self.path.open('a') as stream:
+            stream.write(json.dumps({'type': role, 'uuid': f'{role}-{at}', 'timestamp': clock.iso_from_ms(at),
+                                     'message': {'role': role, 'model': 'synthetic-fixture',
+                                                 'content': content}}) + '\n')
+
+    def send(self, cid, text, trace, at, *, turn=True, settle_after=None):
+        self.now[0] = at
+        agents.record_user_message(agent_id=self.id, backend_session_id='native', client_msg_id=cid, text=text,
+                                   trace_id=trace, origin="automation")
+        if turn:
+            agents.open_turn(agent_id=self.id, source='pwa', trace_id=trace)
+            if settle_after is not None:
+                with db.conn() as con:
+                    con.execute("UPDATE turns SET settled_at=?, outcome='failed' WHERE trace_id=?",
+                                (at + settle_after, trace))
+                db.close_local()
+
+    def imported(self, *, full=False):
+        from lib import transcript_incremental as inc
+        if full:
+            self.monkeypatch.setattr(inc, "parser_version", lambda backend: f"another-importer-{self.now[0]}")
+        self.now[0] += 5
+        transcript_incremental.import_transcript(backend='claude', path=self.path, agent_id=self.id,
+                                                 backend_session_id='native')
+        db.close_local()
+        rows = message_store.list_messages(agent_id=self.id, backend_session_id='native')
+        return ([(row["id"], row["text"]) for row in rows if row["role"] == "user"],
+                [(row["text"], row["trace_id"]) for row in rows if row["role"] == "assistant"])
+
+
+@CONFIGURATIONS
+def test_a_copy_no_turn_covers_takes_no_old_sends_row_nor_a_later_one(tmp_path, monkeypatch, configuration):
+    """The reviewer's case: the same words typed in the terminal (no client row) at a time outside
+    every turn's reach, with four old failed sends of those words and one later send. Main linked
+    the oldest, a send of days before, and the reply carried its trace. The copy is stored as itself;
+    the later send keeps its own row; the same by a tail and by a full import."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    words = "Check the feeds and report."
+    for k in range(4):              # days before, each turn failed long ago
+        cli.send(f"old{k}", words, f"old-{k}", BASE - 7 * 86_400_000 + k * STEP, settle_after=1000)
+    cli.now[0] = BASE
+    cli.line('user', words, BASE)                                       # typed: no client row, no turn
+    cli.line('assistant', [{'type': 'text', 'text': "Typed answer."}], BASE + 3000)
+    cli.send("later", words, "later-turn", BASE + STEP)
+    cli.line('user', words, BASE + STEP + 500)
+    cli.line('assistant', [{'type': 'text', 'text': "Sent answer."}], BASE + STEP + 4000)
+    for full in (False, False, True):
+        users, replies = cli.imported(full=full)
+        typed = [row for row in users if not row[0].startswith("u-")]
+        assert [text for _id, text in typed] == [words], users              # stored as itself
+        assert {f"u-old{k}" for k in range(4)} | {"u-later"} <= {row_id for row_id, _ in users}
+        assert dict(replies)["Typed answer."] not in {f"old-{k}" for k in range(4)}
+        assert dict(replies)["Sent answer."] == "later-turn"
+
+
+@CONFIGURATIONS
+def test_a_terminal_prompt_with_its_own_words_is_still_stored_as_itself(tmp_path, monkeypatch, configuration):
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    cli.send("old0", "Something else entirely.", "old-0", BASE - 86_400_000, settle_after=1000)
+    cli.line('user', "Only typed once, here.", BASE)
+    cli.line('assistant', [{'type': 'text', 'text': "Answered."}], BASE + 2000)
+    for full in (False, True):
+        users, _replies = cli.imported(full=full)
+        assert sorted(text for row_id, text in users if not row_id.startswith("u-")) == ["Only typed once, here."]
+
+
+@CONFIGURATIONS
+def test_an_automation_send_whose_turn_row_is_missing_still_links_its_own_row(tmp_path, monkeypatch, configuration):
+    """A send whose turn was never recorded: no turn covers its copy, and its row has no turn of its
+    own, so neither exclusion takes it away: the copy links it, and the reply carries its trace."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    cli.send("old0", PROMPT, "old-0", BASE - 86_400_000, settle_after=1000)
+    cli.send("now", PROMPT, "unrecorded", BASE, turn=False)
+    cli.line('user', PROMPT, BASE + 500)
+    cli.line('assistant', [{'type': 'text', 'text': ANSWER}], BASE + 4000)
+    for full in (False, True):
+        users, replies = cli.imported(full=full)
+        assert [row_id for row_id, _text in users] == ["u-old0", "u-now"]       # no copy beside its row
+        assert replies == [(ANSWER, "unrecorded")]
+
+
+@pytest.mark.parametrize("sent, chosen", [
+    ((("old-0", -900_000), ("turn-4", 80_000)), None),                 # an old send's, a later send's
+    ((("old-0", -900_000), ("steered", 40_800)), 1),                   # the one row left
+    ((("steered-a", 40_500), ("steered-b", 40_800)), 0),               # of several left, the oldest
+], ids=["old and later", "an old one and one left", "two left"])
+def test_a_copy_no_turn_covers_is_held_to_the_same_two_exclusions(sent, chosen):
+    index = _index(("turn-4", 80_000, 95_000), ("old-0", -900_000, None), ("other", -800_000, -799_000))
+    rows = _rows(*sent)
+    traces = {row[0]: trace for row, (trace, _at) in zip(rows, sent)}
+    copy_at = clock.iso_from_ms(BASE + 41_000)
+    assert message_import_rows._own_turns_row(
+        None, rows, "", None, trace_ids=traces, written_at=copy_at,
+        ended_before=lambda trace: index.ended_before(trace, copy_at)) == chosen
