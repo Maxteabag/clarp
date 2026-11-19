@@ -9,6 +9,7 @@ publish.workspace = true
 clarp-tool-args.workspace = true
 clarp-ports.workspace = true
 clarp-speech.workspace = true
+hmac.workspace = true
 jiff.workspace = true
 regex.workspace = true
 serde.workspace = true

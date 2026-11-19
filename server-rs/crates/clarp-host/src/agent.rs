@@ -29,6 +29,7 @@ use clarp_kernel::media::Asset;
 use clarp_kernel::oracle::attention;
 use clarp_kernel::spoken::{Line as SpokenLine, Said, SpeechBook};
 use clarp_kernel::turn::{Activity, Admission, Origin, Outcome, Settled, TurnId};
+use clarp_kernel::turn_identity::Standing;
 use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
@@ -127,6 +128,11 @@ pub enum Ask {
     Fate {
         message_id: String,
         answer: Answer<TurnFate>,
+    },
+    /// Where one of the agent's turns stands, by its number.
+    Standing {
+        turn: u64,
+        answer: Answer<Standing>,
     },
     /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
     Shown {
@@ -392,6 +398,8 @@ pub struct Setup {
     pub telling: crate::telling::Telling,
     /// The way to the tally of what turns used.
     pub tally: crate::usage::Tally,
+    /// What signs the token each turn is given, which tells whose turn calls.
+    pub turns: Arc<crate::turn_identity::Signer>,
     /// The pool of the accounts of the agent's tool, on a Host that runs the owner's
     /// selector itself and has one for this tool.
     pub pools: Vec<Arc<crate::pool::Service>>,
@@ -484,6 +492,12 @@ impl AgentHandle {
 
     pub async fn fate(&self, message_id: String) -> Result<TurnFate, Unavailable> {
         self.ask(|answer| Ask::Fate { message_id, answer }).await
+    }
+
+    /// Where one of the agent's turns stands, by its number: whether it runs, or when it ended,
+    /// as its log says.
+    pub async fn standing(&self, turn: u64) -> Result<Standing, Unavailable> {
+        self.ask(|answer| Ask::Standing { turn, answer }).await
     }
 
     /// Everything that is shown of the agent's turn as it runs.
@@ -1749,6 +1763,7 @@ impl Worker {
             }
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
+            Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
@@ -2071,6 +2086,13 @@ impl Worker {
             Action::Launch(mut order) => {
                 if let Some(pool) = self.setup.pool() {
                     pool.guard_turn(&mut order);
+                }
+                // Whose turn this is: a Clarp tool of the turn that presents its token is known
+                // to be this agent's. Nothing is written for it.
+                let agent_id = &self.setup.record.agent_id;
+                if let Some(token) = self.setup.turns.token(agent_id, order.turn.0) {
+                    let named = crate::turn_identity::TURN_ENV.to_string();
+                    order.env.push((named, token));
                 }
                 let launcher = self.setup.launcher.clone();
                 let opening_gate = self.setup.opening_gate.clone();
@@ -2734,6 +2756,7 @@ fn refuse_for(
             Ok(Ask::Queue { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
