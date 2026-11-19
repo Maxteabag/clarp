@@ -50,6 +50,7 @@ pub mod oracle;
 pub mod personas;
 pub mod portraits;
 pub mod presence;
+pub mod provider_tasks;
 pub mod push;
 pub mod python;
 pub mod quota;
