@@ -31,6 +31,8 @@ STUB = textwrap.dedent(f"""\
         said = "error: could not handle: " + request
     elif mode == "json":
         said = "error: " + json.dumps({{"input": given}})
+    elif mode == "denied":
+        said = "permission denied: " + request
     elif mode == "partial":
         at = given.find(os.environ["PARTIAL_FROM"])
         said = "bad input near '" + given[at:at + 30] + "'"
@@ -148,9 +150,10 @@ def test_a_common_phrase_shorter_than_the_run_is_kept_and_one_as_long_is_not(fai
     prompt = f"Text x{phrase}x Answer as JSON. " + "z" * 200     # shared: the phrase alone
     failing("plain", SAID=f"busy:{phrase}")
     assert _json_call_failure("claude", prompt) == f"busy:{phrase}"
-    longer = "please try again later!!"         # 24 characters, all in the prompt below
-    failing("plain", SAID=f"service busy, {longer}")
-    assert _json_call_failure("claude", f"Text: {longer} " + "z" * 200).endswith("(runner_exit)")
+    longer = "please try again later!!"         # 24 characters; shared with the prompt, no more
+    assert len(longer) == 24
+    failing("plain", SAID=f"busy:{longer}")
+    assert _json_call_failure("claude", f"Text x{longer}x " + "z" * 200).endswith("(runner_exit)")
 
 
 def test_a_janitors_question_that_is_repeated_back_keeps_none_of_it(failing, monkeypatch):
@@ -194,7 +197,9 @@ def test_an_isolated_antigravity_failure_that_repeats_the_question_keeps_none_of
         "provider": "agy", "model": "", "effort": "", "template_id": "t", "isolated": True}}
     with pytest.raises(model_fallbacks.ProviderFailure) as caught:
         janitor_autonomy.model_json(run, f"{START} the secret plan and its details")
-    assert str(caught.value) == "agy failed (runner_exit)"
+    assert str(caught.value) == "agy exited with status 1 (runner_exit)"
+    from lib import goal_keeper
+    assert goal_keeper.error_code(caught.value) == "agy_exit_1"
     assert caught.value.__cause__ is None and caught.value.__suppress_context__   # no traceback shows it
 
 
@@ -208,3 +213,26 @@ def test_the_map_rule_authors_failure_that_repeats_its_prompt_keeps_none_of_it(f
     said = repr(answer) + capfd.readouterr().err
     assert START not in said and DEEP not in said and "could not handle" not in said
     assert "exited with status 3 (runner_exit)" in repr(answer)
+
+
+# ---- R85 (a) and (b), ruled 01:03: a failure's facts are attributes; its words are for a person ----
+
+def test_a_refusal_that_repeats_its_prompt_is_still_a_refusal_not_a_fallback(failing):
+    failing("denied")
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": "claude", "model": ""}, f"{START} the secret plan", SCHEMA)
+    failure = caught.value
+    assert START not in str(failure) and "permission denied" not in str(failure)   # the words go
+    assert failure.denied is True                                                  # the fact stays
+    assert model_fallbacks._as_provider_failure(failure) is None
+    assert model_fallbacks.is_provider_failure(failure) is False
+
+
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_every_backends_exit_is_named_by_its_facts(failing, provider):
+    from lib import goal_keeper
+    failing("whole")
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": provider, "model": ""}, f"{START} the plan", SCHEMA)
+    assert (caught.value.backend, caught.value.returncode) == (provider, 3)
+    assert goal_keeper.error_code(caught.value) == f"{provider}_exit_3"

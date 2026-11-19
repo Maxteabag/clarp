@@ -199,3 +199,20 @@ def test_a_binding_the_rule_refuses_at_restore_leaves_that_agent_fresh_and_goes_
     assert agents.current_runtime_id(bad) is not None
     assert agents.live_backend_session(good) == GOOD_AGY
     assert ("startupSessionRefused", "bo leaving fresh") in lines
+
+
+def test_a_failed_prompt_directory_sweep_never_stops_the_runtime_from_recovering(monkeypatch, capfd):
+    """The sweep is housekeeping (issue 360, R35): its OSError is logged and recovery goes on."""
+    from lib import routing_input
+
+    def broken(**_kwargs):
+        raise PermissionError("temporary directory not readable")
+    monkeypatch.setattr(routing_input, "sweep_stale", broken)
+    restored = []
+    result = recover_runtime(
+        SimpleNamespace(stream=None),
+        SimpleNamespace(submit=lambda *_: None, recover_queued=lambda: 0),
+        restore_agents=restored.append,
+    )
+    assert len(restored) == 1 and result["queued"] == 0
+    assert "routingDirSweepFail" in capfd.readouterr().err
