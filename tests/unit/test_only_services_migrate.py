@@ -182,6 +182,13 @@ def test_the_real_service_entry_points_upgrade_the_database_when_they_start(tmp_
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("CLAUDE_PWA_", "CLARP_", "XDG_", "PYTEST"))}
     env.update(paths)
+    # The runtime's socket is <cache>/runtime.sock, and a Unix socket path holds at most 108
+    # bytes: under a long temporary directory the runtime could not bind it ('AF_UNIX path too
+    # long'), whatever the code. The cache gets a short directory of its own.
+    import shutil
+    import tempfile
+    short_cache = pathlib.Path(tempfile.mkdtemp(prefix="clarp-", dir="/tmp" if os.path.isdir("/tmp") else None))
+    env["CLARP_CACHE_DIR"] = str(short_cache)
     _own_port(pathlib.Path(paths["CLAUDE_PWA_CONFIG"]))
     errors = tmp_path / "stderr.txt"
 
@@ -202,6 +209,7 @@ def test_the_real_service_entry_points_upgrade_the_database_when_they_start(tmp_
                 service.kill()
                 service.wait(timeout=30)
 
+    shutil.rmtree(short_cache, ignore_errors=True)
     assert schema_guard.stored_version(database) == CODE, errors.read_text()[-2000:]
     assert "is not an installed release" not in errors.read_text()
 
