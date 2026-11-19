@@ -41962,4 +41962,33 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
     let acted = kept_records(&place, "quota-keeper-approval");
     assert_eq!(acted[id]["status"], "nothing_to_resume", "{acted:?}");
     assert_eq!(lines(&asked), "");
+
+    // A CARD THAT WAS NOT MADE IS NEVER MADE: here the receipt is kept as a Host that stopped
+    // between writing it and making its card leaves it (awaiting approval, naming no card). At
+    // the Host's first look, though none is due, its card is asked again and named on it.
+    let (receipt_id, mut receipt) = kept_records(&place, "quota-keeper-receipt")
+        .into_iter()
+        .next()
+        .unwrap();
+    receipt["payload"]["recovery"]
+        .as_object_mut()
+        .unwrap()
+        .remove("artifact_id");
+    keep_record(&place, "quota-keeper-receipt", &receipt_id, &receipt);
+    let host = start(&place, &own, &owners);
+    wait_for("the card asked again", || cards(&host).len() == 2);
+    let again = cards(&host)
+        .into_iter()
+        .find(|made| made["artifact_id"] != card["artifact_id"])
+        .unwrap();
+    assert_eq!(again["reference_id"], json!(receipt_id), "{again}");
+    assert_eq!(again["decision"]["status"], "pending", "{again}");
+    wait_for("its id on the receipt", || {
+        let kept = kept_records(&place, "quota-keeper-receipt");
+        kept[&receipt_id]["payload"]["recovery"]["artifact_id"] == again["artifact_id"]
+    });
+    // Asked once: a later look does not ask it again.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(cards(&host).len(), 2);
+    drop(host);
 }

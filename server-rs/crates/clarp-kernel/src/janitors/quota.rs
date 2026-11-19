@@ -515,6 +515,21 @@ pub fn refused(asked: Asked) -> Option<Value> {
     }
 }
 
+/// Whether a receipt still waits for its card: one of this keeper (`agent_id` in
+/// `generation`) whose recovery awaits the owner's approval and names no card. The reference
+/// makes the card before it writes the receipt, and a look that fails between asks again at
+/// the next; this Host writes the receipt in the look and makes the card after it, so a card
+/// that was not made (it failed, or the Host stopped between the two) is asked again at every
+/// look until it is. A second card where only the write of its id failed is the reference's
+/// own failure mode.
+pub fn unasked(payload: &Value, (agent_id, generation): (&str, u64)) -> bool {
+    let recovery = &payload["recovery"];
+    payload["agent_id"] == agent_id
+        && payload["owner_generation"] == generation
+        && recovery["status"] == "awaiting_approval"
+        && recovery.get("artifact_id").is_none_or(Value::is_null)
+}
+
 /// The card the owner is asked by, in the keeper's session: what `request_recovery` asks
 /// (`artifacts.create_decision`), as the fields of a request for a decision.
 pub fn card(provider: &str, owner: &Owner<'_>, receipt_id: &str) -> Value {
@@ -705,6 +720,27 @@ impl Lane {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_receipt_waits_for_its_card_only_while_its_recovery_awaits_one_and_names_none() {
+        let owner = ("k-1", 3);
+        let receipt = |agent: &str, generation: u64, recovery: Value| {
+            json!({ "agent_id": agent, "owner_generation": generation, "recovery": recovery })
+        };
+        let awaiting = json!({ "status": "awaiting_approval" });
+        assert!(unasked(&receipt("k-1", 3, awaiting.clone()), owner));
+        let named = json!({ "status": "awaiting_approval", "artifact_id": "decision-1" });
+        assert!(!unasked(&receipt("k-1", 3, named), owner));
+        let unnamed = json!({ "status": "awaiting_approval", "artifact_id": null });
+        assert!(unasked(&receipt("k-1", 3, unnamed), owner));
+        // Another keeper, or this one set anew since: its card is not this keeper's to ask.
+        assert!(!unasked(&receipt("k-2", 3, awaiting.clone()), owner));
+        assert!(!unasked(&receipt("k-1", 2, awaiting), owner));
+        // A recovery that runs, or none at all, waits for no card.
+        let running = json!({ "status": "recovering" });
+        assert!(!unasked(&receipt("k-1", 3, running), owner));
+        assert!(!unasked(&json!({ "agent_id": "k-1", "owner_generation": 3 }), owner));
+    }
 
     #[test]
     fn a_number_is_written_as_python_writes_it_with_g() {

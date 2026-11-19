@@ -42,6 +42,12 @@ PLANTS = [
     (A, 'host', "the pool's first turn is one its agent no longer owns", '        let first = self.attempts.iter().find(|attempt| attempt.owned)?;',
      '        let first = self.attempts.iter().find(|attempt| !attempt.owned)?;'),
     (K, 'host', "a Host that keeps the logins reads no owner's answer", '    let selects = app.config.accounts == Accounts::Select;', '    let selects = false;'),
+    # ---- a card that was not made is never made: it is asked again at every look
+    (Q, 'host', 'a card that was not made is never asked again', '        && recovery["status"] == "awaiting_approval"\n',
+     '        && recovery["status"] == "never"\n'),
+    (K, 'host', 'a card that was not made is asked again only at a look that is due',
+     '    // A card that was not made is asked at every look, whether one is due or not.\n    ask_cards(app, &keeper, receipts).await;\n',
+     ''),
     # ---- the keeper is quiet: its shelf is opened by its name or by the exact id of a card on it (the Label
     #      checker's Fleet::scoped and this piece's Fleet::holding), never for a list the roster's members make
     (L, 'host', "the keeper reads its owner's answers from no shelf", '    let fleet = Fleet::scoped(app, session, "");',
