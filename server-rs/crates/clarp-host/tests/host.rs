@@ -43179,7 +43179,7 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
     let h = place.start_with_token(token);
     let (limited, _) = pair(&h, "Fixture", "limited");
     let key = "/diagnostics/settings";
-    let payload = json!({"event":"ios.demo","detail":{"prompt":"SYNTHETIC PRIVATE","msg":"SYNTHETIC PRIVATE"}});
+    let payload = json!({"event":"micFail","trace_id":"fixture-trace","clip_id":7,"duration_ms":1.5,"clip_url":"fixture-secret-url","persona":"fixture-private-persona","detail":{"prompt":"SYNTHETIC PRIVATE","msg":"getUserMedia rejected: NotAllowedError"}});
     let asked = json!({"enabled":true,"categories":[" CLIENT ","requests","agents","client"]});
     let read = |host: &Host| host.ask_as(&limited, "GET", key, None);
     assert_eq!(read(&h).1["settings"]["enabled"], false);
@@ -43215,8 +43215,30 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
         h.ask_as(&limited, "POST", "/clog", Some(&payload)).1,
         json!({"ok":true})
     );
-    wait_for("enabled capture stores events", || {
-        store.usage().is_ok_and(|(n, bytes)| n > 0 && bytes > 0)
+    let hour=now_ms().div_euclid(3_600_000);
+    let name="sseDup";
+    let huge=json!({"msg":"x".repeat(32*1024)});
+    let original=huge.to_string().len();
+    h.post("/clog",json!({"event":name,"agent_id":"keep-this-id","detail":huge}));
+    // Read the hourly store through its port and verify the actual bytes,
+    // including what the writer kept when the entire row was too large.
+    wait_for("both structured client rows to be written",||{
+        let mut bytes=String::new();
+        for h in hour-1..=hour+1 {
+            if let Ok(mut file)=store.read_hour(h){file.read_to_string(&mut bytes).unwrap();}
+        }
+        assert!(!bytes.contains("SYNTHETIC PRIVATE") && !bytes.contains("fixture-secret-url") && !bytes.contains("fixture-private-persona"));
+        let events:Vec<_>=bytes.lines().filter_map(|l|serde_json::from_str::<Value>(l).ok()).collect();
+        let event=|name:&str|events.iter().map(|r|&r["event"]).find(|e|e["name"]==name);
+        let (Some(mic),Some(cut))=(event("micFail"),event(name)) else{return false;};
+        assert_eq!(mic["detail"]["msg"],"getUserMedia rejected: NotAllowedError");
+        assert_eq!(mic["detail"]["prompt"],clarp_kernel::diagnostics::masked(&json!("SYNTHETIC PRIVATE")));
+        assert_eq!(mic["trace_id"],"fixture-trace");
+        assert_eq!(mic["clip_id"],7);assert_eq!(mic["duration_ms"],1.5);
+        assert_eq!(cut["agent_id"],"keep-this-id");
+        assert_eq!(cut["detail"]["_truncated"]["original_bytes"],original);
+        assert_eq!(cut["detail"]["_truncated"]["limit_bytes"],32768);
+        true
     });
     h.kill();
     let h = place.start_with_token(token);

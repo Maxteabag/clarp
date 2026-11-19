@@ -44,6 +44,26 @@ def record(root):
             gates.append([enabled,cats,d.accepts_client_uploads(),samples])
     private = [[{k:v},eventlog._sanitize_detail({k:v})] for k in sorted(eventlog._PRIVATE_DETAIL_KEYS)
                for v in ['fixture',chr(233),None,22,True,['fixture']]]
+    from lib.routes.ops import OpsRoutes
+    mixed = {" Unlisted Field ": "NotAllowedError: fixture", "rows": [None, False, 1, {" PROMPT ": ["hidden", {"one":1}], "msg": "dur=18ms size=42B"}]}
+    for value in [mixed, {"nested": [mixed, {" ToolOutput ": "literal string"}]}, {" Body ": {"z":"first","a":"second"}}, {"empty":[]}, {"x":None}]:
+        private.append([value,eventlog._sanitize_detail(value)])
+    uploads=[]
+    d.update({"enabled": True,"categories":["client"]})
+    for name in [None, "", "micFail", chr(233)*63, chr(233)*64, chr(233)*65]:
+        for detail in [None, "", "getUserMedia rejected: NotAllowedError", 17, False, ["ignored"], {}, mixed]:
+            item={"event":name,"detail":detail}
+            received=[]
+            h=SimpleNamespace(_read_json=lambda:item,_json_ok=lambda v:None)
+            def emitted(source,event,**fields):
+                obj={"kind":"client_upload","name":event}
+                if fields["detail"] is not None:
+                    obj["detail"]=eventlog._sanitize_detail(fields["detail"])
+                received.append(obj)
+            with patch.dict("os.environ",{"CLAUDE_PWA_CLIENT_LOG":str(root / "fixture.log")}),patch.object(eventlog,"emit",emitted):
+                OpsRoutes._handle_clog(h)
+            answer,=received
+            uploads.append([item,answer])
     checks=[]
     for stt in [True,False]:
         for delivery in ['hls','stream']:
@@ -57,7 +77,7 @@ def record(root):
                 with patch('shutil.which',return_value='fixture' if ff else None),patch.object(tts_queue,'pending_count',return_value=7),patch.object(tts_queue,'in_flight_count',return_value=2):
                     SettingsRoutes._handle_diagnostics_health(h)
                 checks.append([stt,delivery,ff,results[0]])
-    return dict(updates=updates,gates=gates,private=private,health=checks,
+    return dict(updates=updates,gates=gates,uploads=uploads,private=private,health=checks,
                 decode=[[raw,d._decode(raw).public()] for raw in ['', 'not json','[]','{"enabled":1}', '{"enabled":true,"categories":"client"}','{"enabled":true,"categories":["unknown"," VOICE "]}']])
 
 
@@ -67,5 +87,5 @@ if __name__ == '__main__':
             print(json.dumps(record(Path(scratch))))
     else:
         data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'}))
-        OUT.write_text(json.dumps(data,ensure_ascii=True,sort_keys=True,separators=(',',':'))+'\n',encoding='ascii')
+        OUT.write_text(json.dumps(data,ensure_ascii=True,sort_keys=False,separators=(',',':'))+'\n',encoding='ascii')
         print({k:len(v) for k,v in data.items()})
