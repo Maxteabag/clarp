@@ -196,3 +196,46 @@ def test_an_unreadable_receipt_is_set_aside_and_the_others_are_delivered(owner, 
     assert json.loads(rows["broken"]) == json.loads(rows["a list"]) == {"cancelled": "The receipt could not be read"}
     worker.deliver_notifications(owner)
     assert len(transport.calls) == 1
+
+
+def test_a_transport_that_cannot_be_built_at_the_first_look_and_works_at_the_next_pushes_once(
+        owner, clock, tmp_path, monkeypatch):
+    """The real send_user_notification: its batch raised (no transport) and counted nothing, so the
+    notice settled as if nobody was meant to get it. Now the phone is counted as failed and the
+    notice is tried again."""
+    import httpx
+    from lib import apns
+    from tests.unit.test_apns import _apns_config, _FakeClient, _FakeResp
+    _apns_config(tmp_path)
+    apns.register_token("a" * 64)
+    pushed = []
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient({"a" * 64: _FakeResp(200)}, pushed))
+    real = apns._transport
+
+    def unbuildable(cfg):
+        raise ConnectionError("relay unreachable")
+    monkeypatch.setattr(apns, "_transport", unbuildable)
+    worker = service.AutonomyJanitors(lambda *_: True, apns.send_user_notification, usage_read=lambda: _usage())
+    _look(worker, clock, T0)
+    [receipt] = _receipts()
+    assert receipt["delivery"] is None and receipt["payload"]["delivery_retry"]["last"]["failed"] == 1
+    monkeypatch.setattr(apns, "_transport", real)
+    _look(worker, clock, T0 + _interval(owner))
+    assert len(pushed) == 1                                               # one push, at the second look
+    [receipt] = _receipts()
+    assert receipt["delivery"]["sent"] == 1 and receipt["delivery"]["attempts"] == 2
+
+
+def test_a_hotseat_notice_whose_transport_failed_settles_once_as_before(owner, clock):
+    """Hotseat's notices go through the same function and settle on what the transport returned,
+    whatever its counts: a failed count above 0 changes only the number stored."""
+    payload = {"agent_id": owner["agent_id"], "owner_generation": owner["generation"], "notification_id": "h-1",
+               "reason": "account_switch", "preview": "codex: switched to b", "push": False}
+    db.conn().execute("INSERT INTO janitor_quota_receipts VALUES (?,?,?,NULL,?)",
+                      ("h-1", "run", json.dumps(payload), T0))
+    transport = Transport(DOWN)
+    worker = _worker(transport, [_usage()])
+    worker.deliver_notifications(owner)
+    clock[0] = T0 + 3 * _interval(owner)
+    worker.deliver_notifications(owner)
+    assert len(transport.calls) == 1 and _receipts()[0]["delivery"] == DOWN
