@@ -1433,6 +1433,13 @@ pub(crate) async fn make_agent(
         Some(_) => Err(bad(&format!("{what} must be a string or null"))),
     };
     let plain = |key: &str| asked.get(key).and_then(Value::as_str).map(str::to_string);
+    for key in ["resume_session_id", "fork_session_id"] {
+        match asked.get(key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(id)) if id.is_empty() || clarp_kernel::native_session_name(clarp_kernel::python::strip(id)) => {}
+            _ => return Err(bad("invalid session id")),
+        }
+    }
     // No tool is given servers of its own here: every one that is named is one this Host
     // does not know, and is refused in the Python Host's words for that.
     match asked.get("mcp_servers") {

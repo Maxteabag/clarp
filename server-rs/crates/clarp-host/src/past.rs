@@ -276,7 +276,7 @@ pub(crate) async fn begins(
     cwd: &Path,
 ) -> Result<Begins, Refused> {
     let said = |key: &str| {
-        let text = asked.get(key).and_then(Value::as_str).map(str::trim);
+        let text = asked.get(key).and_then(Value::as_str).map(clarp_kernel::python::strip);
         text.filter(|text| !text.is_empty()).map(str::to_string)
     };
     let (resume, fork) = (said("resume_session_id"), said("fork_session_id"));
@@ -391,11 +391,21 @@ pub(crate) async fn begins(
         let copy = history::claude_forked(&transcript, &copy_as);
         let dir = root.join(past::claude_project(&of));
         std::fs::create_dir_all(&dir).map_err(failed)?;
-        std::fs::write(dir.join(format!("{copy_as}.jsonl")), &copy).map_err(failed)?;
+        let dir = dir.canonicalize().map_err(failed)?;
+        let projects = root.canonicalize().map_err(failed)?;
+        let project = dir.strip_prefix(&projects).ok().and_then(Path::to_str).ok_or(StatusCode::BAD_REQUEST)?;
+        let (_, directory) = crate::files::open_beneath(&projects, project, true).map_err(|_| StatusCode::BAD_REQUEST)?;
+        let destination = crate::files::beneath(&directory, &format!("{copy_as}.jsonl"));
+        let mut file = std::fs::File::create_new(destination).map_err(failed)?;
+        std::io::Write::write_all(&mut file, copy.as_bytes()).map_err(failed)?;
         Ok(copy)
     };
     let copy = match tokio::task::spawn_blocking(copied).await {
         Ok(Ok(copy)) => copy,
+        Ok(Err(StatusCode::BAD_REQUEST)) => {
+            let why = "invalid session id";
+            return Err(refused(StatusCode::BAD_REQUEST, why, why));
+        }
         Ok(Err(StatusCode::NOT_FOUND)) => {
             let why = "fork source not found";
             return Err(refused(StatusCode::NOT_FOUND, why, why));
