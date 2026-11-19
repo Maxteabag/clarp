@@ -161,7 +161,7 @@ impl Backend for Claude {
         .map(|arg| (*arg).to_string())
         .collect();
         for (flag, value) in [("--model", &question.model), ("--effort", &question.effort)] {
-            if let Some(value) = value.as_ref().filter(|value| !value.trim().is_empty()) {
+            if let Some(value) = value.as_ref().filter(|value| !value.is_empty()) {
                 args.push(flag.to_string());
                 args.push(value.clone());
             }
