@@ -61,6 +61,9 @@ pub struct Config {
     pub helper_idle_after_ms: i64,
     /// How long a helper that is done stays in the list before it is put away.
     pub helper_archive_grace_ms: i64,
+    /// How long an idle agent's own label stands before it is taken back. Nothing turns the
+    /// rule off.
+    pub status_ttl_ms: i64,
     /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
     /// the data directory. Empty for a Host that was not installed by one.
     pub deployed_version: String,
@@ -295,6 +298,7 @@ impl Config {
         let mut goals_kept_every_ms = 15_000;
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
+        let mut status_ttl_ms = clarp_kernel::helpers::STATUS_TTL_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
         let mut push_relay = String::new();
         let mut whisper_python = String::new();
@@ -378,6 +382,11 @@ impl Config {
                     helper_idle_after_ms = value("a number of milliseconds")?
                         .parse()
                         .map_err(|_| "--helper-idle-after-ms needs a number".to_string())?;
+                }
+                "--status-ttl-ms" => {
+                    status_ttl_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--status-ttl-ms needs a number".to_string())?;
                 }
                 "--helper-archive-grace-ms" => {
                     helper_archive_grace_ms = value("a number of milliseconds")?
@@ -571,6 +580,7 @@ impl Config {
             helpers_checked_every_ms,
             helper_idle_after_ms,
             helper_archive_grace_ms,
+            status_ttl_ms,
             deployed_version: std::fs::read_to_string(data_dir.join("DEPLOYED_VERSION"))
                 .map(|version| version.trim().to_string())
                 .unwrap_or_default(),

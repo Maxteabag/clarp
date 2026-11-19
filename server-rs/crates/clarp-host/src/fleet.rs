@@ -2240,9 +2240,17 @@ impl Fleet {
 
     /// What an agent is doing right now, as the list of agents counts it.
     fn doing(&self, member: &Member) -> helpers::Doing {
+        doing(&self.members, member)
+    }
+}
+
+/// What an agent is doing right now, among the agents of the roster: whether a turn runs or
+/// waits, the background processes it left running, its helpers at work, and when anything
+/// of it last changed.
+pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
+    {
         let view = member.agent.view();
-        let children: Vec<&AgentRecord> = self
-            .members
+        let children: Vec<&AgentRecord> = members
             .iter()
             .map(|child| &child.record)
             .filter(|child| child.parent_agent_id.as_ref() == Some(&member.record.agent_id))
@@ -2273,7 +2281,9 @@ impl Fleet {
                 .unwrap_or(0),
         }
     }
+}
 
+impl Fleet {
     /// Now and then: a helper that is working and has sat idle too long counts as having
     /// reported, and a helper that has been done for long enough is put away.
     fn look_after_helpers(&mut self) -> Result<(), Unavailable> {

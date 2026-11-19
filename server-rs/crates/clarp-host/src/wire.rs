@@ -1662,6 +1662,7 @@ mod tests {
             head_revision: 42,
             backend_session: Some("sess-1".to_string()),
             label: String::new(),
+            label_at_ms: None,
             resting: None,
             context_tokens: None,
             completed_at_ms: None,

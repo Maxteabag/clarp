@@ -58,6 +58,9 @@ pub enum Command {
     /// The agent says, in a few words, what it is busy with beyond its turns: work it left
     /// running. An empty label takes that back.
     Label { text: String },
+    /// A label that outlived its time is taken back, if it is still the one that was set at
+    /// `set_at_ms`: one set again since stands.
+    RetireLabel { set_at_ms: i64 },
     /// The shim: the tool process is up.
     TurnStarted { turn: TurnId },
     /// The shim: the tool process could not be started.
@@ -244,6 +247,8 @@ pub struct Agent {
     backend_session: Option<String>,
     /// What the agent says it is busy with beyond its turns. Empty: nothing.
     label: String,
+    /// When it said so, while it says so.
+    label_at: Option<i64>,
     /// What the agent rests in since it last said so, until its next turn starts.
     resting: Option<Rest>,
     /// The agent came from another Host, where it had worked.
@@ -276,6 +281,7 @@ impl Default for Agent {
             last: None,
             backend_session: None,
             label: String::new(),
+            label_at: None,
             resting: None,
             arrived: false,
         }
@@ -338,6 +344,11 @@ impl Agent {
     /// What the agent says it is busy with beyond its turns. Empty: nothing.
     pub fn label(&self) -> &str {
         &self.label
+    }
+
+    /// When the agent set the label it has, while it has one.
+    pub fn label_at(&self) -> Option<i64> {
+        self.label_at
     }
 
     /// What the agent rests in since it last said so. `None` once a turn has started since.
@@ -462,6 +473,14 @@ impl Agent {
                     text,
                     at_ms: now_ms,
                 });
+            }
+            Command::RetireLabel { set_at_ms } => {
+                if !work.agent.label.is_empty() && work.agent.label_at == Some(set_at_ms) {
+                    work.record(AgentEvent::Labelled {
+                        text: String::new(),
+                        at_ms: now_ms,
+                    });
+                }
             }
             Command::Adopt {
                 from,
@@ -688,13 +707,14 @@ impl Agent {
                 backend_session, ..
             } => self.backend_session = Some(backend_session.clone()),
             AgentEvent::StartedAgain { .. } => self.backend_session = None,
-            AgentEvent::Labelled { text, .. } => {
+            AgentEvent::Labelled { text, at_ms } => {
                 self.resting = Some(if text.is_empty() {
                     Rest::Idle
                 } else {
                     Rest::Background
                 });
                 self.label.clone_from(text);
+                self.label_at = (!text.is_empty()).then_some(*at_ms);
             }
             AgentEvent::Turn { turn, change } => self.apply_turn(*turn, change)?,
         }
@@ -1823,6 +1843,38 @@ mod tests {
         })
         .unwrap();
         a.finish(2);
+        assert_eq!((a.agent.label(), a.agent.resting()), ("", Some(Rest::Idle)));
+    }
+
+    #[test]
+    fn a_label_is_taken_back_only_if_it_is_the_one_set_then() {
+        let mut a = Driven::new();
+        a.send(Command::Label {
+            text: "Building".to_string(),
+        })
+        .unwrap();
+        let first = a.agent.label_at().unwrap();
+        // It says something new before the old label is looked at: the new one stands.
+        a.send(Command::Label {
+            text: "Testing".to_string(),
+        })
+        .unwrap();
+        let second = a.agent.label_at().unwrap();
+        assert!(second > first);
+        a.send(Command::RetireLabel { set_at_ms: first }).unwrap();
+        assert_eq!(
+            (a.agent.label(), a.agent.label_at()),
+            ("Testing", Some(second))
+        );
+        // The one that is there, taken back by its own time: the agent rests idle, and a
+        // label that is gone has no time.
+        a.send(Command::RetireLabel { set_at_ms: second }).unwrap();
+        assert_eq!(
+            (a.agent.label(), a.agent.label_at(), a.agent.resting()),
+            ("", None, Some(Rest::Idle))
+        );
+        // Nothing to take back: nothing happens.
+        a.send(Command::RetireLabel { set_at_ms: second }).unwrap();
         assert_eq!((a.agent.label(), a.agent.resting()), ("", Some(Rest::Idle)));
     }
 

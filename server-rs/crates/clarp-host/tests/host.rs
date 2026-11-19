@@ -563,6 +563,67 @@ fn tool(
 }
 
 #[test]
+fn an_idle_agents_own_label_that_outlived_its_time_is_taken_back_and_the_apps_are_told() {
+    let place = Place::new("stale-label");
+    // The two hours a label stands are a second and a half here, looked at every 200 ms.
+    let quick = [
+        "--helpers-checked-every-ms",
+        "200",
+        "--status-ttl-ms",
+        "1500",
+    ];
+    let host = place.start_with("", &quick);
+    let session = host.new_agent("Builder");
+    let dir = place.root.clone();
+    let heard = host.listen();
+    let row = |host: &Host| host.get("/agents/snapshot")["agents"][0].clone();
+    // The agent says what it left running, and nothing of it is running.
+    let on = tool(
+        &host,
+        &dir,
+        None,
+        &["clarp-agent-bg", &session, "on", "Watching"],
+    );
+    assert_eq!(on.0, 0, "{}", on.2);
+    wait_for("the label to show", || {
+        row(&host)["status_text"] == "Watching"
+    });
+    assert_eq!(row(&host)["latest_state"], "background");
+    let set_at = now_ms();
+    // Once it is older than its time it is taken back: the agent rests idle, and the apps are
+    // told to read the rows again.
+    wait_for("the label to be taken back", || {
+        row(&host)["status_text"].is_null()
+    });
+    assert!(now_ms() - set_at >= 1_300, "not before its time");
+    assert_eq!(row(&host)["latest_state"], "idle");
+    wait_for("the apps to be told", || {
+        heard.lock().unwrap().iter().any(|event| {
+            event["type"] == "agent-roster"
+                && event["kind"] == "stale-work"
+                && event["session"] == session
+        })
+    });
+    // A label set again is a label of its own, with its own time.
+    let on = tool(
+        &host,
+        &dir,
+        None,
+        &["clarp-agent-bg", &session, "on", "Again"],
+    );
+    assert_eq!(on.0, 0, "{}", on.2);
+    wait_for("the new label to show", || {
+        row(&host)["status_text"] == "Again"
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        row(&host)["status_text"],
+        "Again",
+        "it is younger than its time"
+    );
+}
+
+#[test]
 fn a_worker_registers_a_background_job_with_the_agents_own_tool_and_the_apps_see_it() {
     let place = Place::new("jobs");
     let fast = ["--jobs-checked-every-ms", "200"];
@@ -17044,6 +17105,57 @@ fn answers(routes: Vec<(&'static str, &'static str, String)>) -> (String, Arc<Mu
         }
     });
     (address, taken)
+}
+
+#[test]
+fn a_quiet_stream_of_events_is_sent_a_heartbeat_an_app_can_see() {
+    let place = Place::new("sse-heartbeat");
+    let host = place.start();
+    // A stream nothing happens on: after ten quiet seconds it is sent a heartbeat as an event
+    // of its own (`event: heartbeat`), with data an app reads and no id to resume from, so
+    // that EventSource tells a quiet stream from a dead one.
+    let mut stream = TcpStream::connect(&host.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(25)))
+        .unwrap();
+    stream
+        .write_all(b"GET /events HTTP/1.1\r\nHost: test\r\nAccept: text/event-stream\r\n\r\n")
+        .unwrap();
+    let opened = now_ms();
+    let mut block: Vec<String> = Vec::new();
+    let mut beat = None;
+    for line in BufReader::new(stream).lines() {
+        let line = line.expect("a heartbeat within 25 seconds");
+        assert!(now_ms() - opened < 25_000, "no heartbeat within 25 seconds");
+        // What chunked framing puts between the lines is no part of an event.
+        if !line.is_empty() && line.chars().all(|sign| sign.is_ascii_hexdigit()) {
+            continue;
+        }
+        if line.is_empty() {
+            if block.iter().any(|line| line == "event: heartbeat") {
+                beat = Some(std::mem::take(&mut block));
+                break;
+            }
+            block.clear();
+        } else {
+            block.push(line);
+        }
+    }
+    let beat = beat.unwrap();
+    let heard = now_ms();
+    assert!(
+        heard - opened >= 9_000,
+        "a heartbeat only on a quiet stream: {beat:?}"
+    );
+    assert!(!beat.iter().any(|line| line.starts_with("id:")), "{beat:?}");
+    let data = beat
+        .iter()
+        .find_map(|line| line.strip_prefix("data:"))
+        .unwrap();
+    let data: Value = serde_json::from_str(data.trim()).unwrap();
+    assert_eq!(data["type"], "heartbeat");
+    let at = data["ts"].as_i64().unwrap();
+    assert!((opened..=heard).contains(&at), "{data}");
 }
 
 #[test]

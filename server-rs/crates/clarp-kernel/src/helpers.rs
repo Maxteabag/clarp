@@ -156,6 +156,32 @@ pub fn idle_due(helper_state: Option<&str>, doing: &Doing, now_ms: i64, limit_ms
         && now_ms - doing.idle_since_ms > limit_ms
 }
 
+// ---- a label that outlived the work behind it ---------------------------------------------
+
+/// How long an idle agent's own label stands: two hours.
+pub const STATUS_TTL_MS: i64 = 2 * 3600 * 1_000;
+
+/// Whether an idle agent's own label is older than `ttl_ms` and is taken back. A label a
+/// janitor keeps has its own time, and one with no time is not guessed at. A limit of
+/// nothing turns the rule off. The Python Host's `custom_status_due`.
+pub fn status_due(
+    status: &str,
+    status_at: Option<i64>,
+    janitor_owned: bool,
+    doing: &Doing,
+    now_ms: i64,
+    ttl_ms: i64,
+) -> bool {
+    let Some(status_at) = status_at else {
+        return false;
+    };
+    ttl_ms > 0
+        && !crate::python::strip(status).is_empty()
+        && !janitor_owned
+        && doing.idle()
+        && now_ms - status_at > ttl_ms
+}
+
 // ---- what an agent's row says of the work it handed out -----------------------------------
 
 /// How the state of a helper that is working reads in its parent's line.
