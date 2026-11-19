@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
@@ -30,6 +30,17 @@ fn kept(path: &str) -> Value {
 
 type Asked = Query<HashMap<String, String>>;
 type Answered = Result<Json<Value>, ApiError>;
+
+/// What a change under a door of which this Host has built a part, or nothing, is answered
+/// with: refused as not built where the Python Host has a route for it, else the plain 404 of
+/// a route that is not there, as there (`clarp_kernel::doors`).
+fn not_built_at(uri: &Uri, what: &str) -> ApiError {
+    if clarp_kernel::doors::registered(uri.path()) {
+        not_built(what)
+    } else {
+        ApiError::plain(StatusCode::NOT_FOUND, "not found")
+    }
+}
 
 /// What a change to something this Host does not have is refused with.
 fn not_built(what: &str) -> ApiError {
@@ -101,8 +112,8 @@ async fn agent_goal(State(app): State<App>, Query(asked): Asked) -> Answered {
     Ok(Json(json!({ "session": session, "goal": null })))
 }
 
-async fn no_agent_goal() -> ApiError {
-    not_built("A goal of this kind is")
+async fn no_agent_goal(uri: Uri) -> ApiError {
+    not_built_at(&uri, "A goal of this kind is")
 }
 
 /// `GET /goal-ledger?plan_id=&after=&limit=`: what was written into a goal's ledger. This
@@ -232,8 +243,8 @@ async fn oracle_calls() -> Json<Value> {
     Json(json!({ "delegations": [] }))
 }
 
-async fn no_oracle() -> ApiError {
-    not_built("The Oracle is")
+async fn no_oracle(uri: Uri) -> ApiError {
+    not_built_at(&uri, "The Oracle is")
 }
 
 // ---- the tools' logins and what they use ------------------------------------------------------
@@ -278,8 +289,8 @@ async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
     Ok(Json(told))
 }
 
-async fn no_logins() -> ApiError {
-    not_built("Signing a tool in or out from an app is")
+async fn no_logins(uri: Uri) -> ApiError {
+    not_built_at(&uri, "Signing a tool in or out from an app is")
 }
 
 // ---- the Host's own software and the skills of its agents' tools -----------------------------
@@ -341,8 +352,8 @@ async fn models_of_provider(Query(asked): Asked) -> ApiError {
     bad(&format!("unknown provider {provider}"))
 }
 
-async fn no_model_providers() -> ApiError {
-    not_built("Signing a harness in to a provider of models is")
+async fn no_model_providers(uri: Uri) -> ApiError {
+    not_built_at(&uri, "Signing a harness in to a provider of models is")
 }
 
 /// What an app can ask to have done to an agent that this Host cannot do yet: servers of
