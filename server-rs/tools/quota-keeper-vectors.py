@@ -22,6 +22,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -187,6 +188,48 @@ STORIES = [
                {'do': 'tick'}, {'do': 'wait', 'seconds': 300}, {'do': 'options', 'options': {'recovery_mode': 'notify'}},
                {'do': 'on'},
                {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(10))])}}, {'do': 'tick'}]},
+    # ---- recovery under a selector: the runtime's own function, its coordinator stood in
+    {'name': 'nothing left, recovered at once: the first turn the coordinator owns is taken up', 'recover': True,
+     'steps': [{'do': 'options', 'options': {'recovery_mode': 'automatic'}}, {'do': 'on'},
+               {'do': 'selector', 'value': 'cycler'},
+               {'do': 'coordinator', 'attempts': [{'agent_id': 'a-gone', 'trace_id': 't-0', 'owned': False},
+                                                  {'agent_id': 'a-1', 'trace_id': 't-1', 'owned': True},
+                                                  {'agent_id': 'a-2', 'trace_id': 't-2', 'owned': True}], 'accepts': True},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(0))])}}, {'do': 'tick'},
+               {'do': 'wait', 'seconds': 300}, {'do': 'coordinator', 'attempts': [], 'accepts': True},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=40, observed=at(5))])}}, {'do': 'tick'},
+               {'do': 'wait', 'seconds': 300},
+               {'do': 'coordinator', 'attempts': [{'agent_id': 'a-3', 'trace_id': 't-3', 'owned': True}], 'accepts': False},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(10))]),
+                                             'claude': provider([window('cl', used=100, observed=at(10), kind='five_hour',
+                                                                        resets_at='2027-01-15T12:00:29Z')],
+                                                                instance='host-1:claude')}}, {'do': 'tick'}]},
+    {'name': 'nothing left and nothing to take up: the coordinator owns no turn', 'recover': True,
+     'steps': [{'do': 'options', 'options': {'recovery_mode': 'automatic'}}, {'do': 'on'},
+               {'do': 'selector', 'value': 'cycler'}, {'do': 'coordinator', 'attempts': [], 'accepts': True},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(0))])}}, {'do': 'tick'}]},
+    {'name': 'nothing left, the owner asked: a card, and the recovery once it is accepted, once', 'recover': True,
+     'steps': [{'do': 'options', 'options': {'recovery_mode': 'ask'}}, {'do': 'on'},
+               {'do': 'selector', 'value': 'cycler'},
+               {'do': 'coordinator', 'attempts': [{'agent_id': 'a-1', 'trace_id': 't-1', 'owned': True}], 'accepts': True},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(0))])}}, {'do': 'tick'},
+               {'do': 'wait', 'seconds': 300}, {'do': 'tick'},
+               {'do': 'resolve', 'choice': 'accepted'},
+               {'do': 'wait', 'seconds': 300}, {'do': 'tick'},
+               {'do': 'wait', 'seconds': 300}, {'do': 'tick'}]},
+    {'name': 'a card turned down, and one accepted after the keeper was set anew, recover nothing', 'recover': True,
+     'steps': [{'do': 'options', 'options': {'recovery_mode': 'ask'}}, {'do': 'on'},
+               {'do': 'selector', 'value': 'cycler'},
+               {'do': 'coordinator', 'attempts': [{'agent_id': 'a-1', 'trace_id': 't-1', 'owned': True}], 'accepts': True},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(0))])}}, {'do': 'tick'},
+               {'do': 'resolve', 'choice': 'rejected'},
+               {'do': 'wait', 'seconds': 300},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=50, observed=at(5))])}}, {'do': 'tick'},
+               {'do': 'wait', 'seconds': 300},
+               {'do': 'usage', 'providers': {CODEX: provider([window(used=100, observed=at(10))])}}, {'do': 'tick'},
+               {'do': 'options', 'options': {'remaining_threshold': 30}}, {'do': 'on'},
+               {'do': 'resolve', 'choice': 'accepted'},
+               {'do': 'wait', 'seconds': 300}, {'do': 'tick'}]},
 ]
 
 
@@ -246,7 +289,7 @@ def units() -> dict:
 def story(index) -> dict:
     """One story of the lane, on a database of its own."""
     root = isolated('clarp-quota-keeper-story-')
-    from lib import agents, db, janitors, janitor_builtins, janitor_autonomy as A, settings_store, turn_dispatch
+    from lib import agents, artifacts, db, janitors, janitor_builtins, janitor_autonomy as A, settings_store, turn_dispatch
     from lib import log as host_log
     host_log.log = host_log.log_exception = lambda *said, **more: None
     A.log_exception = lambda *said, **more: None
@@ -262,6 +305,30 @@ def story(index) -> dict:
     reading = {'providers': {}}
     selector = {'value': None}
     turn_dispatch.account_selector = lambda backend: selector['value']
+    asked = []
+    coordinated = {'attempts': [], 'accepts': True}
+
+    class Attempt:
+        def __init__(self, row):
+            self.agent_id, self.trace_id, self._owned = row['agent_id'], row['trace_id'], row['owned']
+
+        def owned(self):
+            return self._owned
+
+    class Coordinator:
+        """The account pool's coordinator, stood in: its turns, and whether it takes a request."""
+        def __init__(self, provider):
+            self.provider = provider
+            self.lock = threading.Lock()
+
+        @property
+        def attempts(self):
+            return {row['agent_id']: Attempt(row) for row in coordinated['attempts']}
+
+        def request(self, agent_id, trace_id, command):
+            asked.append({'provider': self.provider, 'agent_id': agent_id, 'trace_id': trace_id, 'command': command})
+            return coordinated['accepts']
+    turn_dispatch.account_failover = Coordinator
     pushed = []
     answer = {'value': {'enabled': True, 'sent': 1, 'failed': 0, 'disabled': 0}}
 
@@ -270,7 +337,9 @@ def story(index) -> dict:
         if answer['value'] == 'raise':
             raise RuntimeError('the push service is down')
         return answer['value']
-    keeper = A.AutonomyJanitors(lambda *said, **more: True, push, usage_read=lambda: json.loads(json.dumps(reading)))
+    recover = A.runtime_recover if one.get('recover') else None
+    keeper = A.AutonomyJanitors(lambda *said, **more: True, push, usage_read=lambda: json.loads(json.dumps(reading)),
+                                recover=recover)
     A.setup()
     steps = []
     for step in one['steps']:
@@ -295,7 +364,15 @@ def story(index) -> dict:
             agents.create_agent(persona='Seats', voice_id='', cwd=str(work), session='seats', backend='claude')
             made = janitors.create('seats', template_id='account-hotseat')
             janitors.set_enabled('seats', made['revision'], True)
+        elif kind == 'coordinator':
+            coordinated['attempts'], coordinated['accepts'] = step['attempts'], step['accepts']
+        elif kind == 'resolve':
+            card = db.conn().execute(
+                'SELECT d.decision_id, d.revision FROM artifact_decisions d JOIN artifacts a ON a.artifact_id=d.artifact_id '
+                'WHERE a.session=? ORDER BY a.created_at DESC, a.rowid DESC LIMIT 1', (session,)).fetchone()
+            artifacts.resolve(card['decision_id'], expected_revision=card['revision'], choice=step['choice'])
         elif kind == 'tick':
+            asked_before = len(asked)
             before = len(pushed)
             runs_before = {run['run_id'] for run in janitors.list_runs(session)}
             try:
@@ -303,6 +380,8 @@ def story(index) -> dict:
             except Exception as broke:  # noqa: BLE001 - the Python Host's own break, told as it is
                 more['broke'] = type(broke).__name__
             more['pushed'] = pushed[before:]
+            if one.get('recover'):
+                more['asked'] = asked[asked_before:]
             new_runs = [run for run in janitors.list_runs(session) if run['run_id'] not in runs_before]
             more['runs'] = [{key: run[key] for key in ('status', 'outcome', 'activity', 'activity_summary', 'created_at',
                                                          'finished_at', 'generation')}
@@ -317,12 +396,34 @@ def story(index) -> dict:
             if db.conn().execute("SELECT name FROM sqlite_master WHERE name='settings'").fetchone() else {}
         owner = {'agent_id': current['agent_id'], 'generation': current['generation'], 'options': current['options']}
         lane = A.lane_state('quota-keeper', owner)
+        if one.get('recover'):
+            more['cards'] = [{'artifact_id': row['artifact_id'], 'title': row['title'], 'question': row['question'],
+                              'context': row['context'], 'reference_id': row['reference_id'],
+                              'payload': json.loads(row['payload_json'] or 'null'), 'status': row['status'],
+                              'resolved_choice': row['resolved_choice']}
+                             for row in db.conn().execute(
+                                 'SELECT a.artifact_id, a.title, d.question, d.context, a.reference_id, a.payload_json, '
+                                 'd.status, d.resolved_choice FROM artifacts a JOIN artifact_decisions d '
+                                 'ON d.artifact_id=a.artifact_id WHERE a.session=? ORDER BY a.created_at, a.rowid',
+                                 (session,))]
+            more['approvals'] = sorted(r['key'] for r in db.conn().execute(
+                "SELECT key FROM settings WHERE key LIKE 'quota-keeper.approval.%'"))
         steps.append({**step, **more, 'now': clock['now'], 'enabled': current['enabled'], 'generation': current['generation'],
                       'options': current['options'], 'next_run_at': A.lane_next_run('quota-keeper', owner,
                                                                                     current['options']['interval_seconds'],
                                                                                     'quota-keeper.last-check'),
                       'lane': lane, 'receipts': receipts, 'memory': memory})
     agent = janitors.get(session)
+    # A card's id is drawn anew at every run: it is written as the card it is, in the order they were made.
+    named = []
+    for step in steps:
+        for card in step.get('cards', []):
+            if card['artifact_id'] not in named:
+                named.append(card['artifact_id'])
+    written = json.dumps(steps)
+    for number, artifact_id in enumerate(named, 1):
+        written = written.replace(artifact_id, f'card-{number}')
+    steps = json.loads(written)
     return {'name': one['name'], 'agent_id': agent['agent_id'], 'session': session, 'persona': agent['name'], 'steps': steps}
 
 

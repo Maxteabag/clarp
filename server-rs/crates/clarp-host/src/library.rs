@@ -421,7 +421,9 @@ struct Fleet(Vec<(Arc<Member>, Arc<View>)>);
 impl Fleet {
     fn of(app: &App) -> Self {
         let directory = app.fleet.directory();
-        let agents = directory.members.iter();
+        // The janitors' too: the Quota keeper asks its owner by a card in its own session,
+        // as the Python Host's janitors, which are agents there, do.
+        let agents = directory.members.iter().chain(&directory.janitors);
         Self(
             agents
                 .map(|member| (member.clone(), member.agent.view()))
@@ -1214,8 +1216,34 @@ async fn create_decision(
 /// Asks the user something for an agent, from what a request says. Answers the artifact
 /// the request is, as it is shown.
 pub(crate) async fn request(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
+    let session = said(data, "session", "");
+    let Some(member) = app.member(session.trim()) else {
+        return Err(conflict(decisions::ask_of_nobody(
+            &ask_of(data),
+            app.clock.now_ms(),
+        )));
+    };
+    asked_of(app, &member, data).await
+}
+
+/// Asks the user something for this agent or janitor, from what a request says: the
+/// artifact the request is, as it is shown. The Quota keeper asks its owner so.
+pub(crate) async fn asked_of(
+    app: &App,
+    member: &Member,
+    data: &Map<String, Value>,
+) -> Result<Value, ApiError> {
+    let asked = ask_agent(member, Want::Request(Box::new(ask_of(data))))
+        .await?
+        .artifact;
+    push_request(app, &asked);
+    Ok(asked)
+}
+
+/// What a request for a decision asks, from its fields.
+fn ask_of(data: &Map<String, Value>) -> Ask {
     let given = |key: &str, otherwise: Value| data.get(key).cloned().unwrap_or(otherwise);
-    let ask = Ask {
+    Ask {
         title: said(data, "title", "Decision"),
         question: json!(said(data, "question", "")),
         context: json!(said(data, "context", "")),
@@ -1234,16 +1262,7 @@ pub(crate) async fn request(app: &App, data: &Map<String, Value>) -> Result<Valu
         response_effort: given("response_effort", json!("review")),
         deadline_at: data.get("deadline_at").cloned(),
         input_hint: data.get("input_hint").cloned(),
-    };
-    let session = said(data, "session", "");
-    let Some(member) = app.member(session.trim()) else {
-        return Err(conflict(decisions::ask_of_nobody(&ask, app.clock.now_ms())));
-    };
-    let asked = ask_agent(&member, Want::Request(Box::new(ask)))
-        .await?
-        .artifact;
-    push_request(app, &asked);
-    Ok(asked)
+    }
 }
 
 /// Tells the phones of a request that was just made. A request is the one thing an agent
@@ -1511,6 +1530,20 @@ pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
             Some(art.public(&m.record.persona, &view.books.goals, app.clock.now_ms()))
         })
     })
+}
+
+/// The decisions asked in one session, the newest hundred, as rows (with `payload` and
+/// `decision`): what the Quota keeper reads its owner's answers from.
+pub(crate) fn decisions_of(app: &App, session: &str) -> Vec<Value> {
+    let listing = Listing {
+        session: session.to_string(),
+        kind: "decision".to_string(),
+        limit: 100,
+        by_creation: true,
+        ..Listing::default()
+    };
+    let fleet = Fleet::of(app);
+    artifacts::list(&fleet.shelves(), &listing, app.clock.now_ms())
 }
 
 /// The artifacts of one session, as `GET /artifacts?session=` answers them.

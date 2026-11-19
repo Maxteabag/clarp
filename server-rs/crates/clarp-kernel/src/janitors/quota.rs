@@ -29,7 +29,6 @@ use serde_json::{Value, json};
 
 use super::adaptive::{self, State};
 use crate::python;
-use crate::recovery::Accounts;
 
 /// The job, as the catalogue names it.
 pub const ROLE: &str = "quota-monitor";
@@ -328,25 +327,34 @@ pub fn looked(usage: &Value, owner: &Owner<'_>, memory: &mut dyn Memory) -> Vec<
     notices
 }
 
-/// What a recovery asked for at a window with nothing left answers on a Host that does not
-/// recover yet: the Python Host's words for a tool with no coordinated selector, for a Host
-/// with no selector (`--accounts none` and `follow`: it keeps no logins of its own), and for
-/// a selector with no runtime to recover with (`--accounts select`, until the keeper
-/// recovers here). `None`: none is asked (the keeper only tells).
-pub fn recovery(provider: &str, mode: &str, spent: bool, accounts: Accounts) -> Option<Value> {
+/// How a recovery is asked for at a window with nothing left, as the Python Host's
+/// `request_recovery` decides it: of no runtime for a tool with no coordinated selector, nor
+/// where no selector is configured for the tool (this Host: no pool of the tool with the
+/// owner's selector, which is every tool under `--accounts none` and `follow`); by a card the
+/// owner answers where the keeper asks; at once where it recovers by itself. `None`: none is
+/// asked (the keeper only tells, or something is left).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Asked {
+    Unsupported,
+    Unconfigured,
+    Card,
+    Recover,
+}
+
+pub fn asked(provider: &str, mode: &str, spent: bool, selector: bool) -> Option<Asked> {
     if !spent || mode == "notify" {
         return None;
     }
     if !SWITCHED.contains(&provider) {
-        let why = "No coordinated account selector for this provider";
-        return Some(json!({ "status": "unsupported", "reason": why }));
+        return Some(Asked::Unsupported);
     }
-    Some(match accounts {
-        Accounts::Select => json!({ "status": "runtime_unavailable" }),
-        Accounts::None | Accounts::Follow => {
-            let why = "No runtime account selector configured";
-            json!({ "status": "unconfigured", "reason": why })
-        }
+    if !selector {
+        return Some(Asked::Unconfigured);
+    }
+    Some(if mode == "ask" {
+        Asked::Card
+    } else {
+        Asked::Recover
     })
 }
 
@@ -490,6 +498,123 @@ pub fn after_push(payload: &mut Value, delivery: Value, now_ms: i64) -> Option<V
         delivery["attempts"] = json!(attempts + 1);
     }
     Some(delivery)
+/// What a recovery that is asked of nothing answers, in the Python Host's words.
+pub fn refused(asked: Asked) -> Option<Value> {
+    match asked {
+        Asked::Unsupported => {
+            let why = "No coordinated account selector for this provider";
+            Some(json!({ "status": "unsupported", "reason": why }))
+        }
+        Asked::Unconfigured => {
+            let why = "No runtime account selector configured";
+            Some(json!({ "status": "unconfigured", "reason": why }))
+        }
+        Asked::Card | Asked::Recover => None,
+    }
+}
+
+/// The card the owner is asked by, in the keeper's session: what `request_recovery` asks
+/// (`artifacts.create_decision`), as the fields of a request for a decision.
+pub fn card(provider: &str, owner: &Owner<'_>, receipt_id: &str) -> Value {
+    let mut named = provider.chars();
+    let titled: String = named
+        .next()
+        .map(|first| first.to_uppercase().chain(named).collect())
+        .unwrap_or_default();
+    json!({
+        "session": owner.session,
+        "title": format!("{titled} quota exhausted"),
+        "question": format!("Allow the configured account selector to recover unfinished {provider} turns?"),
+        "context": "The runtime will drain owned processes, verify requested models and resume the original unfinished turns. Completed work and stopped queues are preserved.",
+        "reference_id": receipt_id,
+        "payload": {"quota_recovery": {
+            "owner_id": owner.agent_id, "generation": owner.generation, "provider": provider,
+            "receipt_id": receipt_id,
+        }},
+    })
+}
+
+/// The keeper as it stands when a recovery would run.
+#[derive(Debug, Clone, Copy)]
+pub struct Standing<'a> {
+    pub enabled: bool,
+    pub job: &'a str,
+    pub generation: u64,
+    pub mode: &'a str,
+}
+
+/// Whether a recovery asked for a keeper (`owner_id` in `generation`) may run now, as the
+/// runtime's `runtime_recover` checks it before it asks the pool: `Err` is its answer.
+/// `card`: the decision a recovery the owner approved is run by, as it stands (none where
+/// the keeper recovers by itself).
+pub fn may_recover(
+    standing: Option<Standing<'_>>,
+    (owner_id, generation, provider): (&str, u64, &str),
+    card: Option<&Value>,
+    selector: bool,
+) -> Result<(), &'static str> {
+    let Some(now) =
+        standing.filter(|now| now.enabled && now.job == ROLE && now.generation == generation)
+    else {
+        return Err("cancelled");
+    };
+    if now.mode == "ask" {
+        let asked = card.map(|card| &card["payload"]["quota_recovery"]);
+        let accepted = card.is_some_and(|card| card["decision"]["resolved_choice"] == "accepted");
+        let same = asked.is_some_and(|asked| {
+            asked["owner_id"] == owner_id
+                && asked["generation"] == generation
+                && asked["provider"] == provider
+        });
+        if !accepted || !same {
+            return Err("approval_required");
+        }
+    } else if now.mode != "automatic" {
+        return Err("not_authorized");
+    }
+    if !SWITCHED.contains(&provider) {
+        return Err("unsupported");
+    }
+    if !selector {
+        return Err("unconfigured");
+    }
+    Ok(())
+}
+
+/// The cards of a keeper's session the owner accepted for this keeper in this generation and
+/// that were not acted on yet (`recover_approved`), in the order given: each card's id and the
+/// tool it is for.
+pub fn approved<'a>(
+    cards: &'a [Value],
+    (owner_id, generation): (&str, u64),
+    acted: impl Fn(&str) -> bool,
+) -> Vec<(&'a str, &'a str)> {
+    cards
+        .iter()
+        .filter(|card| card["decision"]["resolved_choice"] == "accepted")
+        .filter_map(|card| {
+            let asked = &card["payload"]["quota_recovery"];
+            let ours = asked["owner_id"] == owner_id && asked["generation"] == generation;
+            let id = card["artifact_id"].as_str()?;
+            (ours && !acted(id)).then_some((id, asked["provider"].as_str().unwrap_or_default()))
+        })
+        .collect()
+}
+
+/// Whether an approved recovery is done with: it is under way, or there was nothing to take
+/// up. Any other answer is tried again at the next look.
+pub fn settled(status: &str) -> bool {
+    status == "recovering" || status == "nothing_to_resume"
+}
+
+/// What the pool answered a recovery: whether it owns a turn to take up, and whether it took
+/// the request.
+pub fn recovered(taken: Option<bool>) -> &'static str {
+    match taken {
+        None => "nothing_to_resume",
+        Some(true) => "recovering",
+        Some(false) => "waiting",
+    }
 }
 
 /// What a run of the keeper says of itself: how it went, its line, and its result.

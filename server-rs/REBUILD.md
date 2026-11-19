@@ -1418,6 +1418,16 @@ once; what it keeps is there after the Host stopped; a book kept whole is kept a
 next crossing is kept and not pushed; a receipt settled thirty days ago is let go and one that waits stays.
 Wrong rules: `tools/plants/quota-keeper.py`.
 
+*Its recovery* (19 Nov 2026), on a Host that keeps the logins itself (`--accounts select`) and has the owner's
+selector for the tool, as the Python Host's `request_recovery`, `recover_approved` and `runtime_recover`: at a window
+with nothing left, a keeper that asks puts a card in its own session (the janitors' shelves are read beside the
+agents' for it); one that recovers by itself has the tool's pool take up the first turn it still owns, as one that
+failed on its account (`accounts::Pool::first_owned`, the pool's only new reading; its rules are as they were). A
+card the owner accepted runs a recovery at the keeper's next look, once. Held to four more stories of the reference
+with its coordinator stood in (14 stories, 135 steps), and through the Host by a stand-in Codex and a stand-in
+selector: at once, the selector asked once and the turn taken up; by a card, recovered once it was accepted.
+Wrong rules: `tools/plants/quota-recovery.py`.
+
 **Grok and Muse** (18 Nov 2026). One CLI process serves each agent turn. Grok gets
 `--session-id` on its first turn and `--resume` thereafter. Muse takes `--session-id`
 for both. Under decision D26 the shim syncs the assigned session id to the turn spool

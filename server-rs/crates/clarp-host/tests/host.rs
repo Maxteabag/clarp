@@ -41711,3 +41711,197 @@ fn working_labels_are_reported_in_the_checkers_own_chat() {
         assert_eq!(records(), before);
     }
 }
+
+/// A stand-in for Codex that writes its account's windows as `CODEX_SAYS_ITS_LIMITS` does, and
+/// works on a message that says `slow` until it is stopped (one an account recovery takes up
+/// is answered at once).
+const CODEX_SAYS_ITS_LIMITS_SLOWLY: &str = r#"#!/usr/bin/env python3
+import datetime, json, os, pathlib, sys, time
+if sys.argv[1:2] != ["exec"]:
+    sys.exit(0)
+prompt = sys.stdin.read()
+args = sys.argv[1:]
+thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-0000000011e6"
+own = pathlib.Path(os.environ["CODEX_HOME"])
+def say(**line):
+    print(json.dumps(line), flush=True)
+say(type="thread.started", thread_id=thread)
+say(type="turn.started")
+rollout = own / "sessions" / "2030" / "03" / "17" / f"rollout-2030-03-17T17-46-40-{thread}.jsonl"
+rollout.parent.mkdir(parents=True, exist_ok=True)
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+count = {"type": "token_count", "info": None, "rate_limits": json.loads((own / "limits.json").read_text())}
+with rollout.open("a") as out:
+    out.write(json.dumps({"timestamp": now, "ordinal": 1, "type": "event_msg", "payload": count}) + "\n")
+if "slow" in prompt and "clarp-account-recovery" not in prompt:
+    time.sleep(60)
+say(type="item.completed", item={"id": "item_0", "type": "agent_message", "text": "done"})
+say(type="turn.completed", usage={"input_tokens": 10, "output_tokens": 2})
+"#;
+
+#[test]
+fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_owner_says_so() {
+    const KEEPER: &str = "/janitors/clarp-quota-monitor";
+    // A Host that keeps the logins itself, with the owner's selector for Codex (a stand-in:
+    // it writes down that it was asked and says that an account serves), and a stand-in Codex
+    // whose five hours are all used.
+    let host_of = |name: &str| {
+        let place = Place::new(name);
+        let at = |file: &str| place.root.join(file);
+        let own = at("codex-own");
+        std::fs::create_dir_all(&own).unwrap();
+        let tokens = json!({ "account_id": "an-account", "access_token": "a-token" });
+        let login = json!({ "auth_mode": "chatgpt", "tokens": tokens });
+        std::fs::write(own.join("auth.json"), login.to_string()).unwrap();
+        let seconds = now_ms() / 1000;
+        let window = |used: f64, minutes: i64, resets: i64| json!({ "used_percent": used, "window_minutes": minutes, "resets_at": resets });
+        let record = json!({
+            "limit_id": "codex", "limit_name": null,
+            "primary": window(100.0, 300, seconds + 4 * 3_600),
+            "secondary": window(10.0, 10_080, seconds + 96 * 3_600),
+            "credits": { "has_credits": false, "unlimited": false, "balance": null },
+            "individual_limit": null, "spend_control_reached": null, "plan_type": "pro",
+            "rate_limit_reached_type": null,
+        });
+        std::fs::write(own.join("limits.json"), record.to_string()).unwrap();
+        program(&at("codex"), CODEX_SAYS_ITS_LIMITS_SLOWLY);
+        let asked = at("asked");
+        let selector = at("selector");
+        let script = format!(
+            "#!/bin/sh\ncat >> \"{}\"\necho >> \"{}\"\nprintf '%s' '{{\"available\": true}}'\n",
+            asked.display(),
+            asked.display()
+        );
+        program(&selector, &script);
+        let owners = at("owner.toml");
+        let named = format!(
+            "[agents]\ncodex_account_switch_command = [\"{}\"]\n",
+            selector.display()
+        );
+        std::fs::write(&owners, named).unwrap();
+        (place, own, asked, owners)
+    };
+    let start = |place: &Place, own: &std::path::Path, owners: &std::path::Path| {
+        let codex = place.root.join("codex");
+        let world = [
+            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+            ("CODEX_HOME", own.to_str().unwrap()),
+        ];
+        let more = [
+            "--accounts",
+            "select",
+            "--speech-keys",
+            owners.to_str().unwrap(),
+        ];
+        place.start_in("", &more, &world)
+    };
+    let set = |host: &Host, mode: &str| {
+        let keeper = host.get(KEEPER)["janitor"].clone();
+        let mut options = keeper["options"].clone();
+        options["recovery_mode"] = json!(mode);
+        let asked = json!({ "expected_revision": keeper["revision"], "options": options });
+        let (status, set) = host.ask("POST", &format!("{KEEPER}/configure"), Some(&asked));
+        assert_eq!(status, 200, "{set}");
+        let on = json!({ "expected_revision": set["janitor"]["revision"], "enabled": true });
+        let (status, turned) = host.ask("POST", &format!("{KEEPER}/enabled"), Some(&on));
+        assert_eq!(status, 200, "{turned}");
+    };
+    let runs = |host: &Host| host.get(&format!("{KEEPER}/runs"))["runs"].clone();
+    let lines = |file: &std::path::Path| std::fs::read_to_string(file).unwrap_or_default();
+
+    // AT ONCE: a turn of Codex runs when the keeper finds the five hours used up. The pool is
+    // asked to recover: what runs is stopped, the selector is asked once, the turn is taken up.
+    let (place, own, asked, owners) = host_of("quota-recovers");
+    let host = start(&place, &own, &owners);
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    host.send(&cody, "slow work", "u-1");
+    wait_for("the windows to be shown", || {
+        let shown = host.get("/backend-usage")["providers"]["codex"]["windows"].clone();
+        shown.as_array().is_some_and(|windows| !windows.is_empty())
+    });
+    set(&host, "automatic");
+    wait_for("the selector to be asked", || !lines(&asked).is_empty());
+    wait_for("the turn to be taken up and done", || {
+        host.state(&cody) == "done"
+    });
+    wait_for("the run to be kept", || {
+        runs(&host)[0]["status"] == "completed"
+    });
+    let run = runs(&host)[0].clone();
+    assert_eq!(run["demand_result"]["reason"], "codex: recovering", "{run}");
+    assert_eq!(lines(&asked).lines().count(), 1, "{}", lines(&asked));
+    drop(host);
+    let receipts = kept_records(&place, "quota-keeper-receipt");
+    let receipt = receipts.values().next().unwrap();
+    assert_eq!(
+        receipt["payload"]["recovery"],
+        json!({ "status": "recovering" })
+    );
+
+    // WHEN THE OWNER SAYS SO: the keeper asks by a card in its own session; nothing is
+    // recovered until the owner accepts it, and then once.
+    let (place, own, asked, owners) = host_of("quota-asks");
+    let host = start(&place, &own, &owners);
+    let made = host.post("/agents", json!({ "name": "Cody", "backend": "codex" }));
+    let cody = made["session"].as_str().unwrap().to_string();
+    host.send(&cody, "quick work", "u-1");
+    wait_for("the turn to be done", || host.state(&cody) == "done");
+    set(&host, "ask");
+    let cards = |host: &Host| {
+        let listed = host.get("/artifacts?session=clarp-quota-monitor")["artifacts"].clone();
+        listed.as_array().cloned().unwrap_or_default()
+    };
+    wait_for("the card", || !cards(&host).is_empty());
+    let card = cards(&host)[0].clone();
+    assert_eq!(card["title"], "Codex quota exhausted", "{card}");
+    assert_eq!(
+        card["decision"]["question"],
+        "Allow the configured account selector to recover unfinished codex turns?"
+    );
+    let asked_for = &card["payload"]["quota_recovery"];
+    assert_eq!(asked_for["provider"], "codex");
+    wait_for("the run to be kept", || {
+        runs(&host)[0]["status"] == "completed"
+    });
+    assert_eq!(
+        runs(&host)[0]["demand_result"]["reason"],
+        "codex: awaiting_approval"
+    );
+    let decision = card["decision"]["decision_id"].as_str().unwrap();
+    let accepted =
+        json!({ "choice": "accepted", "expected_revision": card["decision"]["revision"] });
+    let (status, said) = host.ask(
+        "POST",
+        &format!("/decisions/{decision}/resolve"),
+        Some(&accepted),
+    );
+    assert_eq!(status, 200, "{said}");
+    drop(host);
+    let receipts = kept_records(&place, "quota-keeper-receipt");
+    let receipt = receipts.values().next().unwrap();
+    assert_eq!(
+        receipt["payload"]["recovery"]["status"],
+        "awaiting_approval"
+    );
+    assert_eq!(
+        receipt["payload"]["recovery"]["artifact_id"],
+        card["artifact_id"]
+    );
+    // The keeper's next look, which comes at once here: the accepted card is acted on, once.
+    // Nothing of Codex runs: there is nothing to take up, and the selector is not asked.
+    let mut lane = kept_records(&place, "quota-keeper-lane")
+        .remove("quota-keeper")
+        .unwrap();
+    lane["next_run_at"] = json!(1);
+    keep_record(&place, "quota-keeper-lane", "quota-keeper", &lane);
+    let host = start(&place, &own, &owners);
+    wait_for("the next look", || {
+        runs(&host).as_array().unwrap().len() == 2
+    });
+    drop(host);
+    let id = card["artifact_id"].as_str().unwrap();
+    let acted = kept_records(&place, "quota-keeper-approval");
+    assert_eq!(acted[id]["status"], "nothing_to_resume", "{acted:?}");
+    assert_eq!(lines(&asked), "");
+}
