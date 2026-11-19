@@ -346,7 +346,7 @@ fn the_keepers_lane_tells_keeps_and_waits_as_the_python_host_does() {
             assert_eq!(json!(next), step["next_run_at"], "{at}");
         }
     }
-    assert_eq!((ticks, runs, pushed), (23, 19, 17));
+    assert_eq!((ticks, runs, pushed), (26, 22, 18));
 }
 
 /// A window whose time of seeing is nothing: the Python Host breaks its look there, after

@@ -11,6 +11,7 @@ import runner
 RUNS = {
     'kernel': ['test', '-p', 'clarp-kernel', '--test', 'quota_keeper_vectors'],
     'host': ['test', '--test', 'host', '--', 'the_quota_keeper_tells_the_owner_once_where_a_window_runs_low'],
+    'due': ['test', '-p', 'clarp-kernel', '--lib', 'janitors::quota::tests'],
 }
 Q = 'clarp-kernel/src/janitors/quota.rs'
 K = 'clarp-host/src/quota_keeper.rs'
@@ -25,11 +26,14 @@ B = 'clarp-host/src/janitors.rs'
 #     Host that keeps the logins with the owner's seats tool, or a push that fails, which the pusher never does.
 #   quota_keeper.rs, that a receipt kept already is not made again: a crossing needs a newer reading than the one
 #     kept, so the rule never makes one id twice; the guard is the Python Host's insert-or-ignore.
-#   janitors.rs, that a change of a janitor disarms the keeper: planted, it was MISSED twice (runs 44490948474,
-#     44494470913, the second with the runner looking every 100 ms; the whole test took 1.3 s): a Host test cannot
-#     tell a runner that has not looked yet from one that looked, found nobody keeping and was not disarmed, without
-#     waiting on the runner's clock. Held by reading: the one path that turns a janitor on, off or sets it anew is
-#     `Desk::change`, and it disarms.
+#   janitors.rs, that keeping the book raises the count of its writes (`changes`): planted, a Host test cannot tell a
+#     runner that has not looked yet from one that looked and was armed at the old count, without waiting on the
+#     runner's clock (two runs MISSED it as a side call, 44490948474 and 44494470913). The rule that a moved count
+#     makes a look due is the kernel's (`quota::due`), planted below; the count is raised in the one function that
+#     writes the book (`keep`), which every change goes through.
+#   quota_keeper.rs, a run the book refuses to complete is closed as failed, and a push the pusher never answers is
+#     left to be tried again: neither happens to a Host whose pusher runs and whose results are in their bounds,
+#     which is every Host a test starts.
 #   quota_keeper.rs, the moment a look is due (`if now < next`): a wrong one looks again two seconds later, which a
 #     test sees only by waiting on a clock it cannot move.
 PLANTS = [
@@ -59,6 +63,8 @@ PLANTS = [
     (Q, 'kernel', 'a keeper set anew forgets when the last look was', '            last_check: kept.last_check,', '            last_check: None,'),
     (Q, 'kernel', 'a look is not counted as the last', '        self.last_check = Some(now_ms);', ''),
     (Q, 'kernel', 'the interval grows to a day where the keeper keeps it fixed', '        let bounds = (base, Some(longest));', '        let bounds = (base, None);'),
+    (Q, 'due', 'a change of a janitor leaves the keeper armed', '    armed.is_none_or(|(at, count)| now_ms >= at || changes != count)', '    armed.is_none_or(|(at, _)| now_ms >= at)'),
+    (Q, 'due', 'a keeper armed is looked at before its moment', '    armed.is_none_or(|(at, count)| now_ms >= at || changes != count)', '    armed.is_none_or(|(at, count)| now_ms + 1 >= at || changes != count)'),
     # ---- the Host
     (B, 'host', 'the runner does not look at the keeper', '    crate::quota_keeper::look(app);', ''),
     (B, 'host', "the book's tables are kept in its one record too", '                .and_then(|fields| fields.remove(table))', '                .and_then(|fields| fields.get(table).cloned())'),
