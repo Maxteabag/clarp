@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
@@ -243,7 +243,7 @@ pub(crate) fn pcm(decoder: &[String], audio: &[u8]) -> Result<Vec<u8>, String> {
     let Some((program, given)) = decoder.split_first() else {
         return Err("ffmpeg is not installed".to_string());
     };
-    let started = Command::new(program)
+    let started = clarp_child::command(program)
         .args(given)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -667,6 +667,16 @@ mod tests {
             }
         }
         state.iter().map(|word| format!("{word:08x}")).collect()
+    }
+
+    #[test]
+    fn speech_child_drops_the_host_token() {
+        if crate::run_with_fixture_host_token("chirp::tests::speech_child_drops_the_host_token") {
+            return;
+        }
+        let script = "test -z \"${CLARP_HOST_TOKEN+x}\" || exit 9; exec cat";
+        let args = vec!["/bin/sh".into(), "-c".into(), script.into()];
+        assert_eq!(pcm(&args, b"sample").unwrap(), b"sample");
     }
 
     #[test]

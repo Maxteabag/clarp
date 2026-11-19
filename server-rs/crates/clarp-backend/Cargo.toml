@@ -6,6 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+clarp-child.workspace = true
 clarp-kernel.workspace = true
 clarp-speech.workspace = true
 clarp-spool.workspace = true

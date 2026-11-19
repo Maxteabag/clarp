@@ -104,13 +104,38 @@ fn constructs_command(source: &str) -> bool {
     commands.found
 }
 
-fn inspect(dir: &Path, door: &Path, offenders: &mut Vec<std::path::PathBuf>) {
+// Paths are relative to the workspace. Exemptions apply to one file, never
+// to an entire dependency (in particular the shim's linked protocol library).
+const EXEMPT: &[(&str, &str)] = &[
+    (
+        "crates/clarp-child/src/lib.rs",
+        "Owns the standard command constructor and common environment.",
+    ),
+    (
+        "crates/clarp-host/src/child.rs",
+        "Builds the PTY adapter with the common environment.",
+    ),
+    (
+        "crates/clarp-shim/src/main.rs",
+        "Standalone shim executable starts the assigned tool after the Host supplied its environment.",
+    ),
+    (
+        "crates/clarp-shim/src/opencode.rs",
+        "Only the shim binary's main declares this module and runs the OpenCode driver; it is absent from the linked protocol library.",
+    ),
+];
+
+fn inspect(
+    dir: &Path,
+    exempt: &BTreeSet<std::path::PathBuf>,
+    offenders: &mut Vec<std::path::PathBuf>,
+) {
     for entry in std::fs::read_dir(dir).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
-            inspect(&path, door, offenders);
+            inspect(&path, exempt, offenders);
         } else if path.extension().is_some_and(|ext| ext == "rs")
-            && path != door
+            && !exempt.contains(&path)
             && constructs_command(&std::fs::read_to_string(&path).unwrap())
         {
             offenders.push(path);
@@ -118,14 +143,99 @@ fn inspect(dir: &Path, door: &Path, offenders: &mut Vec<std::path::PathBuf>) {
     }
 }
 
+fn exemptions(workspace: &Path, entries: &[(&str, &str)]) -> BTreeSet<std::path::PathBuf> {
+    entries
+        .iter()
+        .map(|(path, reason)| {
+            assert!(!reason.trim().is_empty(), "missing reason for {path}");
+            let file = workspace.join(path);
+            assert!(file.is_file(), "missing exempt file {path}");
+            file
+        })
+        .collect()
+}
+
 #[test]
 fn production_commands_start_at_the_child_constructor() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let host = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let metadata = std::process::Command::new(env!("CARGO"))
+        .args([
+            "metadata",
+            "--no-deps",
+            "--locked",
+            "--offline",
+            "--format-version",
+            "1",
+        ])
+        .current_dir(host)
+        .output()
+        .unwrap();
+    assert!(
+        metadata.status.success(),
+        "{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+    let manifest: serde_json::Value = serde_json::from_slice(&metadata.stdout).unwrap();
+    let workspace = Path::new(manifest["workspace_root"].as_str().unwrap());
+    let exempt = exemptions(workspace, EXEMPT);
+    let packages = manifest["packages"].as_array().unwrap();
+    let mut read = BTreeSet::new();
     let mut offenders = Vec::new();
-    inspect(&src, &src.join("child.rs"), &mut offenders);
+    for package in packages {
+        let dir = Path::new(package["manifest_path"].as_str().unwrap())
+            .parent()
+            .unwrap();
+        let src = dir.join("src");
+        inspect(&src, &exempt, &mut offenders);
+        for target in package["targets"].as_array().unwrap() {
+            if target["kind"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k == "lib" || k == "bin")
+            {
+                assert!(
+                    Path::new(target["src_path"].as_str().unwrap()).starts_with(&src),
+                    "unexamined target {target}"
+                );
+            }
+        }
+        read.insert(dir.to_path_buf());
+    }
+    for member in packages {
+        let dir = Path::new(member["manifest_path"].as_str().unwrap())
+            .parent()
+            .unwrap();
+        assert!(
+            read.contains(dir),
+            "workspace crate was never inspected: {}",
+            dir.display()
+        );
+    }
+    // Cargo --no-deps also lists local dependency paths. A crate outside
+    // the set examined above must not silently fall out of coverage.
+    for package in packages {
+        for dependency in package["dependencies"].as_array().unwrap() {
+            if let Some(dir) = dependency["path"].as_str() {
+                assert!(
+                    read.contains(Path::new(dir)),
+                    "unexamined local dependency {dir}"
+                );
+            }
+        }
+    }
     assert!(
         offenders.is_empty(),
-        "Use the constructors in child.rs: {offenders:?}"
+        "Use the shared command constructors: {offenders:?}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "missing reason")]
+fn a_named_exemption_must_explain_the_process_boundary() {
+    exemptions(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        &[("src/lib.rs", " ")],
     );
 }
 
@@ -166,7 +276,7 @@ fn the_guard_reports_production_files_even_beside_or_after_test_modules() {
     std::fs::write(&door, text).unwrap();
     std::fs::write(&other, text).unwrap();
     let mut offenders = Vec::new();
-    inspect(&dir, &door, &mut offenders);
+    inspect(&dir, &BTreeSet::from([door]), &mut offenders);
     std::fs::remove_dir_all(&dir).unwrap();
     assert_eq!(offenders, [other]);
 }
