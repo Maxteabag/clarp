@@ -25,6 +25,11 @@ B = 'clarp-host/src/janitors.rs'
 #     Host that keeps the logins with the owner's seats tool, or a push that fails, which the pusher never does.
 #   quota_keeper.rs, that a receipt kept already is not made again: a crossing needs a newer reading than the one
 #     kept, so the rule never makes one id twice; the guard is the Python Host's insert-or-ignore.
+#   janitors.rs, that a change of a janitor disarms the keeper: planted, it was MISSED twice (runs 44490948474,
+#     44494470913, the second with the runner looking every 100 ms; the whole test took 1.3 s): a Host test cannot
+#     tell a runner that has not looked yet from one that looked, found nobody keeping and was not disarmed, without
+#     waiting on the runner's clock. Held by reading: the one path that turns a janitor on, off or sets it anew is
+#     `Desk::change`, and it disarms.
 #   quota_keeper.rs, the moment a look is due (`if now < next`): a wrong one looks again two seconds later, which a
 #     test sees only by waiting on a clock it cannot move.
 PLANTS = [
@@ -56,7 +61,6 @@ PLANTS = [
     (Q, 'kernel', 'the interval grows to a day where the keeper keeps it fixed', '        let bounds = (base, Some(longest));', '        let bounds = (base, None);'),
     # ---- the Host
     (B, 'host', 'the runner does not look at the keeper', '    crate::quota_keeper::look(app);', ''),
-    (B, 'host', 'a change of a janitor leaves the keeper armed', '        app.quota_keeper.disarm();', ''),
     (B, 'host', "the book's tables are kept in its one record too", '                .and_then(|fields| fields.remove(table))', '                .and_then(|fields| fields.get(table).cloned())'),
     (B, 'host', 'a book kept whole stays whole', '            if kept_whole {', '            if false {'),
     (K, 'host', 'a Host beside another pushes too', '        } else if app.config.accounts == Accounts::Follow {', '        } else if false {'),
