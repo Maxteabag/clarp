@@ -532,6 +532,96 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
     wait_for("the agent to be done", || host.state(&session) == "done");
 }
 
+/// A Stop while another message waits (R92, the Python Host's PR 451): the turn that ran is
+/// the one that ends, and says so by its own trace; what waits stays waiting, its own.
+#[test]
+fn a_stop_while_another_message_waits_ends_the_turn_that_ran_by_its_own_trace() {
+    let place = Place::new("stop-trace");
+    let host = place.start();
+    let session = host.new_agent("Halter");
+    let heard = host.listen();
+    let ran = host.send(&session, "sleep 60", "m1");
+    let trace = ran["trace_id"].as_str().unwrap_or("").to_string();
+    assert!(!trace.is_empty(), "{ran}");
+    wait_for("the turn to run", || host.state(&session) == "thinking");
+    let waits = host.post(
+        "/send",
+        json!({ "session": session, "text": "later", "client_msg_id": "m2", "queue_if_busy": true }),
+    );
+    assert_eq!(waits["queued"], true, "{waits}");
+
+    let stopped = host.post("/stop", json!({ "session": session }));
+    assert_eq!(stopped["terminated"], 1, "{stopped}");
+    let ended = |heard: &[Value]| -> Vec<Value> {
+        heard
+            .iter()
+            .filter(|event| {
+                event["type"] == "agent-state"
+                    && event["session"] == session
+                    && event["kind"] == "interrupted"
+            })
+            .cloned()
+            .collect()
+    };
+    wait_for("the turn that ran to end", || {
+        !ended(&heard.lock().unwrap()).is_empty()
+    });
+    for event in ended(&heard.lock().unwrap()) {
+        assert_eq!(
+            (&event["detail"]["source"], &event["detail"]["trace_id"]),
+            (&json!("user_stop"), &json!(trace)),
+            "{event}"
+        );
+    }
+    // What waited is still waiting, unanswered, and no turn of it ended.
+    let held = host.get(&format!("/turn-queue?session={session}"));
+    assert_eq!(held["items"].as_array().unwrap().len(), 1, "{held}");
+    assert_eq!(held["items"][0]["id"], "m2");
+    let conversation = host.conversation(&session);
+    assert!(!conversation.contains(&said("user", "later")));
+    assert!(!conversation.contains(&said("assistant", "later")));
+}
+
+/// A job a worker registers names the turn it was registered in, and between turns none (R92,
+/// the Python Host's PR 451: there it named the last turn long after it had settled).
+#[test]
+fn a_job_registered_between_turns_names_no_trace_and_one_in_a_turn_names_that_turn() {
+    let place = Place::new("job-trace");
+    let host = place.start_with("", &["--jobs-checked-every-ms", "200"]);
+    let session = host.new_agent("Builder");
+    let dir = place.root.clone();
+    host.send(&session, "hello", "m1");
+    wait_for("the turn to be done", || host.state(&session) == "done");
+    let mut worker = Command::new("sleep").arg("60").spawn().unwrap();
+    let pid = worker.id();
+    let register = |id: &str| {
+        let args = [
+            "clarp-agent-bg",
+            &session,
+            "job-upsert",
+            id,
+            "build",
+            "Build it",
+            "the whole thing",
+        ];
+        let (code, _, said) = tool(&host, &dir, Some(pid), &args);
+        assert_eq!(code, 0, "{said}");
+        host.get(&format!("/background-jobs/{id}"))
+    };
+    let between = register("between-1");
+    assert_eq!(between["started_trace_id"], "", "{between}");
+
+    let running = host.send(&session, "sleep 60", "m2");
+    let trace = running["trace_id"].as_str().unwrap_or("").to_string();
+    assert!(!trace.is_empty(), "{running}");
+    wait_for("the turn to run", || host.state(&session) == "thinking");
+    let within = register("within-1");
+    assert_eq!(within["started_trace_id"], json!(trace), "{within}");
+    host.post("/stop", json!({ "session": session }));
+    let _ = worker.kill();
+    let _ = worker.wait();
+}
+
 /// Runs one of an agent's own tools the way a worker would: the Host's binary under the tool's
 /// name, told where the Host is. Answers the exit code and what was printed.
 fn tool(

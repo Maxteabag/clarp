@@ -213,19 +213,34 @@ fn failure(reason: &str, kind: &str, model: &str) -> (String, failures::Told) {
     )
 }
 
-/// What an ended turn's state says about how it ended. `backend` and `model` are the agent's.
-fn ending_detail(last: &Settled, backend: &str, model: &str) -> Value {
+/// What an ended turn's state says about how it ended. `backend` and `model` are the agent's;
+/// `end` is the turn's own end, where it is known, which names its trace.
+fn ending_detail(last: &Settled, backend: &str, model: &str, end: Option<&TurnEnd>) -> Value {
+    // The trace of the turn that ended, and of no other (R92, the Python Host's PR 451).
+    let trace = end
+        .filter(|end| end.turn == last.id.0)
+        .and_then(|end| end.trace_id.clone())
+        .unwrap_or_default();
     match &last.outcome {
-        Outcome::Stopped { by } => json!({
-            "message": "Turn stopped",
-            "source": "user_stop",
-            "stop_actor": by,
-            "stop_actor_verified": false,
-            "stop_reason": "",
-        }),
+        Outcome::Stopped { by } => {
+            let mut detail = json!({
+                "source": "user_stop",
+                "message": "Turn stopped",
+                "stop_actor": by,
+                "stop_actor_verified": false,
+                "stop_reason": "",
+            });
+            // A Stop names the turn it took from the slot, where one ran.
+            if !trace.is_empty() {
+                detail["trace_id"] = json!(trace);
+            }
+            detail
+        }
         Outcome::Failed { reason, kind } => {
             let (kind, told) = failure(reason, kind, model);
             json!({
+                // Every failure names its turn's trace.
+                "trace_id": trace,
                 // Tries against failures that pass: a wait for an account is none.
                 "attempts": last.attempts.saturating_sub(last.account_waits).max(1),
                 "dispatch": backend,
@@ -324,7 +339,7 @@ pub fn state(
             }
             detail
         }
-        (None, Some(last)) => ending_detail(last, backend, &record.model),
+        (None, Some(last)) => ending_detail(last, backend, &record.model, ended),
         (None, None) => json!({ "session": record.session }),
     };
     json!({
@@ -374,7 +389,7 @@ pub fn removed(record: &AgentRecord, at_ms: i64) -> [Value; 2] {
 }
 
 /// The state a Stop leaves, as the route that took the Stop tells it at once.
-pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
+pub fn stopped(record: &AgentRecord, status: &Status, ended: Option<&TurnEnd>) -> Option<Value> {
     let last = status.last.as_ref()?;
     let Outcome::Stopped { .. } = last.outcome else {
         return None;
@@ -386,7 +401,7 @@ pub fn stopped(record: &AgentRecord, status: &Status) -> Option<Value> {
         "persona": record.persona,
         "kind": "interrupted",
         "ts": state_since(record, status),
-        "detail": ending_detail(last, "", ""),
+        "detail": ending_detail(last, "", "", ended),
     }))
 }
 
@@ -2388,7 +2403,7 @@ mod tests {
             "scripted"
         );
         assert_eq!(activity(&record(), &done)["summary"], "Done");
-        assert!(stopped(&record(), &done).is_none());
+        assert!(stopped(&record(), &done, None).is_none());
 
         let halted = status(
             None,
@@ -2396,9 +2411,45 @@ mod tests {
                 by: "user".to_string(),
             }),
         );
-        let at_once = stopped(&record(), &halted).unwrap();
+        let at_once = stopped(&record(), &halted, None).unwrap();
         assert_eq!(at_once["kind"], "interrupted");
         assert_eq!(at_once["detail"]["source"], "user_stop");
+        // A Stop names the trace of the turn it stopped, where its end is known, and no other
+        // (R92, the Python Host's PR 451): never the trace of a turn before it.
+        assert!(at_once["detail"].get("trace_id").is_none());
+        let of_it = stopped(&record(), &halted, Some(&ended())).unwrap();
+        assert_eq!(of_it["detail"]["trace_id"], "trace-1");
+        let mut earlier = ended();
+        earlier.turn = 0;
+        let not_of_it = stopped(&record(), &halted, Some(&earlier)).unwrap();
+        assert!(not_of_it["detail"].get("trace_id").is_none());
+        assert_eq!(
+            state(&record(), &halted, "claude", Some(&ended()))["detail"]["trace_id"],
+            "trace-1"
+        );
+        // A failed turn names its trace, first, on every failure.
+        let failed = status(
+            None,
+            Some(Outcome::Failed {
+                reason: "stream error: connection reset by peer".to_string(),
+                kind: String::new(),
+            }),
+        );
+        let told = state(&record(), &failed, "claude", Some(&ended()));
+        assert_eq!(told["detail"]["trace_id"], "trace-1");
+        assert_eq!(
+            told["detail"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .next()
+                .map(String::as_str),
+            Some("trace_id")
+        );
+        assert_eq!(
+            state(&record(), &failed, "claude", Some(&earlier))["detail"]["trace_id"],
+            ""
+        );
         assert!(
             at_once.get("status_text").is_none(),
             "the route's word has no status text"
