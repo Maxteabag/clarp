@@ -121,3 +121,29 @@ def test_a_reply_with_no_turn_begun_by_its_time_takes_none():
     index = _index(("next", 6_500, None))
     assert index.trace_at(BASE + 5_000, reply=True) == ""
     assert index.trace_at(BASE + 5_000) == "next"                     # a prompt keeps the slack
+
+
+def test_a_settled_turn_with_a_twin_row_that_never_settled_reaches_two_minutes_past_its_settle():
+    """The two turn rows a prompt has a second apart (R92): one settled, its twin never. The turn
+    ended at that settle (TurnIndex.ended_at, the one definition), so a reply finds it for the two
+    minutes after it and not for the six hours an unsettled row would have had."""
+    index = _index(("prompt", 1_000, 20_000), ("prompt", 2_000, None))
+    assert index.trace_at(BASE + 20_000 + 120_000, reply=True) == "prompt"
+    assert index.trace_at(BASE + 20_000 + 120_001, reply=True) == ""
+    assert index.ended_at("prompt") == BASE + 20_000
+
+
+def test_a_turn_that_never_settled_ends_at_the_next_turns_start_and_reaches_two_minutes_past_it():
+    index = _index(("stuck", 1_000, None), ("stuck", 2_000, None), ("next", 600_000, 610_000))
+    assert index.ended_at("stuck") == BASE + 600_000
+    assert index.trace_at(BASE + 599_999, reply=True) == "stuck"
+    assert index.trace_at(BASE + 600_000, reply=True) == "next"
+
+
+def test_the_latest_turn_that_never_settled_still_has_six_hours():
+    """With no settle and no later turn there is no end yet: a running turn, or one whose end was
+    never recorded. Its reach is six hours from its start, as before."""
+    index = _index(("running", 1_000, None))
+    assert index.ended_at("running") is None
+    assert index.trace_at(BASE + 1_000 + 6 * 3_600_000, reply=True) == "running"
+    assert index.trace_at(BASE + 1_000 + 6 * 3_600_000 + 1, reply=True) == ""
