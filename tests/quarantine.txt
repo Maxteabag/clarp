@@ -25,5 +25,4 @@ tests/integration/test_server_di.py::test_server_home_terminal_runs_shell_in_hom
 
 # load: timing-sensitive under xdist on a busy host; pass when run alone
 tests/integration/test_task_goal_recovery.py::test_detached_job_wakes_its_owner_through_every_failure[finishes]  # load
-tests/unit/test_turn_dispatch.py::test_queue_during_claim_to_spawn_window_stays_serial  # load
 tests/unit/test_turn_dispatch.py::test_idle_queue_request_retry_does_not_duplicate_started_turn  # load
