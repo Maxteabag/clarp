@@ -54,7 +54,7 @@ def main() -> int:
     session = app_session()
     try:
         agent = agents_db.resolve_for_hook(
-            backend_session_id=backend_session_id,
+            hook="PostToolUse", backend_session_id=backend_session_id,
             session=session or None,
         )
     except Exception as exc:

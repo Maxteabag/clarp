@@ -117,7 +117,7 @@ def main() -> int:
     # Resolve the agent. Third-party Claude Code (not in DB) → no-op.
     try:
         agent = _agents.resolve_for_hook(
-            backend_session_id=backend_session_id or None,
+            hook="UserPromptSubmit", backend_session_id=backend_session_id or None,
             session=session or None,
         )
     except Exception:
@@ -128,9 +128,10 @@ def main() -> int:
     agent_id = agent["agent_id"]
     try:
         # Stamp the live runtime row with the backend_session_id UUID. Idempotent.
-        # Only Claude agents converse in a Claude session. A Codex or AGY
-        # agent reaches this hook through a Claude fallback model, whose UUID
-        # must never replace the agent's own thread.
+        # Only Claude agents converse in a Claude session: a Codex or AGY agent's
+        # thread is never replaced by a Claude UUID. (Per-agent fallback models are
+        # gone since schema v101, so no Claude turn runs for such an agent; a claude
+        # started in its shell is foreign and never gets here: resolve_for_hook.)
         claude_agent = (agent.get("backend") or "claude") == "claude"
         if backend_session_id and claude_agent:
             try:
