@@ -115,21 +115,25 @@ def waiting_landings():
     return waiting
 
 
-@contextmanager
-def marker_for(description):
-    pid = os.getpid()
-    identity = f'{pid}-{process_start(pid)}'
-    marker = QUEUE / f'first-{identity}'
-    # Publish the fully written description, including its reservation type.
-    # Keep staging files outside the first-* namespace inspected by waiters.
-    temporary = QUEUE / f'.waiting-{identity}'
+def publish_marker(marker, description):
+    # Until the complete description is ready, waiters still see the old one.
+    temporary = marker.with_name('.' + marker.name)
     try:
         temporary.write_text(description + '\n')
         temporary.replace(marker)
-        yield identity
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def marker_for(description):
+    pid = os.getpid()
+    marker = QUEUE / f'first-{pid}-{process_start(pid)}'
+    try:
+        publish_marker(marker, description)
+        yield marker
     finally:
         marker.unlink(missing_ok=True)
-        temporary.unlink(missing_ok=True)
 
 
 def try_lock(lock):
@@ -172,13 +176,13 @@ def take_slot(lock, landing, description):
 def reserve(description):
     # The local wrapper alone owns the writing end of SSH stdin. EOF also
     # cancels a driver that dies while waiting behind another reservation.
-    with (QUEUE / 'lease-lock').open('a') as serial:
+    with marker_for(description) as marker, (QUEUE / 'lease-lock').open('a') as serial:
         while not try_lock(serial):
             if select.select([sys.stdin], [], [], RETRY_SECONDS)[0]:
                 return
-        with marker_for('lease ' + description) as identity:
-            print(identity, flush=True)
-            sys.stdin.buffer.read()
+        publish_marker(marker, 'lease ' + description)
+        print(marker.name.removeprefix('first-'), flush=True)
+        sys.stdin.buffer.read()
 
 
 def drive(host, checkout, who, command):
