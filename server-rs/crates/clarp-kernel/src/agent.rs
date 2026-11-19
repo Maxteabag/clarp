@@ -915,14 +915,6 @@ impl Agent {
                     let stops = self.user_stop_generation;
                     self.deliveries
                         .admit(turn.0, *message_seq, stops, revision, *at_ms);
-                    // One that has to wait is handed to the queue that keeps it: the Python
-                    // Host marks it so when its durable queue takes it.
-                    let waits = self.mailbox.iter().any(|queued| queued.id == turn)
-                        && (self.live.is_some() || self.paused);
-                    if waits {
-                        let next = crate::delivery::revision(self.at, 1);
-                        self.deliveries.hand(turn.0, next, *at_ms);
-                    }
                 }
             }
             _ => {
