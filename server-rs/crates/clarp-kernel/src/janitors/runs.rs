@@ -484,7 +484,7 @@ impl Book {
         let frozen = json!({
             "template_id": config.template_id, "scope": config.scope,
             "trigger_id": trigger.trigger_id, "trigger_version": trigger.trigger_version,
-            "config": trigger.config, "effective_chain": chain(&agent.backend, &agent.model, config),
+            "config": trigger.config, "effective_chain": self.model_policy.effective(&agent.session,&agent,config),
             "options": options,
         });
         let run = Run {
@@ -628,7 +628,9 @@ impl Book {
         let frozen = run.configuration.get("effective_chain");
         let frozen =
             frozen.filter(|chain| chain.as_object().is_some_and(|chain| !chain.is_empty()));
-        if frozen.is_some_and(|frozen| *frozen != chain(&agent.backend, &agent.model, config)) {
+        if frozen.is_some_and(|frozen| {
+            *frozen != self.model_policy.effective(&agent.session, &agent, config)
+        }) {
             return Err(stale(OTHER_MODEL));
         }
         let kept = Value::Object(config.options.clone());
@@ -771,18 +773,4 @@ impl Book {
         let own = self.newest_first(&agent.agent_id).into_iter();
         Ok(own.take(most).map(Run::shown).collect())
     }
-}
-
-/// Whose model a run is run by, as it was when the run was made. A job the Host does by
-/// itself has none.
-pub(super) fn chain(backend: &str, model: &str, config: &Config) -> Value {
-    let named =
-        |key: &str, word: &str| config.execution.get(key).and_then(Value::as_str) == Some(word);
-    if named("executor", "deterministic") || named("provider", "local") {
-        return json!({ "source": "deterministic", "chain": [], "revision": config.revision });
-    }
-    json!({
-        "source": "explicit", "chain": [{ "provider": backend, "model": model }],
-        "revision": config.revision,
-    })
 }

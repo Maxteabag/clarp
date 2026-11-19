@@ -1255,7 +1255,7 @@ impl Worker {
             // the recovery it waited in: the pool asks the selector for it and takes it up.
             if let Some((turn, since)) = actor.waits_for_an_account() {
                 let agent = self.setup.record.agent_id.clone();
-                let model = actor.profile().model.clone().unwrap_or_default();
+                let model = actor.turn_model().unwrap_or_default();
                 pool.carried(since, std::slice::from_ref(&agent));
                 pool.starting(&agent, turn, &model);
                 self.pooled = Some(turn);
@@ -2002,10 +2002,7 @@ impl Worker {
             // when the pool takes the turn up.
             Action::Launch(order) if self.setup.pool().is_some() => {
                 let now = self.now_ms();
-                let model = self
-                    .actor
-                    .as_ref()
-                    .and_then(|actor| actor.profile().model.clone());
+                let model = self.actor.as_ref().and_then(|actor| actor.turn_model());
                 let waits = self.setup.pool().is_some_and(|pool| {
                     let model = model.as_deref().unwrap_or("");
                     pool.starting(&self.setup.record.agent_id, order.turn, model)
@@ -2028,10 +2025,7 @@ impl Worker {
                 attempt,
                 socket,
             } if self.setup.pool().is_some() => {
-                let model = self
-                    .actor
-                    .as_ref()
-                    .and_then(|actor| actor.profile().model.clone());
+                let model = self.actor.as_ref().and_then(|actor| actor.turn_model());
                 let waits = self.setup.pool().is_some_and(|pool| {
                     let model = model.as_deref().unwrap_or("");
                     pool.starting(&self.setup.record.agent_id, turn, model)

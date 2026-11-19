@@ -481,6 +481,8 @@ struct Written {
 /// The turn that holds the agent, as the actor follows it.
 struct LiveTurn {
     opening: bool,
+    /// Managed primary pinned to this admission, including after recovery.
+    managed_model: Option<String>,
     turn: TurnId,
     /// The message this turn answers, and the id its app gave it.
     message_id: String,
@@ -1075,6 +1077,7 @@ impl Actor {
             let message = actor.message_at(message_seq)?;
             actor.live = Some(LiveTurn {
                 opening: opening_message(&message),
+                managed_model: message.managed_model.clone(),
                 turn,
                 last_row: message.id.clone(),
                 // The attempt that comes reads from the log what the turn has said.
@@ -1190,7 +1193,7 @@ impl Actor {
                     "" => failures::classify_error(reason),
                     kind => kind,
                 };
-                let model = self.profile.model.clone().unwrap_or_default();
+                let model = self.turn_model().unwrap_or_default();
                 let told = failures::told(kind, reason, &model, failures::Known::default());
                 let error = serde_json::json!({
                     "reason": kind,
@@ -1255,6 +1258,13 @@ impl Actor {
 
     pub fn profile(&self) -> &Profile {
         &self.profile
+    }
+
+    pub fn turn_model(&self) -> Option<String> {
+        self.live
+            .as_ref()
+            .and_then(|live| live.managed_model.clone())
+            .or_else(|| self.profile.model.clone())
     }
 
     /// Sets which model the agent's next turn runs with, and how much effort. A turn that
@@ -2538,7 +2548,7 @@ impl Actor {
             .map(|live| (live.message_id.clone(), live.origin.clone()))
             .unwrap_or_default();
         let name = turn_name(&message_id).to_string();
-        let model = self.profile.model.clone().unwrap_or_default();
+        let model = self.turn_model().unwrap_or_default();
         let mut closes = self
             .live
             .as_ref()
@@ -2767,7 +2777,10 @@ impl Actor {
             new_session: Some(self.profile.conversation_id.clone())
                 .filter(|name| backend_session.is_none() && !name.is_empty()),
             backend_session,
-            model: self.profile.model.clone(),
+            model: message
+                .managed_model
+                .clone()
+                .or_else(|| self.profile.model.clone()),
             effort: self.profile.effort.clone(),
             identity: told.and_then(|told| told.identity.clone()),
             // How to speak is told to a turn whose answer is read aloud, and to no other.
@@ -2807,6 +2820,7 @@ impl Actor {
         };
         self.live = Some(LiveTurn {
             opening: opening.is_some(),
+            managed_model: message.managed_model.clone(),
             turn,
             last_row,
             said: unfollowed(self.recorder.log(), turn)?,
@@ -2989,6 +3003,7 @@ impl Actor {
         }
         self.live = Some(LiveTurn {
             opening: opening_message(&message),
+            managed_model: message.managed_model.clone(),
             turn,
             client_id: message.told_id().to_string(),
             message_id: message.id,
@@ -3081,7 +3096,7 @@ impl Actor {
 
     fn model_waited_for(&self) -> Option<String> {
         self.for_its_model
-            .then(|| self.profile.model.clone().unwrap_or_default())
+            .then(|| self.turn_model().unwrap_or_default())
     }
 
     /// The turn that waits for an account, and since when it has, where one does.
@@ -3151,10 +3166,10 @@ impl Actor {
         let Some((turn, kind, reason)) = waits else {
             return Ok(out);
         };
+        let model = self.turn_model().unwrap_or_default();
         let Some(live) = self.live.as_mut().filter(|live| live.turn == turn) else {
             return Ok(out);
         };
-        let model = self.profile.model.clone().unwrap_or_default();
         let mut batch = self.recorder.batch();
         // What is said of the end, as of an attempt that failed and is not tried again.
         let told = failure_marker(Failure {
@@ -3239,7 +3254,11 @@ impl Actor {
             }
             out.damaged_lines += read.damaged.len();
 
-            let model = self.profile.model.clone().unwrap_or_default();
+            let model = live
+                .managed_model
+                .clone()
+                .or_else(|| self.profile.model.clone())
+                .unwrap_or_default();
             let accounts = self.profile.accounts;
             let mut batch = self.recorder.batch();
             let mut signals = Vec::new();

@@ -21,7 +21,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use super::book::{Agent, Book, World, model_fits, refused};
-use super::runs::{Run, activity_values, chain};
+use super::runs::{Run, activity_values};
 use super::{Refused, demand_roles, execution, option_values, template};
 
 /// How long a run that answers a request may be out before it is given up.
@@ -273,7 +273,7 @@ impl Book {
             "trigger_id": trigger.trigger_id, "trigger_version": trigger.trigger_version,
             "config": trigger.config, "context": context, "target_agent_id": target,
             "expires_at": now_ms + GIVEN_UP_AFTER_MS,
-            "effective_chain": chain(&agent.backend, &agent.model, config),
+            "effective_chain": self.model_policy.effective(&agent.session,&agent,config),
         });
         let run = Run {
             run_id: run_id.clone(),

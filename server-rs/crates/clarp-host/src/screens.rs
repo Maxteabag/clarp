@@ -146,14 +146,6 @@ async fn no_diagnostics() -> ApiError {
     not_built("Diagnostics of this kind are")
 }
 
-async fn janitor_policy() -> Json<Value> {
-    Json(kept("/janitor-policy"))
-}
-
-async fn no_janitors() -> ApiError {
-    not_built("Janitors are")
-}
-
 /// `GET /hotseat/status`: how the account seats stand, as they were last read. Nothing is
 /// read for it (`crate::seats`).
 async fn hotseat_status(State(app): State<App>) -> Json<Value> {
@@ -369,7 +361,6 @@ pub fn routes() -> Router<App> {
             "/diagnostics/settings",
             get(diagnostics).post(no_diagnostics),
         )
-        .route("/janitor-policy", get(janitor_policy).post(no_janitors))
         .route("/hotseat/status", get(hotseat_status))
         .route("/hotseat/desk", get(hotseat_desk))
         .route("/hotseat/resume", post(hotseat_resume))
