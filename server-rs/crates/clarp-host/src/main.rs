@@ -154,7 +154,7 @@ async fn serve(config: Config) -> Result<(), String> {
         telling: Telling::new(OwnerFile::new(config.speech_keys.clone())),
         tally,
         pools: pools.clone(),
-        log: clarp_host::unkept::Log::stderr(),
+        log: clarp_host::unkept::Log::stderr(clock.clone()),
     };
     // The pictures this Host ships: for the list of agents, and for the face a push shows.
     let faces = Arc::new(clarp_host::faces::Faces::new(config.static_dir.clone()));
