@@ -86,8 +86,22 @@ def arm(host, p, **continuation):
     )
 
 
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return Path(f"/proc/{pid}/stat").is_file() and " Z " not in Path(f"/proc/{pid}/stat").read_text()
+
+
 def wait_wake(host, count=1):
-    for _ in range(200):
+    """Until the wake has reached the dispatcher and the provider. By the event, not a time:
+    the bound is a deadlock guard only (it was 10 s, which a Host restart plus its recovery can
+    take on a loaded machine)."""
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
         with sqlite3.connect(host.root / "state.sqlite") as con:
             rows = con.execute(
                 "SELECT message_id,text FROM messages WHERE message_id LIKE 'u-task-goal-%'"
@@ -280,9 +294,19 @@ def test_detached_job_wakes_its_owner_through_every_failure(host, case):
                 os.kill(int(pid), signal.SIGKILL)
     elif case in ("finishes", "killed"):
         host.stop()
+        worker = job("worker_pid")
         if case == "killed":  # dies while the Host is down, without a receipt
-            os.killpg(os.getpgid(job("worker_pid")), signal.SIGKILL)
-        time.sleep(4)  # the work ends while the Host cannot hear it
+            os.killpg(os.getpgid(worker), signal.SIGKILL)
+        # The work ends while the Host cannot hear it: wait for that end itself (the worker
+        # records it in the database, or is gone), not for a time (it was a 4 s sleep, and on a
+        # loaded machine the work could still end after the Host was back). 60 s: a guard only.
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            ended = job("status") != "running" if case == "finishes" else not _alive(worker)
+            if ended:
+                break
+            time.sleep(0.05)
+        assert ended, "the work never ended while the Host was down"
         host.start()
     rows = wait_wake(host)  # also waits for the owner's actual reply
     p = host.request("/task-plans?session=rachel")["plans"][0]
