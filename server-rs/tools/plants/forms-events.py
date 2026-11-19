@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Wrong rules for form events, spoken form replies and countdown Updates."""
+import runner
+RUNS={'vectors':['test','--test','forms_events'], 'events':['test','--test','host','a_forms_events_are_private_append_only_and_exported_at_one_snapshot']}
+K='clarp-kernel/src/artifacts/form_events.rs'
+H='clarp-host/src/library/events.rs'
+T='clarp-host/src/artifact_tool.rs'
+PLANTS=[]
+
+
+def change(file,reason,old,new):
+    PLANTS.append((file,'vectors' if file==K else 'events',reason,old,new))
+
+
+for why,old,new in [
+    ('empty event batch accepted','.filter(|v| (1..=32)', '.filter(|v| (0..=32)'),
+    ('32nd record refused','.filter(|v| (1..=32)', '.filter(|v| (1..=31)'),
+    ('33rd record accepted','.filter(|v| (1..=32)', '.filter(|v| (1..=33)'),
+    ('malformed batch error changes','return Err("JSON object required");','return Err("object required");'),
+    ('nonobject row error changes','return Err("event record must be an object");','return Err("object required");'),
+    ('short ID accepted','16..=80','15..=80'),
+    ('shortest valid ID refused','16..=80','17..=80'),
+    ('longest valid ID refused','16..=80','16..=79'),
+    ('overlong ID accepted','16..=80','16..=81'),
+    ('underscore allowed in event ID',"c == b'-'","c != b'!'"),
+    ('largest safe integer refused','<= 9007199254740991','< 9007199254740991'),
+    ('first unsafe integer accepted','<= 9007199254740991','<= 9007199254740992'),
+    ('sequence field names time','safe("client_seq")','safe("client_at")'),
+    ('client time field names sequence','safe("client_at")','safe("client_seq")'),
+    ('nonobject event error changes','"event must be an object"','"invalid event"'),
+    ('last allowed byte refused','encoded.len() > 16384','encoded.len() >= 16384'),
+    ('first extra byte accepted','encoded.len() > 16384','encoded.len() > 16385'),
+    ('payload size counts characters','encoded.len() > 16384','encoded.chars().count() > 16384'),
+    ('payload content omitted from retry digest','data["version"], encoded','data["version"],0'),
+    ('draft disable refused','!key.is_null()','true'),
+    ('empty draft key accepted','1..=80','0..=80'),
+    ('longest draft key refused','1..=80','1..=79'),
+    ('overlong draft key accepted','1..=80','1..=81'),
+    ('missing draft key error changes','draft_key required; use null to disable','draft_key required'),
+    ('zero limit accepted','1..=100','0..=100'),
+    ('largest limit refused','1..=100','1..=99'),
+    ('overlarge limit accepted','1..=100','1..=101'),
+    ('cursor minimum moves','0..=i64::MAX as i128','1..=i64::MAX as i128'),
+    ('snapshot may precede cursor','after..=i64::MAX as i128','0..=i64::MAX as i128'),
+    ('maximum snapshot refused','after..=i64::MAX as i128','after..i64::MAX as i128'),
+]: change(K,why,old,new)
+for why,old,new in [
+    ('old ID silently accepts different event','digest != event.digest','digest == event.digest'),
+    ('version comparison inverted','data["version"] != v','data["version"] == v'),
+    ('receipt uses client sequence','"seq":seq}));','"seq":event.client_seq}));'),
+    ('pagination includes the exclusive cursor','<= after','< after'),
+    ('snapshot excludes last visible record','if seq > through','if seq >= through'),
+    ('page reports no continuation','more = true','more = false'),
+    ('page cursor stays at start','next = seq','next = after'),
+    ('global sequence jumps','seq.checked_add(1)','seq.checked_add(2)'),
+    ('session ordinal jumps','ordinal.checked_add(1)','ordinal.checked_add(2)'),
+    ('interleaved forms share a row namespace','key(id, &ordinal.to_string())','key("", &ordinal.to_string())'),
+    ('client receives a negative receipt','"accepted":true','"accepted":false'),
+]: change(H,why,old,new)
+for why,old,new in [
+    ('form config read skips the saved key','read(app, CONFIG, id.into())','read(app, CONFIG, "none".into())'),
+    ('new event receives another form ID','"artifact_id":id,"version":v,"event_id":event.id','"artifact_id":"","version":v,"event_id":event.id'),
+    ('stored event payload omitted','"event":event.value','"event":null'),
+    ('receipt output uses another event ID','"event_id":event.id,"seq":seq','"event_id":"","seq":seq'),
+    ('receipt is saved with another sequence','let receipt = (seq, event.digest)','let receipt = (seq+1, event.digest)'),
+    ('the batch remembers the wrong ordinal','position = Some((ordinal, seq))','position = Some((ordinal+1, seq))'),
+    ('snapshot falls back to the ordinal','through.unwrap_or(last.into())','through.unwrap_or(count.into())'),
+    ('more flag raised a record too soon','if events.len() == limit','if events.len()+1 == limit'),
+    ('next cursor leaks an extra event','next = seq;','next = seq+1;'),
+    ('read-only reports accept events','!= Some(&Value::Bool(true))','== Some(&Value::Bool(true))'),
+    ('form changes require read-only scope','scope: Scope::Limited','scope: Scope::Full'),
+    ('form id is ignored when indexing','format!("{}:{id}{suffix}", id.len())','format!("{}:{suffix}", id.len())'),
+]: change(H,why,old,new)
+for why,old,new in [
+    ('second page of export is lost','if page["has_more"] != true','if page["has_more"] == true'),
+    ('export mode allows group reads','.mode(0o600)','.mode(0o640)'),
+    ('snapshot receipt lies about export length','"events":total','"events":total+1'),
+    ('draft tracking cannot be disabled','(!key.is_empty()).then_some(key)','Some(key)'),
+    ('overwrite flag ignored','options.flags.contains("--overwrite")','false'),
+    ('no-overwrite refuses a new export','!overwrite && target.exists()','!overwrite || target.exists()'),
+]: change(T,why,old,new)
+if __name__=='__main__':
+    raise SystemExit(runner.main(__file__,RUNS,PLANTS))
