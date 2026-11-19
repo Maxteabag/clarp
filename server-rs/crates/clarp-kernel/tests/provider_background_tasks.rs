@@ -122,3 +122,21 @@ fn visits_rotate_across_eligible_runtime_bindings() {
     }
     assert_eq!(count, 320);
 }
+
+#[test]
+fn the_hook_returns_only_the_scoped_origin_and_background_turn_advice(){
+    let data:Value=serde_json::from_str(include_str!("fixtures/provider-hook.json")).unwrap();
+    let reference=data["contexts"][0].as_str().unwrap();
+    let rust=reference.replace("A process you detach with setsid or nohup outlives the turn but still belongs to the Clarp runtime service, so a runtime restart can kill it, and nothing reports its result to you.","A process you detach with setsid can outlive the turn and a Host restart; nothing reports its result to you.");
+    let mut count=0;
+    for row in data["cases"].as_array().unwrap(){
+        let answer=native::background_hook(row[1].as_str().unwrap(),row[2].as_bool().unwrap(),&row[0]);
+        let mut expected=json!({"hookEventName":"PreToolUse"});
+        if !row[3].is_null(){expected["updatedInput"]=row[3].clone();}
+        if !row[4].is_null(){expected["additionalContext"]=json!(rust);}
+        let expected=(!row[3].is_null()||!row[4].is_null()).then(||json!({"hookSpecificOutput":expected}));
+        assert_eq!(answer,expected,"{}",row[0]);
+        count+=1;
+    }
+    assert_eq!(count,117);
+}

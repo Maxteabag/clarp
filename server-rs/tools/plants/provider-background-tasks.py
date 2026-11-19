@@ -3,12 +3,12 @@ import runner
 
 RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"]}
 PLANTS=[
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'reject maximum length', '1..=160', '1..=159'),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'allow an extra byte', '1..=160', '1..=161'),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'lose hyphen from id grammar', "b'-' | b'_'", "b'.' | b'_'"),
-    ('clarp-kernel/src/provider_tasks.rs', 'rules', 'lose underscore from id grammar', "b'-' | b'_'", "b'-' | b'.'"),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'reject maximum length', '1..=160', '1..=159'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow an extra byte', '1..=160', '1..=161'),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'lose hyphen from id grammar', "b'-' | b'_'", "b'.' | b'_'"),
+    ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'lose underscore from id grammar', "b'-' | b'_'", "b'-' | b'.'"),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'job hash omits owner', 'hash.update(agent)', 'hash.update(tool)'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'job hash omits native', 'hash.update(native)', 'hash.update(tool)'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'job hash omits call', 'hash.update(tool)', 'hash.update(agent)'),

@@ -12,6 +12,7 @@ members = [
     "crates/clarp-spool",
     "crates/clarp-codec",
     "crates/clarp-kernel",
+    "crates/clarp-kernel/provider-hook",
     "crates/clarp-store-mem",
     "crates/clarp-store-sqlite",
     "crates/clarp-store-files",
@@ -28,6 +29,7 @@ clarp-child = { path = "crates/clarp-child" }
 clarp-ports = { path = "crates/clarp-ports" }
 clarp-codec = { path = "crates/clarp-codec" }
 clarp-store-mem = { path = "crates/clarp-store-mem" }
+clarp-provider-hook = { path = "crates/clarp-kernel/provider-hook" }
 clarp-kernel = { path = "crates/clarp-kernel" }
 clarp-backend = { path = "crates/clarp-backend" }
 clarp-actor = { path = "crates/clarp-actor" }

@@ -11,12 +11,7 @@ pub const RECORD_LIMIT: usize = 4 * 1024 * 1024;
 pub const MAX_ACTIONS: usize = 64;
 pub const OUTPUT_LIMIT: usize = 64 * 1024;
 const DAY: i64 = 86_400_000;
-pub fn valid_id(id: &str) -> bool {
-    (1..=160).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
-}
+pub use clarp_provider_hook::{background_hook, valid_id};
 pub fn job_id(agent: &str, native: &str, tool: &str) -> String {
     let mut hash = Sha256::new();
     hash.update(agent);

@@ -20,6 +20,7 @@
 //! (`server/lib/tool_explanation_shapes.py`), held by the `parts` and the `helpers` of
 //! `tests/fixtures/tool-explanation-vectors.json`.
 
+use crate::python::shell_quote;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -202,18 +203,6 @@ impl Part {
             activity.insert("input".to_string(), json!({"command": command}));
         }
         activity
-    }
-}
-
-/// A word as a shell is given it safely (`shlex.quote`).
-fn shell_quote(word: &str) -> String {
-    let plain = |sign: char| sign.is_ascii_alphanumeric() || "_@%+=:,./-".contains(sign);
-    if word.is_empty() {
-        "''".to_string()
-    } else if word.chars().all(plain) {
-        word.to_string()
-    } else {
-        format!("'{}'", word.replace('\'', "'\"'\"'"))
     }
 }
 
