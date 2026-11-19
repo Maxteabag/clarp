@@ -63,6 +63,8 @@ pub mod kind {
     /// A [`GoalRecord`](crate::goals::GoalRecord) as JSON: what one change set in one of the
     /// agent's plans.
     pub const GOAL: u16 = 400;
+    /// An event or keyed ledger index in the owner’s log.
+    pub const GOAL_LEDGER: u16 = 800;
     /// An [`ArtifactRecord`](crate::artifacts::ArtifactRecord) as JSON: an artifact of the
     /// agent's as a change left it.
     pub const ARTIFACT: u16 = 500;

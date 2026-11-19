@@ -2218,3 +2218,44 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     assert!(actor.expire_provider_links(archive, 401 + week).unwrap());
     assert!(actor.provider_session(archive).unwrap().links.is_empty());
 }
+
+#[test]
+fn incoming_goal_events_keep_disjoint_ids_and_reject_a_collision_atomically() {
+    use clarp_actor::Kept;
+    use clarp_kernel::goals::{GoalBook,Owner,ledger::Event};
+    let mut w=World::new("ledger-import");
+    let mut actor=w.open();
+    let make=|name:&str|{
+        let row=json!({"plan_id":name,"agent_id":"a1","status":"active","goal":{"history":[]}});
+        GoalBook::new().taken_over(Owner{agent_id:"a1",session:"fixture"},&row,&[]).unwrap()
+    };
+    let event=|id:i64,name:&str|serde_json::from_value::<Event>(json!({
+        "event_id":id,"plan_id":name,"at":100,"kind":"checkpoint","subject":"goal","actor_kind":"owner","actor_agent_id":"a1","delegation_id":"","basis":"","source_refs":["goal_event:3"],"reason":"","prior":null,"new":{},"plan_revision":0
+    })).unwrap();
+    let first=make("a1:first");
+    let old=vec![event(3,"a1:first"),event(40,"a1:first")];
+    actor.keep(&Kept{goal:Some(&first),imported_events:Some(&old),..Default::default()},200).unwrap();
+    assert_eq!(actor.next_goal_event_id().unwrap(),41);
+    let second=make("a1:second");
+    let mut enters=vec![event(7,"a1:second"),event(40,"a1:second")];
+    let open_log=||w.engine.open(&w.profile.dir,standard_set("zstd").unwrap()).unwrap();
+    let last=open_log().last_seq().unwrap();
+    let err=actor.keep(&Kept{goal:Some(&second),imported_events:Some(&enters),entry_source:Some("source"),..Default::default()},300).unwrap_err();
+    assert!(err.to_string().contains("already belongs"));
+    assert_eq!(open_log().last_seq().unwrap(),last);
+    assert!(actor.goals().plan("a1:second").is_none());
+    assert!(open_log().find("ledger/id/7").unwrap().is_none());
+    enters[1].event_id=19;
+    actor.keep(&Kept{goal:Some(&second),imported_events:Some(&enters),entry_source:Some("source"),..Default::default()},400).unwrap();
+    assert_eq!(actor.next_goal_event_id().unwrap(),42);
+    let row=|key:&str|serde_json::from_slice::<serde_json::Value>(&open_log().find(key).unwrap().unwrap().body).unwrap();
+    assert_eq!(row("ledger/id/41"),json!(["a1:second",3]));
+    assert_eq!(row("ledger/event/a1:second/2"),json!(enters[1]));
+    let latest=row("ledger/event/a1:second/3");
+    assert_eq!(latest["event_id"],41);
+    assert_eq!(latest["kind"],"plan_imported");
+    assert_eq!(latest["new"],json!({"from":"source","plan_id":"a1:second","first_id":7,"last_id":19}));
+    drop(actor);
+    let actor=w.open();
+    assert_eq!(actor.next_goal_event_id().unwrap(),42);
+}

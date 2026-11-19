@@ -75,14 +75,20 @@ fn plan_of(app: &App, plan_id: &str) -> Option<(Arc<Member>, Value)> {
 
 /// Does something to a goal as its owner would, and says what the rules said when they
 /// refused.
-async fn act(member: &Member, plan: &Value, action: &str, data: Value) -> Result<(), String> {
+async fn act(
+    member: &Member,
+    plan: &Value,
+    action: &str,
+    data: Value,
+    caller: crate::agent::GoalCaller,
+) -> Result<(), String> {
     let ask = Ask::Act {
         plan_id: plan["plan_id"].as_str().unwrap_or("").to_string(),
         revision: plan["revision"].as_i64().unwrap_or(0),
         action: action.to_string(),
         data,
     };
-    match member.agent.goal(ask).await {
+    match member.agent.goal_as(ask, caller).await {
         Ok(said) if said.exit == 0 => Ok(()),
         Ok(said) => Err(goaltool::refusal(&said).to_string()),
         Err(unavailable) => Err(unavailable.0),
@@ -99,6 +105,7 @@ async fn wait_on(
     request_id: &str,
     recipient: &Member,
     deadline_s: i64,
+    caller: crate::agent::GoalCaller,
 ) -> Result<(), String> {
     let Some((owner, plan)) = plan_of(app, plan_id) else {
         return Err(format!("no such goal: {plan_id}"));
@@ -163,7 +170,7 @@ async fn wait_on(
             "due_at": app.clock.now_ms() + deadline_s * 1_000,
         },
     });
-    act(&owner, &plan, "checkpoint", data)
+    act(&owner, &plan, "checkpoint", data, caller)
         .await
         .map_err(|why| format!("goal {plan_id} changed while arming the wait ({why}); try again"))
 }
@@ -182,7 +189,16 @@ async fn abandon_wait(app: &App, plan_id: &str, request_id: &str, why: &str) -> 
         }
         let evidence = requests::evidence(&format!("request {request_id} {NOT_DELIVERED}: {why}"));
         let data = json!({ "key": key, "outcome": "failed", "evidence": evidence });
-        if act(&owner, &plan, "dependency", data).await.is_ok() {
+        if act(
+            &owner,
+            &plan,
+            "dependency",
+            data,
+            crate::agent::GoalCaller::Default,
+        )
+        .await
+        .is_ok()
+        {
             return true;
         }
     }
@@ -190,7 +206,7 @@ async fn abandon_wait(app: &App, plan_id: &str, request_id: &str, why: &str) -> 
 }
 
 /// `clarp-admin request --to SESSION --from ME --text TEXT [--goal PLAN] [--deadline S]`.
-pub async fn request(app: &App, args: &[String]) -> ToolAnswer {
+pub async fn request(app: &App, args: &[String], token: Option<&str>) -> ToolAnswer {
     let valued = ["--to", "--from", "--text", "--goal", "--deadline"];
     let parsed = match parse(args, &valued, &[], &[]) {
         Ok(parsed) => parsed,
@@ -237,7 +253,23 @@ pub async fn request(app: &App, args: &[String]) -> ToolAnswer {
         let requester = agent(app, from, "requester")?;
         let recipient = agent(app, to, "recipient")?;
         if let Some(plan_id) = goal {
-            wait_on(app, &requester, plan_id, &request_id, &recipient, deadline).await?;
+            let caller = match crate::turn_identity::presented(app, token)
+                .await
+                .map_err(|e| e.message().to_owned())?
+            {
+                Some(who) => crate::agent::GoalCaller::Verified(who.record.agent_id.clone()),
+                None => crate::agent::GoalCaller::Default,
+            };
+            wait_on(
+                app,
+                &requester,
+                plan_id,
+                &request_id,
+                &recipient,
+                deadline,
+                caller,
+            )
+            .await?;
         }
         Ok((requester, recipient))
     };
@@ -510,7 +542,7 @@ async fn plan_reply(
 }
 
 /// `clarp-admin reply --request ID --from ME --kind result|blocked|progress --text TEXT`.
-pub async fn reply(app: &App, args: &[String]) -> ToolAnswer {
+pub async fn reply(app: &App, args: &[String], token: Option<&str>) -> ToolAnswer {
     let valued = ["--request", "--from", "--kind", "--text"];
     let parsed = match parse(args, &valued, &[], &[]) {
         Ok(parsed) => parsed,
@@ -561,7 +593,16 @@ pub async fn reply(app: &App, args: &[String]) -> ToolAnswer {
         };
         let via = match way {
             Way::Dependency { owner, plan, data } => {
-                match act(&owner, &plan, "dependency", data).await {
+                let caller = match crate::turn_identity::presented(app, token).await {
+                    Ok(Some(who)) => {
+                        crate::agent::GoalCaller::Peer(who.record.agent_id.clone(), true)
+                    }
+                    Ok(None) => {
+                        crate::agent::GoalCaller::Peer(replier.record.agent_id.clone(), false)
+                    }
+                    Err(why) => return refused(why.message().to_string()),
+                };
+                match act(&owner, &plan, "dependency", data, caller).await {
                     Ok(()) => {
                         // A helper that answers the agent that made it has reported, as a
                         // message to it would say.

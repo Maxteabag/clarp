@@ -1320,6 +1320,13 @@ server of Codex to ask, and says so in the Python Host's own words for a tool th
 turn of a stand-in Codex through the Host: the session offered, taken up, shown, continued, and refused a
 second time.
 
+**A goal’s ledger** (19 Nov 2026). The owning agent appends a goal change, its attributable
+events, their per-plan ordinals and their ID locators together. The next number belongs to the
+agent. A new agent arriving from another Host keeps its supplied IDs, and its next number is above
+all of them. When a plan enters an existing ledger, its disjoint IDs stay and an entry marker names
+their source and range. Colliding IDs are refused before the append. Earlier goal history available
+at upgrade is marked as legacy.
+
 **The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
 runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's
 books while they work, so after something happened a small model restates the goal beside its owner: which
