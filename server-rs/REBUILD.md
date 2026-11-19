@@ -2514,6 +2514,11 @@ turns it on.
   in the voice of the agent spoken to and before the apps are told, kept as a question with the Host's word
   for why (`name required`), and makes no agent. The order of agents equally recent is the kernel's one rule,
   held by its vectors: a Host's clock gives two agents the same moment by chance only.
+- In the conformance corpus (19 Nov 2026) the scenario `router` walks the rules of the Python Host's PR 436
+  on both Hosts: a command not sure enough is refused and never held, so the yes that follows is given in
+  its own words; a name in a command's payload that is another agent's, or nobody's, is asked about and
+  makes or starts no agent (`fake_claude.py`: `[qa-unsure-stop:...]`, `[qa-restart-as:...:...]`). A planted
+  change to the Python Host that holds a refused command (`router-holds-a-command`) is caught by it.
 - Not yet: phrases kept ready-spoken; a model's fallbacks; the two providers that are no tool. In a call,
   only those of the call who can take speech are shown, as there.
 

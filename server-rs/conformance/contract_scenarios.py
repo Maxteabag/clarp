@@ -1759,7 +1759,8 @@ SCENARIOS.append({
     'what': 'the router of spoken messages, turned on and set to the tool of the scenario: a message said to one '
             'agent and given to another, the same message again, the same id for other words, a message that is '
             'held while its user is asked and given when the answer comes, a question about an agent, what is '
-            'meant for nobody, a model that fails, what an app asks that could place a message by no name, and '
+            'meant for nobody, a command not sure enough (refused and never held), names in a command\'s payload '
+            '(another agent\'s, and nobody\'s), a model that fails, what an app asks that could place a message by no name, and '
             'the router turned off again',
     'sessions': (AGENT, NOVA),
     'steps': [
@@ -1783,6 +1784,16 @@ SCENARIOS.append({
         # A question about an agent, and what is meant for nobody: no agent is given either.
         spoken('synthetic question [qa-status:nova]', 'routedelta'),
         spoken('synthetic noise', 'routeecho'),
+        # A command not sure enough is refused, and never held: the yes that follows is given in its own
+        # words, and not the command's (the second agent's conversation, read at the end, shows which). No
+        # wait for its answer here: were the command held, the agent would be given it under its own id.
+        spoken('synthetic word stop [qa-unsure-stop:nova]', 'routekilo'),
+        spoken('synthetic yes again [qa-yes:nova]', 'routelima'),
+        # A name in the payload is the target: one that is another agent's than the one named, and one that
+        # nobody has, are asked about, and no agent is made or started again.
+        spoken('synthetic restart [qa-restart-as:nova:claire]', 'routemike'),
+        spoken('synthetic restart [qa-restart-as:nova:nobody]', 'routenovember'),
+        SNAPSHOT,
         # The model fails: the message goes on as any other, to the agent that is open.
         spoken('synthetic word foxtrot [qa-router-fails]', 'routefoxtrot'),
         *given('routefoxtrot', NOVA),

@@ -62,6 +62,8 @@ is the same for both, and is what the message itself asks for, in marks:
 - ``[qa-unsure:SESSION]``: for that agent, and not surely enough to give it;
 - ``[qa-yes:SESSION]``: for that agent, and it is the newest of the messages that are held;
 - ``[qa-status:SESSION]``: a question about that agent, with the words to answer it in;
+- ``[qa-unsure-stop:SESSION]``: a command to stop that agent, not sure enough to be carried out;
+- ``[qa-restart-as:SESSION:NAME]``: a command to start that agent again, whose payload names NAME;
 - ``[qa-router-fails]``: the tool ends badly;
 - anything else: nothing that is meant for anybody.
 
@@ -308,7 +310,15 @@ def one_question(args: list[str]) -> int:
         log('exit', how='router fails')
         return 1
     held = packet.get('pending') or []
-    if mark('route'):
+    restart_as = re.search(r'\[qa-restart-as:([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+)\]', said)
+    if restart_as:
+        answer = {'kind': 'agent_control', 'control_action': 'restart', 'target_session': restart_as.group(1),
+                  'control_payload': {'name': restart_as.group(2)}, 'confidence': 0.95,
+                  'reason': 'synthetic: a command whose payload names an agent'}
+    elif mark('unsure-stop'):
+        answer = {'kind': 'agent_control', 'control_action': 'stop', 'target_session': mark('unsure-stop'),
+                  'confidence': 0.6, 'reason': 'synthetic: a command not sure enough'}
+    elif mark('route'):
         answer = {'kind': 'agent_message', 'target_session': mark('route'), 'confidence': 0.95, 'addressing': True,
                   'reason': 'synthetic: the message says whom it is for'}
     elif mark('unsure'):
