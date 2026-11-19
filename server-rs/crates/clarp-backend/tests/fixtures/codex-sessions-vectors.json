@@ -47,15 +47,15 @@
   {"cwd": ".", "all_projects": false, "limit": 100, "index": false, "sessions": [{"id": "nocwd", "mtime": 1800000110, "preview": "no directory", "title": "", "cwd": ""}]}
  ],
  "found": [
-  {"session": "a1", "path": "2027/02/15/rollout-copy-of-a1.jsonl"},
+  {"session": "a1", "path": "2027/02/01/rollout-2027-02-01T10-00-00-a1.jsonl"},
   {"session": "a2", "path": "2027/02/02/rollout-2027-02-02T10-00-00-a2.jsonl"},
   {"session": "b1", "path": "2027/02/03/rollout-2027-02-03T10-00-00-b1.jsonl"},
   {"session": "none", "path": "2027/02/05/rollout-2027-02-05T10-00-00-none.jsonl"},
   {"session": "nobody", "path": null},
   {"session": "", "path": null},
-  {"session": "t1", "path": "rollout-at-the-top-t1.jsonl"},
+  {"session": "t1", "path": null},
   {"session": "a", "path": null},
-  {"session": "1", "path": "rollout-at-the-top-t1.jsonl"}
+  {"session": "1", "path": null}
  ],
  "models": [
   {"path": "2027/02/01/rollout-2027-02-01T10-00-00-a1.jsonl", "model": "gpt-new"},

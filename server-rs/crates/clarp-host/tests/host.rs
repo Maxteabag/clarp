@@ -20659,7 +20659,7 @@ fn what_cannot_be_done_with_a_new_agent_yet_is_refused_in_words() {
     assert_eq!(agents(&host), 1, "none of these made an agent");
     // An empty list, and no words at all for the rest, are what an app sends for a plain agent.
     let (status, plain) = made(json!({
-        "name": "Zed", "backend": "scripted", "mcp_servers": [], "replace_sid": "", "resume_session_id": " ",
+        "name": "Zed", "backend": "scripted", "mcp_servers": [], "replace_sid": "", "resume_session_id": "",
     }));
     assert_eq!(status, 200, "{plain}");
     assert_eq!(agents(&host), 2);

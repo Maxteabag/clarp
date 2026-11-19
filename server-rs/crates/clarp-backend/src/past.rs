@@ -188,9 +188,9 @@ fn moment(entry: &Value) -> i64 {
 /// project of `cwd`, or of every project, the newest first, `limit` at most. Each as an app
 /// reads it: `id`, `mtime` in seconds, `preview`, `title`, `cwd`.
 pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: usize) -> Vec<Value> {
-    if !projects.is_dir() {
+    let Ok(root) = projects.canonicalize() else {
         return Vec::new();
-    }
+    };
     let own = projects.join(claude_project(cwd));
     let dirs: Vec<PathBuf> = if all_projects {
         let all = files_of(projects).into_iter();
@@ -222,7 +222,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
         }
     };
     for dir in &dirs {
-        let index = std::fs::read(dir.join("sessions-index.json")).ok();
+        let index = confined(&root, &dir.join("sessions-index.json")).and_then(|path| std::fs::read(path).ok());
         let index = index.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
         let entries = index.as_ref().and_then(|index| index["entries"].as_array());
         for entry in entries
@@ -231,7 +231,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             .filter(|entry| entry.is_object())
         {
             let id = text_of(entry.get("sessionId"));
-            if id.is_empty() {
+            if !one_name(&id) {
                 continue;
             }
             if truthy(entry.get("isSidechain")) {
@@ -241,7 +241,7 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             }
             let declared = PathBuf::from(text_of(entry.get("fullPath")));
             let beside = dir.join(format!("{id}.jsonl"));
-            if !declared.is_file() && !beside.is_file() {
+            if confined(&root, &declared).is_none() && confined(&root, &beside).is_none() {
                 continue;
             }
             named.insert(id.clone());
@@ -270,7 +270,8 @@ pub fn claude_sessions(projects: &Path, cwd: &str, all_projects: bool, limit: us
             let id = path
                 .file_stem()
                 .map(|stem| stem.to_string_lossy().into_owned());
-            if transcript && path.is_file() && id.is_some_and(|id| !named.contains(&id)) {
+            if transcript && id.is_some_and(|id| one_name(&id) && !named.contains(&id))
+                && confined(&root, &path).is_some() {
                 unnamed.push((written(&path).0, path));
             }
         }
@@ -549,15 +550,19 @@ pub fn claude_transcript(
     })
 }
 
-/// The rollout of a session of Codex: the newest file under `sessions` whose name ends with
-/// the session's.
+/// The newest rollout whose complete timestamped name identifies this session.
 pub fn codex_rollout(sessions: &Path, session: &str) -> Option<PathBuf> {
     if !one_name(session) || !sessions.is_dir() {
         return None;
     }
     let root = sessions.canonicalize().ok()?;
-    let ending = format!("{session}.jsonl");
-    let named = files_under(sessions, &|name| name.ends_with(&ending));
+    static ROLLOUT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(.+)\.jsonl\z")
+            .expect("the Codex rollout name pattern")
+    });
+    let named = files_under(sessions, &|name| {
+        ROLLOUT.captures(name).is_some_and(|matched| &matched[1] == session)
+    });
     let mut newest: Option<(SystemTime, PathBuf)> = None;
     for path in named.into_iter().filter_map(|p| confined(&root, &p)) {
         let Some(at) = written(&path).0 else {
@@ -605,11 +610,10 @@ pub fn agy_transcript(base: &Path, conversation: &str) -> Option<PathBuf> {
     if !one_name(conversation) {
         return None;
     }
-    let path = base
-        .join("brain")
-        .join(conversation)
+    let brain = base.join("brain").canonicalize().ok()?;
+    let path = brain.join(conversation)
         .join(".system_generated/logs/transcript.jsonl");
-    confined(&base.canonicalize().ok()?, &path)
+    confined(&brain, &path)
 }
 
 /// A text of a URI with every `%` and two digits read as the byte they stand for
@@ -988,7 +992,7 @@ mod confinement {
                 "claude" => store
                     .join(claude_project("/work"))
                     .join(format!("{id}.jsonl")),
-                "codex" => store.join(format!("rollout-{id}.jsonl")),
+                "codex" => store.join(format!("rollout-2026-11-18T12-00-00-{id}.jsonl")),
                 "agy" => store
                     .join("brain")
                     .join(id)
