@@ -608,42 +608,56 @@ def _fill_backlog(path, limit: int = 64) -> list:
 
 
 @_linux_only
-def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path):
+def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path, monkeypatch):
+    """The client retries while the listener's backlog is full and is answered once it frees.
+    By order, not seconds: the client's backoff runs on a planted clock, and its first refusal
+    is what frees the backlog (the fillers are closed and accepted, each an instant EOF). It
+    was quarantined as 'load' when a 0.15 s sleep, a 0.2 s read per filler and the client's
+    5 s budget all ran on the wall clock."""
+    import lib.runtime_bridge as runtime_bridge
     path = tmp_path / "runtime.sock"
     listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     listener.bind(str(path))
     listener.listen(1)
     fillers = _fill_backlog(path)
-    served = threading.Event()
+    refused, drained, served = threading.Event(), threading.Event(), threading.Event()
 
-    def accept_later():
-        _time.sleep(0.15)  # the client must retry, not fail, meanwhile
-        listener.settimeout(0.5)
-        deadline = _time.monotonic() + 30
-        while not served.is_set() and _time.monotonic() < deadline:
-            try:
-                conn, _ = listener.accept()
-            except OSError:
-                continue  # an accept timeout is not the end of the helper
-            with conn:
-                conn.settimeout(0.2)
-                try:
-                    data = conn.recv(65536)
-                except OSError:
-                    continue  # a filler that never speaks
-                if b'"status"' in data:
-                    conn.sendall(json.dumps({
-                        "ok": True, "result": {"active": {"a": "t"}}}).encode() + b"\n")
-                    served.set()
+    class Planted:
+        now = 1_000.0
 
-    thread = threading.Thread(target=accept_later, daemon=True)
+        @classmethod
+        def monotonic(cls):
+            return cls.now
+
+        @classmethod
+        def sleep(cls, seconds):          # the client's backoff after a refused connect
+            cls.now += seconds
+            refused.set()
+            assert drained.wait(30), "the backlog was never drained"     # a deadlock guard only
+    monkeypatch.setattr(runtime_bridge, "time", Planted)
+
+    def serve():
+        assert refused.wait(30), "the client was never refused"
+        for raw in fillers:                 # the fillers go away: their connections read EOF
+            raw.close()
+        for _ in fillers:
+            conn, _ = listener.accept()
+            conn.close()
+        drained.set()
+        conn, _ = listener.accept()
+        with conn:
+            if b'"status"' in conn.recv(65536):
+                conn.sendall(json.dumps({"ok": True, "result": {"active": {"a": "t"}}}).encode() + b"\n")
+                served.set()
+
+    thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
         assert RuntimeClient(path, timeout=5.0).status() == {"active": {"a": "t"}}
-        assert served.is_set()
+        assert refused.is_set() and served.is_set()
     finally:
-        for raw in fillers:
-            raw.close()
+        drained.set()
+        thread.join(30)
         listener.close()
 
 
