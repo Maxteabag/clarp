@@ -598,7 +598,32 @@ fn a_stop_ends_the_turn_and_holds_what_waits_until_a_resume() {
 #[test]
 fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     let place = Place::new("delivery");
-    let host = place.start();
+    // Desk, a stand-in for Claude Code, writes down the token of the turn it runs in: a Stop it
+    // makes with it is an agent's, and the Host knows it.
+    let token_at = place.root.join("desk-token");
+    let script = [
+        "#!/bin/sh\nread -r message\n",
+        &format!(
+            "printf '%s' \"$CLARP_PROVIDER_TURN\" > \"{}\"\n",
+            token_at.display()
+        ),
+        STAND_IN_ANSWERS,
+    ]
+    .concat();
+    let claude = place.root.join("claude");
+    program(&claude, &script);
+    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
+    let host = place.start_in("secret", &[], &world);
+    let made = host.post(
+        "/agents",
+        json!({ "name": "Desk", "session": "desk", "backend": "claude" }),
+    );
+    assert_eq!(made["session"], "desk", "{made}");
+    host.send("desk", "hello", "d-1");
+    wait_for("Desk's turn to hold its token", || {
+        std::fs::read_to_string(&token_at).is_ok_and(|token| !token.is_empty())
+    });
+    let desk_token = std::fs::read_to_string(&token_at).unwrap();
     let session = host.new_agent("Deliverer");
     let heard = host.listen();
     host.send(&session, "sleep 60", "m1");
@@ -633,8 +658,28 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     );
     assert_ne!(before["delivery_scope"]["agent_id"], "");
 
-    host.post("/stop", json!({ "session": session }));
+    // Desk stops it, in its own turn: an agent's Stop the Host knows. The turn ends and what
+    // waits is held, but nothing of the user's is withdrawn: still pending, the generation as
+    // it was.
+    let body = json!({ "session": session, "actor": "agent:desk" }).to_string();
+    let headers = [
+        ("X-Clarp-Turn", desk_token.as_str()),
+        ("Content-Type", "application/json"),
+    ];
+    let answered = fetch(&host, &host.token, "POST", "/stop", &headers, body.as_bytes());
+    let by_desk: Value = serde_json::from_slice(&answered.body).unwrap();
+    assert_eq!(
+        (answered.status, &by_desk["stop_actor"], &by_desk["stop_actor_verified"]),
+        (200, &json!("agent:desk"), &json!(true)),
+        "{by_desk}"
+    );
     wait_for("the turn to end", || host.state(&session) == "interrupted");
+    let after_desk = log("");
+    assert_eq!(delivery(&after_desk, "u-m2"), queued, "{after_desk}");
+    assert_eq!(after_desk["delivery_stop_generation"], 0);
+
+    // The user's Stop: the one that waits is fenced, and the generation moves.
+    host.post("/stop", json!({ "session": session }));
     let held = log("&delivery_since=0");
     assert_eq!(delivery(&held, "u-m3"), Value::Null, "{held}");
     let stopped = delivery(&held, "u-m2");
@@ -674,7 +719,9 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
             .lock()
             .unwrap()
             .iter()
-            .filter(|event| event["type"] == "delivery-updated")
+            .filter(|event| {
+                event["type"] == "delivery-updated" && event["session"] == session.as_str()
+            })
             .cloned()
             .collect()
     };
