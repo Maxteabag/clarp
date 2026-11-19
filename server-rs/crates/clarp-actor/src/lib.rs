@@ -59,6 +59,7 @@ use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 pub use goal_ledger::{page as read_goal_events, retire as retire_goal_ledger};
 
 pub mod conversation;
+pub mod deliveries;
 pub mod helper_cells;
 pub mod provider_jobs;
 
@@ -619,6 +620,9 @@ pub struct Actor {
     media: MediaBook,
     /// The lines the agent says aloud, as the log has them.
     speech: SpeechBook,
+    /// The user sends whose delivery is shown: those that can still change, and those that
+    /// changed since the Host started.
+    deliveries: deliveries::Deliveries,
     /// How often something that is shown but not stored has changed since the last write to
     /// the log. It makes the revisions between two log items.
     unstored_changes: u64,
@@ -1080,6 +1084,7 @@ impl Actor {
             artifacts,
             media,
             speech,
+            deliveries: deliveries::Deliveries::default(),
             live: None,
             unstored_changes: 0,
             shown_revision: 0,
@@ -1087,6 +1092,19 @@ impl Actor {
         };
         actor.open_goal_ledger(now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
+        // The sends that can still change are what the agent's state holds; each one's names
+        // are read from its message, once.
+        let waiting: Vec<_> = actor
+            .recorder
+            .agent()
+            .deliveries()
+            .waiting()
+            .cloned()
+            .collect();
+        for send in waiting {
+            let names = actor.send_names(send.message_seq)?;
+            actor.deliveries.changed(send, names);
+        }
         // A line an engine was speaking when the Host went: begun a moment ago, it waits
         // again; begun long ago, it is over. And one that waited for a Host that was away
         // too long is not spoken any more.
@@ -1708,6 +1726,71 @@ impl Actor {
     /// The message a turn that ended answered.
     pub fn message_of(&self, turn: &Settled) -> Result<Message, ActorError> {
         self.message_at(turn.message_seq)
+    }
+
+    /// What changed of the user sends' delivery since this was last asked: the message ids a
+    /// client is told may have changed (`delivery-updated`), each once. What can change no
+    /// more and is older than a week is let go.
+    pub fn take_deliveries(&mut self, now_ms: i64) -> Result<Vec<String>, ActorError> {
+        let changed = self.recorder.take_deliveries();
+        let mut told = Vec::new();
+        for send in changed {
+            let turn = send.turn;
+            let names = if self.deliveries.message_id(turn).is_some() {
+                None
+            } else {
+                self.send_names(send.message_seq)?
+            };
+            if self.deliveries.changed(send, names)
+                && let Some(id) = self.deliveries.message_id(turn)
+            {
+                told.push(id);
+            }
+        }
+        let waiting: Vec<u64> = self
+            .recorder
+            .agent()
+            .deliveries()
+            .waiting()
+            .map(|send| send.turn)
+            .collect();
+        self.deliveries
+            .forget_before(now_ms - deliveries::KEPT_FOR_MS, &waiting);
+        Ok(told)
+    }
+
+    /// The delivery fields of a `GET /log` answer: the user rows of `turns` are given theirs,
+    /// and the fields of the answer are returned. Nothing of the log is read.
+    pub fn delivery(
+        &self,
+        turns: &mut [serde_json::Value],
+        query: &clarp_kernel::delivery::Query,
+        scope: &clarp_kernel::delivery::Scope,
+    ) -> serde_json::Map<String, serde_json::Value> {
+        let agent_id = &self.profile.agent_id;
+        let generation = self.recorder.agent().user_stop_generation();
+        let feed = self.deliveries.feed(agent_id, generation);
+        clarp_kernel::delivery::answer(&feed, scope, turns, query, |trace| {
+            self.deliveries.receipt(agent_id, trace)
+        })
+    }
+
+    /// How many sends' delivery the actor holds.
+    pub fn held_deliveries(&self) -> usize {
+        self.deliveries.len()
+    }
+
+    /// The client's id and the trace of the message a send answers; nothing for a message no
+    /// app named, or the opening of a call.
+    fn send_names(&self, message_seq: Seq) -> Result<Option<(String, String)>, ActorError> {
+        let message = self.message_at(message_seq)?;
+        if opening_message(&message) {
+            return Ok(None);
+        }
+        Ok(deliveries::names(
+            message.told_id(),
+            message.trace_id.as_deref(),
+        ))
     }
 
     /// The message the log holds at this position.

@@ -566,6 +566,17 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
 
 /// The queue changed. `message_id` names the message the change is about, when it is about
 /// one: a message that joined the queue, or one that left it to run (`started`).
+/// That a user send's delivery may have changed (`delivery-updated`): its identity, and no
+/// state; a client reads the state from `GET /log`.
+pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
+    json!({
+        "type": clarp_kernel::delivery::HINT,
+        "session": record.session,
+        "agent_id": record.agent_id,
+        "message_id": message_id,
+    })
+}
+
 pub fn queue_updated(
     record: &AgentRecord,
     status: &Status,

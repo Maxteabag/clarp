@@ -299,6 +299,13 @@ pub enum Ask {
         id: String,
         answer: Answer<Option<Versioned>>,
     },
+    /// The delivery fields of a `GET /log` answer, for the rows of its page.
+    Delivery {
+        turns: Vec<Value>,
+        query: clarp_kernel::delivery::Query,
+        scope: clarp_kernel::delivery::Scope,
+        answer: Answer<(Vec<Value>, serde_json::Map<String, Value>)>,
+    },
     /// The revision the conversation had at a time.
     RevisionAt {
         ts_ms: i64,
@@ -729,6 +736,23 @@ impl AgentHandle {
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
         self.ask(|answer| Ask::Row { id, answer }).await
+    }
+
+    /// The delivery of the user sends of a page (send_delivery_state): the page's rows with
+    /// theirs, and the fields of the answer, as the query asks.
+    pub async fn delivery(
+        &self,
+        turns: Vec<Value>,
+        query: clarp_kernel::delivery::Query,
+        scope: clarp_kernel::delivery::Scope,
+    ) -> Result<(Vec<Value>, serde_json::Map<String, Value>), Unavailable> {
+        self.ask(|answer| Ask::Delivery {
+            turns,
+            query,
+            scope,
+            answer,
+        })
+        .await
     }
 
     /// The revision the agent's conversation had at a time: what is newer than it
@@ -2422,6 +2446,15 @@ impl Worker {
                 answer,
             } => return read(actor.goal_events(&plan, after, limit), answer),
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
+            Ask::Delivery {
+                mut turns,
+                query,
+                scope,
+                answer,
+            } => {
+                let top = actor.delivery(&mut turns, &query, &scope);
+                return read(Ok((turns, top)), answer);
+            }
             Ask::RevisionAt { ts_ms, answer } => return read(actor.revision_at(ts_ms), answer),
             // Answered above, where what they change is published first.
             Ask::Artifact { .. }
@@ -2616,7 +2649,30 @@ impl Worker {
             }
             self.setup.speaks.wake(&self.setup.record.agent_id);
         }
+        self.tell_deliveries();
         self.show(out.changed);
+    }
+
+    /// A user send's delivery moved (fenced by the user's Stop, or handed over): the apps are
+    /// told which, by its id alone, and read what it is from the log.
+    fn tell_deliveries(&mut self) {
+        let now = self.now_ms();
+        let Some(actor) = self.actor.as_mut() else {
+            return;
+        };
+        match actor.take_deliveries(now) {
+            Ok(told) => {
+                let record = &self.setup.record;
+                for message_id in told {
+                    let hint = wire::delivery_updated(record, &message_id);
+                    self.setup.hub.publish(hint, now);
+                }
+            }
+            Err(error) => eprintln!(
+                "clarp-host: agent {}: the delivery of its sends was not read: {error}",
+                self.setup.record.session
+            ),
+        }
     }
 
     /// Each turn has a thread of its own for as long as its shim lives. It does the waiting, so
@@ -3470,6 +3526,7 @@ fn refuse_for(
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Delivery { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Goal { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Artifact { answer, .. }) => drop(answer.send(Err(refusal()))),

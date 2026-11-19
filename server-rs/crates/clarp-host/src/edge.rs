@@ -289,6 +289,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
+    // What a user send's delivery is, on `GET /log` and its feed (`delivery_*`), and the
+    // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
+    ("send_delivery_state", 81),
 ];
 
 /// After this long without an event, a stream is sent a heartbeat.
@@ -1924,6 +1927,13 @@ struct LogQuery {
     include_automated: Option<String>,
     /// `0`, `false` or `no`: with one header for a row's tools instead of every card whole.
     include_tool_details: Option<String>,
+    /// What a client asks of its sends' delivery (send_delivery_state).
+    delivery_since: Option<String>,
+    delivery_until: Option<String>,
+    delivery_stop_generation: Option<String>,
+    delivery_bootstrap: Option<String>,
+    delivery_runtime_release: Option<String>,
+    delivery_runtime_instance: Option<String>,
 }
 
 async fn log(
@@ -1969,6 +1979,32 @@ async fn log(
     };
     if no(&query.include_tool_details) {
         wire::without_tool_details(&mut answer);
+    }
+    // The delivery of the user sends: their rows, the scope and the generation, and a page of
+    // the feed where the client asks for one. This Host owns its turns itself: it answers in
+    // the in-process mode, under an instance of this start of the Host.
+    let asked = |name: &str| match name {
+        "delivery_since" => query.delivery_since.as_deref(),
+        "delivery_until" => query.delivery_until.as_deref(),
+        "delivery_stop_generation" => query.delivery_stop_generation.as_deref(),
+        "delivery_bootstrap" => query.delivery_bootstrap.as_deref(),
+        "delivery_runtime_release" => query.delivery_runtime_release.as_deref(),
+        "delivery_runtime_instance" => query.delivery_runtime_instance.as_deref(),
+        _ => None,
+    };
+    let delivery = clarp_kernel::delivery::Query::read(asked)
+        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    let scope = clarp_kernel::delivery::Scope {
+        server_id: app.server_id.clone(),
+        agent_id: member.record.agent_id.clone(),
+        release: clarp_kernel::delivery::IN_PROCESS_RELEASE.to_string(),
+        instance: app.hub.epoch().to_string(),
+    };
+    let turns = answer["turns"].as_array().cloned().unwrap_or_default();
+    let (turns, fields) = member.agent.delivery(turns, delivery, scope).await?;
+    answer["turns"] = Value::Array(turns);
+    if let Some(answer) = answer.as_object_mut() {
+        answer.extend(fields);
     }
     // An answer to another agent says whom it answers, by the name that agent has today.
     let directory = app.fleet.directory();

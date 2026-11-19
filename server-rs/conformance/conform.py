@@ -444,12 +444,7 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # fields and events are left out of both sides before the Rust Host is compared: they are not
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
-NOT_YET = {
-    'send_delivery_state': {
-        'fields': ('delivery_scope', 'delivery_stop_generation', 'delivery'),
-        'events': ('delivery-updated',),
-    },
-}
+NOT_YET: dict = {}
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
@@ -732,6 +727,47 @@ def ranked(value, held: dict, row=False, conversation=''):
     return value
 
 
+# Where a send's delivery stands in its feed (`delivery.seq`, `delivery_cursor`, `delivery_until`):
+# the Python Host counts every transition of the Host in one counter, the Rust Host an agent's in
+# the revisions of its own log. What a client can tell of them is their order: a cursor is newer
+# or older than a send's last change. They are compared as their place among all of them in the
+# capture.
+DELIVERY_ORDER_KEYS = ('delivery_cursor', 'delivery_until')
+
+
+def delivery_numbers(value, found: set) -> None:
+    if isinstance(value, list):
+        for item in value:
+            delivery_numbers(item, found)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            whole = isinstance(item, int) and not isinstance(item, bool)
+            if whole and key in DELIVERY_ORDER_KEYS:
+                found.add(item)
+            elif key == 'delivery' and isinstance(item, dict) and isinstance(item.get('seq'), int):
+                found.add(item['seq'])
+            else:
+                delivery_numbers(item, found)
+
+
+def delivery_ranked(value, order: list):
+    place = lambda number: order.index(number) + 1 if number in order else number
+    if isinstance(value, list):
+        return [delivery_ranked(item, order) for item in value]
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            whole = isinstance(item, int) and not isinstance(item, bool)
+            if whole and key in DELIVERY_ORDER_KEYS:
+                out[key] = place(item)
+            elif key == 'delivery' and isinstance(item, dict) and isinstance(item.get('seq'), int):
+                out[key] = {**item, 'seq': place(item['seq'])}
+            else:
+                out[key] = delivery_ranked(item, order)
+        return out
+    return value
+
+
 def agent_rows(http) -> dict:
     """The ids of the rows a Host named itself, in the order a client first reads them: the rows
     an agent wrote, and the rows of a user that a Host read from a tool's transcript (`msg-`: a
@@ -884,7 +920,11 @@ def core(raw: dict) -> dict:
     cursors([exchange['body'] for exchange in http], found)
     held = {conversation: sorted(values - {0}) for conversation, values in found.items()}
     names = agent_rows(http)
-    http = [{**exchange, 'body': renamed(ranked(exchange['body'], held), names)} for exchange in http]
+    numbers: set = set()
+    delivery_numbers([exchange['body'] for exchange in http], numbers)
+    order = sorted(numbers - {0})
+    http = [{**exchange, 'body': renamed(delivery_ranked(ranked(exchange['body'], held), order), names)}
+            for exchange in http]
     sse = [{**frame, 'data': renamed(frame.get('data'), names)} for frame in sse]
     return {**raw, 'http': http, 'sse': sse}
 
