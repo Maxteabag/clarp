@@ -2671,7 +2671,10 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     assert_eq!(read.load(Ordering::SeqCst), 0, "nothing of the log is read");
     // The resume runs the held one: its launch is told, as before the restart.
     actor.resume("user", world.tick()).unwrap();
+    read.store(0, Ordering::SeqCst);
     assert_eq!(actor.take_deliveries(world.tick()).unwrap(), ["u-m10002"]);
+    // A send the actor knows is not read again when it changes.
+    assert_eq!(read.load(Ordering::SeqCst), 0, "a known send's names are not read again");
     // One more behind it: admitted and pending, its names read once (one call, one item), and
     // nothing to tell yet.
     let behind = Message {
