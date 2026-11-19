@@ -15643,7 +15643,7 @@ fn a_forms_events_are_private_append_only_and_exported_at_one_snapshot() {
     ))
     .unwrap();
     let mut count = 0;
-    for case in fixtures.as_array().unwrap() {
+    for case in fixtures["cases"].as_array().unwrap() {
         let id = case["artifact"].as_str().unwrap();
         let data = &case["data"];
         let create = json!({"session":maker,"artifact_id":id,"type":"html_form","title":"Test form","payload":{"version":"v1","content":"<p>Test</p>","answer_schema":{"type":"object"}}});
@@ -15833,7 +15833,7 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
         "../../clarp-kernel/tests/fixtures/form-reply-dispatch.json"
     ))
     .unwrap();
-    let successful: Vec<&Value> = vectors
+    let successful: Vec<&Value> = vectors["cases"]
         .as_array()
         .unwrap()
         .iter()
@@ -15934,6 +15934,60 @@ fn a_forms_spoken_answer_belongs_to_the_submission_that_requested_it() {
             .filter(|r| r["role"] == "assistant")
             .count(),
         4
+    );
+}
+
+#[test]
+fn countdowns_are_created_with_a_clock_and_listed_in_updates() {
+    let place = Place::new("countdown-updates");
+    let host = place.start();
+    let agent = host.new_agent("Clock");
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/countdown-attention.json"
+    ))
+    .unwrap();
+    let mut count = 0;
+    for (i, c) in vectors["validation"].as_array().unwrap().iter().enumerate() {
+        let data = json!({"artifact_id":format!("deadline-{i}"),"type":"countdown","title":"Deadline","session":agent,"status":"ready","payload":c["payload"]});
+        let (status, body) = host.ask("POST", "/artifacts", Some(&data));
+        let errors = c["errors"].as_array().unwrap();
+        if errors.is_empty() {
+            assert_eq!(status, 201, "{data}: {body}");
+        } else {
+            assert_eq!(status, 409, "{data}: {body}");
+            assert!(
+                errors.contains(&body["error"]),
+                "{data}: expected {errors:?}, got {body}"
+            );
+        }
+        count += 1;
+    }
+    assert_eq!(count, 121);
+    for (status, id, time) in [
+        ("ready", "upcoming", "2099-01-01T00:00:00Z"),
+        ("completed", "elapsed", "2001-01-01T00:00:00Z"),
+        ("active", "working", "2001-01-01T00:00:00Z"),
+        ("failed", "correction", "2001-01-01T00:00:00Z"),
+        ("cancelled", "history", "2001-01-01T00:00:00Z"),
+    ] {
+        let data = json!({"artifact_id":id,"type":"countdown","title":id,"session":agent,"status":status,"payload":{"target_at":time,"time_zone":"UTC"}});
+        assert_eq!(host.ask("POST", "/artifacts", Some(&data)).0, 201);
+    }
+    let list = host.get("/attention/inbox?limit=200");
+    let rows = list["artifacts"].as_array().unwrap();
+    for (id, bucket) in [
+        ("upcoming", "review"),
+        ("elapsed", "review"),
+        ("working", "working"),
+        ("correction", "blocking"),
+    ] {
+        let row = rows.iter().find(|r| r["artifact_id"] == id).unwrap();
+        assert_eq!(row["attention_bucket"], bucket);
+    }
+    assert!(!rows.iter().any(|r| r["artifact_id"] == "history"));
+    assert_eq!(
+        host.get("/artifacts/history")["artifact"]["status"],
+        "cancelled"
     );
 }
 

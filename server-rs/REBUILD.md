@@ -488,6 +488,13 @@ called; published again under its id, the tool finds the version the new one fol
 Held end to end (`tests/host.rs`, an agent hands its user a report) and by the scenario `reports`. Not there
 yet: countdowns and podcast episodes.
 
+**Countdowns in Updates** (19 Nov 2026). A countdown names an offset timestamp and an IANA
+time zone. Each page of Updates uses one clock reading. Ready and completed countdowns are
+upcoming until their target, due for the first minute, then elapsed. Each stays for review under
+the reference’s default policy. Failed countdowns need correction, active ones are working, and
+draft, cancelled and expired countdowns stay out of Updates. Projection leaves the stored status
+alone.
+
 **A form’s events** (19 Nov 2026). The Host accepts 1–32 telemetry records per batch from a
 full-access client. Each event object fits in 16 KiB of compact UTF-8 JSON. The immutable log
 has no per-form quota. One new event reads three keys and commits four records in one fleet
