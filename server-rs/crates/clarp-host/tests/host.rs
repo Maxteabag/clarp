@@ -20863,29 +20863,45 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
     assert_eq!(rows(&fox), at_fox);
     assert_eq!(head(&fox), json!(at_fox[1].0));
 
-    // A message each, left for later under one id while each agent works: the id names
-    // neither, and nothing is done to either; each is still there and runs in its turn.
+    // A message each, left for later under one id while each agent works (Echo has one more
+    // before it): the id names neither, and nothing is done to either. Both stay exactly as
+    // they were: their words, their place, the queue's revision and the agent's state.
     host.send(&echo, "sleep 60", "busy-echo");
     host.send(&fox, "sleep 60", "busy-fox");
     wait_for("both to work", || {
         host.state(&echo) == "thinking" && host.state(&fox) == "thinking"
     });
-    for (session, text) in [(&echo, "left with Echo"), (&fox, "left with Fox")] {
+    let leave = |session: &str, text: &str, id: &str| {
         let left = host.post(
             "/send",
-            json!({ "session": session, "text": text, "client_msg_id": "m9", "queue_if_busy": true }),
+            json!({ "session": session, "text": text, "client_msg_id": id, "queue_if_busy": true }),
         );
         assert_eq!(left["queued"], true, "{left}");
-    }
-    let waiting = |session: &str| -> Vec<(String, String)> {
+    };
+    leave(&echo, "before it with Echo", "m8");
+    leave(&echo, "left with Echo", "m9");
+    leave(&fox, "left with Fox", "m9");
+    // An agent's queue as an app is shown it: each waiting message's id and words in their
+    // order, and the queue's revision.
+    let queued = |session: &str| -> (Vec<(String, String)>, Value) {
         let queue = host.get(&format!("/turn-queue?session={session}"));
         let items = queue["items"].as_array().unwrap().iter();
         let items = items.map(|item| {
             let text = |key: &str| item[key].as_str().unwrap().to_string();
             (text("id"), text("text"))
         });
-        items.collect()
+        (items.collect(), queue["revision"].clone())
     };
+    let waiting = |session: &str| queued(session).0;
+    let (echo_before, fox_before) = (queued(&echo), queued(&fox));
+    let pair = |id: &str, text: &str| (id.to_string(), text.to_string());
+    assert_eq!(
+        (&echo_before.0, &fox_before.0),
+        (
+            &vec![pair("m8", "before it with Echo"), pair("m9", "left with Echo")],
+            &vec![pair("m9", "left with Fox")]
+        )
+    );
     let ambiguous = (
         409,
         "queued message id names more than one agent".to_string(),
@@ -20899,33 +20915,61 @@ fn an_id_two_agents_both_use_is_each_ones_own() {
         ),
         ("POST", "/turn-queue/m9/send", Some(json!({}))),
     ] {
-        let (status, said) = host.ask(method, path, body.as_ref());
-        let said = said["error"].as_str().unwrap_or_default().to_string();
-        assert_eq!((status, said), ambiguous, "{method} {path}");
+        let (status, answered) = host.ask(method, path, body.as_ref());
+        let why = answered["error"].as_str().unwrap_or_default().to_string();
+        assert_eq!((status, why), ambiguous, "{method} {path}");
     }
+    assert_eq!((queued(&echo), queued(&fox)), (echo_before, fox_before));
     assert_eq!(
-        (waiting(&echo), waiting(&fox)),
-        (
-            vec![("m9".to_string(), "left with Echo".to_string())],
-            vec![("m9".to_string(), "left with Fox".to_string())]
-        )
+        (host.state(&echo), host.state(&fox)),
+        ("thinking".to_string(), "thinking".to_string())
     );
-    // Where one agent alone holds an id waiting, it is that agent's message that is acted on.
-    let left = host.post(
-        "/send",
-        json!({ "session": fox, "text": "left with Fox alone", "client_msg_id": "m10", "queue_if_busy": true }),
-    );
-    assert_eq!(left["queued"], true, "{left}");
+    // Where one agent alone holds an id waiting, among agents that hold others, it is that
+    // agent's message that is acted on.
+    leave(&fox, "left with Fox alone", "m10");
     let (status, _) = host.ask("DELETE", "/turn-queue/m10", None);
     assert_eq!(status, 200);
-    assert_eq!(waiting(&fox).len(), 1);
-    assert_eq!(waiting(&echo).len(), 1);
-    for session in [&echo, &fox] {
-        host.post("/stop", json!({ "session": session }));
-    }
-    wait_for("both turns to end", || {
-        host.state(&echo) == "interrupted" && host.state(&fox) == "interrupted"
+    assert_eq!(waiting(&fox), [pair("m9", "left with Fox")]);
+    assert_eq!(waiting(&echo).len(), 2);
+    // Fox's goes to run: the id is Echo's alone again, and each route acts on the one that
+    // still waits.
+    host.post("/stop", json!({ "session": fox }));
+    wait_for("Fox's turn to end", || host.state(&fox) == "interrupted");
+    host.post("/turn-queue/resume", json!({ "session": fox }));
+    wait_for("Fox's waiting message to be answered", || {
+        host.conversation(&fox)
+            .contains(&said("assistant", "left with Fox"))
+            && host.state(&fox) == "done"
     });
+    assert!(waiting(&fox).is_empty());
+    let (status, _) = host.ask(
+        "PUT",
+        "/turn-queue/m9",
+        Some(&json!({ "text": "other words for Echo" })),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        waiting(&echo),
+        [
+            pair("m8", "before it with Echo"),
+            pair("m9", "other words for Echo")
+        ]
+    );
+    let (status, answered) = host.ask("POST", "/turn-queue/m9/send", Some(&json!({})));
+    assert_eq!(
+        (status, &answered["error"]),
+        (409, &json!("agent is still working"))
+    );
+    let (status, _) = host.ask("DELETE", "/turn-queue/m9", None);
+    assert_eq!(status, 200);
+    assert_eq!(waiting(&echo), [pair("m8", "before it with Echo")]);
+    assert!(
+        !host
+            .conversation(&fox)
+            .contains(&said("assistant", "other words for Echo"))
+    );
+    host.post("/stop", json!({ "session": echo }));
+    wait_for("Echo's turn to end", || host.state(&echo) == "interrupted");
 
     // Two agents taken over from another Host whose conversations have rows of one name:
     // each keeps its own.

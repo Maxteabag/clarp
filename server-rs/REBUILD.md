@@ -2639,6 +2639,16 @@ change. A message that was said while a turn ran waits its turn in the conversat
 was said stands (409, in this Host's words). Held by the kernel's test, a Host test through a kill, and the
 scenario `the-queue-reworded`.
 
+**An id two agents both use** (19 Nov 2026). An app's message id is each agent's own here: every agent's rows
+are written only into its own log, the ids of a tool's answer are made from the message's id in that log, and
+the rows of a taken-up transcript or of an agent taken over from another Host are the agent's own. One path
+found its message by the bare id across agents: the routes of a waiting message took the first agent that held
+the id. They act now only where exactly one agent holds it waiting; where more do, they touch none and answer
+409 `queued message id names more than one agent` (the owner's ruling: with only the id the Host cannot know
+which is meant, so it does not guess). The Python Host cannot have two: its queue's key is global and it drops
+the second (R63). Held by the Host's test `an_id_two_agents_both_use_is_each_ones_own` and the wrong rules of
+`tools/plants/ids-across-agents.py`.
+
 **The battle test has begun** (15 Nov 2026, 17:15 CET). The owner declined an install earlier that day (a Host an
 agent cannot live on is not put on his machine) and then gave his word for one to battle-test it: "You can
 install the host to battletest." The Rust Host runs on elitebook beside the Python Host, as
