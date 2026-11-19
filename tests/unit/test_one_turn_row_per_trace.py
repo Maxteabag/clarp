@@ -183,6 +183,49 @@ def test_a_claude_started_by_a_dispatched_turns_tool_owns_no_row_and_settles_not
     assert _rows(agent_id) == [("tr-1", "completed", 1)]
 
 
+def _real_stop_hook(monkeypatch, *, clarp_process):
+    """plugin/hooks/stop_state.py's main(), as the CLI runs it; returns the flag it sent."""
+    import pathlib
+    hooks = str(pathlib.Path(__file__).resolve().parents[2] / "plugin" / "hooks")
+    if hooks not in sys.path:
+        sys.path.insert(0, hooks)
+    import stop_state
+    if clarp_process:
+        monkeypatch.setenv("CLAUDE_PWA_SESSION", "mike")
+    else:
+        monkeypatch.delenv("CLAUDE_PWA_SESSION", raising=False)
+    sent = []
+    real = turn_lifecycle.hook_transition
+
+    def hook_transition(agent_id, event, detail=None, *args, **kwargs):
+        sent.append(dict(detail or {}).get("dispatched", "absent"))
+        return real(agent_id, event, detail, *args, **kwargs)
+    monkeypatch.setattr(turn_lifecycle, "hook_transition", hook_transition)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"session_id": "claude-uuid"})))
+    assert stop_state.main() == 0
+    return sent
+
+
+@pytest.mark.parametrize("clarp_process", [True, False], ids=["the dispatcher's process", "a terminal"])
+def test_the_real_stop_hook_says_dispatched_only_in_a_process_the_dispatcher_started(
+        tmp_path, monkeypatch, clarp_process):
+    """The hook itself sends the flag (the tests above pass it to the transition by hand)."""
+    call, agent_id = _dispatched(tmp_path, monkeypatch)
+    assert _real_stop_hook(monkeypatch, clarp_process=clarp_process) == [clarp_process]
+    if clarp_process:
+        assert _rows(agent_id) == [("tr-1", None, 0)]               # the runner settles it
+        call["on_result"](OK)
+    assert _rows(agent_id) == [("tr-1", "completed", 1)]
+
+
+@pytest.mark.parametrize("flag", ["true", 1, None], ids=["the string true", "the number 1", "no flag"])
+def test_only_the_boolean_true_says_dispatched(tmp_path, monkeypatch, flag):
+    """Read strictly: anything but True is a terminal turn, settled by its hook as before."""
+    _call, agent_id = _dispatched(tmp_path, monkeypatch)
+    _stop_hook(agent_id, dispatched=flag)
+    assert _rows(agent_id) == [("tr-1", "completed", 1)]
+
+
 def test_a_terminal_turn_is_settled_by_its_stop_hook(tmp_path, monkeypatch):
     agent_id = agents_db.create_agent(persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike")
     agents_db.bind_backend_session(agent_id, "claude-uuid")

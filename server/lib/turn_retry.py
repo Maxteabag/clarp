@@ -200,7 +200,7 @@ class RetryMixin:
                 log_exception("providerLimitRecordFail", exc, detail=spec.trace_id)
         provider = error_classify.provider_message(message)
         state_detail = {
-            # Its trace: the runner's end settles (or corrects) its own turn's row (R92).
+            # Its trace: the runner's end names its trace, so it settles its own turn's row (R92).
             "trace_id": spec.trace_id,
             "dispatch": spec.backend, "reason": category, "message": human,
             "error": (message or "")[:200], "provider_message": provider[:500],
