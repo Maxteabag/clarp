@@ -163,6 +163,7 @@ dependencies = [
 name = "clarp-backend"
 version = "0.0.1"
 dependencies = [
+ "clarp-child",
  "clarp-kernel",
  "clarp-speech",
  "clarp-spool",
@@ -171,6 +172,10 @@ dependencies = [
  "rusqlite",
  "serde_json",
 ]
+
+[[package]]
+name = "clarp-child"
+version = "0.0.1"
 
 [[package]]
 name = "clarp-codec"
@@ -188,6 +193,7 @@ dependencies = [
  "bytes",
  "clarp-actor",
  "clarp-backend",
+ "clarp-child",
  "clarp-codec",
  "clarp-kernel",
  "clarp-ports",
@@ -222,6 +228,7 @@ dependencies = [
 name = "clarp-kernel"
 version = "0.0.1"
 dependencies = [
+ "clarp-child",
  "clarp-codec",
  "clarp-ports",
  "clarp-speech",
@@ -267,6 +274,7 @@ name = "clarp-speech"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "clarp-child",
  "regex",
  "serde_json",
  "tungstenite",

@@ -6,6 +6,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+clarp-child.workspace = true
 axum.workspace = true
 bytes.workspace = true
 clarp-actor.workspace = true
