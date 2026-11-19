@@ -1887,7 +1887,7 @@ impl Actor {
     }
 
     fn remember_job_event(&mut self,record:&JobRecord){
-        if record.timeline{self.job_events.push(JobEvent{id:record.job.id.clone(),revision:record.job.revision,at:record.at_ms});}
+        if record.timeline || !record.job.provider_owned(){self.job_events.push(JobEvent{id:record.job.id.clone(),revision:record.job.revision,at:record.at_ms});}
     }
     pub fn take_job_events(&mut self)->Vec<JobEvent>{std::mem::take(&mut self.job_events)}
 
