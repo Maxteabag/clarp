@@ -48,6 +48,9 @@ pub mod kind {
     /// A [`Commentary`](crate::conversation::Commentary): tool work came after a reply in the
     /// same turn, for that reply's row.
     pub const COMMENTARY: u16 = 112;
+    /// A change to helper cells on a parent message. Its place in a
+    /// conversation page is still the original row.
+    pub const HELPER_CELLS: u16 = 113;
 
     /// A [`JobRecord`](crate::jobs::JobRecord): a background job as a change left it.
     pub const JOB: u16 = 300;

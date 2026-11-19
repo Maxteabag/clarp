@@ -54,6 +54,7 @@ use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
 use clarp_spool::{Entry as Line, ShimEvent, SpoolReader};
 
 pub mod conversation;
+pub mod helper_cells;
 
 use conversation::{Draft, Page, REVISION_STEP, Versioned, Which};
 

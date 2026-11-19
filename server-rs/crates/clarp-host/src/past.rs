@@ -44,7 +44,7 @@ const OF_A_DIRECTORY: usize = 20;
 const OF_EVERY_DIRECTORY: usize = 100;
 
 /// Where Claude Code keeps its sessions, for a user whose home is `home`.
-fn projects(home: &Path) -> PathBuf {
+pub(crate) fn projects(home: &Path) -> PathBuf {
     home.join(".claude").join("projects")
 }
 
@@ -120,6 +120,7 @@ pub(crate) enum Begins {
     /// agent's, and the model the session last ran on (empty where its transcript names
     /// none).
     With {
+        helpers: Option<Box<crate::helper_source::HelperSource>>,
         session: String,
         turns: Vec<Value>,
         parent: Option<String>,
@@ -258,6 +259,7 @@ async fn begins_where_it_ran(
         return Err(refused(StatusCode::NOT_FOUND, why, why));
     };
     Ok(Begins::With {
+        helpers: None,
         session,
         turns,
         parent: None,
@@ -344,15 +346,32 @@ pub(crate) async fn begins(
         let name = session.clone();
         let read = move || {
             let path = past::claude_transcript(&root, &cwd, &name, false)?;
-            std::fs::read_to_string(path).ok()
+            use std::io::Read;
+            let resolved = root.canonicalize().ok()?;
+            let relative = path.strip_prefix(&resolved).ok()?.to_str()?;
+            let (_, mut file) = crate::files::open_beneath(&root, relative, false).ok()?;
+            if !file.metadata().ok()?.is_file() {
+                return None;
+            }
+            let mut text = String::new();
+            file.read_to_string(&mut text).ok()?;
+            let mut source = crate::helper_source::HelperSource::default();
+            source.seed(&file, &text).ok()?;
+            source.discover(&root, &path);
+            let children = &source.children;
+            let turns = history::claude_with_children(&text, children);
+            Some((text, turns, Box::new(source)))
         };
-        let Some(transcript) = tokio::task::spawn_blocking(read).await.ok().flatten() else {
+        let Some((transcript, turns, helpers)) =
+            tokio::task::spawn_blocking(read).await.ok().flatten()
+        else {
             let why = "Session is no longer available in this directory";
             return Err(refused(StatusCode::NOT_FOUND, why, why));
         };
         return Ok(Begins::With {
+            helpers: Some(helpers),
             session,
-            turns: history::claude(&transcript),
+            turns,
             parent: None,
             model: history::model(&transcript),
         });
@@ -387,6 +406,7 @@ pub(crate) async fn begins(
         }
     };
     Ok(Begins::With {
+        helpers: None,
         session,
         turns: history::claude(&copy),
         parent,
