@@ -609,6 +609,10 @@ def test_unoccupied_unique_reply_keeps_authored_trace_beyond_time_index_reach(tm
                           ('earlier-turn', first_user['id']))
         db.conn().execute('INSERT INTO turns(agent_id,source,trace_id,started_at,ended_at,settled_at,outcome) VALUES(?,?,?,?,?,?,?)',
             (aid, 'pwa', 'earlier-turn', BASE+50, BASE+500, BASE+500, 'completed'))
+        # An agent runs one turn at a time, so the earlier turn's start ended turn-1's first row;
+        # turn-1, which the later input is steered into, runs again after it (R89, third part).
+        db.conn().execute('INSERT INTO turns(agent_id,source,trace_id,started_at) VALUES(?,?,?,?)',
+            (aid, 'pwa', 'turn-1', BASE+600))
     first, final = 'An earlier unrelated answer.', 'A distinct later answer.'
     _record(path, 'assistant', first, 200)
     late = _UNSETTLED_REACH_MS + 100000

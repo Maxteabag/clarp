@@ -5,8 +5,25 @@ provider message streams into its own row instead of one row concatenating
 the whole turn."""
 from __future__ import annotations
 
+import pytest
+
 from lib import agents as agents_db
 from lib import message_store
+
+
+@pytest.fixture(autouse=True)
+def _before_the_copies(monkeypatch):
+    """The turn begins and the client row is sent just before 2026-10-03T00:00:00Z, where the
+    transcript's copies are dated (R89, third part: a copy cannot come before its own send; the
+    rows were written at the real time before). The clock moves a millisecond a reading."""
+    import time
+    now = [1790985598000]                # 2026-10-02T23:59:58Z
+
+    def ticking():
+        now[0] += 1
+        return now[0] / 1000
+    monkeypatch.setattr(time, "time", ticking)
+    return now
 
 
 def _agent(session="nia"):
@@ -49,11 +66,12 @@ def test_import_adopts_the_live_row_instead_of_swapping_it():
     assert _replace_revision(agent_id) == 0
 
 
-def test_each_provider_message_streams_into_its_own_row():
+def test_each_provider_message_streams_into_its_own_row(_before_the_copies):
     agent_id = _agent()
     first = message_store.upsert_live_assistant_message(
         agent_id=agent_id, backend_session_id="b-1", trace_id="t-1",
         text="Looking at it.", item_key="msg_1")
+    _before_the_copies[0] += 4_000          # the second message streams after the first one's copy
     second = message_store.upsert_live_assistant_message(
         agent_id=agent_id, backend_session_id="b-1", trace_id="t-1",
         text="Found it.", item_key="msg_2")
