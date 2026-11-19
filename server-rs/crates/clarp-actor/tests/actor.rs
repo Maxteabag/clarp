@@ -2219,29 +2219,49 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     assert!(actor.provider_session(archive).unwrap().links.is_empty());
     // Equal native identities are displayed under the earliest registration,
     // including when an older ordinary job acquires its link later.
-    let provenance=json!({"provider":"claude","native_session_id":"fixture","tool_use_id":"tool"});
-    let register=|actor:&mut Actor,name:&str,metadata:serde_json::Value|{
-        let command=clarp_kernel::jobs::JobCommand::Register{id:name.into(),kind:"fixture".into(),title:"Explicit".into(),detail:String::new(),
-            worker:clarp_kernel::jobs::Worker::none(),restart_cancelled:false,started_trace_id:String::new(),heartbeat_timeout_ms:None,metadata};
-        let (receipt,_)=actor.job(command,500,next).unwrap();
+    let provenance =
+        json!({"provider":"claude","native_session_id":"fixture","tool_use_id":"tool"});
+    let register = |actor: &mut Actor, name: &str, metadata: serde_json::Value| {
+        let command = clarp_kernel::jobs::JobCommand::Register {
+            id: name.into(),
+            kind: "fixture".into(),
+            title: "Explicit".into(),
+            detail: String::new(),
+            worker: clarp_kernel::jobs::Worker::none(),
+            restart_cancelled: false,
+            started_trace_id: String::new(),
+            heartbeat_timeout_ms: None,
+            metadata,
+        };
+        let (receipt, _) = actor.job(command, 500, next).unwrap();
         receipt.unwrap();
     };
-    let replacement=|actor:&Actor|actor.jobs().provider_replacement(actor.jobs().get(&id).unwrap()).map(str::to_owned);
-    register(&mut actor,"z-first",json!({}));
-    register(&mut actor,"a-second",provenance.clone());
-    assert_eq!(replacement(&actor).as_deref(),Some("a-second"));
-    register(&mut actor,"z-first",provenance.clone());
-    assert_eq!(replacement(&actor).as_deref(),Some("z-first"));
-    let mut actor=world.open();
-    assert_eq!(replacement(&actor).as_deref(),Some("z-first"));
-    let last=actor.job_timeline(&id,1).unwrap();
-    assert_eq!(last[0].note,"Display projection changed; native task lifecycle unchanged");
-    assert_eq!(last[0].job.revision,actor.jobs().get(&id).unwrap().revision);
-    register(&mut actor,"z-first",json!({}));
-    assert_eq!(replacement(&actor).as_deref(),Some("a-second"));
-    register(&mut actor,"a-second",json!({}));
-    assert_eq!(replacement(&actor),None);
-
+    let replacement = |actor: &Actor| {
+        actor
+            .jobs()
+            .provider_replacement(actor.jobs().get(&id).unwrap())
+            .map(str::to_owned)
+    };
+    register(&mut actor, "z-first", json!({}));
+    register(&mut actor, "a-second", provenance.clone());
+    assert_eq!(replacement(&actor).as_deref(), Some("a-second"));
+    register(&mut actor, "z-first", provenance.clone());
+    assert_eq!(replacement(&actor).as_deref(), Some("z-first"));
+    let mut actor = world.open();
+    assert_eq!(replacement(&actor).as_deref(), Some("z-first"));
+    let last = actor.job_timeline(&id, 1).unwrap();
+    assert_eq!(
+        last[0].note,
+        "Display projection changed; native task lifecycle unchanged"
+    );
+    assert_eq!(
+        last[0].job.revision,
+        actor.jobs().get(&id).unwrap().revision
+    );
+    register(&mut actor, "z-first", json!({}));
+    assert_eq!(replacement(&actor).as_deref(), Some("a-second"));
+    register(&mut actor, "a-second", json!({}));
+    assert_eq!(replacement(&actor), None);
 }
 
 #[test]
