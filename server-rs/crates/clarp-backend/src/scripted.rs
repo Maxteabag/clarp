@@ -360,6 +360,69 @@ mod tests {
         );
     }
 
+    /// The echo tool, started in `place` and told `message`: its process, its message given.
+    fn echoing(place: &std::path::Path, message: &str) -> std::process::Child {
+        use std::io::Write as _;
+        let tool = Scripted::echo();
+        let mut child = std::process::Command::new(&tool.program)
+            .args(&tool.args)
+            .current_dir(place)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut given = child.stdin.take().unwrap();
+        given.write_all(format!("{message}\n").as_bytes()).unwrap();
+        child
+    }
+
+    /// What the tool answered, once it is over.
+    fn answered(child: &mut std::process::Child) -> String {
+        let mut said = String::new();
+        std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut said).unwrap();
+        said
+    }
+
+    #[test]
+    fn the_echo_tool_stops_sleeping_when_the_directory_it_runs_in_is_gone() {
+        use std::time::{Duration, Instant};
+        let place = std::env::temp_dir().join(format!("scripted-sleep-{}", std::process::id()));
+        std::fs::create_dir_all(&place).unwrap();
+
+        // Half a second, which is no whole number, is slept as it is said.
+        let begun = Instant::now();
+        let mut half = echoing(&place, "sleep 0.5");
+        assert!(half.wait().unwrap().success());
+        assert!(
+            begun.elapsed() >= Duration::from_millis(450),
+            "{:?}",
+            begun.elapsed()
+        );
+        assert_eq!(answered(&mut half), "sleep 0.5\n");
+
+        // A minute is slept while the place is there, and no longer once it is gone.
+        let mut child = echoing(&place, "sleep 60");
+        std::thread::sleep(Duration::from_millis(1_500));
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "it sleeps while its place is there"
+        );
+        std::fs::remove_dir_all(&place).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the tool still sleeps after its place is gone");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(status.success());
+        assert_eq!(answered(&mut child), "sleep 60\n");
+    }
+
     #[test]
     fn the_echo_tool_is_given_the_message_on_standard_input() {
         let launch = Scripted::echo().launch(&TurnSpec {
