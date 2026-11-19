@@ -135,7 +135,16 @@ async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
     let Some(member) = member else {
         return goaltool::nobody(&ask, app.clock.now_ms());
     };
-    match member.agent.goal(ask).await {
+    let token = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    let caller = match crate::turn_identity::presented(app, token).await {
+        Ok(Some(who)) => crate::agent::GoalCaller::Verified(who.record.agent_id.clone()),
+        Ok(None) => crate::agent::GoalCaller::Default,
+        Err(why) => return ToolAnswer::said(1, why.message().to_string()),
+    };
+    match member.agent.goal_as(ask, caller).await {
         // A plan is printed with how the Goal keeper stands to it, as an app reads it.
         Ok(said) => crate::keeper::told_in(app, said).await,
         Err(error) => ToolAnswer::said(

@@ -39,6 +39,8 @@ use clarp_kernel::conversation::{
     ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
+mod goal_ledger;
+use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind};
@@ -473,6 +475,11 @@ pub struct Status {
 /// artifacts as changes left them, and files the agent published.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Kept<'a> {
+    pub author: Author<'a>,
+    pub imported_events: Option<&'a [LedgerEvent]>,
+    pub entry_source: Option<&'a str>,
+    pub import_high: i64,
+    pub applied_cursor: Option<(&'a str, i64)>,
     pub goal: Option<&'a GoalChange>,
     pub artifacts: &'a [Artifact],
     pub media: &'a [Asset],
@@ -1076,6 +1083,7 @@ impl Actor {
             shown_revision: 0,
             remembered: Remembered::default(),
         };
+        actor.open_goal_ledger(now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
         // A line an engine was speaking when the Host went: begun a moment ago, it waits
         // again; begun long ago, it is over. And one that waited for a Host that was away
@@ -1986,6 +1994,56 @@ impl Actor {
         Ok(dropped.len())
     }
 
+    fn open_goal_ledger(&mut self, now: i64) -> Result<(), ActorError> {
+        if self.recorder.log().find("ledger/installed")?.is_some() {
+            return Ok(());
+        }
+        for plan in self.goals.plans().filter(|p| p.goal.is_some()) {
+            // An interrupted initialization resumes at the first missing tail.
+            if goal_ledger::has_plan(self.recorder.log(), &plan.plan_id)? {
+                continue;
+            }
+            let mut items = Vec::new();
+            goal_ledger::stage(
+                self.recorder.log(),
+                &plan.plan_id,
+                ledger::legacy(plan),
+                0,
+                0,
+                now,
+                &mut items,
+            )?;
+            let mut batch = self.recorder.batch();
+            for item in items {
+                batch.item(item);
+            }
+            batch.commit()?;
+        }
+        // Avoid adding any log item merely for opening a brand-new agent.
+        if self.goals.plans().any(|p| p.goal.is_some()) {
+            let mut batch = self.recorder.batch();
+            batch.item(record_item(
+                kind::GOAL_LEDGER,
+                "ledger/installed".into(),
+                &true,
+                now,
+            )?);
+            batch.commit()?;
+        }
+        Ok(())
+    }
+
+    pub fn next_goal_event_id(&self) -> Result<i64, ActorError> {
+        goal_ledger::next_id(self.recorder.log())
+    }
+
+    pub fn validate_goal_import(
+        &self,
+        plans: &[(String, &[LedgerEvent])],
+    ) -> Result<(), ActorError> {
+        goal_ledger::check_import(self.recorder.log(), plans)
+    }
+
     /// Writes what was decided on the agent's books, all of it in one append, and takes it.
     pub fn keep(&mut self, kept: &Kept<'_>, now_ms: i64) -> Result<Outputs, ActorError> {
         let mut written = self.written(kept, now_ms)?;
@@ -2011,6 +2069,41 @@ impl Actor {
         if let Some(record) = &goal {
             let key = format!("g-{}", record.plan_id);
             items.push(record_item(kind::GOAL, key, record, now_ms)?);
+        }
+        if let Some(change) = kept.goal {
+            let plan = &change.plan;
+            let (mut events, imported) = match kept.imported_events {
+                Some(imports) => (imports.to_vec(), imports.len()),
+                None if matches!(kept.author, Author::Legacy) => (ledger::legacy(plan), 0),
+                None => (
+                    ledger::changes(self.goals.plan(&plan.plan_id), plan, kept.author)
+                        .into_iter()
+                        .map(|(_, e)| e)
+                        .collect(),
+                    0,
+                ),
+            };
+            if let Some(source) = kept.entry_source {
+                events.push(ledger::entry_marker(plan, source, &events, now_ms));
+            }
+            goal_ledger::stage(
+                self.recorder.log(),
+                &plan.plan_id,
+                events,
+                imported,
+                kept.import_high,
+                now_ms,
+                &mut items,
+            )?;
+        }
+        if let Some((delegation, requested)) = kept.applied_cursor {
+            items.push(goal_ledger::cursor(
+                self.recorder.log(),
+                delegation,
+                requested,
+                now_ms,
+                &items,
+            )?);
         }
         for record in &artifacts {
             let key = format!("a-{}", record.artifact.artifact_id);

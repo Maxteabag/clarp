@@ -1134,6 +1134,121 @@ fn goal(host: &Host, dir: &std::path::Path, args: &[&str]) -> Value {
 }
 
 #[test]
+fn a_goal_change_keeps_its_event_and_number_in_its_owners_append() {
+    use clarp_ports::log::LogEngine;
+    let place = Place::new("ledger-write");
+    let host = place.start();
+    let a = host.new_agent("First");
+    let b = host.new_agent("Second");
+    let create = |s: &str| {
+        goal(
+            &host,
+            &place.root,
+            &[
+                "create",
+                s,
+                "fixture",
+                "Fixture",
+                "[]",
+                r#"{"outcome":"Deliver","criteria":["Checked"],"limits":"Local"}"#,
+            ],
+        )
+    };
+    let first = create(&a);
+    let second = create(&b);
+    for (p, reason) in [(&first, "A paused"), (&second, "B paused")] {
+        goal(
+            &host,
+            &place.root,
+            &[
+                "pause",
+                p["plan_id"].as_str().unwrap(),
+                "0",
+                &json!({"reason":reason}).to_string(),
+            ],
+        );
+    }
+    goal(
+        &host,
+        &place.root,
+        &[
+            "resume",
+            second["plan_id"].as_str().unwrap(),
+            "1",
+            r#"{"reason":"B resumed"}"#,
+        ],
+    );
+    host.kill();
+    for (plan, next) in [(&first, 3), (&second, 4)] {
+        let id = plan["agent_id"].as_str().unwrap();
+        let pid = plan["plan_id"].as_str().unwrap();
+        let dir = place.root.join("data/agents").join(id);
+        let log = clarp_store_sqlite::SqliteEngine::new()
+            .open(&dir, clarp_codec::standard_set("zstd").unwrap())
+            .unwrap();
+        let get = |key: &str| {
+            serde_json::from_slice::<Value>(&log.find(key).unwrap().unwrap().body).unwrap()
+        };
+        assert_eq!(get("ledger/next"), next);
+        assert_eq!(get("ledger/id/2"), json!([pid, 2]));
+        let event = get(&format!("ledger/event/{pid}/2"));
+        assert_eq!(event["kind"], "pause");
+        assert_eq!(event["actor_kind"], "owner");
+        assert_eq!(event["actor_agent_id"], id);
+        assert_eq!(event["new"]["actor_verified"], false);
+        assert_eq!(event["prior"]["status"], "active");
+        assert_eq!(event["new"]["status"], "paused");
+        // The authorized empty bookkeeping batch uses this same owner-log operation.
+        if next == 3 {
+            let profile = clarp_actor::Profile {
+                agent_id: id.into(),
+                session: a.clone(),
+                conversation_id: "fixture".into(),
+                dir: dir.clone(),
+                run_dir: place.root.join("run"),
+                cwd: place.root.join("work"),
+                model: None,
+                effort: None,
+                told: None,
+                tool_env: vec![],
+                stop_grace_ms: 1000,
+                keep_spools: false,
+                accounts: clarp_kernel::recovery::Accounts::None,
+                epoch: "fixture".into(),
+            };
+            let (mut actor, _) = clarp_actor::Actor::open(
+                profile,
+                Arc::new(clarp_backend::scripted::Scripted::echo()),
+                log,
+                1000,
+            )
+            .unwrap();
+            actor
+                .keep(
+                    &clarp_actor::Kept {
+                        applied_cursor: Some(("fixture", 3)),
+                        ..Default::default()
+                    },
+                    1001,
+                )
+                .unwrap();
+            drop(actor);
+            let log = clarp_store_sqlite::SqliteEngine::new()
+                .open(&dir, clarp_codec::standard_set("zstd").unwrap())
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<i64>(
+                    &log.find("ledger/applied/fixture").unwrap().unwrap().body
+                )
+                .unwrap(),
+                2,
+                "B's later event cannot advance A"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_agent_keeps_a_goal_with_its_own_tool_and_still_has_it_after_the_host_is_killed() {
     let place = Place::new("goal");
     let host = place.start();
