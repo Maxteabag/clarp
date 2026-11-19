@@ -2640,8 +2640,9 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     read.store(0, Ordering::SeqCst);
     let told = actor.take_deliveries(world.tick()).unwrap();
     assert_eq!(told, ["u-m10003"]);
+    // One message read: one call, one item.
     let one_read = read.load(Ordering::SeqCst);
-    assert!(one_read > 0);
+    assert_eq!(one_read, 2, "a send's names are read once");
     // One more behind it: admitted and handed to the queue in one breath, its names read once.
     let behind = Message {
         id: "u-m10004".into(),
