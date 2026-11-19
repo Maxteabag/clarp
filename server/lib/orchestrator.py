@@ -375,6 +375,15 @@ def _decision_row_to_dict(row) -> dict[str, Any]:
     return out
 
 
+def _answerable_status(value) -> bool:
+    """Whether a status stored in a receipt can be a replay's answer: an integer from 200 to 599
+    other than 204 and 304 (a bool is not one). A client cannot read the others as this answer:
+    0 or 99 make the status line unparseable, 1xx is skipped as interim (100 then reads the JSON
+    body as the next status line), and 1xx, 204 and 304 carry no body, so the answer is lost. The
+    Host itself stores only 200, 202 and 4xx/5xx; anything else is a corrupt receipt."""
+    return type(value) is int and 200 <= value <= 599 and value not in (204, 304)
+
+
 class OrchestratorService:
     def __init__(
         self,
@@ -683,18 +692,19 @@ class OrchestratorService:
         recipient = identity.lookup(receipt.get("target_agent_id")) or {}
         pending = run.get("status") in {"queued", "running"}
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
+        stored_http = receipt.get("http_status")
         status = (202 if pending
-                  else int(receipt.get("http_status") or 500) if action == FINAL_ERROR
+                  else (stored_http if _answerable_status(stored_http) else 500) if action == FINAL_ERROR
                   else 200)
         # A replay answers what the first answer said, whatever its kind: the receipt keeps it.
         # A receipt written before it kept that answers as main did, by its recipient.
-        # A stored answer is read defensively. Its status must be an HTTP status, an integer from
-        # 100 to 599 (0 would be answered as 'HTTP/1.1 0'), else the receipt is
-        # an older one, replayed as main does. A status with no session stored means the first
-        # answer named the requested session (too long for the bound), which is this same client
-        # id's own request; a session stored but not a non-empty text is an older receipt too.
+        # A stored answer is read defensively. Its status must be one a replay can answer with
+        # (_answerable_status), else the receipt is an older one, replayed as main does. A status
+        # with no session stored means the first answer named the requested session (too long for
+        # the bound), which is this same client id's own request; a session stored but not a
+        # non-empty text is an older receipt too.
         said_session, said_status = receipt.get("answer_session"), receipt.get("answer_status")
-        if not pending and type(said_status) is int and 100 <= said_status <= 599 and (
+        if not pending and _answerable_status(said_status) and (
                 "answer_session" not in receipt or (isinstance(said_session, str) and said_session)):
             session = said_session if "answer_session" in receipt else requested_session
             dispatched = receipt.get("answer_dispatch") if isinstance(receipt.get("answer_dispatch"), str) else ""
