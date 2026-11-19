@@ -2007,7 +2007,23 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     use clarp_kernel::provider_tasks::{self as rules,Attempt,Cursor,FinalRead,Visit};
     use clarp_kernel::jobs::JobStatus;
     let mut world=World::new("native-task");
-    let mut actor=world.open();
+    use clarp_ports::log::{AgentLog,Item,Kinds,LogError,NewItem,Seq};
+    struct FailFirstNativeWrite(Box<dyn AgentLog>,bool);
+    impl AgentLog for FailFirstNativeWrite {
+        fn append(&mut self,items:&[NewItem])->Result<Seq,LogError>{
+            if self.1 && items.iter().any(|i|i.kind==kind::PROVIDER_JOBS){
+                self.1=false;
+                return Err(LogError::Storage("fixture refused this append".into()));
+            }
+            self.0.append(items)
+        }
+        fn last_seq(&self)->Result<Seq,LogError>{self.0.last_seq()}
+        fn read_after(&self,n:Seq,k:Kinds,l:usize)->Result<Vec<Item>,LogError>{self.0.read_after(n,k,l)}
+        fn read_before(&self,n:Seq,k:Kinds,l:usize)->Result<Vec<Item>,LogError>{self.0.read_before(n,k,l)}
+        fn find(&self,key:&str)->Result<Option<Item>,LogError>{self.0.find(key)}
+    }
+    let log=world.engine.open(&world.profile.dir,standard_set("zstd").unwrap()).unwrap();
+    let (mut actor,_)=Actor::open(world.profile.clone(),world.backend.clone(),Box::new(FailFirstNativeWrite(log,true)),world.now_ms).unwrap();
     let id=rules::job_id(&world.profile.agent_id,"fixture","tool");
     let owner=Attempt{turn:1,attempt:2};
     let mut visit=Visit{native:"fixture".into(),bound_at:90,owner:Some(owner),expected:0,cursor:Cursor{device:1,inode:2,offset:256,..Default::default()},
@@ -2015,6 +2031,12 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
         serde_json::from_value(json!({"tool":"tool","at":101,"state":"running","task":"child"})).unwrap()],eof:true};
     let revision=std::cell::Cell::new(500);
     let next=||{revision.set(revision.get()+1);revision.get()};
+    // When the one append fails, neither the advancing cursor nor any
+    // public job or timeline entry escapes. The same batch can be retried.
+    assert!(actor.apply_provider_visit(visit.clone(),101,next).is_err());
+    assert!(actor.jobs().get(&id).is_none());
+    assert!(actor.provider_session("fixture").is_none());
+    assert!(actor.job_timeline(&id,10).unwrap().is_empty());
     actor.apply_provider_visit(visit.clone(),101,next).unwrap();
     assert_eq!(actor.jobs().get(&id).unwrap().status,JobStatus::Running);
     assert_eq!(actor.job_timeline(&id,10).unwrap().len(),2);
@@ -2035,6 +2057,7 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
     actor.apply_provider_visit(visit.clone(),202,next).unwrap();
     assert_eq!(actor.jobs().get(&id).unwrap().outcome_state(),"unknown");
     assert_eq!(actor.jobs().get(&id).unwrap().metadata["stop_basis"],"turn_exit");
+    assert_eq!(actor.jobs().get(&id).unwrap().metadata["turn_exited_at"],200);
     let mut actor=world.open();
     let saved=actor.provider_session("fixture").unwrap();assert_eq!(saved.final_read,None);
     visit.expected=saved.revision;visit.owner=None;visit.final_read=None;visit.cursor.offset+=100;
