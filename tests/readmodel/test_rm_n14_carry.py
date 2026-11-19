@@ -633,8 +633,10 @@ def test_two_messages_with_the_same_words_are_told_apart_by_when_they_were_sent(
     words = "the same words, sent twice"
     with World(tmp_path, backend, _history(backend)) as world:
         ordinal = world.started(6)
-        world.send("earlier", words, at=FAR, trace="the-earlier-message")
-        world.send("later", words, at=FAR + 5_000, trace="the-later-message")
+        # Both sent before the transcript writes the words (R89, third part: a copy cannot be of a
+        # message not yet sent; they were dated FAR, after every copy, before).
+        world.send("earlier", words, at=ordinal * 1000 - 9_000, trace="the-earlier-message")
+        world.send("later", words, at=ordinal * 1000 - 4_000, trace="the-later-message")
         with sqlite3.connect(world.candidate) as stored:
             seqs = dict(stored.execute(
                 "SELECT message_id, seq FROM messages WHERE source_file LIKE 'client:%'"))
@@ -659,8 +661,10 @@ def test_two_messages_with_the_same_words_sent_in_the_same_millisecond(tmp_path,
     words = "the same words, in the same millisecond"
     with World(tmp_path, backend, _history(backend)) as world:
         ordinal = world.started(6)
-        world.send("a-written-first", words, at=FAR, trace="higher-seq")
-        world.send("b-written-second", words, at=FAR, trace="lower-seq")
+        # In the same millisecond, before the transcript writes the words (they were dated FAR,
+        # after every copy, before R89's third part).
+        world.send("a-written-first", words, at=ordinal * 1000 - 4_000, trace="higher-seq")
+        world.send("b-written-second", words, at=ordinal * 1000 - 4_000, trace="lower-seq")
         world.grow(_turn(backend, ordinal, request=words))
         assert world.imported() == ("tail_applied", [])
         assert _reply_traces(world, ordinal) == {"lower-seq"}

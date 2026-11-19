@@ -349,7 +349,9 @@ def test_recorded_user_message_survives_and_links_to_transcript(tmp_path):
         source_file="/tmp/transcript.jsonl",
         turns=[
             *old_turns,
-            {"role": "user", "text": "long dictated message", "timestamp": "3"},
+            # Written after its /send (R89, third part: a copy is never of a message not yet
+            # sent; it was dated "3", 1970, before).
+            {"role": "user", "text": "long dictated message", "timestamp": _iso_from_ms(now_ms() + 1000)},
         ],
     )
     visible = agents_db.list_messages(
@@ -458,9 +460,10 @@ def test_stable_client_id_is_idempotent_and_handles_repeats(tmp_path):
         agent_id=agent_id, backend_session_id=bsid,
         source_file="/tmp/t.jsonl",
         turns=[
-            {"role": "user", "text": "lol", "timestamp": "1"},
-            {"role": "user", "text": "lol", "timestamp": "2"},
-            {"role": "assistant", "text": "reply", "timestamp": "3"},
+            # Written after their two /sends (R89, third part; dated "1" to "3", 1970, before).
+            {"role": "user", "text": "lol", "timestamp": _iso_from_ms(now_ms() + 1000)},
+            {"role": "user", "text": "lol", "timestamp": _iso_from_ms(now_ms() + 1001)},
+            {"role": "assistant", "text": "reply", "timestamp": _iso_from_ms(now_ms() + 1002)},
         ],
     )
     visible = agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)

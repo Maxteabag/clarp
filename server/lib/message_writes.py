@@ -1493,8 +1493,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 own = _own_turns_row(
                     database, rows, running, began, trace_ids=client_traces,
                     written_at=turn.get("timestamp"),
-                    ended_before=lambda sent, at=turn.get("timestamp"): turn_index.ended_before(sent, at),
-                    began_after=lambda sent, at=turn.get("timestamp"): turn_index.began_after(sent, at))
+                    ended_before=lambda sent, at=turn.get("timestamp"): turn_index.ended_before(sent, at))
             if own is not None:
                 client_msg_id, current_origin, current_sender_agent_id, _ = \
                     provenance.take(key, rows, own)

@@ -415,8 +415,7 @@ def test_a_copy_no_turn_covers_is_held_to_the_same_two_exclusions(sent, chosen):
     copy_at = clock.iso_from_ms(BASE + 41_000)
     assert message_import_rows._own_turns_row(
         None, rows, "", None, trace_ids=traces, written_at=copy_at,
-        ended_before=lambda trace: index.ended_before(trace, copy_at),
-        began_after=lambda trace: index.began_after(trace, copy_at)) == chosen
+        ended_before=lambda trace: index.ended_before(trace, copy_at)) == chosen
 
 
 @CONFIGURATIONS
@@ -425,8 +424,9 @@ def test_a_row_written_after_its_copy_still_links(tmp_path, monkeypatch, configu
     """The one real path where a copy comes before its own row: a new Codex session persists the
     client row only when its session init binds the backend id, after the spawn
     (turn_launcher, 'persist it as soon as init binds the UUID'). Its own turn runs, so the row
-    is found by its trace first; with that turn row missing, no exclusion rules it out either
-    (a row sent after a copy is ruled out only for a turn that began after the copy)."""
+    is found by its trace first, which no exclusion touches. With that turn row missing there is
+    no trace to find it by, and a row sent more than 2 s after a copy is never taken: the copy is
+    stored beside it (the strict rule of 05:24; no real path writes such a row without its turn)."""
     _configured(monkeypatch, configuration)
     cli = _Cli(tmp_path, monkeypatch)
     if turn:
@@ -437,8 +437,11 @@ def test_a_row_written_after_its_copy_still_links(tmp_path, monkeypatch, configu
     cli.line('assistant', [{'type': 'text', 'text': ANSWER}], BASE + 5000)
     for full in (False, True):
         users, replies = cli.imported(full=full)
-        assert [row_id for row_id, _text in users] == ["u-late-row"]     # no copy beside its row
-        assert replies == [(ANSWER, "bound-late")]
+        if turn:
+            assert [row_id for row_id, _text in users] == ["u-late-row"]     # no copy beside its row
+            assert replies == [(ANSWER, "bound-late")]
+        else:
+            assert sorted(row_id.startswith("u-") for row_id, _text in users) == [False, True]
 
 
 @CONFIGURATIONS
@@ -501,8 +504,8 @@ def test_an_agy_copy_is_timed_and_held_to_the_same_rule(tmp_path, monkeypatch, c
 @pytest.mark.parametrize("after_ms, taken", [(1_999, True), (2_000, True), (2_001, False)])
 @pytest.mark.parametrize("running", [True, False], ids=["a turn running", "no turn running"])
 def test_a_row_sent_up_to_two_seconds_after_the_copy_may_be_its_and_one_more_may_not(after_ms, taken, running):
-    """The bound is two seconds exactly: 1,999 and 2,000 ms after the copy are taken, 2,001 is not.
-    With no turn running, the row is sent for a turn that began after the copy, as the rule asks."""
+    """The bound is two seconds exactly: 1,999 and 2,000 ms after the copy are taken, 2,001 is not,
+    with a turn running and with none, whatever turn the row has."""
     copy_ms = 41_000
     index = _index(("turn-2", 40_000, 55_000), ("late", copy_ms + after_ms + 100, None))
     rows = _rows(("late", copy_ms + after_ms))
@@ -510,8 +513,7 @@ def test_a_row_sent_up_to_two_seconds_after_the_copy_may_be_its_and_one_more_may
     chosen = message_import_rows._own_turns_row(
         None, rows, "turn-2" if running else "", BASE + 40_000 if running else None,
         trace_ids={"c0": "late"}, written_at=copy_at,
-        ended_before=lambda trace: index.ended_before(trace, copy_at),
-        began_after=lambda trace: index.began_after(trace, copy_at))
+        ended_before=lambda trace: index.ended_before(trace, copy_at))
     assert chosen == (0 if taken else None)
 
 
@@ -578,3 +580,52 @@ def test_a_copy_after_a_settled_turn_with_an_unsettled_twin_does_not_take_its_ro
         assert [text for row_id, text in users if not row_id.startswith("u-")] == [PROMPT], users
         assert "u-failed" in {row_id for row_id, _ in users}                          # its row stays its own
         assert dict(replies)["Typed answer."] != "settled-twin"
+
+
+# ---- the hold of 05:24 (the strict rule): no row sent more than 2 s after a copy is ever taken ----
+
+@CONFIGURATIONS
+def test_a_typed_copy_never_takes_a_row_steered_in_hours_later(tmp_path, monkeypatch, configuration):
+    """The reviewer's (d): the same words typed outside every turn at 09:00; four old failed sends of
+    them; hours later the same words steered into a running turn (a row with no turn of its own),
+    and that message's own copy follows. The typed copy takes no row (the old sends had ended, the
+    steered one was not yet sent) and is stored as itself; the steered message shows once."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    for k in range(4):
+        cli.send(f"old{k}", PROMPT, f"old-{k}", BASE - 7 * 86_400_000 + k * STEP, settle_after=1000)
+    cli.line('user', PROMPT, BASE)                                       # typed at 09:00: no row
+    cli.line('assistant', [{'type': 'text', 'text': "Typed answer."}], BASE + 3000)
+    later = BASE + 5 * 3_600_000
+    cli.send("work", "Run the weekly report.", "running-turn", later)    # the turn running then
+    cli.line('user', "Run the weekly report.", later + 500)
+    cli.send("steered", PROMPT, "steered-in", later + 10_000, turn=False)  # steered: no turn of its own
+    cli.line('user', PROMPT, later + 10_500)                             # its own copy
+    cli.line('assistant', [{'type': 'text', 'text': ANSWER}], later + 15_000)
+    cli.now[0] = later + 20_000
+    for full in (False, False, True):
+        users, _replies = cli.imported(full=full)
+        stored = db.conn().execute(
+            "SELECT timestamp FROM messages WHERE agent_id=? AND role='user' AND text=?"
+            " AND source_file NOT LIKE 'client:%'", (cli.id, PROMPT)).fetchall()
+        db.close_local()
+        # The one copy stored as itself is the TYPED one (09:00); the steered message's copy linked
+        # its own row, so the steered message shows once.
+        assert [row["timestamp"] for row in stored] == [clock.iso_from_ms(BASE)], users
+        assert "u-steered" in {row_id for row_id, _ in users}
+
+
+@CONFIGURATIONS
+def test_a_later_send_that_never_ran_does_not_lend_its_row_to_an_earlier_copy(tmp_path, monkeypatch, configuration):
+    """The reviewer's (a): the same words typed outside every turn, then an hour later sent but
+    never run (no turn row, no copy). The typed copy is stored as itself; the send keeps its row."""
+    _configured(monkeypatch, configuration)
+    cli = _Cli(tmp_path, monkeypatch)
+    cli.line('user', PROMPT, BASE)
+    cli.line('assistant', [{'type': 'text', 'text': "Typed answer."}], BASE + 3000)
+    cli.send("never-ran", PROMPT, "never-ran", BASE + 3_600_000, turn=False)
+    cli.now[0] = BASE + 3_600_000 + 5000
+    for full in (False, False, True):
+        users, replies = cli.imported(full=full)
+        assert sorted(row_id.startswith("u-") for row_id, _text in users) == [False, True], users
+        assert dict(replies)["Typed answer."] != "never-ran"
