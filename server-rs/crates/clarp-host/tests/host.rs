@@ -20800,6 +20800,150 @@ fn what_waits_is_taken_back_or_sent_now_by_its_user_and_a_hold_of_nothing_is_ove
 }
 
 #[test]
+fn an_id_two_agents_both_use_is_each_ones_own() {
+    let place = Place::new("ids-across-agents");
+    let host = place.start();
+    let (echo, fox) = (host.new_agent("Echo"), host.new_agent("Fox"));
+    // An agent's rows as the Host answers them: id, role and words.
+    let rows = |session: &str| -> Vec<(String, String, String)> {
+        let turns = host.turns(session);
+        let rows = turns.iter().map(|row| {
+            let text = |key: &str| row[key].as_str().unwrap_or("").to_string();
+            (text("id"), text("role"), text("text"))
+        });
+        rows.collect()
+    };
+    let head = |session: &str| -> Value {
+        let snapshot = host.get("/agents/snapshot");
+        let mut agents = snapshot["agents"].as_array().unwrap().iter();
+        let found = agents.find(|agent| agent["session"] == session);
+        found.unwrap()["last_message_id"].clone()
+    };
+    let done = |session: &str, rows_now: usize| {
+        wait_for("the turn to be answered", || {
+            host.turns(session).len() == rows_now && host.state(session) == "done"
+        });
+    };
+
+    // An app's id, the same at both: each agent's message and answer are filed under it,
+    // and the ids the tool's answer is named by, which are made from it, are the same too.
+    host.send(&echo, "said to Echo", "m1");
+    done(&echo, 2);
+    host.send(&fox, "said to Fox", "m1");
+    done(&fox, 2);
+    let (at_echo, at_fox) = (rows(&echo), rows(&fox));
+    assert_eq!(
+        (&at_echo[0], &at_fox[0]),
+        (
+            &("u-m1".to_string(), "user".to_string(), "said to Echo".to_string()),
+            &("u-m1".to_string(), "user".to_string(), "said to Fox".to_string())
+        )
+    );
+    assert_eq!(at_echo[1].0, at_fox[1].0, "the answers have one name");
+    assert_eq!(
+        (at_echo[1].2.as_str(), at_fox[1].2.as_str()),
+        ("said to Echo", "said to Fox")
+    );
+    assert_eq!(head(&echo), json!(at_echo[1].0));
+    assert_eq!(head(&fox), json!(at_fox[1].0));
+    // The same id again, at the one: the other's rows and head are as they were.
+    host.send(&echo, "said to Echo again", "m1");
+    wait_for("Echo to have heard the id again", || host.state(&echo) == "done");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(rows(&fox), at_fox);
+    assert_eq!(head(&fox), json!(at_fox[1].0));
+
+    // A message each, left for later under one id while each agent works: the id names
+    // neither, and nothing is done to either; each is still there and runs in its turn.
+    host.send(&echo, "sleep 60", "busy-echo");
+    host.send(&fox, "sleep 60", "busy-fox");
+    wait_for("both to work", || {
+        host.state(&echo) == "thinking" && host.state(&fox) == "thinking"
+    });
+    for (session, text) in [(&echo, "left with Echo"), (&fox, "left with Fox")] {
+        let left = host.post(
+            "/send",
+            json!({ "session": session, "text": text, "client_msg_id": "m9", "queue_if_busy": true }),
+        );
+        assert_eq!(left["queued"], true, "{left}");
+    }
+    let waiting = |session: &str| -> Vec<(String, String)> {
+        let queue = host.get(&format!("/turn-queue?session={session}"));
+        let items = queue["items"].as_array().unwrap().iter();
+        let items = items.map(|item| {
+            let text = |key: &str| item[key].as_str().unwrap().to_string();
+            (text("id"), text("text"))
+        });
+        items.collect()
+    };
+    let ambiguous = (409, "queued message id names more than one agent".to_string());
+    for (method, path, body) in [
+        ("DELETE", "/turn-queue/m9", None),
+        ("PUT", "/turn-queue/m9", Some(json!({ "text": "other words" }))),
+        ("POST", "/turn-queue/m9/send", Some(json!({}))),
+    ] {
+        let (status, said) = host.ask(method, path, body.as_ref());
+        let said = said["error"].as_str().unwrap_or_default().to_string();
+        assert_eq!((status, said), ambiguous, "{method} {path}");
+    }
+    assert_eq!(
+        (waiting(&echo), waiting(&fox)),
+        (
+            vec![("m9".to_string(), "left with Echo".to_string())],
+            vec![("m9".to_string(), "left with Fox".to_string())]
+        )
+    );
+    // Where one agent alone holds an id waiting, it is that agent's message that is acted on.
+    let left = host.post(
+        "/send",
+        json!({ "session": fox, "text": "left with Fox alone", "client_msg_id": "m10", "queue_if_busy": true }),
+    );
+    assert_eq!(left["queued"], true, "{left}");
+    let (status, _) = host.ask("DELETE", "/turn-queue/m10", None);
+    assert_eq!(status, 200);
+    assert_eq!(waiting(&fox).len(), 1);
+    assert_eq!(waiting(&echo).len(), 1);
+    for session in [&echo, &fox] {
+        host.post("/stop", json!({ "session": session }));
+    }
+    wait_for("both turns to end", || {
+        host.state(&echo) == "interrupted" && host.state(&fox) == "interrupted"
+    });
+
+    // Two agents taken over from another Host whose conversations have rows of one name:
+    // each keeps its own.
+    let imported = |name: &str, said: &str| -> String {
+        let session = format!("{}-1a2b", name.to_lowercase());
+        let row = |id: &str, role: &str, text: &str| {
+            json!({ "id": id, "role": role, "text": text, "timestamp": "2026-11-18T10:00:00Z" })
+        };
+        let moved = host.post(
+            "/agents/import",
+            json!({
+                "agent": { "agent_id": format!("agent-{name}"), "session": session, "persona": name,
+                           "backend": "scripted", "backend_session_id": format!("thread-{name}"),
+                           "cwd": place.root.join("work").to_str().unwrap() },
+                "from": "the other Host",
+                "turns": [row("msg-same-1", "user", said), row("msg-same-2", "assistant", said)],
+            }),
+        );
+        assert_eq!(moved["ok"], true, "{moved}");
+        session
+    };
+    let (gale, hail) = (imported("Gale", "Gale's words"), imported("Hail", "Hail's words"));
+    let both = |words: &str| {
+        vec![
+            ("msg-same-1".to_string(), "user".to_string(), words.to_string()),
+            ("msg-same-2".to_string(), "assistant".to_string(), words.to_string()),
+        ]
+    };
+    assert_eq!(rows(&gale), both("Gale's words"));
+    assert_eq!(rows(&hail), both("Hail's words"));
+    // The first agents' rows are as they were.
+    assert_eq!(rows(&fox)[..2], at_fox[..2]);
+}
+
+#[test]
 fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_the_new_ones() {
     let place = Place::new("queue-reword");
     let host = place.start();

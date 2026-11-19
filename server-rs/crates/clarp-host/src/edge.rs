@@ -2584,17 +2584,26 @@ async fn resume(
 /// gave it, which is what the queue names it by.
 async fn waiting_named(app: &App, id: &str) -> Result<Option<(Arc<Member>, TurnId)>, ApiError> {
     let directory = app.fleet.directory();
+    let mut named = None;
     for member in &directory.members {
         if member.agent.view().status.waiting.is_empty() {
             continue;
         }
         let (waiting, _) = member.agent.queue().await?;
         if let Some(found) = waiting.iter().find(|message| message.client_id == id) {
-            return Ok(Some((member.clone(), found.turn)));
+            // An app's ids are each agent's own here: an id that waits at two agents names
+            // neither, and nothing is done to either.
+            if named.is_some() {
+                return Err(ApiError::new(StatusCode::CONFLICT, AMBIGUOUS_WAITING));
+            }
+            named = Some((member.clone(), found.turn));
         }
     }
-    Ok(None)
+    Ok(named)
 }
+
+/// Why a waiting message is not acted on by an id that more than one agent holds waiting.
+const AMBIGUOUS_WAITING: &str = "queued message id names more than one agent";
 
 fn not_waiting() -> ApiError {
     ApiError::new(StatusCode::NOT_FOUND, "queued message not found")
