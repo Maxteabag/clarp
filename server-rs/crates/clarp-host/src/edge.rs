@@ -1867,7 +1867,14 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         request.force_session = Some(true);
         request.trace_id = Some(trace);
         request.client_msg_id = Some(message.clone());
-        let sent = send_message(app, request).await;
+        let binding = (result["route"] == "greeting").then(|| {
+            (
+                result["opening"]["ring_id"].as_str().unwrap_or(""),
+                message.as_str(),
+                result["opening"]["epoch"].as_u64().unwrap_or(1),
+            )
+        });
+        let sent = send_as(app, request, false, binding).await;
         if result["route"] == "greeting"
             && let Some(id) = result["opening"]["ring_id"].as_str()
         {
@@ -1954,17 +1961,22 @@ pub(crate) async fn send_message(
     app: &App,
     request: SendRequest,
 ) -> Result<SendResponse, ApiError> {
-    send_as(app, request, false).await
+    send_as(app, request, false, None).await
 }
 
 /// Takes a message the Host sends by itself: a heartbeat, a prompt at a set time, the task
 /// of a fork. It is a message like any other, but for this: no app gave it an id, and the
 /// apps are told of it under none.
 pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
-    send_as(app, request, true).await
+    send_as(app, request, true, None).await
 }
 
-async fn send_as(app: &App, request: SendRequest, own: bool) -> Result<SendResponse, ApiError> {
+async fn send_as(
+    app: &App,
+    request: SendRequest,
+    own: bool,
+    binding: Option<(&str, &str, u64)>,
+) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
     let text = python::strip(&request.text).to_string();
     if text.is_empty() {
@@ -2150,7 +2162,46 @@ async fn send_as(app: &App, request: SendRequest, own: bool) -> Result<SendRespo
         // agent has the message, so that no answer is faster than this.
         app.mouth.sent(&member.record.session).await;
     }
-    let sent = member.agent.send(message, admission).await?;
+    let guard = if binding.is_some() {
+        Some(app.mouth.binding_admission.write().await)
+    } else {
+        None
+    };
+    let proof = binding
+        .map(|(ring, _, epoch)| json!({"ring_id":ring,"kind":"greeting_reply","epoch":epoch}));
+    let sent = member
+        .agent
+        .send_reserved(message, admission, proof)
+        .await?;
+    if let (Some((ring, id, epoch)), Some(turn)) = (binding, sent.turn) {
+        app.calls
+            .bind_clip(
+                app,
+                ring,
+                &member.record.agent_id,
+                clarp_kernel::rings::binding::Binding {
+                    turn_id: turn.0,
+                    kind: clarp_kernel::rings::binding::Kind::GreetingReply,
+                    admission_id: id.into(),
+                    epoch,
+                },
+            )
+            .await?;
+    }
+    if sent.duplicate
+        && let Some((ring, id, _)) = binding
+    {
+        app.calls
+            .recover_clip(
+                app,
+                &member,
+                ring,
+                clarp_kernel::rings::binding::Kind::GreetingReply,
+                id,
+            )
+            .await?;
+    }
+    drop(guard);
     if let Some(writer) = writer {
         // A helper that writes to the agent that made it has reported, and one that is
         // written to by it has more work.
