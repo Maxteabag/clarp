@@ -35,15 +35,13 @@ def generate(directory):
         logged = []
         response = None
 
-        class Handler:
-            headers = {'Content-Length': str(size)}
-
-            def _send(self, code, data, mime, extra_headers):
+        class Responder:
+            def send_bytes(self, status, body, content_type, *, headers=None):
                 nonlocal response
-                response = [code, json.loads(data), mime, extra_headers]
+                response = [status, json.loads(body), content_type, headers]
 
         with patch.object(log, 'log', lambda kind, text: logged.append([kind, text])):
-            refused = request_body.refused(Handler(), method, path)
+            refused = request_body.refused(Responder(), {'Content-Length': str(size)}, method, path)
         cases.append([method, path, size, request_body.limit(method, path),
                       request_body.family(path), refused, logged, response])
     return cases
