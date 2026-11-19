@@ -35,8 +35,10 @@ def reports_session_cost(backend: str) -> bool:
     return bool(definition and definition.reports_session_cost)
 
 
-def claude_cost_delta(session: str, total: float | None, *, fresh: bool) -> float | None:
-    """Commit the provider cursor before its delta can reach any consumer."""
+def session_cost_delta(backend: str, session: str, total: float | None, *,
+                       fresh: bool) -> float | None:
+    """Commit the provider cursor before its delta can reach any consumer (a backend that
+    reports_session_cost: its session total becomes the turn's cost)."""
     from .log import log
 
     reason = ""
@@ -50,8 +52,8 @@ def claude_cost_delta(session: str, total: float | None, *, fresh: bool) -> floa
         database.execute("BEGIN IMMEDIATE")
         try:
             previous = database.execute(
-                "SELECT last_total FROM usage_cursors WHERE backend='claude' "
-                "AND native_session_id=? AND metric='cost_usd'", (session,)).fetchone()
+                "SELECT last_total FROM usage_cursors WHERE backend=? "
+                "AND native_session_id=? AND metric='cost_usd'", (backend, session)).fetchone()
             if previous is None:
                 if fresh:
                     delta = total
@@ -63,8 +65,8 @@ def claude_cost_delta(session: str, total: float | None, *, fresh: bool) -> floa
                 delta = total - previous[0]
             database.execute(
                 "INSERT INTO usage_cursors(backend,native_session_id,metric,last_total) "
-                "VALUES ('claude',?,'cost_usd',?) ON CONFLICT(backend,native_session_id,metric) "
-                "DO UPDATE SET last_total=excluded.last_total", (session, total))
+                "VALUES (?,?,'cost_usd',?) ON CONFLICT(backend,native_session_id,metric) "
+                "DO UPDATE SET last_total=excluded.last_total", (backend, session, total))
             database.execute("COMMIT")
         except BaseException:
             if database.in_transaction:

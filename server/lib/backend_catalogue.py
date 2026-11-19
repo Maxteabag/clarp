@@ -107,12 +107,19 @@ class BackendDefinition:
     model_providers: bool = False
     model_id_filter: str = ''
     probe: ModelProbe | None = None
+    # How a one-shot routing prompt reaches the CLI off its command line (lib.routing_input): on
+    # stdin, these arguments taking the prompt's place; or in a file, the second flag naming it in
+    # place of the first and the prompt. Neither: it stays on argv behind a size check. Kept here,
+    # not on the adapter classes, whose sources version the transcript importer.
+    oneshot_stdin_args: tuple[str, ...] | None = None
+    oneshot_prompt_file_flags: tuple[str, str] | None = None
 
 DEFAULT_DEFINITION = BackendDefinition()
 
 CLAUDE = BackendDefinition(
     probe=ModelProbe("file", "parse_claude_models", "claude account model cache", source_kind="cli_cache", cache_path="claude_model_cache_path", auth_path="claude_model_cache_path", append_fallback=True, fallback_efforts=True),
     id='claude',
+    oneshot_stdin_args=(),
     reports_session_cost=True,
     label='Claude',
     required_binary='claude',
@@ -165,6 +172,7 @@ CODEX = BackendDefinition(
         fallback_efforts=True,
     ),
     id='codex',
+    oneshot_stdin_args=("-",),
     label='Codex',
     required_binary='codex',
     badge='BackendCodex',
@@ -281,6 +289,7 @@ AGY = BackendDefinition(
 GROK = BackendDefinition(
     probe=ModelProbe("command", "parse_grok_models", "grok models", argv=("models",), timeout=5.0),
     id='grok',
+    oneshot_prompt_file_flags=("-p", "--prompt-file"),
     label='Grok',
     required_binary='grok',
     badge='BackendGrok',
@@ -351,6 +360,7 @@ DEEPSEEK = replace(OPENCODE,
 MUSE = BackendDefinition(
     probe=ModelProbe("directory", "parse_muse_models", "muse model catalogue cache", source_kind="cli_cache", cache_path="muse_model_catalog_dir"),
     id='muse',
+    oneshot_prompt_file_flags=("--", "--prompt-file"),
     label='Muse Code',
     required_binary='muse',
     aliases=('muse-code', 'musecode'),
