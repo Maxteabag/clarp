@@ -7,6 +7,6 @@ pub trait DiagnosticStore: Send {
 /// Read-only accounting for the resource sampler.
 pub trait DiagnosticUsage {
     /// Open one UTC hour for local inspection under the store user's permissions.
-    fn read_hour(&self,hour:i64)->std::io::Result<Box<dyn std::io::Read>>;
+    fn read_hour(&self, hour: i64) -> std::io::Result<Box<dyn std::io::Read>>;
     fn usage(&self) -> std::io::Result<(usize, u64)>;
 }

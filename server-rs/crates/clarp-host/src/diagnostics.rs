@@ -134,9 +134,10 @@ impl Capture {
             return false;
         };
         let mut value = json!({"category":category,"at":now,"event":make()});
-        if value["event"]["kind"]=="client_upload" && compact_bytes(&value)>MAX_RECORD {
-            let original=compact_bytes(&value["event"]["detail"]);
-            value["event"]["detail"]=json!({"_truncated":{"original_bytes":original,"limit_bytes":MAX_RECORD}});
+        if value["event"]["kind"] == "client_upload" && compact_bytes(&value) > MAX_RECORD {
+            let original = compact_bytes(&value["event"]["detail"]);
+            value["event"]["detail"] =
+                json!({"_truncated":{"original_bytes":original,"limit_bytes":MAX_RECORD}});
         }
         let bytes = value.to_string().into_bytes();
         if bytes.len() > MAX_RECORD {
@@ -321,15 +322,24 @@ pub async fn request(
     reply
 }
 /// Measure JSON without allocating a second copy of an oversized client detail.
-fn compact_bytes(value:&Value)->usize{
+fn compact_bytes(value: &Value) -> usize {
     #[derive(Default)]
     struct Count(usize);
-    impl std::io::Write for Count{
-        fn write(&mut self,bytes:&[u8])->std::io::Result<usize>{self.0+=bytes.len();Ok(bytes.len())}
-        fn flush(&mut self)->std::io::Result<()>{Ok(())}
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
-    let mut count=Count::default();
-    if serde_json::to_writer(&mut count,value).is_ok(){count.0}else{usize::MAX}
+    let mut count = Count::default();
+    if serde_json::to_writer(&mut count, value).is_ok() {
+        count.0
+    } else {
+        usize::MAX
+    }
 }
 pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let s = app.capture.settings();
@@ -352,9 +362,11 @@ pub async fn clog(State(app): State<App>, body: Bytes) -> Result<Json<Value>, Ap
         .map_or_else(|| std::slice::from_ref(&v), Vec::as_slice);
     let mut captured = false;
     for item in items {
-        let name=rules::client_name(item);
-        let category=rules::client_category(name);
-        captured|=app.capture.emit(category,app.clock.now_ms(),||rules::client_event(item,name));
+        let name = rules::client_name(item);
+        let category = rules::client_category(name);
+        captured |= app.capture.emit(category, app.clock.now_ms(), || {
+            rules::client_event(item, name)
+        });
     }
     Ok(Json(if captured {
         json!({"ok":true})
@@ -583,22 +595,47 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn diagnostic_client_limit_includes_the_envelope_and_preserves_identifiers(){
-        let (queue,mut read)=mpsc::channel(1);
-        let capture=Capture{bits:AtomicU16::new(Settings::update(&json!({"enabled":true,"categories":["client"]})).unwrap().0),queue,dropped:Default::default(),settings_lock:Default::default(),resources:watch::channel(false).0,health:Default::default()};
-        let at=99;let category="client";
-        let make=|n|rules::client_event(&json!({"event":"micFail","session":"fixture","detail":"a".repeat(n)}),"micFail");
-        let overhead=compact_bytes(&json!({"at":at,"category":category,"event":make(1)}))-1;
-        for limit in [MAX_RECORD-1,MAX_RECORD,MAX_RECORD+1]{
-            let event=make(limit-overhead);
-            let expected=compact_bytes(&event["detail"]);
-            assert!(capture.emit(category,at,||event));
-            let (_,data)=read.try_recv().unwrap();
-            let record:Value=serde_json::from_slice(&data).unwrap();
-            assert_eq!(record["event"]["session"],"fixture");
-            assert_eq!(record["event"]["name"],"micFail");
-            if limit<=MAX_RECORD {assert_eq!(data.len(),limit);assert!(record["event"]["detail"]["msg"].is_string());}
-            else{assert_eq!(record["event"]["detail"],json!({"_truncated":{"original_bytes":expected,"limit_bytes":MAX_RECORD}}));assert!(data.len()<limit);}
+    fn diagnostic_client_limit_includes_the_envelope_and_preserves_identifiers() {
+        let (queue, mut read) = mpsc::channel(1);
+        let capture = Capture {
+            bits: AtomicU16::new(
+                Settings::update(&json!({"enabled":true,"categories":["client"]}))
+                    .unwrap()
+                    .0,
+            ),
+            queue,
+            dropped: Default::default(),
+            settings_lock: Default::default(),
+            resources: watch::channel(false).0,
+            health: Default::default(),
+        };
+        let at = 99;
+        let category = "client";
+        let make = |n| {
+            rules::client_event(
+                &json!({"event":"micFail","session":"fixture","detail":"a".repeat(n)}),
+                "micFail",
+            )
+        };
+        let overhead = compact_bytes(&json!({"at":at,"category":category,"event":make(1)})) - 1;
+        for limit in [MAX_RECORD - 1, MAX_RECORD, MAX_RECORD + 1] {
+            let event = make(limit - overhead);
+            let expected = compact_bytes(&event["detail"]);
+            assert!(capture.emit(category, at, || event));
+            let (_, data) = read.try_recv().unwrap();
+            let record: Value = serde_json::from_slice(&data).unwrap();
+            assert_eq!(record["event"]["session"], "fixture");
+            assert_eq!(record["event"]["name"], "micFail");
+            if limit <= MAX_RECORD {
+                assert_eq!(data.len(), limit);
+                assert!(record["event"]["detail"]["msg"].is_string());
+            } else {
+                assert_eq!(
+                    record["event"]["detail"],
+                    json!({"_truncated":{"original_bytes":expected,"limit_bytes":MAX_RECORD}})
+                );
+                assert!(data.len() < limit);
+            }
         }
     }
     #[test]

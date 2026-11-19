@@ -56,28 +56,46 @@ fn diagnostic_policy_matches_the_reference() {
 }
 
 #[test]
-fn diagnostic_client_uploads_match_the_handler_and_only_keep_the_ruled_identifiers(){
-    let f:Value=serde_json::from_str(include_str!("fixtures/diagnostics.json")).unwrap();
-    let mut n=0;
-    for row in f["uploads"].as_array().unwrap(){
-        let name=rules::client_name(&row[0]);
-        assert_eq!(rules::client_event(&row[0],name),row[1]);
-        n+=1;
+fn diagnostic_client_uploads_match_the_handler_and_only_keep_the_ruled_identifiers() {
+    let f: Value = serde_json::from_str(include_str!("fixtures/diagnostics.json")).unwrap();
+    let mut n = 0;
+    for row in f["uploads"].as_array().unwrap() {
+        let name = rules::client_name(&row[0]);
+        assert_eq!(rules::client_event(&row[0], name), row[1]);
+        n += 1;
     }
-    assert_eq!(n,48);
-    let keys=["session","agent_id","backend_session_id","client_id","trace_id"];
-    for size in [0,1,127,128,129]{
-        let id="é".repeat(size);
-        let mut item=json!({"persona":"private","clip_url":"address","clip_id":7,"duration_ms":2.5,"extra":"excluded"});
-        for k in keys{item[k]=json!(id);}
-        let event=rules::client_event(&item,"fixture");
-        for k in keys{assert_eq!(event[k],"é".repeat(size.min(128)));}
-        assert_eq!(event["clip_id"],7);assert_eq!(event["duration_ms"],2.5);
-        assert_eq!(event.as_object().unwrap().len(),9);
+    assert_eq!(n, 48);
+    let keys = [
+        "session",
+        "agent_id",
+        "backend_session_id",
+        "client_id",
+        "trace_id",
+    ];
+    for size in [0, 1, 127, 128, 129] {
+        let id = "é".repeat(size);
+        let mut item = json!({"persona":"private","clip_url":"address","clip_id":7,"duration_ms":2.5,"extra":"excluded"});
+        for k in keys {
+            item[k] = json!(id);
+        }
+        let event = rules::client_event(&item, "fixture");
+        for k in keys {
+            assert_eq!(event[k], "é".repeat(size.min(128)));
+        }
+        assert_eq!(event["clip_id"], 7);
+        assert_eq!(event["duration_ms"], 2.5);
+        assert_eq!(event.as_object().unwrap().len(), 9);
     }
-    for bad in [json!(null),json!(false),json!("42"),json!([]),json!({})]{
-        let item=json!({"trace_id":3,"clip_id":bad,"duration_ms":bad});
-        assert_eq!(rules::client_event(&item,"log"),json!({"kind":"client_upload","name":"log"}));
+    for bad in [json!(null), json!(false), json!("42"), json!([]), json!({})] {
+        let item = json!({"trace_id":3,"clip_id":bad,"duration_ms":bad});
+        assert_eq!(
+            rules::client_event(&item, "log"),
+            json!({"kind":"client_upload","name":"log"})
+        );
     }
-    assert!(rules::client_event(&json!({"clip_id":1.5}),"log").get("clip_id").is_none());
+    assert!(
+        rules::client_event(&json!({"clip_id":1.5}), "log")
+            .get("clip_id")
+            .is_none()
+    );
 }

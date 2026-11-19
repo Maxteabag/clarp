@@ -75,8 +75,10 @@ impl DiagnosticStore for HourFiles {
 }
 
 impl clarp_ports::diagnostics::DiagnosticUsage for HourFiles {
-    fn read_hour(&self,hour:i64)->io::Result<Box<dyn io::Read>>{
-        Ok(Box::new(fs::File::open(self.directory.join(format!("{hour}.jsonl")))?))
+    fn read_hour(&self, hour: i64) -> io::Result<Box<dyn io::Read>> {
+        Ok(Box::new(fs::File::open(
+            self.directory.join(format!("{hour}.jsonl")),
+        )?))
     }
     fn usage(&self) -> io::Result<(usize, u64)> {
         let items = match fs::read_dir(&self.directory) {
