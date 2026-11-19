@@ -28,13 +28,13 @@ pub const HINT: &str = "delivery-updated";
 
 /// A stored rev, seq or generation: a positive whole number, else 0.
 fn count(value: &Value) -> u64 {
-    value.as_u64().filter(|n| *n > 0).unwrap_or(0)
+    value.as_u64().unwrap_or(0)
 }
 
 /// A whole number as Python's `json` reads one (`isinstance(value, int)`, not a bool).
 fn whole(value: &Value) -> Option<i128> {
     match value {
-        Value::Number(number) if !number.is_f64() => number
+        Value::Number(number) => number
             .as_i64()
             .map(i128::from)
             .or_else(|| number.as_u64().map(i128::from)),
@@ -432,9 +432,298 @@ pub fn egress(stored: &Value, internal: bool) -> Option<Value> {
     Some(Value::Object(hint))
 }
 
+/// Whether a Stop is the user's: only the user's moves the generation a send is shown stopped
+/// by. Every Stop here is the user's until a Stop carries its actor and whether it is
+/// verified; then a verified agent's Stop is not.
+pub fn is_users_stop(_by: &str) -> bool {
+    true
+}
+
+/// The revision of a transition: the position of the event in the agent's own log, and the
+/// send's place among those one event moves (a Stop that fences several).
+pub fn revision(position: u64, place: u64) -> u64 {
+    (position << 20) | (place & 0xF_FFFF)
+}
+
+/// The newest revision there is in a log whose newest item is at `position`.
+pub fn head(position: u64) -> u64 {
+    revision(position, 0xF_FFFF)
+}
+
+/// A user send whose delivery is shown, as the agent's events moved it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Send {
+    pub turn: u64,
+    /// Where the message it answers is in the log.
+    pub message_seq: u64,
+    /// The agent's user Stop generation when it was admitted.
+    pub stops_at: u64,
+    pub fenced: bool,
+    pub handed: bool,
+    /// How many transitions it had, and the revision of its last.
+    pub rev: u64,
+    pub seq: u64,
+    pub at_ms: i64,
+}
+
+impl Send {
+    /// The receipt the Python Host would hold for it, with the client's id and the trace.
+    pub fn receipt(&self, agent_id: &str, client_msg_id: &str, trace_id: &str) -> Value {
+        let state = if self.handed {
+            "attempted"
+        } else if self.fenced {
+            "fenced"
+        } else {
+            "pending"
+        };
+        json!({
+            "state": state, "agent_id": agent_id, "trace_id": trace_id,
+            "client_msg_id": client_msg_id, "origin": "user", "sender_agent_id": "",
+            "user_stop_gen": self.stops_at, "rev": self.rev, "seq": self.seq,
+        })
+    }
+
+    fn moved(&mut self, seq: u64, at_ms: i64) {
+        self.rev += 1;
+        self.seq = seq;
+        self.at_ms = at_ms;
+    }
+}
+
+/// The agent's sends whose state can still change: admitted, not handed over, their turn not
+/// over. What changes leaves through [`Ledger::take`]; a send that can no longer change leaves
+/// the ledger. Folding the log when the Host starts, nothing leaves: what changed before is not
+/// told again.
+#[derive(Debug, Clone, Default)]
+pub struct Ledger {
+    waiting: std::collections::BTreeMap<u64, Send>,
+    changed: Vec<Send>,
+    folding: bool,
+}
+
+/// Two ledgers are the same when they hold the same sends: what waits to be told, and whether
+/// the log is being folded, is the moment's.
+impl PartialEq for Ledger {
+    fn eq(&self, other: &Self) -> bool {
+        self.waiting == other.waiting
+    }
+}
+
+impl Eq for Ledger {}
+
+impl Ledger {
+    /// The sends that can still change, in turn order.
+    pub fn waiting(&self) -> impl Iterator<Item = &Send> {
+        self.waiting.values()
+    }
+
+    /// While the log is folded, what changes is not kept to be told.
+    pub fn folding(&mut self, folding: bool) {
+        self.folding = folding;
+    }
+
+    /// What changed since this was last asked, oldest first.
+    pub fn take(&mut self) -> Vec<Send> {
+        std::mem::take(&mut self.changed)
+    }
+
+    fn tell(&mut self, send: Send) {
+        if !self.folding {
+            self.changed.push(send);
+        }
+    }
+
+    pub(crate) fn admit(
+        &mut self,
+        turn: u64,
+        message_seq: u64,
+        stops_at: u64,
+        seq: u64,
+        at_ms: i64,
+    ) {
+        let send = Send {
+            turn,
+            message_seq,
+            stops_at,
+            fenced: false,
+            handed: false,
+            rev: 1,
+            seq,
+            at_ms,
+        };
+        self.tell(send.clone());
+        self.waiting.insert(turn, send);
+    }
+
+    /// The user's Stop: every send that is pending is fenced, each with its own revision.
+    pub(crate) fn fence(&mut self, position: u64, at_ms: i64) {
+        let mut told = Vec::new();
+        let pending = self.waiting.values_mut().filter(|send| !send.fenced);
+        for (place, send) in (0u64..).zip(pending) {
+            send.fenced = true;
+            send.moved(revision(position, place), at_ms);
+            told.push(send.clone());
+        }
+        for send in told {
+            self.tell(send);
+        }
+    }
+
+    /// Its tool is handed the message: it can change no more.
+    pub(crate) fn hand(&mut self, turn: u64, seq: u64, at_ms: i64) {
+        if let Some(mut send) = self.waiting.remove(&turn) {
+            send.handed = true;
+            send.moved(seq, at_ms);
+            self.tell(send);
+        }
+    }
+
+    /// Its turn is over without its tool having had it: it stays as it is, and can change no more.
+    pub(crate) fn over(&mut self, turn: u64) {
+        if let Some(send) = self.waiting.remove(&turn) {
+            self.tell(Send {
+                rev: send.rev,
+                ..send
+            });
+        }
+    }
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    use crate::agent::{Agent, AgentEvent};
+    use crate::turn::{Admission, Origin, Outcome, TurnEvent, TurnId};
+
+    fn turn(agent: &mut Agent, at: u64, id: u64, change: TurnEvent) {
+        agent.at(at);
+        agent
+            .apply(&AgentEvent::Turn {
+                turn: TurnId(id),
+                change,
+            })
+            .unwrap();
+    }
+
+    fn accepted(id: u64, message_seq: u64, origin: Origin, admission: Admission) -> TurnEvent {
+        TurnEvent::Accepted {
+            turn: TurnId(id),
+            message_seq,
+            origin,
+            admission,
+            at_ms: 1_000,
+        }
+    }
+
+    #[test]
+    fn a_send_is_admitted_fenced_by_the_users_stop_and_handed_over_at_its_own_revisions() {
+        let mut agent = Agent::new();
+        turn(
+            &mut agent,
+            2,
+            1,
+            accepted(1, 1, Origin::User, Admission::Queue),
+        );
+        turn(&mut agent, 3, 1, TurnEvent::Started { at_ms: 1_100 });
+        // A send behind the busy turn waits; one left for later, and an agent's, are not shown.
+        turn(
+            &mut agent,
+            5,
+            2,
+            accepted(2, 4, Origin::User, Admission::Queue),
+        );
+        turn(
+            &mut agent,
+            7,
+            3,
+            accepted(3, 6, Origin::User, Admission::Later),
+        );
+        let other = Origin::Agent {
+            agent_id: "helper".into(),
+        };
+        turn(&mut agent, 9, 4, accepted(4, 8, other, Admission::Queue));
+        let told = agent.deliveries_mut().take();
+        assert_eq!(
+            told.iter()
+                .map(|s| (s.turn, s.rev, s.seq))
+                .collect::<Vec<_>>(),
+            [
+                (1, 1, revision(2, 0)),
+                (1, 2, revision(3, 0)),
+                (2, 1, revision(5, 0))
+            ]
+        );
+        assert_eq!(told[2].stops_at, 0);
+        // The user stops the agent: the one that waits is fenced, once.
+        agent.at(10);
+        agent
+            .apply(&AgentEvent::Paused {
+                by: "user".into(),
+                at_ms: 2_000,
+            })
+            .unwrap();
+        agent.at(11);
+        agent
+            .apply(&AgentEvent::Paused {
+                by: "user".into(),
+                at_ms: 2_100,
+            })
+            .unwrap();
+        assert_eq!(agent.user_stop_generation(), 2);
+        let fenced = agent.deliveries_mut().take();
+        assert_eq!(
+            fenced
+                .iter()
+                .map(|s| (s.turn, s.fenced, s.rev, s.seq))
+                .collect::<Vec<_>>(),
+            [(2, true, 2, revision(10, 0))]
+        );
+        let stopped = fenced[0].receipt("ag", "m2", "t2");
+        assert_eq!(
+            project(&stopped, "ag", 2, None, None).unwrap()["state"],
+            STOPPED
+        );
+        // Resumed, the first turn over, the held one runs: handed over at its start.
+        agent.at(12);
+        agent
+            .apply(&AgentEvent::Resumed {
+                by: "user".into(),
+                at_ms: 3_000,
+            })
+            .unwrap();
+        let ended = TurnEvent::Settled {
+            outcome: Outcome::Completed,
+            at_ms: 3_100,
+        };
+        turn(&mut agent, 13, 1, ended);
+        turn(&mut agent, 14, 2, TurnEvent::Started { at_ms: 3_200 });
+        let handed = agent.deliveries_mut().take();
+        assert_eq!(
+            handed
+                .iter()
+                .map(|s| (s.turn, s.handed, s.rev, s.seq))
+                .collect::<Vec<_>>(),
+            [(2, true, 3, revision(14, 0))]
+        );
+        assert_eq!(
+            project(&handed[0].receipt("ag", "m2", "t2"), "ag", 2, None, None).unwrap()["state"],
+            HANDED_OVER
+        );
+        assert_eq!(agent.deliveries().waiting().count(), 0);
+        // Folding the log tells nothing.
+        let mut folded = Agent::new();
+        folded.deliveries_mut().folding(true);
+        turn(
+            &mut folded,
+            2,
+            1,
+            accepted(1, 1, Origin::User, Admission::Queue),
+        );
+        assert!(folded.deliveries_mut().take().is_empty());
+        assert_eq!(folded.deliveries().waiting().count(), 1);
+    }
 
     #[test]
     fn a_clients_id_is_its_rows_id_with_one_prefix() {

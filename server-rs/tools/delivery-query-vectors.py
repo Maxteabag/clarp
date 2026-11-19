@@ -65,6 +65,9 @@ def queries() -> list[dict]:
         asked.append({'delivery_bootstrap': raw, 'delivery_since': '0'})
         asked.append({'delivery_bootstrap': raw, 'delivery_since': '2', 'delivery_until': '4',
                       'delivery_stop_generation': '1'})
+        asked.append({'delivery_bootstrap': raw, 'delivery_since': '2', 'delivery_until': '4',
+                      'delivery_stop_generation': '1', 'delivery_runtime_release': 'in-process',
+                      'delivery_runtime_instance': INSTANCE})
     scopes = [('in-process', INSTANCE), ('in-process', 'another'), ('other', INSTANCE), ('', ''), (None, None),
               (' in-process ', f' {INSTANCE} ')]
     for release, instance in scopes:

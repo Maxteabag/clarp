@@ -153,6 +153,7 @@ def story(w: World) -> None:
     w.send('ag', 't3', 'm3', origin='agent', sender='helper')
     w.page('three of its own, one of another agent between', 'ag', since=0, stop_generation=0)
     w.page('from the first', 'ag', since=1, stop_generation=0)
+    w.page('a normal page given an until', 'ag', since=1, until=3, stop_generation=0)
     w.page('the other agent: its own pointer alone', 'other', since=0, stop_generation=0)
     w.page('generation missing', 'ag', since=1)
     w.page('generation from the future', 'ag', since=1, stop_generation=3)
@@ -225,7 +226,11 @@ def story(w: World) -> None:
     w.plant(lr.pointer_key('ag', 904), 'legacy')
     w.page('pointers that do not hold', 'ag', since=0, stop_generation=3)
     w.page('pointers that do not hold, cap one at the end', 'ag', since=899, stop_generation=3, cap=1)
-    w.annotate('a legacy receipt', 'ag', [user('l', 'legacy'), user('e', 'elsewhere'), user('x', 'broken')])
+    w.plant(lr._key('tz'), json.dumps({'state': 'pending', 'agent_id': 'ag', 'trace_id': 'tq', 'client_msg_id': 'z',
+                                       'origin': 'user', 'sender_agent_id': '', 'rev': 1, 'seq': 2,
+                                       'user_stop_gen': 3}))
+    w.annotate('a legacy receipt, one filed under another trace', 'ag', [
+        user('l', 'legacy'), user('e', 'elsewhere'), user('x', 'broken'), user('z', 'tz')])
     # A week later: the prune takes what is old and not fenced, and moves the watermark.
     w.tick(8 * DAY)
     w.send('ag', 't8', 'm8')

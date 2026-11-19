@@ -132,7 +132,7 @@ fn the_feed_and_a_pages_rows_are_read_as_the_python_host_reads_them() {
         assert_eq!(json!(epoch), vector["epoch"]);
         rows += 1;
     }
-    assert_eq!([pages, rows], [47, 7]);
+    assert_eq!([pages, rows], [48, 7]);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn a_query_of_the_log_is_read_and_answered_as_the_python_host_answers_it() {
         }
         assert_eq!(answer, vector["answer"], "{vector}");
     }
-    assert_eq!(counted, [54, 29, 81]);
+    assert_eq!(counted, [54, 29, 89]);
 }
 
 #[test]
