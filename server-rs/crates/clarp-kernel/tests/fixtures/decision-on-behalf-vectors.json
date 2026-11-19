@@ -1,0 +1,60 @@
+{
+ "files": [
+  {
+   "what": "no table of agents",
+   "toml": "",
+   "sessions": []
+  },
+  {
+   "what": "a table of agents without the list",
+   "toml": "[agents]\nclaude_effort = \"high\"\n",
+   "sessions": []
+  },
+  {
+   "what": "one session",
+   "toml": "[agents]\ndecision_on_behalf_sessions = [\"desk\"]\n",
+   "sessions": [
+    "desk"
+   ]
+  },
+  {
+   "what": "blanks, a repeat and empties",
+   "toml": "[agents]\ndecision_on_behalf_sessions = [\" desk \", \"desk\", \"\", \"  \", \"omar\"]\n",
+   "sessions": [
+    "desk",
+    "omar"
+   ]
+  },
+  {
+   "what": "a text, not a list",
+   "toml": "[agents]\ndecision_on_behalf_sessions = \"desk\"\n",
+   "sessions": []
+  },
+  {
+   "what": "what is no text is passed over",
+   "toml": "[agents]\ndecision_on_behalf_sessions = [7, \"desk\", true, [\"omar\"]]\n",
+   "sessions": [
+    "desk"
+   ]
+  },
+  {
+   "what": "an empty list",
+   "toml": "[agents]\ndecision_on_behalf_sessions = []\n",
+   "sessions": []
+  },
+  {
+   "what": "case is kept",
+   "toml": "[agents]\ndecision_on_behalf_sessions = [\"Desk\", \"desk\", \"DESK\"]\n",
+   "sessions": [
+    "Desk",
+    "desk",
+    "DESK"
+   ]
+  },
+  {
+   "what": "a table, not a list",
+   "toml": "[agents.decision_on_behalf_sessions]\ndesk = true\n",
+   "sessions": []
+  }
+ ]
+}
