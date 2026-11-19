@@ -586,6 +586,9 @@ SCENARIOS = [
             LOG,
             get(f'/log?session={HELPER}', "the helper's conversation"),
             SNAPSHOT,
+            # What the feature background_process_detail names beside the counts: one job's
+            # detail, of a job nobody has. Asked last, so that no place moves.
+            get('/background-jobs/nobody-of-the-kind', 'the detail of a job nobody has'),
         ],
     },
     {

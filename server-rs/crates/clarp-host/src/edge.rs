@@ -229,6 +229,32 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("transcription_agent_engine", 34),
     ("transcription_agent_engine_fallback", 37),
     ("transcription_google_chirp", 35),
+    // What a Host's janitors run: a scheduled task (`scheduled-prompt`), and the adaptive
+    // interval every run of an interval ends with (worked, idle, failed; `cadence`).
+    ("janitor_scheduled_tasks", 58),
+    ("janitor_adaptive_intervals", 57),
+    // A turn that fails is told: `interrupted` with its reason, its message and the
+    // provider's own words, a row under its message, and `account_plan`.
+    ("turn_failure_reason", 54),
+    // Where the owner is (`/location`, an agent asks for it) and an event an agent asks to
+    // be put in the owner's calendar (`/calendar/request`).
+    ("location", 1),
+    ("calendar", 1),
+    // An agent whose user is with another raises its hand (`/herald/settings`).
+    ("herald", 1),
+    // How the agents speak: the owner's personalities and the humanness of a spoken reply.
+    ("personalities", 1),
+    ("voice_humanness", 46),
+    // The router of spoken messages (`/orchestrator/*`).
+    ("orchestrator", 1),
+    // Helpers and background processes counted apart, and one job's detail
+    // (`GET /background-jobs/<id>`).
+    ("background_process_detail", 16),
+    // OpenCode's and DeepSeek's efforts, model by model.
+    ("opencode_model_efforts", 25),
+    // `GET /status` `runtime`: true of this Host, where nothing is drained: a turn lives in
+    // its shim across a restart of the Host (docs/differences.md).
+    ("runtime_drain_status", 62),
     // The Host's own terminal (`GET /server-terminal`, a socket): a login shell in the
     // home of whoever the Host runs as, for the administrator and a device of full scope.
     ("server_home_terminal", 48),
