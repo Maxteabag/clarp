@@ -84,3 +84,31 @@ def test_transcription_guidance_answers_only_active_names(fleet):
     payload = vocab.settings_payload(_names())
     assert not [n for n in payload["active_agent_names"] if n.startswith("Archived")]
     assert "Archived" not in payload["delegation_effective_prompt"]
+
+
+# The cut (R109, ruled): a name that does not fit in what is left is skipped, the walk goes on.
+
+LONG = "Overlong-agent-name-" * 5                     # 100 characters: never fits a 40-character budget
+
+
+def _prompt(names, budget):
+    return vocab.build_initial_prompt("", names, include_agent_names=True,
+                                      include_technical_glossary=False, max_prompt_chars=budget)
+
+
+@pytest.mark.parametrize("names", [[LONG, "Ann", "Bob"], ["Ann", LONG, "Bob"], ["Ann", "Bob", LONG]],
+                         ids=["first", "in the middle", "last"])
+def test_an_over_long_name_is_skipped_wherever_it_stands(names):
+    assert _prompt(names, 40) == "Agent names: Ann, Bob."
+    assert _prompt(names, 40) == _prompt(names, 40)
+
+
+def test_every_name_over_long_gives_no_names_and_no_error():
+    assert _prompt([LONG, LONG + "2", LONG + "3"], 40) == ""
+
+
+def test_the_budget_is_characters_with_prefix_separators_and_full_stop_and_may_be_reached_exactly():
+    exact = "Agent names: Ann, Bob."
+    assert _prompt(["Ann", "Bob", "Cy"], len(exact)) == exact            # 22 characters: Cy skipped
+    assert _prompt(["Ann", "Bob", "Cy"], len(exact) - 1) == "Agent names: Ann, Cy."
+    assert _prompt(["Ann", "Bob", "Cy"], len(exact) + 4) == "Agent names: Ann, Bob, Cy."
