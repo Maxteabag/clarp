@@ -118,9 +118,10 @@ for tool in ["grok","muse"]:
           f'    if tool=="{tool}" {{return Ok(None);}}\n    match routing_input::prepare(tool,')
 plant(O,"host","retain the private routing file after the call","let _ = std::fs::remove_dir_all(&self.0);",
       'if !self.0.join("prompt.txt").exists() {let _ = std::fs::remove_dir_all(&self.0);}')
+# The run is told the tool's name and its question since routing-failure-445 (R85).
 plant(O,"host","check size only after trying to start an argument-only tool",
-      "    let _prompt_file = prepare(routing_root, backend, &mut launch, &question.prompt)?;\n    let printed = run(&launch, cwd, within).await;",
-      '    let printed = if backend=="opencode"{run(&launch,cwd,within).await}else{let _file=prepare(routing_root,backend,&mut launch,&question.prompt)?;run(&launch,cwd,within).await};')
+      "    let _prompt_file = prepare(routing_root, backend, &mut launch, &question.prompt)?;\n    let printed = run(&launch, cwd, within, (backend, &question.prompt)).await;",
+      '    let printed = if backend=="opencode"{run(&launch,cwd,within,(backend,&question.prompt)).await}else{let _file=prepare(routing_root,backend,&mut launch,&question.prompt)?;run(&launch,cwd,within,(backend,&question.prompt)).await};')
 for why,old,new in [
     ("encode a low surrogate outside the escape range","0xdc80..=0xdcff","0xdc7f..=0xdcff"),
     ("refuse the first escaped byte","0xdc80..=0xdcff","0xdc81..=0xdcff"),

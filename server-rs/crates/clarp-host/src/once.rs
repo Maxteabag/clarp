@@ -21,9 +21,6 @@ use tokio::io::AsyncWriteExt as _;
 
 /// The least time a question is given.
 const LEAST: Duration = Duration::from_millis(250);
-/// How much of what a tool said when it failed is told, in signs.
-const SAID_MOST: usize = 1_000;
-
 /// Why a question was not answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unanswered {
@@ -36,8 +33,9 @@ pub enum Unanswered {
     RoutingTimeout(String),
     PromptNotEncodable(String),
     PromptTooLarge(String),
-    /// It ended badly: what it said, cut short.
-    Failed(String),
+    /// It ended badly: its facts, and of its words only what holds none of the question
+    /// (`clarp_kernel::failures::cli_failure`).
+    Failed(clarp_kernel::failures::CliFailure),
     /// It ended well, and there is no answer in what it printed.
     NoAnswer(String),
 }
@@ -51,8 +49,8 @@ impl Unanswered {
             | Self::PromptNotEncodable(why)
             | Self::PromptTooLarge(why)
             | Self::NotStarted(why)
-            | Self::Failed(why)
             | Self::NoAnswer(why) => why.clone(),
+            Self::Failed(failed) => failed.line.clone(),
             Self::TimedOut => "the model did not answer in time".to_string(),
         }
     }
@@ -140,7 +138,7 @@ pub async fn ask(
         None => None,
     };
     let _prompt_file = prepare(routing_root, backend, &mut launch, &question.prompt)?;
-    let printed = run(&launch, cwd, within).await;
+    let printed = run(&launch, cwd, within, (backend, &question.prompt)).await;
     tool.answered(&routing_result(backend, within, printed)?)
         .map_err(Unanswered::NoAnswer)
 }
@@ -280,6 +278,13 @@ pub async fn read(
             launch.env.push(("HOME".to_string(), home.clone()));
         }
     };
+    // What the tool is asked, as the reference's `json_call` asks it: what a failure's words
+    // are held against, also where the tool reads its instructions from a file of its own.
+    let prompt = format!(
+        "{}\n{}\nReturn only the assistant answer as one JSON object matching this \
+         exact schema: {}",
+        reading.instructions, reading.asked, reading.schema
+    );
     let printed = match tool.reads(reading) {
         Some(apart) => {
             let here = place.to_string_lossy();
@@ -292,18 +297,16 @@ pub async fn read(
                 .map_err(Unanswered::PromptTooLarge)?;
             let mut given = apart.files.iter();
             match given.try_for_each(|(name, holds)| std::fs::write(place.join(name), holds)) {
-                Ok(()) => run_with(&launch, &works_in, within, Some(&apart.keeps)).await,
+                Ok(()) => {
+                    let asked = (backend, prompt.as_str());
+                    run_with(&launch, &works_in, within, Some(&apart.keeps), asked).await
+                }
                 Err(error) => Err(Unanswered::NotStarted(error.to_string())),
             }
         }
         None => {
-            let prompt = format!(
-                "{}\n{}\nReturn only the assistant answer as one JSON object matching this \
-                 exact schema: {}",
-                reading.instructions, reading.asked, reading.schema
-            );
             let question = Question {
-                prompt,
+                prompt: prompt.clone(),
                 model: reading.model.clone(),
                 effort: reading.effort.clone(),
             };
@@ -311,7 +314,14 @@ pub async fn read(
                 Some(mut launch) => {
                     at_home(&mut launch);
                     let _prompt_file = prepare(place, backend, &mut launch, &question.prompt)?;
-                    run_with(&launch, &works_in, within, None).await
+                    run_with(
+                        &launch,
+                        &works_in,
+                        within,
+                        None,
+                        (backend, &question.prompt),
+                    )
+                    .await
                 }
                 None => Err(none()),
             }
@@ -322,9 +332,15 @@ pub async fn read(
 }
 
 /// Runs a tool once, as it says it is started for one question, and answers what it
-/// printed.
-async fn run(launch: &Launch, cwd: &Path, within: Duration) -> Result<String, Unanswered> {
-    run_with(launch, cwd, within, None).await
+/// printed. `asked`: the tool's name and the question it was given, which a failure's words
+/// are held against.
+async fn run(
+    launch: &Launch,
+    cwd: &Path,
+    within: Duration,
+    asked: (&str, &str),
+) -> Result<String, Unanswered> {
+    run_with(launch, cwd, within, None, asked).await
 }
 
 /// The same; `keeps`: the only variables of the Host's environment the tool is left with.
@@ -333,6 +349,7 @@ async fn run_with(
     cwd: &Path,
     within: Duration,
     keeps: Option<&[&str]>,
+    (backend, prompt): (&str, &str),
 ) -> Result<String, Unanswered> {
     let mut command = tokio::process::Command::new(&launch.program);
     if let Some(keeps) = keeps {
@@ -375,19 +392,32 @@ async fn run_with(
     // A question that is given up drops its tool, which ends it.
     let done = match tokio::time::timeout(within.max(LEAST), asked).await {
         Err(_) => return Err(Unanswered::TimedOut),
-        Ok(Err(error)) => return Err(Unanswered::Failed(error.to_string())),
+        Ok(Err(error)) => {
+            let failed =
+                clarp_kernel::failures::cli_failure(backend, &error.to_string(), prompt, None);
+            return Err(Unanswered::Failed(failed));
+        }
         Ok(Ok(done)) => done,
     };
     let printed = String::from_utf8_lossy(&done.stdout);
     if !done.status.success() {
+        // What it complained of, else what it printed (`p.stderr or p.stdout`), held against
+        // the question: its own words are kept only where they hold none of it. The status as
+        // the reference reads it: a signal is its negative.
+        use std::os::unix::process::ExitStatusExt as _;
         let complained = String::from_utf8_lossy(&done.stderr);
-        let said = [complained.trim(), printed.trim()];
-        let said = said.into_iter().find(|said| !said.is_empty());
-        let said = match said {
-            Some(said) => said.chars().take(SAID_MOST).collect(),
-            None => format!("{} ended with {}", launch.program, done.status),
+        let said = if complained.is_empty() {
+            &printed
+        } else {
+            &complained
         };
-        return Err(Unanswered::Failed(said));
+        let status = done
+            .status
+            .code()
+            .map(i64::from)
+            .or_else(|| done.status.signal().map(|signal| -i64::from(signal)));
+        let failed = clarp_kernel::failures::cli_failure(backend, said, prompt, status);
+        return Err(Unanswered::Failed(failed));
     }
     Ok(printed.into_owned())
 }
@@ -405,8 +435,9 @@ mod tests {
             Unanswered::TimedOut.words(),
             "the model did not answer in time"
         );
-        let failed = Unanswered::Failed("no login".to_string());
-        assert_eq!(failed.words(), "no login");
+        let failed =
+            clarp_kernel::failures::cli_failure("codex", "no login", "a question", Some(3));
+        assert_eq!(Unanswered::Failed(failed).words(), "no login");
     }
 
     #[test]
@@ -464,34 +495,54 @@ mod tests {
         // It reads its question on standard input and is given what its launch names.
         let echo = shell("printf '%s: ' \"$ASKED_AS\"; cat", "Whom is this for?");
         assert_eq!(
-            run(&echo, &here, long).await,
+            run(&echo, &here, long, ("sh", "Whom is this for?")).await,
             Ok("a question: Whom is this for?".to_string())
         );
         // It runs where it is told to.
-        let place = run(&shell("pwd -P", ""), &here, long).await.unwrap();
+        let place = run(&shell("pwd -P", ""), &here, long, ("sh", ""))
+            .await
+            .unwrap();
         assert_eq!(
             std::path::Path::new(place.trim()),
             here.canonicalize().unwrap()
         );
         // One that ends badly says why: what it complained of, else what it printed, else
-        // how it ended.
-        let complains = shell("echo printed; echo no login >&2; exit 3", "");
-        assert_eq!(
-            run(&complains, &here, long).await,
-            Err(Unanswered::Failed("no login".to_string()))
-        );
-        let prints = shell("echo only printed; exit 3", "");
-        assert_eq!(
-            run(&prints, &here, long).await,
-            Err(Unanswered::Failed("only printed".to_string()))
-        );
-        let Err(Unanswered::Failed(silent)) = run(&shell("exit 3", ""), &here, long).await else {
-            panic!("a tool that ended badly answered");
+        // how it ended; and never the question it was asked.
+        let at = here.as_path();
+        let words = |asked: &'static str, line: &str| {
+            let said = shell(line, asked);
+            async move {
+                let Err(Unanswered::Failed(failed)) = run(&said, at, long, ("sh", asked)).await
+                else {
+                    panic!("a tool that ended badly answered");
+                };
+                failed
+            }
         };
-        assert!(silent.starts_with("sh ended with "), "{silent}");
+        let complains = words("", "echo printed; echo no login >&2; exit 3").await;
+        assert_eq!(
+            (complains.line.as_str(), complains.status),
+            ("no login", Some(3))
+        );
+        let prints = words("", "echo only printed; exit 3").await;
+        assert_eq!(prints.line, "only printed");
+        let silent = words("", "exit 3").await;
+        assert_eq!(silent.line, "sh exited with status 3 (runner_exit)");
+        let asked = "Please book a table for four at the harbour restaurant tonight.";
+        let repeats = words(asked, "cat >&2; exit 2").await;
+        assert_eq!(repeats.line, "sh exited with status 2 (runner_exit)");
+        assert!(repeats.moves_on);
+        let killed = words("", "kill -9 $$").await;
+        assert_eq!(killed.status, Some(-9));
         // One that does not answer in its time is given up, at that time.
         let began = std::time::Instant::now();
-        let slow = run(&shell("sleep 20", ""), &here, Duration::from_millis(300)).await;
+        let slow = run(
+            &shell("sleep 20", ""),
+            &here,
+            Duration::from_millis(300),
+            ("sh", ""),
+        )
+        .await;
         assert_eq!(slow, Err(Unanswered::TimedOut));
         assert!(began.elapsed() < Duration::from_secs(5));
         // One that is not there to run is not started.
@@ -500,7 +551,7 @@ mod tests {
             program: "/nowhere/no-such-tool".to_string(),
             ..shell("", "")
         };
-        let Err(Unanswered::NotStarted(why)) = run(&missing, &here, long).await else {
+        let Err(Unanswered::NotStarted(why)) = run(&missing, &here, long, ("sh", "")).await else {
             panic!("a tool that is not there ran");
         };
         assert!(why.starts_with("/nowhere/no-such-tool: "), "{why}");

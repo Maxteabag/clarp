@@ -374,6 +374,274 @@ pub fn told(kind: &str, said: &str, model: &str, known: Known) -> Told {
     }
 }
 
+// ---- what is kept of a failed tool's own words ---------------------------------------------
+
+/// A CLI's own words on failure are what an operator debugs with ("rate limit reached",
+/// "unknown model ..."), but a CLI that repeats its input puts the request into them. They are
+/// kept only when they share no run of this many characters with the prompt (the whole prompt
+/// when it is shorter), and as one line of at most `KEPT_MOST` characters. The Python Host's
+/// `model_fallbacks` since its PR 445 (R85), held by its own answers
+/// (`tests/routing_failure_vectors.rs`).
+pub const ECHO_RUN: usize = 24;
+pub const KEPT_MOST: usize = 300;
+
+/// The categories a fallback chain moves on from (`model_fallbacks.PROVIDER_FAILURES`).
+pub const PROVIDER_FAILURES: [&str; 5] = [CONNECTION, TRANSIENT, USAGE_LIMIT, RUNNER_EXIT, TIMEOUT];
+
+/// A refusal is an answer, not an outage: retrying it elsewhere would launder a decision the
+/// user or the sandbox already made.
+static DENIED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)permission denied|approval required|not authorized|ownership lost|configuration changed",
+    )
+    .unwrap_or_else(|_| unreachable!("a fixed pattern"))
+});
+static ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|["\\/bfnrt'])"#)
+        .unwrap_or_else(|_| unreachable!("a fixed pattern"))
+});
+static BYTE_RUN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:\\x[0-9a-fA-F]{2})+").unwrap_or_else(|_| unreachable!("a fixed pattern"))
+});
+
+/// What stands for half of a pair of signs that an escape wrote out alone (`\ud83d`): the
+/// reference keeps it as such, and no prompt has one, so it is no part of any run in common.
+const HALF_A_PAIR: char = '\u{FFFF}';
+
+/// Whether a sign is one the reference's `[\s\x00-\x1f\x7f]` takes.
+fn spacing(sign: char) -> bool {
+    crate::python::blank(sign) || sign <= '\u{1f}' || sign == '\u{7f}'
+}
+
+/// One line: control characters and runs of white space become one space (`_plain`).
+pub fn plain(text: &str) -> String {
+    let mut line = String::with_capacity(text.len());
+    let mut spaced = false;
+    for sign in text.chars() {
+        if spacing(sign) {
+            spaced = true;
+            continue;
+        }
+        if spaced && !line.is_empty() {
+            line.push(' ');
+        }
+        spaced = false;
+        line.push(sign);
+    }
+    line
+}
+
+/// UTF-8 bytes read as the reference's `decode("utf-8", errors="backslashreplace")`: a byte
+/// that is no part of a sign is written `\xNN`.
+fn utf8_or_escaped(mut bytes: &[u8]) -> String {
+    let mut said = String::new();
+    loop {
+        match std::str::from_utf8(bytes) {
+            Ok(rest) => {
+                said.push_str(rest);
+                return said;
+            }
+            Err(error) => {
+                let (good, bad) = bytes.split_at(error.valid_up_to());
+                said.push_str(std::str::from_utf8(good).unwrap_or_default());
+                let wrong = error.error_len().unwrap_or(bad.len());
+                for byte in &bad[..wrong] {
+                    said.push_str(&format!("\\x{byte:02x}"));
+                }
+                bytes = &bad[wrong..];
+            }
+        }
+    }
+}
+
+/// A text with JSON and Python string escapes undone (`_unescaped`). `utf8_bytes`: read as a
+/// bytes repr, where each run of `\xNN` is UTF-8 bytes; else each `\xNN` is the code point NN.
+pub fn unescaped(text: &str, utf8_bytes: bool) -> String {
+    let text = if utf8_bytes {
+        BYTE_RUN
+            .replace_all(text, |run: &regex::Captures<'_>| {
+                let bytes: Vec<u8> = run[0]
+                    .split("\\x")
+                    .skip(1)
+                    .filter_map(|pair| u8::from_str_radix(pair, 16).ok())
+                    .collect();
+                utf8_or_escaped(&bytes)
+            })
+            .into_owned()
+    } else {
+        text.to_string()
+    };
+    ESCAPE
+        .replace_all(&text, |found: &regex::Captures<'_>| {
+            let code = &found[1];
+            match code.as_bytes()[0] {
+                b'u' | b'U' | b'x' => match u32::from_str_radix(&code[1..], 16) {
+                    // Above U+10FFFF no sign exists: the escape stays as written.
+                    Ok(value) if value <= 0x10_FFFF => {
+                        char::from_u32(value).unwrap_or(HALF_A_PAIR).to_string()
+                    }
+                    _ => found[0].to_string(),
+                },
+                b'b' => "\u{8}".to_string(),
+                b'f' => "\u{c}".to_string(),
+                b'n' => "\n".to_string(),
+                b'r' => "\r".to_string(),
+                b't' => "\t".to_string(),
+                _ => code.to_string(),
+            }
+        })
+        .into_owned()
+}
+
+/// The code points the reference's Unicode (15.1.0) has not assigned: its NFKC leaves them as
+/// written, where this Host's tables (a later Unicode) may fold some (the generator's
+/// `unassigned-15.1.json`).
+static UNASSIGNED: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| {
+    let table: Value =
+        serde_json::from_str(include_str!("unassigned-15.1.json")).unwrap_or(Value::Null);
+    let ranges = table["unassigned"].as_array().into_iter().flatten();
+    ranges
+        .filter_map(|range| Some((range[0].as_u64()? as u32, range[1].as_u64()? as u32)))
+        .collect()
+});
+
+/// Whether the reference's Unicode has not assigned this sign.
+pub fn unassigned_in_reference(sign: char) -> bool {
+    let at = sign as u32;
+    let ranges = &*UNASSIGNED;
+    let index = ranges.partition_point(|(start, _)| *start <= at);
+    index > 0 && at <= ranges[index - 1].1
+}
+
+/// NFKC as the reference has it: what its Unicode has not assigned is left as written, and
+/// the rest normalised around it.
+pub fn nfkc(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let mut said = String::with_capacity(text.len());
+    let mut run = String::new();
+    for sign in text.chars() {
+        if unassigned_in_reference(sign) {
+            said.extend(run.nfkc());
+            run.clear();
+            said.push(sign);
+        } else {
+            run.push(sign);
+        }
+    }
+    said.extend(run.nfkc());
+    said
+}
+
+/// Whether `text` shares a run of `ECHO_RUN` characters (the whole prompt when it is shorter)
+/// with `prompt`, read as written or with its string escapes undone; white space compared as
+/// one space, both sides NFKC-normalised (`echoes`).
+pub fn echoes(text: &str, prompt: &str) -> bool {
+    let request = python_strip(&plain(&nfkc(prompt)));
+    if request.is_empty() {
+        return false;
+    }
+    let run = ECHO_RUN.min(request.chars().count());
+    let forms = [
+        python_strip(&plain(&nfkc(text))),
+        python_strip(&plain(&nfkc(&unescaped(text, false)))),
+        python_strip(&plain(&nfkc(&unescaped(text, true)))),
+    ];
+    forms.iter().any(|form| {
+        let starts: Vec<usize> = form
+            .char_indices()
+            .map(|(at, _)| at)
+            .chain(std::iter::once(form.len()))
+            .collect();
+        starts
+            .windows(run + 1)
+            .any(|window| request.contains(&form[window[0]..window[run]]))
+    })
+}
+
+fn python_strip(text: &str) -> String {
+    crate::python::strip(text).to_string()
+}
+
+/// The CLI's own words as one line of at most `KEPT_MOST` characters, or nothing when they
+/// hold any of the request (`_kept_line`).
+pub fn kept_line(words: &str, prompt: &str) -> String {
+    let line: String = python_strip(&plain(words))
+        .chars()
+        .take(KEPT_MOST)
+        .collect();
+    if line.is_empty() || echoes(&line, prompt) {
+        String::new()
+    } else {
+        line
+    }
+}
+
+/// What a failed one-off CLI says: its facts, read from its raw words and its exit, and its
+/// line for a person. Nothing reads a category, a refusal or a retry out of the line again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliFailure {
+    /// The words kept, or "<backend> exited with status N (<category>)".
+    pub line: String,
+    pub category: &'static str,
+    /// A refusal: never moved on from, whatever line is kept.
+    pub denied: bool,
+    pub backend: String,
+    /// The exit status, as the reference has it (a signal is its negative); none where the
+    /// tool never told one.
+    pub status: Option<i64>,
+    /// Whether a fallback chain moves on from it (`_as_provider_failure` is not None).
+    pub moves_on: bool,
+}
+
+/// What a routing CLI's failure says, wherever it is caught (`cli_failure`): the category and
+/// the refusal from the raw words first, the line worked out after.
+pub fn cli_failure(backend: &str, output: &str, prompt: &str, status: Option<i64>) -> CliFailure {
+    let words = crate::python::strip(output);
+    let mut category = classify_error(words);
+    if category != INTERRUPTED && !PROVIDER_FAILURES.contains(&category) {
+        category = RUNNER_EXIT;
+    }
+    let denied = DENIED.is_match(words);
+    let line = match kept_line(words, prompt) {
+        kept if !kept.is_empty() => kept,
+        _ => match status {
+            Some(status) => format!("{backend} exited with status {status} ({category})"),
+            None => format!("{backend} failed ({category})"),
+        },
+    };
+    // The reference promotes the failure again from its line (`provider_error`): an
+    // interruption or a refusal written there holds it back too. Read here, once.
+    let moves_on = category != INTERRUPTED
+        && !denied
+        && !DENIED.is_match(&line)
+        && classify_error(&line) != INTERRUPTED;
+    CliFailure {
+        line,
+        category,
+        denied,
+        backend: backend.to_string(),
+        status,
+        moves_on,
+    }
+}
+
+/// The Goal keeper's code for a failure it was given, where the facts name one
+/// (`goal_keeper.error_code`): `timeout`, `<backend>_exit_<N>`, or `agy_exit_<N>` from the
+/// fixed prefix of Antigravity's own error. `None`: the caller's own code.
+pub fn keeper_code(failure: &CliFailure) -> Option<String> {
+    static AGY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"agy exited (-?\d+)").unwrap_or_else(|_| unreachable!("a fixed pattern"))
+    });
+    if failure.category == TIMEOUT {
+        return Some(TIMEOUT.to_string());
+    }
+    if let (false, Some(status)) = (failure.backend.is_empty(), failure.status) {
+        return Some(format!("{}_exit_{status}", failure.backend));
+    }
+    AGY.captures(&failure.line)
+        .map(|status| format!("agy_exit_{}", &status[1]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,17 +14,24 @@ pub struct Desk(tokio::sync::Mutex<()>);
 #[derive(Debug)]
 pub(crate) struct Failure {
     pub code: &'static str,
+    /// What a person is told. A failed tool's own words only where they hold none of its
+    /// question.
     pub detail: String,
+    /// What a failed tool's failure is, read once from its raw words and its exit: whether the
+    /// chain moves on and the keeper's code come from here, never from `detail`.
+    pub facts: Option<Box<clarp_kernel::failures::CliFailure>>,
     reason: &'static str,
     retry: bool,
 }
 impl Failure {
+    /// A failure in the Host's own words.
     pub fn model(code: &'static str, detail: impl Into<String>) -> Self {
         let detail = detail.into();
         Self {
             code,
             retry: retryable(&detail),
             detail,
+            facts: None,
             reason: "ProviderFailure",
         }
     }
@@ -60,13 +67,18 @@ impl Failure {
             Unanswered::RoutingTimeout(_) | Unanswered::TimedOut => "TimeoutExpired",
             _ => "ProviderFailure",
         };
-        let failure = Self::model(code, error.words());
+        let mut failure = Self::model(code, error.words());
+        if let Unanswered::Failed(facts) = error {
+            failure.retry = facts.moves_on;
+            failure.facts = Some(Box::new(facts));
+        }
         failure.because(origin)
     }
     fn control(detail: &str) -> Self {
         Self {
             code: "cancelled",
             detail: detail.into(),
+            facts: None,
             reason: "Cancelled",
             retry: false,
         }
