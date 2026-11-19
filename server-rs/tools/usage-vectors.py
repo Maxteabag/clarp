@@ -2,7 +2,7 @@
 """What a Host's own turns used, as the Python Host counts it for an app's usage screen
 (`server/lib/turn_usage.py`: what each turn's tool said it took in and gave out, summed over the
 last five hours and the last seven days; what a turn of Claude Code cost, which tells what its whole
-session has cost so far (`claude_cost_delta`); and `server/lib/backend_usage_claude.py`,
+session has cost so far (`session_cost_delta`, for Claude); and `server/lib/backend_usage_claude.py`,
 `_claude_response_row`: the row an app is given of it): what its own functions answer for made-up
 turns on a database of their own, written to `crates/clarp-kernel/tests/fixtures/usage-vectors.json`,
 so that the Rust Host's counting is held to it.
@@ -149,7 +149,8 @@ def rise(number: int) -> list:
     log.log = lambda *said: None
     answered = []
     for step in steps:
-        answered.append({**step, 'share': turn_usage.claude_cost_delta(step['session'], step['total'], fresh=step['fresh'])})
+        answered.append({**step, 'share': turn_usage.session_cost_delta('claude', step['session'], step['total'],
+                                                                         fresh=step['fresh'])})
     return answered
 
 
