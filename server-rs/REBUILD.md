@@ -2468,6 +2468,21 @@ turns it on.
   by a send that says whom it is for, as the message came in (a held message as it came in then, under its
   own id); an agent is opened as an app opens it and stopped as an app stops it; a word aloud is a clip in
   the agent's voice or the router's, played whichever agent is open, where an engine of this Host can say it.
+- **Whom the model is, and how it is asked** (19 Nov 2026). Any tool of the Host that can be asked one
+  question, as the Python Host's router asks any of its own (`backends.routing_adapters`): Claude Code,
+  Codex, Antigravity, Grok, OpenCode, DeepSeek and Muse, offered to an app in that order and in its words,
+  and known by the names the Python Host knows them by (`antigravity`, `claude-code`, `open-code`, ...). Each
+  is asked once outside every conversation (`once.rs`, `Backend::once`), started as the Python Host starts it
+  for one question (`routing_cmd`), and its answer found where the Python Host finds it (`routing_text`);
+  Antigravity in a home of its own, with its login linked and its settings copied. Held by vectors of the
+  Python Host's own functions (`tools/router-tools-vectors.py`: 9 providers, 33 names, 240 commands of 7
+  tools, 13 answers) and by the Host's test of a router that asks Antigravity. Five things are done
+  otherwise on purpose, each named in `clarp-backend` `tests/router_tools_vectors.rs` and registered:
+  Claude Code is asked without its user's MCP servers; Codex is given its effort as a TOML string;
+  Antigravity is asked for one JSON object that says how it ended, and given an effort only where no model
+  is named; OpenCode and DeepSeek are asked with OpenCode's own question tool denied. Where the question goes
+  is the next point's. It can also ask the OpenAI API and a typed decision model, which this
+  Host has not built in and refuses in words when it is set to one.
 - **How the router asks its model.** The router asks one question outside every conversation.
   Claude Code and Codex read it on stdin. Grok and Muse read a private file. For tools
   that require an argument, the Host checks the byte limit before launch. See **Model fallbacks**.

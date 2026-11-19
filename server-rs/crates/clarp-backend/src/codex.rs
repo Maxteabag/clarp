@@ -202,7 +202,7 @@ impl Backend for Codex {
         .iter()
         .map(|arg| (*arg).to_string())
         .collect();
-        let given = |value: &Option<String>| value.clone().filter(|value| !value.trim().is_empty());
+        let given = |value: &Option<String>| value.clone().filter(|value| !value.is_empty());
         if let Some(model) = given(&question.model) {
             args.push("--model".to_string());
             args.push(model);
@@ -300,7 +300,7 @@ impl Backend for Codex {
         });
         messages
             .next_back()
-            .ok_or_else(|| "codex returned no agent message".to_string())
+            .ok_or_else(|| "codex orchestrator returned no agent message".to_string())
     }
 }
 
@@ -1269,7 +1269,7 @@ mod tests {
         );
         assert_eq!(
             codex.answered("nothing of the kind"),
-            Err("codex returned no agent message".to_string())
+            Err("codex orchestrator returned no agent message".to_string())
         );
     }
 }

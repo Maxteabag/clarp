@@ -304,7 +304,7 @@ fn not_a_tool(provider: &str) -> String {
     match provider {
         "openai" | "typesafe" => format!(
             "unsupported orchestrator provider: {provider} (this Host asks a tool of its \
-             own, codex or claude, and has no API of a provider built in)"
+             own, and has no API of a provider built in)"
         ),
         other => format!("unsupported orchestrator provider: {other}"),
     }
