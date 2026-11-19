@@ -33432,6 +33432,289 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     );
 }
 
+#[test]
+fn a_helpers_cell_tracks_its_parent_call_and_the_childs_metadata() {
+    let place = Place::new("helper-cells");
+    let cwd = place.root.join("work");
+    let sid = "153e72cb-0567-4bd8-95d1-409ba0887a52";
+    let project = place
+        .root
+        .join(".claude/projects")
+        .join(clarp_backend::past::claude_project(cwd.to_str().unwrap()));
+    let children = project.join(sid).join("subagents");
+    std::fs::create_dir_all(&children).unwrap();
+    let parent = project.join(format!("{sid}.jsonl"));
+    let call = |id: &str, name: &str| {
+        json!({"type":"assistant","message":{"role":"assistant","id":format!("msg_{id}"),"content":[
+        {"type":"text","text":"I asked."},{"type":"tool_use","name":name,"id":id,"input":{"description":"Check files","prompt":"Find\n the  entry","subagent_type":"Explore"}}]}})
+    };
+    let result = |id: &str| json!({"type":"user","toolUseResult":{"totalToolUseCount":1,"totalDurationMs":61000},"message":{"content":[{"type":"tool_result","tool_use_id":id,"content":"  Found it. "}] }});
+    let write = |rows: &[Value]| {
+        std::fs::write(
+            &parent,
+            rows.iter()
+                .map(Value::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n",
+        )
+        .unwrap();
+    };
+    let kept = call("older", "Task");
+    let prelinked = call("linked-at-import", "Agent");
+    let prelinked_child = children.join("agent-earlier.jsonl");
+    std::fs::write(&prelinked_child, "SYNTHETIC CHILD").unwrap();
+    std::fs::write(
+        children.join("agent-earlier.meta.json"),
+        r#"{"toolUseId":"linked-at-import"}"#,
+    )
+    .unwrap();
+    write(&[kept.clone(), prelinked]);
+    // A scripted stand-in speaks Claude's stream protocol without starting
+    // the provider. The test controls exactly when the helper may return.
+    let executable = place.root.join("fixture-claude");
+    let begin = place.root.join("begin.jsonl");
+    let end = place.root.join("end.jsonl");
+    std::fs::write(&begin,format!("{}\n{}\n{}\n",json!({"type":"system","subtype":"init","session_id":sid}),call("running","Agent"),json!({"type":"assistant","message":{"id":"msg_after","content":[{"type":"text","text":"Waiting."}]}}))).unwrap();
+    std::fs::write(
+        &end,
+        format!(
+            "{}\n{}\n",
+            result("running"),
+            json!({"type":"result","subtype":"success","session_id":sid,"result":"Done."})
+        ),
+    )
+    .unwrap();
+    program(
+        &executable,
+        &format!(
+            "#!/bin/sh\nread -r message\ncat '{}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\ncat '{}'\n",
+            begin.display(),
+            place.root.join("release").display(),
+            end.display()
+        ),
+    );
+    let env = [
+        ("HOME", place.root.to_str().unwrap()),
+        ("CLARP_CLAUDE_PROGRAM", executable.to_str().unwrap()),
+    ];
+    let host = place.start_in("", &[], &env);
+    let made = host.post(
+        "/agents",
+        json!({"backend":"claude","name":"Parent","cwd":cwd,"resume_session_id":sid}),
+    );
+    let session = made["session"].as_str().unwrap();
+    let log = |host: &Host| host.get(&format!("/log?session={session}&limit=200"));
+    let cell = |page: &Value, id: &str| {
+        page["turns"].as_array().unwrap().iter().find_map(|r| {
+            let c = r["display_cells"]
+                .as_array()?
+                .iter()
+                .find(|c| c["id"] == id)?;
+            Some((r["id"].clone(), c.clone(), r["tools"].clone()))
+        })
+    };
+
+    // Calls with identical ids in another scripted session remain ordinary
+    // tool work. A provider-specific projection cannot leak between agents.
+    let scripted = host.new_agent("Ordinary fixture");
+    let command = json!({"tool":"Bash","id":"older","input":{"command":"fixture-only"}});
+    host.send(&scripted, &command.to_string(), "plain");
+    wait_for("the scripted session has its own tool card", || {
+        host.turns(&scripted).iter().any(|row| {
+            row["tools"]
+                .as_array()
+                .is_some_and(|cards| cards.iter().any(|c| c["id"] == "older"))
+                && row["display_cells"] == json!([])
+        })
+    });
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["claude_subagent_cells"],
+        14
+    );
+    // The imported Task has its own display cell before any child file exists.
+    let initial = log(&host);
+    let (row, opened, tools) = cell(&initial, "older").unwrap();
+    assert_eq!(tools, json!([]));
+    assert_eq!(opened["title"], "Running agent");
+    assert_eq!(opened["ephemeral"], true);
+    assert_eq!(opened["transcript_path"], "");
+    assert_eq!(
+        opened["lines"][0],
+        json!({"label":"Task","text":"Find the entry","kind":"detail"})
+    );
+    host.send(session, "Begin", "fixture-parent");
+    wait_for("the current Agent call appears before its result", || {
+        cell(&log(&host), "running").is_some_and(|(_, c, _)| c["status"] == "running")
+    });
+    let (live_id, _, tools) = cell(&log(&host), "running").unwrap();
+    assert_eq!(tools, json!([]));
+    let live_rows = log(&host)["turns"].as_array().unwrap().len();
+    // This row already had a Transcript line when it entered the journal.
+    // If the parent disappears, the stored row supplies the other lines.
+    let (original_id, original, _) = cell(&initial, "linked-at-import").unwrap();
+    assert_eq!(
+        original["transcript_path"],
+        prelinked_child.to_str().unwrap()
+    );
+    let lines_without_path: Vec<_> = original["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|line| line["label"] != "Transcript")
+        .cloned()
+        .collect();
+    assert_eq!(
+        lines_without_path.len() + 1,
+        original["lines"].as_array().unwrap().len()
+    );
+    let offline = parent.with_extension("offline");
+    std::fs::rename(&parent, &offline).unwrap();
+    wait_for("a missing parent withdraws the imported path", || {
+        cell(&log(&host), "linked-at-import").unwrap().1["transcript_path"] == ""
+    });
+    let (same_id, withdrawn, _) = cell(&log(&host), "linked-at-import").unwrap();
+    assert_eq!(same_id, original_id);
+    assert_eq!(withdrawn["lines"], json!(lines_without_path));
+    std::fs::rename(&offline, &parent).unwrap();
+    wait_for(
+        "the restored parent supplies its original path and lines",
+        || cell(&log(&host), "linked-at-import").unwrap().1 == original,
+    );
+
+    let cursor = initial["latest_revision"].as_u64().unwrap();
+    let heard = host.listen();
+
+    // A metadata alias changes the existing row even if the parent never
+    // writes another byte. Child JSONL content stays outside the conversation.
+    let child = children.join("agent-child1.jsonl");
+    std::fs::write(&child, "PRIVATE CHILD BODY").unwrap();
+    let meta = children.join("agent-child1.meta.json");
+    std::fs::write(&meta, r#"{"toolUseId":"older"}"#).unwrap();
+    wait_for(
+        "an unchanged parent gains a child transcript association",
+        || cell(&log(&host), "older").is_some_and(|(_, c, _)| c["agent_id"] == "child1"),
+    );
+    let delta = host.get(&format!("/log?session={session}&after_revision={cursor}"));
+    let (updated, linked, _) = cell(&delta, "older").unwrap();
+    assert_eq!(updated, row);
+    assert_eq!(linked["transcript_path"], child.to_str().unwrap());
+    assert_eq!(
+        linked["lines"].as_array().unwrap().last().unwrap()["label"],
+        "Transcript"
+    );
+    assert!(!delta.to_string().contains("PRIVATE CHILD BODY"));
+    wait_for("the app hears a change to its transcript", || {
+        heard.lock().unwrap().iter().any(|v| {
+            v["type"] == "transcript-updated"
+                && v["session"] == session
+                && v["backend_session_id"] == sid
+        })
+    });
+
+    let compact = host.get(&format!("/log?session={session}&include_tool_details=0"));
+    let summary = cell(&compact, "older").unwrap().1;
+    assert_eq!(summary["ephemeral"], true);
+    assert!(summary.get("lines").is_none());
+    assert_eq!(
+        summary["detail_count"],
+        linked["lines"].as_array().unwrap().len()
+    );
+    std::fs::remove_file(&child).unwrap();
+    wait_for("a removed child file withdraws its label", || {
+        cell(&log(&host), "older").unwrap().1["transcript_path"] == ""
+    });
+    std::fs::write(&child, "still not parent content").unwrap();
+    wait_for("the child label returns when the file does", || {
+        cell(&log(&host), "older").unwrap().1["transcript_path"] == child.to_str().unwrap()
+    });
+    // Rebinding or removing the metadata withdraws the old label. A link to
+    // metadata outside this parent's directory cannot supply another alias.
+    std::fs::write(&meta, r#"{"toolUseId":"unrelated"}"#).unwrap();
+    wait_for("the old alias is gone", || {
+        cell(&log(&host), "older").unwrap().1["transcript_path"] == ""
+    });
+    std::fs::remove_file(&meta).unwrap();
+    let outside = place.root.join("foreign.meta.json");
+    std::fs::write(&outside, r#"{"toolUseId":"older"}"#).unwrap();
+    std::os::unix::fs::symlink(&outside, &meta).unwrap();
+    // The sidecar itself may be genuine while the alleged child is a link
+    // out of the store. Neither kind of link gives the phone a path.
+    let decoy = children.join("agent-outside.jsonl");
+    std::os::unix::fs::symlink(&outside, &decoy).unwrap();
+    std::fs::write(
+        children.join("agent-outside.meta.json"),
+        r#"{"toolUseId":"older"}"#,
+    )
+    .unwrap();
+    writeln!(
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&parent)
+            .unwrap(),
+        "{}",
+        result("older")
+    )
+    .unwrap();
+    wait_for("the imported helper finishes", || {
+        cell(&log(&host), "older").unwrap().1["title"] == "Agent finished"
+    });
+    let (_, done, _) = cell(&log(&host), "older").unwrap();
+    assert_eq!(done["transcript_path"], "");
+    assert_eq!(
+        done["lines"].as_array().unwrap().last().unwrap()["text"],
+        "1 tool call · 1m 1s"
+    );
+
+    // The current turn uses the same projection while its scripted child is
+    // running, at completion, and in the full details of the same row.
+    // Metadata and result changes revise this row without adding chat rows.
+    assert_eq!(log(&host)["turns"].as_array().unwrap().len(), live_rows);
+    // With a live call the parent stream can precede the parent's disk
+    // transcript. An id inferred from a sidecar must go away with that alias.
+    std::fs::remove_file(&meta).unwrap();
+    let live_cursor = log(&host)["latest_revision"].as_u64().unwrap();
+    std::fs::write(&meta, r#"{"toolUseId":"running"}"#).unwrap();
+    wait_for("the live helper has its discovered path", || {
+        cell(&log(&host), "running").unwrap().1["agent_id"] == "child1"
+    });
+    let update = host.get(&format!(
+        "/log?session={session}&after_revision={live_cursor}"
+    ));
+    let (owner, changed, _) = cell(&update, "running").unwrap();
+    assert_eq!(owner, live_id);
+    assert_eq!(changed["transcript_path"], child.to_str().unwrap());
+    assert_eq!(
+        changed["lines"].as_array().unwrap().last().unwrap(),
+        &json!({"label":"Transcript","text":child.to_str().unwrap(),"kind":"muted"})
+    );
+    std::fs::write(&meta, r#"{"toolUseId":"elsewhere"}"#).unwrap();
+    wait_for("the live helper loses only its inferred id", || {
+        let (_, c, _) = cell(&log(&host), "running").unwrap();
+        c["agent_id"] == "" && c["transcript_path"] == "" && c["status"] == "running"
+    });
+    std::fs::write(place.root.join("release"), "go").unwrap();
+    wait_for("the scripted Agent returns", || {
+        cell(&log(&host), "running").unwrap().1["status"] == "ok"
+    });
+    let full = host.get(&format!(
+        "/message-tool-details?session={session}&message_id={}",
+        live_id.as_str().unwrap()
+    ));
+    assert_eq!(full["tools"], json!([]));
+    assert_eq!(full["display_cells"][0]["title"], "Agent finished");
+    assert!(
+        full["display_cells"][0]["lines"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["label"] == "Result" && l["text"] == "Found it.")
+    );
+    drop(host);
+    let host = place.start_in("", &[], &env);
+    assert_eq!(cell(&log(&host), "running").unwrap().0, live_id);
+}
+
 /// What the stand-in for the push service was handed for one push: where it went, what its
 /// head said, and its body.
 type Handed = (String, std::collections::BTreeMap<String, String>, Value);
