@@ -81,7 +81,7 @@ for file,why,old,new in [
     (E,"remove the agent from the claim key","json!([agent, request, index])","json!([request, index])"),
     (E,"use the primary backend on all retries","invoke(pick.clone())","invoke(primary.clone())"),
     ("clarp-host/src/keeper.rs","attribute the keeper update to its configured model",'receipt["model"] = json!(actual.model);','receipt["model"] = json!(run.model);'),
-    ("clarp-host/src/explain.rs","read with the primary for every explanation",'once::read_on(app, &pick.backend, &reading, WITHIN)','once::read_on(app, "absent", &reading, WITHIN)'),
+    ("clarp-host/src/explain.rs","read with the primary for every explanation",'once::read_on(app, &pick.backend, &reading, within)','once::read_on(app, "absent", &reading, within)'),
     ("clarp-host/src/router.rs","mix initial and broad attempt keys",'ask(app, &routing, "initial")','ask(app, &routing, "broad")'),
     ("clarp-host/src/janitors.rs","drop the frozen primary for managed turns","        managed_model,","        managed_model: managed_model.filter(|_|false),"),
     ("clarp-host/src/models.rs","reject an unobserved Codex catalogue",'(tool == "agy").then_some(&bundled)','(tool != "agy").then_some(&bundled)'),

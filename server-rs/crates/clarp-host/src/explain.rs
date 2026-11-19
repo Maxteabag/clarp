@@ -46,8 +46,6 @@ const LEARNED: &str = "explained";
 const COUNTED: &str = "explain-counted";
 /// The setting the key is kept under that shapes are signed with.
 const KEY: &str = "tool_explanations.identity_key";
-/// How long a model is given for one batch.
-const WITHIN: Duration = Duration::from_secs(45);
 /// How often the desk is looked at while something waits, and how long a batch waits
 /// whose janitor is at another request.
 const LOOKS_EVERY: Duration = Duration::from_millis(200);
@@ -436,7 +434,8 @@ async fn ask(app: &App, batch: &Batch) -> Option<Said> {
             if pick.backend != "codex" {
                 reading.schema = bounded.to_string();
             }
-            let answer = once::read_on(app, &pick.backend, &reading, WITHIN)
+            let within = Duration::from_millis(app.config.explain_within_ms);
+            let answer = once::read_on(app, &pick.backend, &reading, within)
                 .await
                 .map_err(Failure::runner)?;
             let raw = if pick.backend == "codex" {

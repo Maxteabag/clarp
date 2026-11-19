@@ -11,7 +11,7 @@ U = 'clarp-kernel/src/oracle/usage.rs'
 C = 'clarp-kernel/src/oracle/conversation.rs'
 H = 'clarp-host/src/oracle/upstream.rs'
 PLANTS = [
-    (G, 'gemini', 'hold extends past ten minutes', 'now - at >= 600.', 'now - at > 600.'),
+    (G, 'gemini', 'hold extends past ten minutes', 'now - at >= hold_seconds', 'now - at > hold_seconds'),
     (G, 'gemini', 'too little time to resume', 'SETUP_SECONDS: u64 = 10', 'SETUP_SECONDS: u64 = 9'),
     (G, 'gemini', 'a phone interrupt unmutes the reply', 'self.muted |= self.speaking', 'self.muted = false'),
     (G, 'gemini', 'sound is declared at the wrong rate', 'audio/pcm;rate=24000', 'audio/pcm;rate=16000'),
@@ -25,7 +25,7 @@ PLANTS = [
     (U, 'usage', 'a full context window is ignored', '<= Some(1.)', '< Some(1.)'),
     (U, 'usage', 'OpenAI voice is charged twice', 'n * 0.05', 'n * 0.10'),
     (C, 'conversation', 'usage arrives before the first frame', 'event["type"] != "session.started" && self.usage.observe(event)', 'self.usage.observe(event)'),
-    (H, 'host', 'a held voice is tried again', 'app.oracle.calls.healthy()', 'true'),
+    (H, 'host', 'a held voice is tried again', '            && app\n                .oracle\n                .calls\n                .healthy(Duration::from_millis(app.config.second_voice_hold_ms))', '            && true'),
     (H, 'host', 'a new socket gets the first setup again', 'socket.send(Message::text(setup.to_string()))', 'socket.send(Message::text("{}"))'),
 ]
 

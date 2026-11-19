@@ -64,6 +64,14 @@ pub struct Config {
     /// How long an idle agent's own label stands before it is taken back. Nothing turns the
     /// rule off.
     pub status_ttl_ms: i64,
+    /// How long the Oracle's second voice (Gemini Live) is passed over after it failed: ten
+    /// minutes, as on the Python Host (`oracle_gemini_live.FAILURE_HOLD_SECONDS`).
+    pub second_voice_hold_ms: u64,
+    /// How long a phone in a live call may give no sign of life before the call is over:
+    /// thirty seconds, as on the Python Host.
+    pub phone_idle_ms: u64,
+    /// How long the model of the explainer of tools is given for one batch: 45 seconds.
+    pub explain_within_ms: u64,
     /// What an installer stamped this installation with: the content of `DEPLOYED_VERSION` in
     /// the data directory. Empty for a Host that was not installed by one.
     pub deployed_version: String,
@@ -143,6 +151,13 @@ pub struct Config {
     pub heartbeats_disabled: bool,
 }
 
+/// The products' own times, which a test may make shorter: the hold of the Oracle's second
+/// voice after it failed, how long a silent phone keeps a live call, and how long the
+/// explainer's model is given.
+pub const SECOND_VOICE_HOLD_MS: u64 = (clarp_kernel::oracle::gemini::HOLD_SECONDS * 1000.) as u64;
+pub const PHONE_IDLE_MS: u64 = (clarp_kernel::live_session::PHONE_IDLE_S * 1000.) as u64;
+pub const EXPLAIN_WITHIN_MS: u64 = 45_000;
+
 pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen ADDR:PORT] \
 [--engine sqlite|memory] [--codec zstd|none] [--blobs files|memory] \
 [--launcher direct|systemd] [--shim PATH] \
@@ -151,6 +166,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
 [--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
+[--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
 [--whisper-compute KIND] [--speech-language CODE] [--speech-keys FILE] [--transcription-engine NAME]
 [--push-keys FILE]
@@ -299,6 +315,9 @@ impl Config {
         let mut helpers_checked_every_ms = 60_000;
         let mut helper_idle_after_ms = clarp_kernel::helpers::IDLE_AFTER_MS;
         let mut status_ttl_ms = clarp_kernel::helpers::STATUS_TTL_MS;
+        let mut second_voice_hold_ms = SECOND_VOICE_HOLD_MS;
+        let mut phone_idle_ms = PHONE_IDLE_MS;
+        let mut explain_within_ms = EXPLAIN_WITHIN_MS;
         let mut helper_archive_grace_ms = clarp_kernel::helpers::DEFAULT_ARCHIVE_GRACE_MS;
         let mut push_relay = String::new();
         let mut whisper_python = String::new();
@@ -382,6 +401,21 @@ impl Config {
                     helper_idle_after_ms = value("a number of milliseconds")?
                         .parse()
                         .map_err(|_| "--helper-idle-after-ms needs a number".to_string())?;
+                }
+                "--second-voice-hold-ms" => {
+                    second_voice_hold_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--second-voice-hold-ms needs a number".to_string())?;
+                }
+                "--phone-idle-ms" => {
+                    phone_idle_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--phone-idle-ms needs a number".to_string())?;
+                }
+                "--explain-within-ms" => {
+                    explain_within_ms = value("a number of milliseconds")?
+                        .parse()
+                        .map_err(|_| "--explain-within-ms needs a number".to_string())?;
                 }
                 "--status-ttl-ms" => {
                     status_ttl_ms = value("a number of milliseconds")?
@@ -581,6 +615,9 @@ impl Config {
             helper_idle_after_ms,
             helper_archive_grace_ms,
             status_ttl_ms,
+            second_voice_hold_ms,
+            phone_idle_ms,
+            explain_within_ms,
             deployed_version: std::fs::read_to_string(data_dir.join("DEPLOYED_VERSION"))
                 .map(|version| version.trim().to_string())
                 .unwrap_or_default(),
@@ -815,6 +852,42 @@ mod tests {
         assert_eq!(parse(&["--blobs", "memory"]).unwrap().blobs, "memory");
         assert!(config.keep_spools);
         assert!(parse(&["--what"]).is_err());
+        // The products' own times: as the Python Host has them, unless a test makes them
+        // shorter; a time that is no number is refused in words.
+        assert_eq!(
+            (
+                config.second_voice_hold_ms,
+                config.phone_idle_ms,
+                config.explain_within_ms
+            ),
+            (600_000, 30_000, 45_000)
+        );
+        let shorter = parse(&[
+            "--second-voice-hold-ms",
+            "3000",
+            "--phone-idle-ms",
+            "1500",
+            "--explain-within-ms",
+            "2000",
+        ])
+        .unwrap();
+        assert_eq!(
+            (
+                shorter.second_voice_hold_ms,
+                shorter.phone_idle_ms,
+                shorter.explain_within_ms
+            ),
+            (3000, 1500, 2000)
+        );
+        for flag in [
+            "--second-voice-hold-ms",
+            "--phone-idle-ms",
+            "--explain-within-ms",
+        ] {
+            let refused = parse(&[flag, "soon"]).err();
+            assert_eq!(refused, Some(format!("{flag} needs a number")));
+            assert!(parse(&[flag]).is_err());
+        }
         assert!(parse(&["--data"]).is_err());
         assert!(parse(&["--listen", "nowhere"]).is_err());
         // A Host pushes nothing until it is given a relay, and only one it reaches over TLS

@@ -85,12 +85,15 @@ pub struct Calls {
 }
 
 impl Calls {
-    pub(super) fn healthy(&self) -> bool {
+    /// Whether the second voice may be tried: it did not fail within the hold.
+    pub(super) fn healthy(&self, hold: Duration) -> bool {
         let failed = self
             .gemini_failed
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        failed.is_none_or(|at| rules::gemini::healthy(at.elapsed().as_secs_f64(), Some(0.)))
+        let hold = hold.as_secs_f64();
+        failed
+            .is_none_or(|at| rules::gemini::healthy_for(at.elapsed().as_secs_f64(), Some(0.), hold))
     }
     pub(super) fn health(&self, well: bool) {
         *self
