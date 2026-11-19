@@ -489,6 +489,22 @@ def by_fiat(path, body):
     if not said or not isinstance(body, dict):
         return body
     return {key: value for key, value in body.items() if key not in said}
+
+
+# Lists whose order is an accident of the reference, compared in the order of their names: the
+# contacts an agent may take (`POST /agent-assign` with `options`) come in the order the Python
+# Host lists its personas, by the millisecond each built-in one was written at its start, which
+# moves from start to start (docs/differences.md, "The order of the personas a Host offers").
+IN_ANY_ORDER = {'/agent-assign': 'contacts'}
+
+
+def in_any_order(path, body):
+    """A body with a list of no order of its own sorted by its names."""
+    key = IN_ANY_ORDER.get(path)
+    if not key or not isinstance(body, dict) or not isinstance(body.get(key), list):
+        return body
+    named = lambda item: str(item.get('name')) if isinstance(item, dict) else str(item)  # noqa: E731
+    return {**body, key: sorted(body[key], key=named)}
 # The lists an app's screens are made of, for what the Rust Host keeps nothing of yet: janitors,
 # the engines that listen as a Host with other engines lists them, the models an agent can be
 # given. (The catalogue of voices is not among them any more: it is compared whole.) It answers each as the Python Host
@@ -844,7 +860,7 @@ def core(raw: dict) -> dict:
     the order they are first read in, and with each Host's own version as just "a version"."""
     # The session a Host drew for a janitor it made as a new agent is named first: the answer that
     # says it is compared as its outline below, and the name is needed wherever the janitor is named.
-    janitors_made = made_new(raw['http'], {})
+    janitors_made = made_new(raw['http'], {}, nameless=raw.get('scenario') in NAMELESS)
     if janitors_made:
         raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
     http = [{**exchange, 'body': own_particulars(without_features(exchange['body']))} for exchange in raw['http']]
@@ -853,6 +869,7 @@ def core(raw: dict) -> dict:
     http = [{**exchange, 'body': kept_where(exchange['body'])} if exchange.get('path') == '/upload' else exchange
             for exchange in http]
     http = [{**exchange, 'body': by_fiat(exchange.get('path'), exchange['body'])} for exchange in http]
+    http = [{**exchange, 'body': in_any_order(exchange.get('path'), exchange['body'])} for exchange in http]
     sse = []
     for frame in raw['sse']:
         data = frame.get('data')
@@ -1027,12 +1044,24 @@ def forked(http, found: dict) -> dict:
     return found
 
 
-def made_new(http, found: dict) -> dict:
+# Scenarios whose agents are made without a session of their own: the session each Host draws for one
+# (`<name>-<four hex signs>` on the Python Host, the name alone where it is free on the Rust Host:
+# docs/differences.md, "The session name of a new agent") is named in the order they are made.
+NAMELESS = frozenset({'contacts-minted'})
+
+
+def made_new(http, found: dict, nameless: bool = False) -> dict:
     """The session name of each janitor a capture made as a new agent, with the name it is given here:
     the letters of the janitor's name and twelve signs its Host drew (`POST /janitors` without a
     session). What a client relies on is that the name the request answered is the janitor's name
-    wherever it is named."""
+    wherever it is named. `nameless`: also of each agent `POST /agents` made in such a scenario."""
     for exchange in http:
+        if nameless and exchange.get('method') == 'POST' and exchange.get('path') == '/agents' \
+                and exchange.get('status') == 200 and isinstance(exchange.get('body'), dict):
+            session = exchange['body'].get('session')
+            if isinstance(session, str) and session:
+                found.setdefault(session, f'<made:{len(found) + 1}>')
+            continue
         body = exchange.get('body')
         janitor = body.get('janitor') if isinstance(body, dict) else None
         if exchange.get('method') != 'POST' or exchange.get('path') != '/janitors' or not isinstance(janitor, dict):
@@ -1075,7 +1104,7 @@ def seen_by_a_client(raw: dict) -> dict:
     children = forked(raw['http'], {})
     if children:
         raw = {**raw, 'http': by_name(raw['http'], children), 'sse': by_name(raw['sse'], children)}
-    janitors_made = made_new(raw['http'], {})
+    janitors_made = made_new(raw['http'], {}, nameless=raw.get('scenario') in NAMELESS)
     if janitors_made:
         raw = {**raw, 'http': by_name(raw['http'], janitors_made), 'sse': by_name(raw['sse'], janitors_made)}
     conversations = own_conversations([exchange['body'] for exchange in raw['http']], {})

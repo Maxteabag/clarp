@@ -16,6 +16,7 @@ pub mod call_transcription;
 pub mod calls;
 pub mod chip;
 pub mod connector;
+pub mod contacts;
 pub mod control;
 pub mod controller_narration;
 pub mod conversation;

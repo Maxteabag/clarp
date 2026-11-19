@@ -118,6 +118,10 @@ async fn amend(app: &App, key: &str, change: Amend) -> Result<AgentRecord, Refus
     match app.fleet.amend(key.to_string(), change).await {
         Ok(Ok(record)) => Ok(record),
         Ok(Err(NotAmended::Unknown)) => Err(no_such_agent()),
+        Ok(Err(NotAmended::NoContact)) => Err(Refusal::Told(
+            StatusCode::CONFLICT,
+            json!({ "error": "contact_pool_empty", "message": "contact_pool_empty" }),
+        )),
         Ok(Err(NotAmended::Occupied { owner, session })) => Err(Refusal::Told(
             StatusCode::CONFLICT,
             occupied_body(&owner, &session, ""),

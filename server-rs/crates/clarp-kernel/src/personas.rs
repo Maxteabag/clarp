@@ -85,6 +85,15 @@ pub fn tier(name: &str) -> &'static str {
     }
 }
 
+/// Every name of the roster's tiers, without the letters' case: names a contact is never
+/// minted with (`roster.CONTACT_TIERS`).
+pub fn tier_names() -> impl Iterator<Item = &'static str> {
+    lists()["tiers"]
+        .as_object()
+        .into_iter()
+        .flat_map(|tiers| tiers.keys().map(String::as_str))
+}
+
 /// How a persona speaks: the clause its agent is told, or nothing.
 pub fn personality(name: &str) -> &'static str {
     let name = clarp_speech::listen::strip(name);

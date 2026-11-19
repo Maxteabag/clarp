@@ -21,6 +21,7 @@ use clarp_actor::conversation::Which;
 use clarp_actor::{ByHand, ImportedRow};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
+use clarp_kernel::contacts::{self, Launch};
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
@@ -180,6 +181,11 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A quiet agent (a janitor) never reaches its owner by itself: its row says so, its turns tell
     // nobody, and it is in none of the lists the roster's members make.
     ("quiet_agents", 56),
+    // An agent nobody named takes a free contact of its tool's pool or one minted for it
+    // (`POST /agents` with `auto_contact` or `mint_contact`), and a running agent is given one
+    // (`POST /agent-assign`). A minted contact has no picture here yet: a Python Host with
+    // pictures off or no key mints the same contact without one and lists this all the same.
+    ("auto_contact_minting", 85),
     // A Stop says who stopped the agent and why, an agent's own turn known by its token; and a
     // turn nothing runs is repaired, which here gives nothing back: nothing can be busy with
     // no process behind it (`controls.rs`).
@@ -579,6 +585,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::past::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
+        .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())
         .merge(crate::calendar::routes())
@@ -1488,7 +1495,16 @@ pub(crate) async fn make_agent(
         |why: Unavailable| (StatusCode::SERVICE_UNAVAILABLE, json!({ "error": why.0 }));
     // The agent it names is started again in place; with none named a new agent is made.
     let replaces = plain("replace_sid").map(|said| said.trim().to_string());
-    let record = match replaces.filter(|said| !said.is_empty()) {
+    let replaces = replaces.filter(|said| !said.is_empty());
+    // A contact asked for (`mint_contact`, `auto_contact`) goes with no other way of naming
+    // the agent: started again in place, it has its own.
+    if replaces.is_some()
+        && let Launch::Refused(status, word) = contacts::launch(asked, None, false)
+    {
+        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
+        return Err(refused(status, word, word));
+    }
+    let record = match replaces {
         Some(replaces) => started_again(app, replaces, request)
             .await?
             .map_err(not_made)?,
@@ -1537,6 +1553,21 @@ pub(crate) async fn make_agent(
                     Some((session, turns, helpers))
                 }
             };
+            // Who it is when the request names no contact of its own: the first free one of
+            // its tool's pool, or one minted for it (`agent_lifecycle`, `NeedsContact`). The
+            // fleet chooses it in the turn that registers the agent, so that launches at once
+            // never take the same one; what is refused is refused here.
+            let contact = match contacts::launch(asked, None, false) {
+                Launch::AsNamed => None,
+                Launch::Refused(status, word) => {
+                    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_REQUEST);
+                    return Err(refused(status, word, word));
+                }
+                Launch::Pooled(_) | Launch::Minted => Some(crate::fleet::ContactAsked {
+                    mint: asked.get("mint_contact") == Some(&Value::Bool(true)),
+                    fetched: app.mouth.cartesia_known(),
+                }),
+            };
             let forks = plain("fork_session_id").is_some_and(|said| !said.trim().is_empty());
             // An agent that takes a session up has a conversation of its own, under a name
             // of its own: the session may have been another agent's conversation before, and
@@ -1548,7 +1579,7 @@ pub(crate) async fn make_agent(
                 .map(|(session, _, _)| session.clone());
             let made = app
                 .fleet
-                .create_as(request, forked)
+                .create_contacted(request, forked, contact)
                 .await
                 .map_err(unavailable)?;
             let record = made.map_err(not_made)?;

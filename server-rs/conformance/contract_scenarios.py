@@ -2933,4 +2933,53 @@ SCENARIOS.append({
     ],
 })
 
+# Agents nobody named (feature `auto_contact_minting`): a contact minted for an agent, and a running one given one
+# (`POST /agent-assign`). Their sessions are each Host's own drawing (docs/differences.md, "The session name of a
+# new agent"): named in the order they are made (`conform.py`, `NAMELESS`). The first free contact of a tool's pool
+# is not asked here: the Python Host's pool is in the order of its personas, which moves from start to start, so
+# which contact is first is an accident there (held by the contact vectors instead); the contacts listed are
+# compared as a set (`IN_ANY_ORDER`). No Host of the suite has a key for a picture: none is drawn on either.
+NAMELESS_AGENT = {'backend': 'claude', 'cwd': '{workspace}', 'synthesize_audio': False}
+SCENARIOS.append({
+    'id': 'contacts-minted',
+    'what': 'an agent nobody named has a contact minted for it under a session of its own, whatever name it asks '
+            'for; what goes against a contact asked for; a running agent is listed the contacts it may take, is '
+            'given a new one, keeps its own, chooses one; and what is refused',
+    'steps': [
+        {**post('/agents', {**NAMELESS_AGENT, 'mint_contact': True, 'name': 'Given', 'session': 'given'},
+                'a contact minted for it, whatever name and session it asks for'),
+         'save': {'minted': 'session'}},
+        # Each agent at rest before anything is done with it: the Python Host tells an agent's state
+        # once its tool is ready, and what it tells then is the contact it has by then.
+        {'op': 'quiesce', 'session': '{minted}'},
+        {**post('/agents', {**NAMELESS_AGENT, 'mint_contact': True}, 'another contact minted'),
+         'save': {'second': 'session'}},
+        {'op': 'quiesce', 'session': '{second}'},
+        post('/agents', {**NAMELESS_AGENT, 'mint_contact': True, 'auto_contact': True}, 'both'),
+        post('/agents', {**NAMELESS_AGENT, 'auto_contact': True, 'anonymous': True}, 'a contact and no name'),
+        post('/agents', {**NAMELESS_AGENT, 'mint_contact': True, 'replace_sid': '{minted}'},
+             'a contact for an agent started again'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'options'}, 'the contacts it may take'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'choose', 'name': 'ETHAN'},
+             'a contact another agent has'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'choose', 'name': 'nobody of the kind'},
+             'a contact that is not there'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'nonsense'}, 'a mode there is not'),
+        post('/agent-assign', {'session': 'nobody-there', 'mode': 'auto'}, 'an agent that is not there'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'create', 'name': ''}, 'a new contact of no name'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'create', 'name': '  Synthetic   Scout '},
+             'a new contact'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'create', 'name': 'synthetic scout'},
+             'a new contact of a name there is'),
+        post('/agent-assign', {'session': '{minted}', 'mode': 'auto'}, 'its own contact kept'),
+        post('/agent-assign', {'session': '{second}', 'mode': 'choose', 'name': 'clara'},
+             'a contact nobody has now, chosen'),
+        # Each contact made here changed to itself, in the order they were made: the answer names its id,
+        # which the Host drew at random, before the snapshot lists the personas by their ids.
+        *[post('/personas/update', {'original_name': name, 'name': name, 'voice_id': ''}, f'{name} as it is')
+          for name in ('Clara', 'Ethan', 'Synthetic Scout')],
+        SNAPSHOT,
+    ],
+})
+
 BY_ID = {scenario['id']: scenario for scenario in SCENARIOS}

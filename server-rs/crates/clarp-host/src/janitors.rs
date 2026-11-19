@@ -633,6 +633,7 @@ fn not_amended<T>(app: &App, amended: Result<T, crate::fleet::NotAmended>) {
         Ok(_) => return,
         Err(crate::fleet::NotAmended::Unknown) => "no such agent",
         Err(crate::fleet::NotAmended::Occupied { .. }) => "its name is another agent's",
+        Err(crate::fleet::NotAmended::NoContact) => "no contact could be minted for it",
     };
     app.fleet.unkept("agent", why);
 }

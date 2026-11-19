@@ -196,6 +196,15 @@ pub enum Amend {
         kept: Vec<Portrait>,
         worn: Option<String>,
     },
+    /// The contact it is given (`POST /agent-assign`): the persona of that name, whose
+    /// voices, way of speaking, symbol and picture it takes on in place of its own, none
+    /// where the persona has none (`contact_assignment.assign_contact`). Its conversation
+    /// stays. Not told as a new name: whoever assigns it tells the apps.
+    Contact(String),
+    /// The contact `POST /agent-assign` gives it with `auto`, chosen in this turn: its own
+    /// where it is in its pool, else the pool's first, else one minted for it (`fetched`: the
+    /// voices of Cartesia's this Host has listed, what a minted contact's is picked from first).
+    ContactAuto(Vec<String>),
 }
 
 /// Why an agent was not changed.
@@ -205,6 +214,8 @@ pub enum NotAmended {
     Unknown,
     /// Another agent has the name.
     Occupied { owner: String, session: String },
+    /// No contact could be minted for it.
+    NoContact,
 }
 
 /// An agent as a change left it. `taken` is done when the agent's own thread has it.
@@ -281,6 +292,16 @@ pub struct Directory {
     pub settings: Arc<BTreeMap<String, String>>,
     /// The personas the owner made, and how he made built-in ones look.
     pub personas: Arc<Book>,
+}
+
+/// The contact a launch asked for in place of a name of its own: always a minted one
+/// (`mint_contact`), or the first free one of its tool's pool and a minted one where there is
+/// none (`auto_contact`). `fetched`: the voices of Cartesia's this Host has listed, what a
+/// minted contact's voice is picked from first.
+#[derive(Debug, Clone, Default)]
+pub struct ContactAsked {
+    pub mint: bool,
+    pub fetched: Vec<String>,
 }
 
 /// What an app says of a persona it makes or changes.
@@ -467,6 +488,9 @@ enum Ask {
     Create {
         request: CreateAgentRequest,
         forked: Option<String>,
+        /// The contact the request asked for in place of a name of its own, chosen in this
+        /// turn ([`ContactAsked`]).
+        contact: Option<ContactAsked>,
         answer: Answer<Result<AgentRecord, NotMade>>,
     },
     /// An agent is started again in place. `dry`: only what would be is answered.
@@ -620,6 +644,9 @@ enum Ask {
         original: Option<String>,
         said: PersonaSaid,
         fetched: Vec<String>,
+        /// Whether the apps are told the personas changed: not for a contact minted for an
+        /// agent, of which the Python Host tells them nothing.
+        announce: bool,
         answer: Answer<Result<serde_json::Value, String>>,
     },
     /// The owner removes a persona of his own. Answers whether there was one to remove.
@@ -670,9 +697,24 @@ impl FleetHandle {
         request: CreateAgentRequest,
         forked: Option<String>,
     ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
+        self.create_contacted(request, forked, None).await
+    }
+
+    /// Makes an agent as [`Self::create_as`] does, as the contact it asked for where it asked
+    /// for one: chosen in the turn that registers it, so that launches at once never take the
+    /// same contact (`agent_lifecycle.create` holds its lock across the pool, the mint and the
+    /// registration). A contact minted for it is written before the agent: a launch that then
+    /// fails leaves it, a persona nobody wears, as the Python Host leaves it.
+    pub async fn create_contacted(
+        &self,
+        request: CreateAgentRequest,
+        forked: Option<String>,
+        contact: Option<ContactAsked>,
+    ) -> Result<Result<AgentRecord, NotMade>, Unavailable> {
         self.ask(|answer| Ask::Create {
             request,
             forked,
+            contact,
             answer,
         })
         .await
@@ -931,6 +973,24 @@ impl FleetHandle {
             original,
             said,
             fetched,
+            announce: true,
+            answer,
+        })
+        .await
+    }
+
+    /// Makes a persona minted as an agent's contact (`contact_minting.mint_contact`): as
+    /// [`Self::persona_write`] makes one, without telling the apps the personas changed.
+    pub async fn persona_mint(
+        &self,
+        said: PersonaSaid,
+        fetched: Vec<String>,
+    ) -> Result<Result<serde_json::Value, String>, Unavailable> {
+        self.ask(|answer| Ask::PersonaWrite {
+            original: None,
+            said,
+            fetched,
+            announce: false,
             answer,
         })
         .await
@@ -1316,9 +1376,10 @@ impl Fleet {
                 Ask::Create {
                     request,
                     forked,
+                    contact,
                     answer,
                 } => {
-                    let _ = answer.send(Ok(self.create(request, forked)));
+                    let _ = answer.send(Ok(self.create(request, forked, contact)));
                 }
                 Ask::StartAgain {
                     replaces,
@@ -1455,9 +1516,12 @@ impl Fleet {
                     original,
                     said,
                     fetched,
+                    announce,
                     answer,
                 } => {
-                    let _ = answer.send(self.persona_write(original.as_deref(), &said, &fetched));
+                    let written =
+                        self.persona_write(original.as_deref(), &said, &fetched, announce);
+                    let _ = answer.send(written);
                 }
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
@@ -1563,6 +1627,7 @@ impl Fleet {
         original: Option<&str>,
         said: &PersonaSaid,
         fetched: &[String],
+        announce: bool,
     ) -> Result<Result<serde_json::Value, String>, Unavailable> {
         let [roster, cartesia, gemini] = self.works.telling.owner_tables();
         let owner = Owner {
@@ -1625,9 +1690,11 @@ impl Fleet {
         } else {
             "persona-updated"
         };
-        self.works
-            .hub
-            .publish(wire::roster_personas(kind), self.now_ms());
+        if announce {
+            self.works
+                .hub
+                .publish(wire::roster_personas(kind), self.now_ms());
+        }
         Ok(Ok(told))
     }
 
@@ -1794,6 +1861,89 @@ impl Fleet {
     }
 
     /// The agent that has this name, when it is not `except`.
+    /// Every persona as the pool reads it, and every member of the fleet as a wearer: what
+    /// a contact is chosen against, as they stand in this turn.
+    fn personas_listed(&self) -> Vec<serde_json::Value> {
+        let [named, cartesia, gemini] = self.works.telling.owner_tables();
+        self.book.listed(&Owner {
+            roster: &named,
+            cartesia: &cartesia,
+            gemini: &gemini,
+        })
+    }
+
+    /// The contact of a launch that asked for one (`agent_spec`, `NeedsContact`): the first
+    /// free contact of its tool's pool, or one minted for it, which is written now.
+    fn contact_of_launch(&mut self, backend: &str, contact: &ContactAsked) -> Result<String, NotMade> {
+        let pooled = {
+            let personas = self.personas_listed();
+            let contacts = crate::contacts::contacts_of(&personas);
+            let wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
+            pool.first().map(|name| (*name).to_string())
+        };
+        if !contact.mint
+            && let Some(name) = pooled
+        {
+            return Ok(name);
+        }
+        match self.mint_contact(backend, &contact.fetched) {
+            Ok(Some(name)) => Ok(name),
+            Ok(None) => Err(Told::new(409, "contact_pool_empty", "contact_pool_empty").into()),
+            Err(why) => Err(NotMade::Refused(why.0)),
+        }
+    }
+
+    /// The contact `POST /agent-assign` gives the member at `at` with `auto`
+    /// (`contact_assignment.assign_contact`): `None` where none could be minted.
+    fn contact_of_assignment(&mut self, at: usize, fetched: &[String]) -> Result<Option<String>, Unavailable> {
+        let record = self.members[at].record.clone();
+        let decided = {
+            let personas = self.personas_listed();
+            let contacts = crate::contacts::contacts_of(&personas);
+            let wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+            let agent = clarp_kernel::contacts::Assignee {
+                agent_id: &record.agent_id,
+                persona: &record.persona,
+                backend: &record.backend,
+                janitor: record.is_janitor,
+            };
+            clarp_kernel::contacts::assign("auto", None, Some(agent), &contacts, &wearers)
+        };
+        match decided {
+            Ok(clarp_kernel::contacts::Assigned::Take(name)) => Ok(Some(name)),
+            Ok(clarp_kernel::contacts::Assigned::Mint) => self.mint_contact(&record.backend, fetched),
+            _ => Ok(None),
+        }
+    }
+
+    /// A contact minted for an agent of a tool (`contact_minting.mint_contact`): a persona of
+    /// the owner's with its tier's first free name, a voice nobody speaks with and the tier's
+    /// way of speaking for that name, written now, without telling the apps the personas
+    /// changed. Its name; `None` where none was made.
+    fn mint_contact(&mut self, backend: &str, fetched: &[String]) -> Result<Option<String>, Unavailable> {
+        let personas = self.personas_listed();
+        let existing: Vec<String> = personas
+            .iter()
+            .filter_map(|persona| persona["name"].as_str().map(str::to_string))
+            .collect();
+        let occupied: Vec<String> = self
+            .members
+            .iter()
+            .map(|member| member.record.persona.clone())
+            .collect();
+        let Some((name, tier)) = clarp_kernel::contacts::given_name(backend, &occupied, &existing) else {
+            return Ok(None);
+        };
+        let said = PersonaSaid {
+            personality: clarp_kernel::contacts::personality(&name, tier).to_string(),
+            name,
+            ..PersonaSaid::default()
+        };
+        let made = self.persona_write(None, &said, fetched, false)?;
+        Ok(made.ok().and_then(|persona| persona["name"].as_str().map(str::to_string)))
+    }
+
     fn owner_of_name(&self, name: &str, except: &str) -> Option<&AgentRecord> {
         self.members
             .iter()
@@ -1907,9 +2057,23 @@ impl Fleet {
 
     fn create(
         &mut self,
-        request: CreateAgentRequest,
+        mut request: CreateAgentRequest,
         forked: Option<String>,
+        contact: Option<ContactAsked>,
     ) -> Result<AgentRecord, NotMade> {
+        // The contact asked for in place of a name of its own: its name, and no session of
+        // its own (`agent_spec`: the session asked for is dropped).
+        if let Some(contact) = contact {
+            let backend = request
+                .backend
+                .as_deref()
+                .map(str::trim)
+                .filter(|backend| !backend.is_empty())
+                .unwrap_or("claude")
+                .to_string();
+            request.name = self.contact_of_launch(&backend, &contact)?;
+            request.session = None;
+        }
         let was_forked = forked.is_some();
         let persona = request.name.trim().to_string();
         if persona.is_empty() {
@@ -2146,8 +2310,17 @@ impl Fleet {
         let Some(at) = found else {
             return Ok(Err(NotAmended::Unknown));
         };
+        // A contact chosen by the rule is chosen here, in the turn that gives it.
+        let change = match change {
+            Amend::ContactAuto(fetched) => match self.contact_of_assignment(at, &fetched)? {
+                Some(name) => Amend::Contact(name),
+                None => return Ok(Err(NotAmended::NoContact)),
+            },
+            other => other,
+        };
         let before = &self.members[at].record;
         let mut record = before.clone();
+        let assigned = matches!(change, Amend::Contact(_) | Amend::ContactAuto(_));
         match change {
             Amend::Mute(muted) => record.muted = muted,
             Amend::Heartbeat(on) => record.heartbeat_enabled = on,
@@ -2190,13 +2363,43 @@ impl Fleet {
                     record.avatar = worn;
                 }
             }
+            // Chosen above.
+            Amend::ContactAuto(_) => {}
+            Amend::Contact(name) => {
+                if let Some(owner) = self.owner_of_name(&name, &record.agent_id) {
+                    return Ok(Err(NotAmended::Occupied {
+                        owner: owner.persona.clone(),
+                        session: owner.session.clone(),
+                    }));
+                }
+                let [named, cartesia, gemini] = self.works.telling.owner_tables();
+                let owner = Owner {
+                    roster: &named,
+                    cartesia: &cartesia,
+                    gemini: &gemini,
+                };
+                let Some(persona) = self.book.named(&owner, &name) else {
+                    return Ok(Err(NotAmended::Unknown));
+                };
+                let of_persona = |key: &str| persona[key].as_str().unwrap_or("").to_string();
+                record.persona = of_persona("name");
+                record.voice_id = match of_persona("voice_id") {
+                    voice if voice.is_empty() => "{}".to_string(),
+                    voice => voice,
+                };
+                record.personality = of_persona("personality");
+                record.avatar_symbol = of_persona("avatar_symbol");
+                record.avatar = persona["id"]
+                    .as_str()
+                    .and_then(|id| self.book.picture_of(&owner, id));
+            }
         }
         let (took, taken) = oneshot::channel();
         if record == *before {
             let _ = took.send(());
             return Ok(Ok(Amended { record, taken }));
         }
-        let renamed = record.persona != before.persona;
+        let renamed = record.persona != before.persona && !assigned;
         let put_away = record.archived_at_ms.is_some();
         self.replace(at, record.clone(), took)?;
         if renamed {
