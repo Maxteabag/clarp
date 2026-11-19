@@ -15809,7 +15809,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     let log = host.heard.lock().unwrap().clone();
     let lines: Vec<_> = log
         .lines()
-        .filter(|line| line.starts_with("jsonBodyLarge "))
+        .filter(|line| line.starts_with("requestBodyLarge "))
         .collect();
     let wanted = format!(
         "requestBodyLarge family=/application-activity bytes={}",
