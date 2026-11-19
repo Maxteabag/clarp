@@ -1,0 +1,3898 @@
+{
+ "about": "Written by server-rs/tools/delivery-feed-vectors.py from server/lib/launch_receipts.py (delivery_page, annotate_rows, through record_pending, mark_attempted, fence_agent, prune). Do not edit by hand.",
+ "page_cap": 200,
+ "pages": [
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 0,
+    "generation": 0,
+    "pointers": [],
+    "receipts": {},
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "an agent with nothing"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 200,
+   "given": {
+    "current": 0,
+    "generation": 0,
+    "pointers": [],
+    "receipts": {},
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 0,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": 0,
+    "updates": []
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "nothing, bootstrap"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 4,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 1,
+       "seq": 1,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 1,
+       "seq": 3,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 4,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "three of its own, one of another agent between"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 4,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 1,
+       "seq": 3,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 4,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 1,
+   "stop_generation": 0,
+   "until": null,
+   "what": "from the first"
+  },
+  {
+   "agent_id": "other",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      2,
+      "o1"
+     ]
+    ],
+    "receipts": {
+     "o1": "{\"state\":\"pending\",\"agent_id\":\"other\",\"trace_id\":\"o1\",\"client_msg_id\":\"x1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700002000,\"user_stop_gen\":0,\"rev\":1,\"seq\":2}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 4,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "x1",
+        "trace_id": "o1"
+       },
+       "rev": 1,
+       "seq": 2,
+       "state": "pending_launch"
+      },
+      "message_id": "u-x1"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "the other agent: its own pointer alone"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 1,
+   "stop_generation": null,
+   "until": null,
+   "what": "generation missing"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 1,
+   "stop_generation": 3,
+   "until": null,
+   "what": "generation from the future"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 99,
+   "stop_generation": 0,
+   "until": null,
+   "what": "cursor ahead of the Host"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": -1,
+   "stop_generation": 0,
+   "until": null,
+   "what": "negative"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 1,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 1,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 1,
+       "seq": 1,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m1"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "cap one"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 2,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 3,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 1,
+       "seq": 1,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 1,
+       "seq": 3,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m2"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "cap two"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 3,
+   "given": {
+    "current": 4,
+    "generation": 0,
+    "pointers": [
+     [
+      1,
+      "t1"
+     ],
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":1,\"seq\":1}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 4,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 1,
+       "seq": 1,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 1,
+       "seq": 3,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 4,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "cap three: exactly its pointers"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 5,
+    "generation": 0,
+    "pointers": [
+     [
+      3,
+      "t2"
+     ],
+     [
+      4,
+      "t3"
+     ],
+     [
+      5,
+      "t1"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 5,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 1,
+       "seq": 4,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     }
+    ]
+   },
+   "since": 3,
+   "stop_generation": 0,
+   "until": null,
+   "what": "after the handoff"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 4,
+   "stop_generation": 0,
+   "until": null,
+   "what": "a cursor of the old generation"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 7,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 6,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 4,
+   "stop_generation": 1,
+   "until": null,
+   "what": "of the new one"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 1,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 5,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "bootstrap after the Stop, one a page: first page"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 1,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 6,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 6,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     }
+    ]
+   },
+   "since": 5,
+   "stop_generation": 1,
+   "until": 7,
+   "what": "bootstrap after the Stop, one a page: page 2"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 1,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 7,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 6,
+   "stop_generation": 1,
+   "until": 7,
+   "what": "bootstrap after the Stop, one a page: page 3"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 1,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 7,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": []
+   },
+   "since": 7,
+   "stop_generation": 1,
+   "until": 7,
+   "what": "bootstrap after the Stop, one a page: page 4"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 6,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 2,
+       "seq": 6,
+       "state": "stopped"
+      },
+      "message_id": "u-m2"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "bootstrap after the Stop, two a page: first page"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 7,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      6,
+      "t2"
+     ],
+     [
+      7,
+      "t3"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 7,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": 7,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 6,
+   "stop_generation": 1,
+   "until": 7,
+   "what": "bootstrap after the Stop, two a page: page 2"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 10,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 10,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 3,
+       "seq": 9,
+       "state": "handed_over"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 2,
+       "seq": 10,
+       "state": "handed_over"
+      },
+      "message_id": "u-m4"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 1,
+   "until": null,
+   "what": "all since the Stop"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 13,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      13,
+      "t6"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":1,\"seq\":13}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 13,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 3,
+       "seq": 9,
+       "state": "handed_over"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 2,
+       "seq": 10,
+       "state": "handed_over"
+      },
+      "message_id": "u-m4"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m5",
+        "trace_id": "t6"
+       },
+       "rev": 1,
+       "seq": 13,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m5"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 1,
+   "until": null,
+   "what": "with the relaunched one"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 14,
+    "generation": 1,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      13,
+      "t6"
+     ],
+     [
+      14,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":1,\"seq\":13}",
+     "tu": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":1,\"seq\":14}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 14,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 1,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "u-mu",
+        "trace_id": "tu"
+       },
+       "rev": 1,
+       "seq": 14,
+       "state": "pending_launch"
+      },
+      "message_id": "u-mu"
+     }
+    ]
+   },
+   "since": 13,
+   "stop_generation": 1,
+   "until": null,
+   "what": "with the prefixed one"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 16,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 0,
+   "stop_generation": 1,
+   "until": null,
+   "what": "a second Stop with nothing pending, the old generation"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 3,
+   "given": {
+    "current": 16,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 9,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 2,
+    "until": 16,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 3,
+       "seq": 9,
+       "state": "handed_over"
+      },
+      "message_id": "u-m2"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "bootstrap, three a page: first page"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 3,
+   "given": {
+    "current": 16,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 15,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 2,
+    "until": 16,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 2,
+       "seq": 10,
+       "state": "handed_over"
+      },
+      "message_id": "u-m4"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m5",
+        "trace_id": "t6"
+       },
+       "rev": 2,
+       "seq": 15,
+       "state": "stopped"
+      },
+      "message_id": "u-m5"
+     }
+    ]
+   },
+   "since": 9,
+   "stop_generation": 2,
+   "until": 16,
+   "what": "bootstrap, three a page: page 2"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 3,
+   "given": {
+    "current": 16,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 16,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 2,
+    "until": 16,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "u-mu",
+        "trace_id": "tu"
+       },
+       "rev": 2,
+       "seq": 16,
+       "state": "stopped"
+      },
+      "message_id": "u-mu"
+     }
+    ]
+   },
+   "since": 15,
+   "stop_generation": 2,
+   "until": 16,
+   "what": "bootstrap, three a page: page 3"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 16,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 7,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 2,
+    "until": 16,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "a pass begins"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 17,
+    "generation": 2,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      17,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":1,\"seq\":17}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 10,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 2,
+    "until": 16,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 3,
+       "seq": 9,
+       "state": "handed_over"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 2,
+       "seq": 10,
+       "state": "handed_over"
+      },
+      "message_id": "u-m4"
+     }
+    ]
+   },
+   "since": 7,
+   "stop_generation": 2,
+   "until": 16,
+   "what": "a send between its pages"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 18,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 7,
+   "stop_generation": 2,
+   "until": 16,
+   "what": "a Stop between its pages"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 200,
+   "given": {
+    "current": 18,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 2,
+   "stop_generation": 3,
+   "until": null,
+   "what": "a later page with no until"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 200,
+   "given": {
+    "current": 18,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 0,
+   "stop_generation": 3,
+   "until": 999,
+   "what": "until beyond the Host"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 200,
+   "given": {
+    "current": 18,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 5,
+   "stop_generation": 3,
+   "until": 4,
+   "what": "since beyond until"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 200,
+   "given": {
+    "current": 18,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ]
+    ],
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 3,
+   "stop_generation": null,
+   "until": null,
+   "what": "a first page that is not at the start"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 905,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ]
+    ],
+    "receipts": {
+     "broken": "{",
+     "elsewhere": "{\"state\": \"pending\", \"agent_id\": \"other\", \"trace_id\": \"elsewhere\", \"client_msg_id\": \"e\", \"rev\": 1, \"seq\": 903, \"user_stop_gen\": 0}",
+     "gone": null,
+     "legacy": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"legacy\", \"client_msg_id\": \"l\"}",
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 905,
+    "expired": false,
+    "more": false,
+    "skipped": 5,
+    "stop_generation": 3,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m1",
+        "trace_id": "t1"
+       },
+       "rev": 2,
+       "seq": 5,
+       "state": "handed_over"
+      },
+      "message_id": "u-m1"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m2",
+        "trace_id": "t2"
+       },
+       "rev": 3,
+       "seq": 9,
+       "state": "handed_over"
+      },
+      "message_id": "u-m2"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m4",
+        "trace_id": "t4"
+       },
+       "rev": 2,
+       "seq": 10,
+       "state": "handed_over"
+      },
+      "message_id": "u-m4"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m5",
+        "trace_id": "t6"
+       },
+       "rev": 2,
+       "seq": 15,
+       "state": "stopped"
+      },
+      "message_id": "u-m5"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "u-mu",
+        "trace_id": "tu"
+       },
+       "rev": 2,
+       "seq": 16,
+       "state": "stopped"
+      },
+      "message_id": "u-mu"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m7",
+        "trace_id": "t7"
+       },
+       "rev": 2,
+       "seq": 18,
+       "state": "stopped"
+      },
+      "message_id": "u-m7"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 3,
+   "until": null,
+   "what": "pointers that do not hold"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 1,
+   "given": {
+    "current": 905,
+    "generation": 3,
+    "pointers": [
+     [
+      5,
+      "t1"
+     ],
+     [
+      7,
+      "t3"
+     ],
+     [
+      9,
+      "t2"
+     ],
+     [
+      10,
+      "t4"
+     ],
+     [
+      12,
+      "t5"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ]
+    ],
+    "receipts": {
+     "broken": "{",
+     "elsewhere": "{\"state\": \"pending\", \"agent_id\": \"other\", \"trace_id\": \"elsewhere\", \"client_msg_id\": \"e\", \"rev\": 1, \"seq\": 903, \"user_stop_gen\": 0}",
+     "gone": null,
+     "legacy": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"legacy\", \"client_msg_id\": \"l\"}",
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":3,\"seq\":9}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 0
+   },
+   "page": {
+    "cursor": 900,
+    "expired": false,
+    "more": true,
+    "skipped": 1,
+    "stop_generation": 3,
+    "until": null,
+    "updates": []
+   },
+   "since": 899,
+   "stop_generation": 3,
+   "until": null,
+   "what": "pointers that do not hold, cap one at the end"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": null,
+    "expired": true,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": null,
+    "until": null,
+    "updates": []
+   },
+   "since": 1,
+   "stop_generation": 3,
+   "until": null,
+   "what": "behind the watermark"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 906,
+    "expired": false,
+    "more": false,
+    "skipped": 5,
+    "stop_generation": 3,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m5",
+        "trace_id": "t6"
+       },
+       "rev": 2,
+       "seq": 15,
+       "state": "stopped"
+      },
+      "message_id": "u-m5"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "u-mu",
+        "trace_id": "tu"
+       },
+       "rev": 2,
+       "seq": 16,
+       "state": "stopped"
+      },
+      "message_id": "u-mu"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m7",
+        "trace_id": "t7"
+       },
+       "rev": 2,
+       "seq": 18,
+       "state": "stopped"
+      },
+      "message_id": "u-m7"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m8",
+        "trace_id": "t8"
+       },
+       "rev": 1,
+       "seq": 906,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m8"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": 3,
+   "until": null,
+   "what": "at zero, behind the watermark"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 906,
+    "expired": false,
+    "more": false,
+    "skipped": 1,
+    "stop_generation": 3,
+    "until": null,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m8",
+        "trace_id": "t8"
+       },
+       "rev": 1,
+       "seq": 906,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m8"
+     }
+    ]
+   },
+   "since": 903,
+   "stop_generation": 3,
+   "until": null,
+   "what": "at the watermark"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 15,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m3",
+        "trace_id": "t3"
+       },
+       "rev": 2,
+       "seq": 7,
+       "state": "stopped"
+      },
+      "message_id": "u-m3"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m5",
+        "trace_id": "t6"
+       },
+       "rev": 2,
+       "seq": 15,
+       "state": "stopped"
+      },
+      "message_id": "u-m5"
+     }
+    ]
+   },
+   "since": 0,
+   "stop_generation": null,
+   "until": null,
+   "what": "bootstrap after the prune: first page"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 18,
+    "expired": false,
+    "more": true,
+    "skipped": 0,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "u-mu",
+        "trace_id": "tu"
+       },
+       "rev": 2,
+       "seq": 16,
+       "state": "stopped"
+      },
+      "message_id": "u-mu"
+     },
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m7",
+        "trace_id": "t7"
+       },
+       "rev": 2,
+       "seq": 18,
+       "state": "stopped"
+      },
+      "message_id": "u-m7"
+     }
+    ]
+   },
+   "since": 15,
+   "stop_generation": 3,
+   "until": 906,
+   "what": "bootstrap after the prune: page 2"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 901,
+    "expired": false,
+    "more": true,
+    "skipped": 2,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": []
+   },
+   "since": 18,
+   "stop_generation": 3,
+   "until": 906,
+   "what": "bootstrap after the prune: page 3"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 903,
+    "expired": false,
+    "more": true,
+    "skipped": 2,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": []
+   },
+   "since": 901,
+   "stop_generation": 3,
+   "until": 906,
+   "what": "bootstrap after the prune: page 4"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 906,
+    "expired": false,
+    "more": true,
+    "skipped": 1,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": [
+     {
+      "delivery": {
+       "for": {
+        "client_msg_id": "m8",
+        "trace_id": "t8"
+       },
+       "rev": 1,
+       "seq": 906,
+       "state": "pending_launch"
+      },
+      "message_id": "u-m8"
+     }
+    ]
+   },
+   "since": 903,
+   "stop_generation": 3,
+   "until": 906,
+   "what": "bootstrap after the prune: page 5"
+  },
+  {
+   "agent_id": "ag",
+   "bootstrap": true,
+   "cap": 2,
+   "given": {
+    "current": 906,
+    "generation": 3,
+    "pointers": [
+     [
+      7,
+      "t3"
+     ],
+     [
+      15,
+      "t6"
+     ],
+     [
+      16,
+      "tu"
+     ],
+     [
+      18,
+      "t7"
+     ],
+     [
+      900,
+      "t1"
+     ],
+     [
+      901,
+      "gone"
+     ],
+     [
+      902,
+      "broken"
+     ],
+     [
+      903,
+      "elsewhere"
+     ],
+     [
+      904,
+      "legacy"
+     ],
+     [
+      906,
+      "t8"
+     ]
+    ],
+    "receipts": {
+     "broken": null,
+     "elsewhere": null,
+     "gone": null,
+     "legacy": null,
+     "t1": null,
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}",
+     "t7": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t7\",\"client_msg_id\":\"m7\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700015000,\"user_stop_gen\":2,\"rev\":2,\"seq\":18}",
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}",
+     "tu": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":2,\"seq\":16}"
+    },
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 906,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 3,
+    "until": 906,
+    "updates": []
+   },
+   "since": 906,
+   "stop_generation": 3,
+   "until": 906,
+   "what": "bootstrap after the prune: page 6"
+  },
+  {
+   "agent_id": "other",
+   "bootstrap": false,
+   "cap": 200,
+   "given": {
+    "current": 906,
+    "generation": 0,
+    "pointers": [],
+    "receipts": {},
+    "watermark": 903
+   },
+   "page": {
+    "cursor": 906,
+    "expired": false,
+    "more": false,
+    "skipped": 0,
+    "stop_generation": 0,
+    "until": null,
+    "updates": []
+   },
+   "since": 0,
+   "stop_generation": 0,
+   "until": null,
+   "what": "the other agent, from its start"
+  }
+ ],
+ "rows": [
+  {
+   "agent_id": "ag",
+   "epoch": 0,
+   "given": {
+    "generation": 0,
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":1,\"seq\":3}",
+     "t3": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":1,\"seq\":4}",
+     "t9": null
+    }
+   },
+   "rows": [
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m1",
+       "trace_id": "t1"
+      },
+      "rev": 2,
+      "seq": 5,
+      "state": "handed_over"
+     },
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "id": "r-1",
+     "role": "assistant",
+     "trace_id": "t1"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m2",
+       "trace_id": "t2"
+      },
+      "rev": 1,
+      "seq": 3,
+      "state": "pending_launch"
+     },
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m3",
+       "trace_id": "t3"
+      },
+      "rev": 1,
+      "seq": 4,
+      "state": "pending_launch"
+     },
+     "id": "u-m3",
+     "origin": "agent",
+     "role": "user",
+     "sender_agent_id": "helper",
+     "trace_id": "t3"
+    },
+    {
+     "id": "u-m3",
+     "role": "user",
+     "trace_id": "t3"
+    },
+    {
+     "id": "u-m9",
+     "role": "user",
+     "trace_id": "t9"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": ""
+    },
+    {
+     "id": "",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "m2",
+     "role": "user",
+     "trace_id": "t2"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "id": "r-1",
+     "role": "assistant",
+     "trace_id": "t1"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "u-m3",
+     "origin": "agent",
+     "role": "user",
+     "sender_agent_id": "helper",
+     "trace_id": "t3"
+    },
+    {
+     "id": "u-m3",
+     "role": "user",
+     "trace_id": "t3"
+    },
+    {
+     "id": "u-m9",
+     "role": "user",
+     "trace_id": "t9"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": ""
+    },
+    {
+     "id": "",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "m2",
+     "role": "user",
+     "trace_id": "t2"
+    }
+   ],
+   "what": "one handed over, one pending, one of an agent, a reply between"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 1,
+   "given": {
+    "generation": 1,
+    "receipts": {
+     "t1": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t1\",\"client_msg_id\":\"m1\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700001000,\"user_stop_gen\":0,\"rev\":2,\"seq\":5}",
+     "t2": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t2\",\"client_msg_id\":\"m2\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700003000,\"user_stop_gen\":0,\"rev\":2,\"seq\":6}",
+     "t3": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t3\",\"client_msg_id\":\"m3\",\"origin\":\"agent\",\"sender_agent_id\":\"helper\",\"admitted_at\":1794700004000,\"user_stop_gen\":0,\"rev\":2,\"seq\":7}"
+    }
+   },
+   "rows": [
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m1",
+       "trace_id": "t1"
+      },
+      "rev": 2,
+      "seq": 5,
+      "state": "handed_over"
+     },
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m2",
+       "trace_id": "t2"
+      },
+      "rev": 2,
+      "seq": 6,
+      "state": "stopped"
+     },
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m3",
+       "trace_id": "t3"
+      },
+      "rev": 2,
+      "seq": 7,
+      "state": "stopped"
+     },
+     "id": "u-m3",
+     "origin": "agent",
+     "role": "user",
+     "sender_agent_id": "helper",
+     "trace_id": "t3"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "u-m3",
+     "origin": "agent",
+     "role": "user",
+     "sender_agent_id": "helper",
+     "trace_id": "t3"
+    }
+   ],
+   "what": "after the Stop"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 1,
+   "given": {
+    "generation": 1,
+    "receipts": {
+     "t5": "{\"state\":\"relaunched\",\"agent_id\":\"ag\",\"trace_id\":\"t5\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700011000,\"user_stop_gen\":1,\"rev\":2,\"seq\":12}",
+     "t6": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":1,\"seq\":13}"
+    }
+   },
+   "rows": [
+    {
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t5"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m5",
+       "trace_id": "t6"
+      },
+      "rev": 1,
+      "seq": 13,
+      "state": "pending_launch"
+     },
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t6"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t5"
+    },
+    {
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t6"
+    }
+   ],
+   "what": "the retried send, under its old and its new trace"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 1,
+   "given": {
+    "generation": 1,
+    "receipts": {
+     "tu": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"tu\",\"client_msg_id\":\"u-mu\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700013000,\"user_stop_gen\":1,\"rev\":1,\"seq\":14}"
+    }
+   },
+   "rows": [
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "u-mu",
+       "trace_id": "tu"
+      },
+      "rev": 1,
+      "seq": 14,
+      "state": "pending_launch"
+     },
+     "id": "u-mu",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "id": "u-u-mu",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "u-mu",
+       "trace_id": "tu"
+      },
+      "rev": 1,
+      "seq": 14,
+      "state": "pending_launch"
+     },
+     "id": "u-mu",
+     "origin": "",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "u-mu",
+       "trace_id": "tu"
+      },
+      "rev": 1,
+      "seq": 14,
+      "state": "pending_launch"
+     },
+     "id": "u-mu",
+     "role": "user",
+     "sender_agent_id": "",
+     "trace_id": "tu"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-mu",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "id": "u-u-mu",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "id": "u-mu",
+     "origin": "",
+     "role": "user",
+     "trace_id": "tu"
+    },
+    {
+     "id": "u-mu",
+     "role": "user",
+     "sender_agent_id": "",
+     "trace_id": "tu"
+    }
+   ],
+   "what": "an id with its prefix, an empty origin"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 2,
+   "given": {
+    "generation": 2,
+    "receipts": {
+     "t4": "{\"state\":\"attempted\",\"agent_id\":\"ag\",\"trace_id\":\"t4\",\"client_msg_id\":\"m4\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700007000,\"user_stop_gen\":1,\"rev\":2,\"seq\":10}",
+     "t6": "{\"state\":\"fenced\",\"agent_id\":\"ag\",\"trace_id\":\"t6\",\"client_msg_id\":\"m5\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1794700012000,\"user_stop_gen\":1,\"rev\":2,\"seq\":15}"
+    }
+   },
+   "rows": [
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m5",
+       "trace_id": "t6"
+      },
+      "rev": 2,
+      "seq": 15,
+      "state": "stopped"
+     },
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t6"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m4",
+       "trace_id": "t4"
+      },
+      "rev": 2,
+      "seq": 10,
+      "state": "handed_over"
+     },
+     "id": "u-m4",
+     "role": "user",
+     "trace_id": "t4"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-m5",
+     "role": "user",
+     "trace_id": "t6"
+    },
+    {
+     "id": "u-m4",
+     "role": "user",
+     "trace_id": "t4"
+    }
+   ],
+   "what": "after the second Stop"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 3,
+   "given": {
+    "generation": 3,
+    "receipts": {
+     "broken": "{",
+     "elsewhere": "{\"state\": \"pending\", \"agent_id\": \"other\", \"trace_id\": \"elsewhere\", \"client_msg_id\": \"e\", \"rev\": 1, \"seq\": 903, \"user_stop_gen\": 0}",
+     "legacy": "{\"state\": \"pending\", \"agent_id\": \"ag\", \"trace_id\": \"legacy\", \"client_msg_id\": \"l\"}"
+    }
+   },
+   "rows": [
+    {
+     "id": "u-l",
+     "role": "user",
+     "trace_id": "legacy"
+    },
+    {
+     "id": "u-e",
+     "role": "user",
+     "trace_id": "elsewhere"
+    },
+    {
+     "id": "u-x",
+     "role": "user",
+     "trace_id": "broken"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-l",
+     "role": "user",
+     "trace_id": "legacy"
+    },
+    {
+     "id": "u-e",
+     "role": "user",
+     "trace_id": "elsewhere"
+    },
+    {
+     "id": "u-x",
+     "role": "user",
+     "trace_id": "broken"
+    }
+   ],
+   "what": "a legacy receipt"
+  },
+  {
+   "agent_id": "ag",
+   "epoch": 3,
+   "given": {
+    "generation": 3,
+    "receipts": {
+     "t1": null,
+     "t2": null,
+     "t8": "{\"state\":\"pending\",\"agent_id\":\"ag\",\"trace_id\":\"t8\",\"client_msg_id\":\"m8\",\"origin\":\"user\",\"sender_agent_id\":\"\",\"admitted_at\":1795391217000,\"user_stop_gen\":3,\"rev\":1,\"seq\":906}"
+    }
+   },
+   "rows": [
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "delivery": {
+      "for": {
+       "client_msg_id": "m8",
+       "trace_id": "t8"
+      },
+      "rev": 1,
+      "seq": 906,
+      "state": "pending_launch"
+     },
+     "id": "u-m8",
+     "role": "user",
+     "trace_id": "t8"
+    }
+   ],
+   "turns": [
+    {
+     "id": "u-m1",
+     "role": "user",
+     "trace_id": "t1"
+    },
+    {
+     "id": "u-m2",
+     "role": "user",
+     "trace_id": "t2"
+    },
+    {
+     "id": "u-m8",
+     "role": "user",
+     "trace_id": "t8"
+    }
+   ],
+   "what": "after the prune"
+  }
+ ]
+}
