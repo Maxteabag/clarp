@@ -16,3 +16,4 @@ pub mod kv;
 pub mod log;
 pub mod testkit;
 pub mod usage;
+pub mod diagnostics;

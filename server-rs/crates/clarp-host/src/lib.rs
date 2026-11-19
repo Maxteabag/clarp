@@ -29,6 +29,7 @@ pub mod connector;
 pub mod contacts;
 pub mod controls;
 pub mod direct;
+pub mod diagnostics;
 pub mod edge;
 pub mod explain;
 pub mod faces;

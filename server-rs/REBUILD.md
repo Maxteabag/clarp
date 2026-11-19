@@ -229,6 +229,15 @@ of them the user's). Not there of goals: the ledger and subgoals (`ledger`, `sub
 answer that they are not here yet), and what an account's usage limit does to a wake (accounts come later).
 The Goal keeper and its receipts are there: below.
 
+**Developer diagnostics** (19 Nov 2026). A computer's capture preferences live in one fleet
+setting. A limited device may read settings and health; changing the setting requires full access.
+Capture goes to one private directory and uses a bounded nonblocking queue. Its writer drops new
+records at capacity and expires hour files even with capture off. Its resource sampler runs only
+when selected. The public retention numbers are upper bounds; this Host keeps no hourly rollups.
+The policy and its reference recordings are in `clarp-kernel/src/diagnostics.rs` and
+`tools/diagnostics-vectors.py`. The file implementation of the diagnostic store port owns expiry
+and the 256 MiB bound. Its two GET routes never open the capture store.
+
 **Background Bash tasks in Claude's transcript** (19 Nov 2026). The agent reads a background Bash
 launch, its tool result and the provider's eventual task notice from its bound parent transcript.
 The agent's job book gives that task a stable id and shows it in the ordinary job list and
