@@ -2584,7 +2584,7 @@ async fn resume(
 /// gave it, which is what the queue names it by.
 async fn waiting_named(app: &App, id: &str) -> Result<Option<(Arc<Member>, TurnId)>, ApiError> {
     let directory = app.fleet.directory();
-    let mut named = None;
+    let mut named: Option<(Arc<Member>, TurnId)> = None;
     for member in &directory.members {
         if member.agent.view().status.waiting.is_empty() {
             continue;
