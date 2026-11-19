@@ -72,6 +72,13 @@ def _fold(text: object) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).strip()
 
 
+def _resolved(name: str) -> str:
+    """The session a decision's target stands for: its one agent, by id, session or voice name;
+    "" for none or more than one."""
+    found = _agents_named(name.strip()) if name and name.strip() else []
+    return str(found[0]["session"]) if len(found) == 1 else ""
+
+
 def _agents_named(name: str) -> list[dict[str, Any]]:
     """The agents a spoken name stands for: the exact id or session first, else every agent
     whose session or persona name it is, case and accents aside (archived ones included, so
@@ -525,7 +532,7 @@ class OrchestratorService:
             fallback_request=fallback_request,
             janitor_run_id=run_id,
         )
-        recipient = identity.lookup(result.session)
+        recipient = identity.lookup(result.session if result.target is None else result.target)
         failed = decision.kind == DECISION_ERROR or result.action == FINAL_ERROR
         receipt = {"summary": f"Message routing finished: {result.action}",
                    "status": result.action,
@@ -655,7 +662,9 @@ class OrchestratorService:
         action = "pending" if pending else receipt.get("status", FINAL_CLARIFY)
         return OrchestratorOutcome(
             handled=True, ok=action != FINAL_ERROR,
-            session=recipient.get("session", requested_session),
+            # The receipt names the resolved target (R83); only what reached it answers with it.
+            session=(recipient.get("session", requested_session)
+                     if action in {FINAL_ROUTE, FINAL_CONTROL, FINAL_STATUS} else requested_session),
             dispatch=recipient.get("backend", "") if action == FINAL_ROUTE else "",
             trace_id=trace_id, action=action,
             error="Message routing failed" if action == FINAL_ERROR else "",
@@ -882,6 +891,12 @@ class OrchestratorService:
             error = str(e)
             final_action = FINAL_ERROR
 
+        if final_action == FINAL_CLARIFY:
+            # A clarify delivered nothing. Its row and event name the session the decision's target
+            # resolves to, or none; the decision keeps that as its suggestion; the answer names the
+            # session spoken to (issue 360, R83, ruled for every clarify).
+            target = _resolved(decision.target_session)
+            decision = OrchestratorDecision(**{**asdict(decision), "target_session": target})
         decision_id = self._log_decision(
             decision=decision,
             packet=packet,
@@ -913,9 +928,13 @@ class OrchestratorService:
         return OrchestratorOutcome(
             handled=True,
             ok=final_action != FINAL_ERROR,
-            # A command that did nothing names the agent spoken to: a client that acts on this
+            # Nothing was delivered, or a command did nothing (refused, a question, or an error after
+            # it was accepted): the answer names the agent spoken to, so a client that acts on this
             # session (a cancelled send's stop) never acts on another agent (issue 360, R83).
-            session=requested_session if command and final_action == FINAL_CLARIFY else target,
+            session=(requested_session
+                     if final_action == FINAL_CLARIFY or (command and final_action != FINAL_CONTROL)
+                     else target),
+            target=target,
             trace_id=trace_id,
             action=final_action,
             decision_id=decision_id,
@@ -936,9 +955,10 @@ class OrchestratorService:
         resolved to none."""
         action = (decision.control_action or "").strip().lower()
         if not self._route_confidently(decision, settings):
-            return UNSURE_COMMAND, ""
+            return UNSURE_COMMAND, self._named_session(decision)
         if decision.kind == DECISION_AGENT_CONTROL and action == "fork":
-            return FORK_IN_APP, ""      # no fork source is trusted from the router (RTO-03)
+            # No fork source is trusted from the router (RTO-03); a real agent it names is recorded.
+            return FORK_IN_APP, self._named_session(decision)
         if decision.kind == DECISION_AGENT_CONTROL and action == "create":
             # A new agent never takes a name the voice already gives an agent (archived ones
             # count): the lifecycle compares exact names only (issue 360, R75).
@@ -972,6 +992,17 @@ class OrchestratorService:
         if agent["session"] not in sessions:      # the packet holds no archived agent either
             return CANNOT_COMMAND, agent["session"]
         return "", agent["session"]
+
+    @staticmethod
+    def _named_session(decision: OrchestratorDecision) -> str:
+        """The session every name the command gives resolves to, one agent; "" for none, more
+        than one, names that disagree, or no name at all (R83: "" only when nothing resolved)."""
+        names = [decision.target_session.strip()]
+        if decision.kind == DECISION_AGENT_CONTROL:
+            given = (decision.control_payload or {}).get("name")
+            names.append(given.strip() if isinstance(given, str) else "")
+        sessions = {_resolved(name) for name in names if name}
+        return sessions.pop() if len(sessions) == 1 else ""
 
     def _route_confidently(
         self,
