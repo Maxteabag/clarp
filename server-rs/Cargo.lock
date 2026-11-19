@@ -200,7 +200,6 @@ dependencies = [
  "futures-util",
  "h2",
  "http",
- "http-body-util",
  "nix",
  "pty-process",
  "ring",
