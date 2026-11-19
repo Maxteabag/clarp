@@ -87,6 +87,7 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
             session: scenario["session"].as_str().unwrap(),
         };
         let mut book = GoalBook::new();
+        let mut ledger_rows: Vec<Value> = Vec::new();
         // The ids are counted as the generator counts them; making the agent took the first.
         let mut made = 1u64;
         let mut ids = move |bytes: usize| {
@@ -236,6 +237,26 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                                 ids(12);
                             }
                             // As the Host does it: what the log keeps is what the book takes.
+                            let author = if by_user {
+                                clarp_kernel::goals::ledger::Author::User
+                            } else {
+                                clarp_kernel::goals::ledger::Author::Owner(None)
+                            };
+                            for (_, mut event) in clarp_kernel::goals::ledger::changes(
+                                book.plan(&change.plan.plan_id),
+                                &change.plan,
+                                author,
+                            ) {
+                                event.event_id = ledger_rows.len() as i64 + 1;
+                                let mut row = json!(event);
+                                row["actor_session"] =
+                                    json!(if event.actor_agent_id == owner.agent_id {
+                                        owner.session
+                                    } else {
+                                        ""
+                                    });
+                                ledger_rows.push(row);
+                            }
                             let record = book.record(&change, at);
                             let kept: clarp_kernel::goals::GoalRecord =
                                 serde_json::from_slice(&serde_json::to_vec(&record).unwrap())
@@ -251,9 +272,24 @@ fn the_goal_tool_answers_as_the_python_hosts_does() {
                     }
                 }
             };
-            // The ledger, and what is kept in it, this Host does not have yet. A scenario is
-            // followed until it changes something there.
-            if matches!(verb, "ledger" | "subgoal" | "receipts" | "bookkeeping") {
+            if verb == "ledger" {
+                assert_eq!(said.exit, 0, "{context}");
+                let expected = &step["stdout"];
+                assert_eq!(
+                    expected["events"],
+                    json!(
+                        ledger_rows
+                            .iter()
+                            .filter(|e| e["plan_id"] == argv[1])
+                            .collect::<Vec<_>>()
+                    ),
+                    "{context}"
+                );
+                compared += 1;
+                continue;
+            }
+            // The delegate's bookkeeping and owner subgoals are later pieces.
+            if matches!(verb, "subgoal" | "receipts" | "bookkeeping") {
                 assert_eq!(said.exit, NOT_HERE, "{context}");
                 if verb == "subgoal" {
                     break;

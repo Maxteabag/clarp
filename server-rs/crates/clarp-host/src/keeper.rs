@@ -358,23 +358,15 @@ fn light(goal: &Goal) -> Value {
     Value::Object(read)
 }
 
-/// What was done to a goal: its history, each entry numbered from the goal's first. The
-/// keeper's own writes are under its role.
-fn events_of(goal: &Goal) -> Vec<rules::Event> {
-    let before = i64::try_from(goal.history_offset).unwrap_or(0);
-    let numbered = goal.history.iter().zip(1i64..);
-    numbered
-        .map(|(entry, number)| {
-            let kind = entry["kind"].as_str().unwrap_or_default().to_string();
-            let own = kind == "updater";
-            rules::Event {
-                event_id: before + number,
-                at: entry["at"].as_i64().unwrap_or(0),
-                kind,
-                delegation_id: if own { ROLE.to_string() } else { String::new() },
-            }
-        })
-        .collect()
+/// The keeper's citation is an event of this plan in the owner's ledger,
+/// including when a different plan used the intervening IDs.
+fn keeper_event(event: clarp_kernel::goals::ledger::Event) -> rules::Event {
+    rules::Event {
+        event_id: event.event_id,
+        at: event.at,
+        kind: event.kind,
+        delegation_id: event.delegation_id,
+    }
 }
 
 /// When an agent last wrote anything: its newest row, or the end of its last turn.
@@ -448,13 +440,25 @@ async fn gather(
     let plan = book.plan(plan_id)?;
     let kept = plan.goal.as_ref()?;
     let goal = light(kept);
-    let events = events_of(kept);
     let full = full && !python::truthy(&goal["updater"]);
-    let (since_ms, since_event) = rules::cursor(&goal, plan.created_at, now, full);
-    // A goal that came from another Host counts what was done to it as that Host did: what
-    // it has here is numbered from its own first, and nothing of it is newer than all of it.
-    let done = events.last().map_or(0, |last| last.event_id);
-    let since = (since_ms, since_event.min(done));
+    let (since_ms, requested) = rules::cursor(&goal, plan.created_at, now, full);
+    let (start, mut page, mut more) = owner
+        .agent
+        .keeper_events(plan_id.into(), requested)
+        .await
+        .ok()?;
+    let since = (since_ms, start);
+    let mut events = Vec::new();
+    while more {
+        let after = page.last()?.event_id;
+        events.extend(page.into_iter().map(keeper_event));
+        (page, more) = owner
+            .agent
+            .goal_events(plan_id.into(), after, 500)
+            .await
+            .ok()?;
+    }
+    events.extend(page.into_iter().map(keeper_event));
 
     let owner_id = owner.record.agent_id.as_str();
     let mut helping: Vec<&Arc<Member>> = directory
@@ -470,7 +474,7 @@ async fn gather(
     helping.truncate(rules::HELPERS_MOST);
 
     // What each of them said since, read on from where it was read to.
-    let mut seen = app.keeper.take(plan_id, since_ms);
+    let mut seen = app.keeper.take(plan_id, since.0);
     let mut rows = Vec::new();
     let mut everyone = vec![owner];
     everyone.extend(helping.iter().copied());
@@ -1249,23 +1253,12 @@ mod tests {
     }
 
     #[test]
-    fn what_was_done_to_a_goal_is_numbered_from_its_first() {
-        let goal = Goal {
-            history: vec![
-                json!({ "at": 10, "kind": "pause", "revision": 3, "detail": {} }),
-                json!({ "at": 20, "kind": "updater", "revision": 3, "detail": {} }),
-            ],
-            history_offset: 40,
-            ..Goal::default()
-        };
-        let events = events_of(&goal);
-        let read: Vec<(i64, i64, &str, &str)> = events
-            .iter()
-            .map(|event| {
-                let (kind, by) = (event.kind.as_str(), event.delegation_id.as_str());
-                (event.event_id, event.at, kind, by)
-            })
-            .collect();
-        assert_eq!(read, [(41, 10, "pause", ""), (42, 20, "updater", ROLE)]);
+    fn the_keeper_uses_the_recorded_owner_local_event_id() {
+        let record=serde_json::from_value(json!({"event_id":75,"plan_id":"a:p","at":20,"kind":"updater","subject":"goal","actor_kind":"system","actor_agent_id":"k","delegation_id":"goal-keeper","basis":"","source_refs":[],"reason":"","prior":null,"new":{},"plan_revision":7})).unwrap();
+        let e = keeper_event(record);
+        assert_eq!(
+            (e.event_id, e.at, e.kind.as_str(), e.delegation_id.as_str()),
+            (75, 20, "updater", ROLE)
+        );
     }
 }

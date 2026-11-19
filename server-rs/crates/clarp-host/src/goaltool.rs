@@ -111,6 +111,10 @@ pub enum Ask {
         action: String,
         data: Value,
     },
+    Ledger {
+        plan_id: String,
+        after: i64,
+    },
     /// A document of a goal.
     Read {
         plan_id: String,
@@ -156,7 +160,8 @@ impl Ask {
             Self::Create { session, .. } | Self::List { session } | Self::Show { session } => {
                 About::Session(session)
             }
-            Self::Get { plan_id }
+            Self::Ledger { plan_id, .. }
+            | Self::Get { plan_id }
             | Self::Step { plan_id, .. }
             | Self::Finish { plan_id, .. }
             | Self::Act { plan_id, .. }
@@ -202,7 +207,11 @@ pub fn parse(argv: &[String]) -> Result<Ask, ToolAnswer> {
             limit: limit.first().map(|given| integer(given)).transpose()?,
         },
         // The ledger and what is kept in it.
-        ("bookkeeping", _) | ("ledger", [_] | [_, _]) | ("subgoal", [_, _, _]) => Ask::NotHere {
+        ("ledger", [plan_id, rest @ ..]) if rest.len() <= 1 => Ask::Ledger {
+            plan_id: text(plan_id),
+            after: rest.first().map(|v| integer(v)).transpose()?.unwrap_or(0),
+        },
+        ("bookkeeping", _) | ("subgoal", [_, _, _]) => Ask::NotHere {
             verb: verb.to_string(),
         },
         ("create" | "goal", [session, alias, title, items, goal]) => Ask::Create {
@@ -285,6 +294,14 @@ pub fn answer(
 ) -> (ToolAnswer, Option<Change>) {
     let now = world.now_ms;
     let changed = match ask {
+        Ask::Ledger { plan_id, after } => {
+            return (
+                printed(
+                    &serde_json::json!({"plan_id":plan_id,"events":[],"next_after":after,"has_more":false}),
+                ),
+                None,
+            );
+        }
         Ask::Get { plan_id } => {
             let plan = book.get(plan_id, now).unwrap_or(Value::Null);
             return (printed(&plan), None);
@@ -493,9 +510,14 @@ mod tests {
                 .exit,
             1
         );
-        // The ledger is not here yet, and says so instead of doing something else.
+        // A ledger read of an unknown plan returns an empty page.
         let ask = parse(&args(&["ledger", "p"])).unwrap();
-        assert_eq!(nobody(&ask, 0).exit, NOT_HERE);
+        let page = nobody(&ask, 0);
+        assert_eq!(page.exit, 0);
+        assert_eq!(
+            serde_json::from_str::<Value>(&page.stdout).unwrap(),
+            serde_json::json!({"plan_id":"p","events":[],"has_more":false,"next_after":0})
+        );
         // The keeper's receipts of a goal are asked for by the goal, with how many.
         let ask = parse(&args(&["receipts", "a:ship:01", "5"])).unwrap();
         assert!(matches!(&ask, Ask::Receipts { limit: Some(5), .. }));

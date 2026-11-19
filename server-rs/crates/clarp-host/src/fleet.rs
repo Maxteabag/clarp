@@ -74,6 +74,8 @@ pub struct AgentRecord {
     pub created_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deleted_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ledger_retired: bool,
     /// The user muted it: what it says is marked unread and pages nobody.
     #[serde(default, skip_serializing_if = "is_false")]
     pub muted: bool,
@@ -507,6 +509,16 @@ enum Ask {
         record: AgentRecord,
         answer: Answer<Result<Arc<Member>, String>>,
     },
+    StoredAgent {
+        id: String,
+        answer: Answer<Option<AgentRecord>>,
+    },
+    PastLedger {
+        plan: String,
+        after: i64,
+        limit: usize,
+        answer: Answer<(Vec<clarp_kernel::goals::ledger::Event>, bool)>,
+    },
     Remove {
         session: String,
         answer: Answer<bool>,
@@ -777,6 +789,24 @@ impl FleetHandle {
         record: AgentRecord,
     ) -> Result<Result<Arc<Member>, String>, Unavailable> {
         self.ask(|answer| Ask::Adopt { record, answer }).await
+    }
+
+    pub async fn stored_agent(&self, id: String) -> Result<Option<AgentRecord>, Unavailable> {
+        self.ask(|answer| Ask::StoredAgent { id, answer }).await
+    }
+    pub async fn past_ledger(
+        &self,
+        plan: String,
+        after: i64,
+        limit: usize,
+    ) -> Result<(Vec<clarp_kernel::goals::ledger::Event>, bool), Unavailable> {
+        self.ask(|answer| Ask::PastLedger {
+            plan,
+            after,
+            limit,
+            answer,
+        })
+        .await
     }
 
     /// Removes an agent from the fleet. Its history stays on disk. Returns whether it was there.
@@ -1111,9 +1141,20 @@ fn setup(works: &Works, record: &AgentRecord) -> Result<Setup, String> {
     })
 }
 
+fn retire_goals(works: &Works, record: &AgentRecord, at: i64) -> Result<(), String> {
+    let mut log = works
+        .engine
+        .open(
+            &works.config.data_dir.join("agents").join(&record.agent_id),
+            works.codecs.clone(),
+        )
+        .map_err(|e| e.to_string())?;
+    clarp_actor::retire_goal_ledger(log.as_mut(), at).map_err(|e| e.to_string())
+}
+
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
-pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
     // The owner's settings have a dot in their key (`transcription.language`); what the
     // Host keeps for itself in the same table (its id, the focus) has none. They are read
     // first: what an agent's tool is told is worked out from them.
@@ -1126,10 +1167,18 @@ pub fn start(works: Works, store: Box<dyn KeyValue>) -> Result<FleetHandle, Stri
     works.telling.settings_are(Arc::new(settings.clone()));
     let mut members = Vec::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
-        let record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
+        let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
             format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
         })?;
-        if record.deleted_at_ms.is_some() {
+        if let Some(at) = record.deleted_at_ms {
+            if !record.ledger_retired {
+                retire_goals(&works, &record, at)?;
+                record.ledger_retired = true;
+                let value = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
+                store
+                    .put(AGENTS, &agent_id, &value)
+                    .map_err(|e| e.to_string())?;
+            }
             continue;
         }
         match setup(&works, &record) {
@@ -1307,6 +1356,17 @@ impl Fleet {
                 }
                 Ask::Adopt { record, answer } => {
                     let _ = answer.send(Ok(self.adopt(record)));
+                }
+                Ask::StoredAgent { id, answer } => {
+                    let _ = answer.send(self.stored_agent(&id));
+                }
+                Ask::PastLedger {
+                    plan,
+                    after,
+                    limit,
+                    answer,
+                } => {
+                    let _ = answer.send(self.past_ledger(&plan, after, limit));
                 }
                 Ask::Remove { session, answer } => {
                     let _ = answer.send(self.remove(&session));
@@ -2433,6 +2493,45 @@ impl Fleet {
             .map_err(|error| error.to_string())
     }
 
+    fn stored_agent(&self, id: &str) -> Result<Option<AgentRecord>, Unavailable> {
+        self.store
+            .get(AGENTS, id)
+            .map_err(|e| Unavailable(e.to_string()))?
+            .map(|b| serde_json::from_slice(&b).map_err(|e| Unavailable(e.to_string())))
+            .transpose()
+    }
+    fn past_ledger(
+        &self,
+        plan: &str,
+        after: i64,
+        limit: usize,
+    ) -> Result<(Vec<clarp_kernel::goals::ledger::Event>, bool), Unavailable> {
+        let Some(record) = self
+            .stored_agent(crate::goaltool::owner_of(plan))?
+            .filter(|r| r.deleted_at_ms.is_some())
+        else {
+            return Ok((vec![], false));
+        };
+        if !record.ledger_retired {
+            return Err(Unavailable("goal ledger retirement is incomplete".into()));
+        }
+        let log = self
+            .works
+            .engine
+            .open(
+                &self
+                    .works
+                    .config
+                    .data_dir
+                    .join("agents")
+                    .join(record.agent_id),
+                self.works.codecs.clone(),
+            )
+            .map_err(|e| Unavailable(e.to_string()))?;
+        clarp_actor::read_goal_events(log.as_ref(), plan, after, limit)
+            .map_err(|e| Unavailable(e.to_string()))
+    }
+
     fn remove(&mut self, session: &str) -> Result<bool, Unavailable> {
         let of_the_roster =
             |member: &Arc<Member>| member.record.session == session && !member.record.is_janitor;
@@ -2444,6 +2543,11 @@ impl Fleet {
         self.put(&record).map_err(Unavailable)?;
         let member = self.members.remove(at);
         member.agent.close();
+        let retired = retire_goals(
+            &self.works,
+            &record,
+            record.deleted_at_ms.unwrap_or_default(),
+        );
         self.abandon_helpers_of(&record.agent_id)?;
         if self.focus.as_deref() == Some(record.agent_id.as_str()) {
             self.focus = None;
@@ -2458,6 +2562,14 @@ impl Fleet {
         let now = self.now_ms();
         for told in wire::removed(&record, now) {
             self.works.hub.publish(told, now);
+        }
+        if let Err(why) = retired.and_then(|()| {
+            record.ledger_retired = true;
+            self.put(&record)
+        }) {
+            // Removal was already published. The durable tombstone keeps past
+            // pages closed until startup finishes the retirement.
+            self.works.log.unkept("goal ledger retirement", &why);
         }
         Ok(true)
     }
@@ -2619,3 +2731,7 @@ mod opening_reads {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod retirement_tests;

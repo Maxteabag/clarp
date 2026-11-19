@@ -585,7 +585,34 @@ pub fn import(
             );
             documents.push(get(&from, &path, source_token)?["document"].clone());
         }
-        plans.push(json!({ "plan": plan, "documents": documents }));
+        let mut moved = json!({"plan":plan,"documents":documents});
+        if plan["goal"].is_object() {
+            let mut after = 0;
+            let mut events = Vec::new();
+            loop {
+                let path = format!(
+                    "/goal-ledger?plan_id={}&after={after}&limit=500",
+                    ids::in_a_link(plan_id)
+                );
+                let page = get(&from, &path, source_token)?;
+                let rows = page["events"]
+                    .as_array()
+                    .ok_or("invalid goal ledger page")?;
+                events.extend(rows.iter().cloned());
+                if page["has_more"] != true {
+                    break;
+                }
+                let next = page["next_after"]
+                    .as_i64()
+                    .filter(|n| *n > after)
+                    .ok_or("goal ledger cursor did not advance")?;
+                after = next;
+            }
+            if !events.is_empty() || plan["ledger"]["event_count"] == 0 {
+                moved["events"] = Value::Array(events);
+            }
+        }
+        plans.push(moved);
     }
     // What it made and asked: its library, a page of it at a time, and for a report what
     // it was, version by version.
