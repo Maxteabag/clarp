@@ -1,7 +1,7 @@
 """Incorrect provider-evidence rules checked against isolated reference stories."""
 import runner
 
-RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_resumes"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"]}
+RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"]}
 PLANTS=[
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
     ('clarp-kernel/src/provider_tasks.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
@@ -122,6 +122,8 @@ PLANTS=[
     ('clarp-host/src/helper_source.rs', 'reader', 'drop an exact ceiling native line', 'RECORD_LIMIT,|line,end|', 'RECORD_LIMIT-1,|line,end|'),
     ('clarp-host/src/helper_source.rs', 'reader', 'lose the pending action cursor', 'visit.cursor.action_offset=n+take', 'visit.cursor.action_offset=0'),
     ('clarp-host/src/helper_source.rs', 'reader', 'read the whole available file', '(end-start).min(VISIT_BYTES)', 'end-start'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'miss the replacement of a native transcript', 'v.cursor.inode!=stamp.inode', 'false'),
+    ('clarp-host/src/helper_source.rs', 'reader', 'ignore a shortened native file', 'v.cursor.offset>stamp.bytes ||\n            self.provider.saved==v.cursor && self.provider.consumed>stamp.bytes', 'false'),
     ('clarp-host/src/wire.rs', 'host', 'provider progress becomes worker freshness', '_ if job.provider_owned() => "unknown",', '_ if job.provider_owned() => "fresh",'),
     ('clarp-host/src/wire.rs', 'host', 'provider task offers cancel', 'active && !job.provider_owned()', 'active'),
     ('clarp-host/src/janitors.rs', 'host', 'idle bindings never receive a visit', 'agent.visit_provider(&binding.1)', 'let _=agent'),

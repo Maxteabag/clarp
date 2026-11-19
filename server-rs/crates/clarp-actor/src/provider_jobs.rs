@@ -6,6 +6,28 @@ use clarp_kernel::provider_tasks::{self as rules,Attempt,Event,JournalEntry,Obse
 impl Actor {
     pub fn provider_session(&self,native:&str)->Option<&Session>{self.provider_sessions.get(native)}
     pub fn provider_sessions(&self)->impl Iterator<Item=(&String,&Session)>{self.provider_sessions.iter()}
+    /// A runtime bound by an older Host has no provider cursor. Its first
+    /// binding is already dated in the same log. Read it once and keep
+    /// that time with the new cursor so pre-binding launches stay excluded.
+    pub fn first_provider_binding(&self,native:&str)->Result<Option<i64>,ActorError>{
+        use clarp_kernel::agent::AgentEvent;
+        use clarp_kernel::turn::TurnEvent;
+        let mut after=0;
+        loop{
+            let page=self.recorder.log().read_after(after,clarp_ports::log::Kinds::only(kind::AGENT_EVENT),WINDOW)?;
+            let Some(last)=page.last() else{return Ok(None);};
+            after=last.seq;
+            for item in page{
+                let event:AgentEvent=serde_json::from_slice(&item.body).map_err(|e|ActorError::Corrupt(e.to_string()))?;
+                let id=match event{
+                    AgentEvent::Adopted{backend_session:Some(id),..} | AgentEvent::TookUp{backend_session:id,..}
+                    | AgentEvent::Turn{change:TurnEvent::Bound{backend_session:id},..}=>id,
+                    _=>continue,
+                };
+                if id==native{return Ok(Some(item.ts_ms));}
+            }
+        }
+    }
     pub fn provider_attempt(&self)->Option<Attempt>{
         self.live.as_ref().filter(|_|self.recorder.agent().live().is_some_and(Turn::has_process)).map(|live|Attempt{turn:live.turn.0,attempt:live.attempt})
     }
@@ -53,6 +75,7 @@ impl Actor {
         let mut next=previous.clone();
         next.cursor=visit.cursor;
         if next.bound_at==0{next.bound_at=visit.bound_at;}
+        if next.cwd.is_empty(){next.cwd=self.profile.cwd.to_string_lossy().into_owned();}
         next.owner=visit.owner;
         next.final_read=visit.final_read;
 
