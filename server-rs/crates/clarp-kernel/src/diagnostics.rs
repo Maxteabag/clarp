@@ -104,51 +104,36 @@ pub fn masked(v: &Value) -> Value {
     ))
 }
 pub fn safe_detail(v: &Value) -> Value {
-    // Arbitrary keys and string leaves can both be dialogue. Preserve only
-    // a small vocabulary of measurement keys and numeric/boolean values.
     match v {
-        Value::Object(fields) => {
-            let mut out = serde_json::Map::new();
-            for (key, value) in fields {
-                let k = key.trim().to_ascii_lowercase();
-                let private = matches!(
-                    k.as_str(),
-                    "text"
-                        | "prompt"
-                        | "transcript"
-                        | "content"
-                        | "body"
-                        | "authorization"
-                        | "auth_token"
-                        | "token"
-                        | "api_key"
-                        | "password"
-                );
-                let name = if private
-                    || matches!(
-                        k.as_str(),
-                        "count" | "size" | "bytes" | "duration_ms" | "status" | "detail" | "id"
-                    ) {
-                    k
-                } else {
-                    format!("field_{:x}", Sha256::digest(key.as_bytes()))
-                };
-                out.insert(
-                    name,
-                    if private {
-                        masked(value)
-                    } else {
-                        safe_detail(value)
-                    },
-                );
-            }
-            Value::Object(out)
-        }
-        Value::Array(items) => Value::Array(items.iter().map(safe_detail).collect()),
-        Value::String(_) => masked(v),
-        _ => v.clone(),
+        Value::Object(fields) => Value::Object(fields.iter().map(|(key,value)|{
+            let private=matches!(python::strip(key).to_lowercase().as_str(),"text"|"prompt"|"transcript"|"content"|"body"|"authorization"|"auth_token"|"token"|"api_key"|"password");
+            (key.clone(),if private { masked(value) } else { safe_detail(value) })
+        }).collect()),
+        Value::Array(items)=>Value::Array(items.iter().map(safe_detail).collect()),
+        _=>v.clone(),
     }
 }
+
+pub fn client_name(item:&Value)->&str{
+    python::first(item["event"].as_str().filter(|s|!s.is_empty()).unwrap_or("log"),64)
+}
+
+pub fn client_event(item:&Value,name:&str)->Value{
+    let mut event=json!({"kind":"client_upload","name":name});
+    for key in ["session","agent_id","backend_session_id","client_id","trace_id"]{
+        if let Some(id)=item[key].as_str(){event[key]=json!(python::first(id,128));}
+    }
+    let clip=&item["clip_id"];
+    if clip.is_i64() || clip.is_u64(){event["clip_id"]=clip.clone();}
+    if item["duration_ms"].is_number(){event["duration_ms"]=item["duration_ms"].clone();}
+    match &item["detail"] {
+        Value::String(text) if !text.is_empty()=>event["detail"]=json!({"msg":text}),
+        value @ Value::Object(_) => event["detail"]=safe_detail(value),
+        _=>{}
+    }
+    event
+}
+
 pub fn health(
     stt: bool,
     ffmpeg: bool,
