@@ -134,6 +134,21 @@ it covers that exact difference and nothing else.
 | The conversation of an agent that took up a session its tool kept (`conversation_id` and `file` in its conversation, `conversation_id` in its row) | goes by the name of the session. Where another agent had that session, it is that agent's conversation, counted on from where it stood: the Python Host counts every row it has in one sequence | has a name of its own; the session is what its tool goes on in (`backend_session_id`) | This Host counts each agent's rows by themselves. A reader that kept its place in the first agent's conversation would read the second's from a place that means something else there; a conversation under a new name is read from its beginning. A fork's conversation goes by the name of its copy on both Hosts. Registered for `past-sessions` |
 | What a tool that died left on stderr, as the state of the failed turn gives it (`detail.error`) | as the tool wrote it, with the end of its last line | the same words without the line's end | The words are what failed, the line's end is how a terminal was told. `detail.provider_message` and the row under the message carry them without it on both Hosts |
 
+## Awaited
+
+Not meant to be there, and not this Host's to decide: the Python Host moved on main, and the
+port of its change to this Host is owed. Each such difference has its id in
+`../conformance/awaited.txt`, with the reference's PR and the branch (or the owner) that owes the
+port. The conformance run counts them apart (`awaited`), passes where nothing else is
+unexplained, and names them in its verdict; it fails where one of them does not show (the line is
+stale: the port landed, or the reference moved again) and where an id is both awaited and
+intended. The port's commit takes its lines out.
+
+Awaited now: ten differences of the scenario `router`, from PR 443 (the reference's rulings on
+R83 and R84): where a command or a message the router was asked to hand on was refused or held,
+the answer's `session` and the decision's `target_session` are the session the user spoke to
+there and the session the name resolved to here. The port is rs-router's.
+
 ## Differences the conformance corpus does not reach
 
 | What | The Python Host | The Rust Host | Why |

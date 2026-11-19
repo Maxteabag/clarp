@@ -7,7 +7,7 @@
   conform.py plants  --build CHECKOUT --golden DIR
       Plants each change of contract_plants.py in a copy of the Python server and requires
       that it shows up against what was written down.
-  conform.py compare --rust BINARY --golden DIR [--intended FILE]
+  conform.py compare --rust BINARY --golden DIR [--intended FILE] [--awaited FILE]
       Runs the corpus against the Rust Host and reports every difference from
       what was written down.
   conform.py cross   --build CHECKOUT --rust BINARY --out DIR
@@ -1152,6 +1152,38 @@ def load_intended(path) -> set:
             if line.strip() and not line.lstrip().startswith('#')}
 
 
+def read_awaited(text: str) -> dict:
+    """The register of awaited differences (`awaited.txt`), by id: the reference's PR, the
+    branch that owes the port, the scenario and what it is. A line is `<id>  <PR>  <branch>
+    <scenario> / ...`; one that says less is an error, named."""
+    found = {}
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        fields = line.split(None, 3)
+        if len(fields) < 4 or not fields[1].isdigit():
+            raise SystemExit(f'awaited.txt, line {number}: an id, the PR, the branch and what it is: {line!r}')
+        ident, pr, branch, what = fields
+        if ident in found:
+            raise SystemExit(f'awaited.txt, line {number}: {ident} is registered twice')
+        found[ident] = {'pr': int(pr), 'branch': branch, 'scenario': what.split()[0], 'what': what}
+    return found
+
+
+def load_awaited(path) -> dict:
+    if not path or not Path(path).is_file():
+        return {}
+    return read_awaited(Path(path).read_text())
+
+
+def both_registers(intended: set, awaited: dict) -> None:
+    """An id is intended or awaited, never both: a difference meant to stay is no port owed."""
+    both = sorted(intended & set(awaited))
+    if both:
+        raise SystemExit('registered as intended and as awaited, which cannot both be: '
+                         f'{", ".join(both)}: take it out of one of intended.txt and awaited.txt')
+
+
 # How often a scenario is recorded again when both of its recordings carry the mark of the
 # reference's defect R19 (`names_no_row`).
 MORE_TRIES = 3
@@ -1759,18 +1791,22 @@ def told_by_rule(difference: dict, base: dict, head: dict, bases=()) -> str:
     return f'defect {defect}' if defect else PLACE if only_its_place(difference) else ''
 
 
-def rendered(report, intended: set, shaped: dict, title: str, errors=()) -> str:
-    """A report of differences in four kinds: registered by its id, a defect of the reference
-    told by its shape, an event's place in its lane, and unexplained. `shaped`: what a rule says
-    of a difference, by its id (`told_by_rule`)."""
-    explained = lambda d: d['id'] in intended or d['id'] in shaped  # noqa: E731
+def rendered(report, intended: set, shaped: dict, title: str, errors=(), awaited=()) -> str:
+    """A report of differences in five kinds: registered by its id as intended, registered as
+    awaited (the reference moved and this Host's port is owed), a defect of the reference told
+    by its shape, an event's place in its lane, and unexplained. `shaped`: what a rule says of a
+    difference, by its id (`told_by_rule`)."""
+    registered = lambda d: d['id'] in intended or d['id'] in awaited  # noqa: E731
+    explained = lambda d: registered(d) or d['id'] in shaped  # noqa: E731
     unexplained = [d for d in report.items if not explained(d)]
-    ruled = [shaped[d['id']] for d in report.items if d['id'] not in intended and d['id'] in shaped]
+    ruled = [shaped[d['id']] for d in report.items if not registered(d) and d['id'] in shaped]
+    waiting = sum(1 for d in report.items if d['id'] in awaited and d['id'] not in intended)
     placed = ruled.count(PLACE)
     by_shape = len(ruled) - placed
     lines = [f'# Replay difference report: {title}', '',
              f'differences: {len(report.items)}  registered intended: '
-             f'{len(report.items) - len(unexplained) - len(ruled)}  a defect of the reference by its shape: '
+             f'{len(report.items) - len(unexplained) - len(ruled) - waiting}  awaited: {waiting}  '
+             f'a defect of the reference by its shape: '
              f'{by_shape}  only an event\'s place in its lane: {placed}  unexplained: {len(unexplained)}']
     counts: dict = {}
     for d in report.items:
@@ -1780,16 +1816,47 @@ def rendered(report, intended: set, shaped: dict, title: str, errors=()) -> str:
     if report.items:
         lines += ['', 'id            class        scenario / channel / locator / kind: base -> head']
     for d in report.items:
-        kind = 'intended' if d['id'] in intended else shaped[d['id']] if d['id'] in shaped else 'UNEXPLAINED'
+        kind = ('intended' if d['id'] in intended else 'awaited' if d['id'] in awaited
+                else shaped[d['id']] if d['id'] in shaped else 'UNEXPLAINED')
         lines.append(f"{d['id']}  {kind:<11}  {d['scenario']} / {d['channel']} / {d['locator']} / "
                      f"{d['kind']}: {d['base']} -> {d['head']}")
     return '\n'.join(lines) + '\n'
 
 
-def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple:
+def verdict(unexplained: list, errors, awaited: dict, shown: set, chosen) -> tuple:
+    """The last lines of a report and whether the Rust Host conforms. Every awaited difference
+    of a scenario that ran has to show (`shown`: the ids the run showed): one that does not is
+    stale, and fails the run by its id, so a port cannot land without taking its lines out."""
+    ran = {scenario['id'] for scenario in chosen}
+    owed = {ident: line for ident, line in awaited.items() if line['scenario'] in ran}
+    seen = sorted(ident for ident in owed if ident in shown)
+    stale = sorted(ident for ident in owed if ident not in shown)
+    lines = []
+    if stale:
+        lines.append(f'AWAITED AND NOT SEEN: take it out of awaited.txt: {", ".join(stale)}')
+    ok = not errors and not unexplained and not stale
+    if ok and seen:
+        prs = sorted({owed[ident]['pr'] for ident in seen})
+        named = '; '.join(f"PR {pr} ({', '.join(sorted({owed[i]['branch'] for i in seen if owed[i]['pr'] == pr}))}"
+                          f" owes it): {', '.join(i for i in seen if owed[i]['pr'] == pr)}" for pr in prs)
+        lines.append(f'THE RUST HOST CONFORMS BUT FOR {len(seen)} AWAITED DIFFERENCE(S): {named}')
+    elif ok:
+        lines.append('THE RUST HOST CONFORMS')
+    else:
+        said = f'THE RUST HOST DIFFERS: {len(unexplained)} unexplained difference(s), {len(errors)} run error(s)'
+        if stale:
+            said += f', {len(stale)} awaited difference(s) not seen'
+        lines.append(said)
+    return lines, ok
+
+
+def judged(recordings: list, seen: dict, chosen, intended: set, errors, awaited=None) -> tuple:
     """What the Rust Host answered (`seen`), held to the recordings of the reference: the lines
     of the report, and whether it conforms. Nothing is started here: a run that was written
     down can be judged again."""
+    awaited = awaited or {}
+    both_registers(intended, awaited)
+    registered = intended | set(awaited)
     report, held_to, shaped = diff.Report(), [], {}
     for scenario in steady(chosen):
         name = scenario['id']
@@ -1802,7 +1869,7 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple
         counted = [[d for d in items if place(d) in everywhere] for items in against]
         bases = [recording[name]['core'] for recording in recordings]
         head = seen[name]['core']
-        told = [{d['id']: told_by_rule(d, bases[n], head, bases) for d in counted[n] if d['id'] not in intended}
+        told = [{d['id']: told_by_rule(d, bases[n], head, bases) for d in counted[n] if d['id'] not in registered}
                 for n in range(len(recordings))]
         nearest = min(range(len(recordings)), key=lambda n: sum(1 for defect in told[n].values() if not defect))
         report.items.extend(counted[nearest])
@@ -1814,8 +1881,9 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple
             held_to.append(f"{name}: at {len(elsewhere)} place(s) the recordings differ and the Rust "
                            f"Host gives one of their answers ({'; '.join(' / '.join(p) for p in elsewhere[:6])}"
                            f"{' ...' if len(elsewhere) > 6 else ''})")
-    unexplained = [d for d in report.items if d['id'] not in intended and d['id'] not in shaped]
-    lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors)]
+    unexplained = [d for d in report.items if d['id'] not in registered and d['id'] not in shaped]
+    lines = [rendered(report, intended, shaped, 'the Python Host (base) against the Rust Host (head)', errors,
+                      awaited)]
     by_defect: dict = {}
     for said in shaped.values():
         if said != PLACE:
@@ -1827,19 +1895,18 @@ def judged(recordings: list, seen: dict, chosen, intended: set, errors) -> tuple
     if held_to:
         lines += ['', 'held to more than the first recording:', *(f'  {line}' for line in held_to)]
     lines += ['', '# The same differences by shape', *diff.shapes(report, top=200)]
-    ok = not errors and not unexplained
-    lines.append('')
-    lines.append('THE RUST HOST CONFORMS' if ok else
-                 f'THE RUST HOST DIFFERS: {len(unexplained)} unexplained difference(s), {len(errors)} run error(s)')
+    said, ok = verdict(unexplained, errors, awaited, {d['id'] for d in report.items}, chosen)
+    lines += ['', *said]
     return lines, ok
 
 
-def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int) -> tuple:
+def against_rust(binary: Path, recordings: list, chosen, intended: set, run: Run, jobs: int,
+                 awaited=None) -> tuple:
     """The Rust Host against what the Python Host answered. Where the reference was recorded
     answering in more than one way, the answer the Rust Host is nearest to is the one it is
     held to; the report says which recording that was."""
     seen = corpus(rust_host(binary), chosen, run.label('rust'), jobs)
-    lines, ok = judged(recordings, seen, chosen, intended, run_errors(seen, 'rust'))
+    lines, ok = judged(recordings, seen, chosen, intended, run_errors(seen, 'rust'), awaited)
     return lines, ok, seen
 
 
@@ -1866,6 +1933,9 @@ def main(argv=None) -> int:
                         'what a test Host left of a scenario it did not run to its end goes under it '
                         '(unfinished/)')
     parser.add_argument('--intended', default=str(HERE / 'intended.txt'))
+    parser.add_argument('--awaited', default=str(HERE / 'awaited.txt'),
+                        help='the register of awaited differences: the reference moved on main and this '
+                             "Host's port is owed (README.md, \"Awaited\")")
     parser.add_argument('--scenarios', help='a comma-separated subset of the corpus')
     parser.add_argument('--plant', type=int, help='plants: only the planted change of this number, from 0')
     parser.add_argument('--fresh', action='store_true',
@@ -1887,6 +1957,8 @@ def main(argv=None) -> int:
             parser.error(f'{args.mode} needs --{needed}')
     build = args.build.resolve() if args.build else None
     rust = args.rust.resolve() if args.rust else None
+    intended, awaited = load_intended(args.intended), load_awaited(args.awaited)
+    both_registers(intended, awaited)
     if args.mode == 'selftest':
         print('\n'.join(selftest()))
         return 0
@@ -1896,7 +1968,7 @@ def main(argv=None) -> int:
                       if directory == args.golden or directory.is_dir()]
         seen = load_golden(args.out / 'rust', chosen)
         errors = [error for n, recording in enumerate(recordings) for error in run_errors(recording, f'recording {n + 1}')]
-        lines, ok = judged(recordings, seen, chosen, load_intended(args.intended), errors + run_errors(seen, 'rust'))
+        lines, ok = judged(recordings, seen, chosen, intended, errors + run_errors(seen, 'rust'), awaited)
         print('\n'.join(lines))
         return 0 if ok else 1
     run = Run()
@@ -1942,8 +2014,7 @@ def main(argv=None) -> int:
         elif args.mode == 'compare':
             recordings = [load_golden(directory, chosen) for directory in golden_dirs(args.golden)
                           if directory == args.golden or directory.is_dir()]
-            lines, ok, rust_seen = against_rust(rust, recordings, chosen,
-                                                load_intended(args.intended), run, args.jobs)
+            lines, ok, rust_seen = against_rust(rust, recordings, chosen, intended, run, args.jobs, awaited)
             if args.out:
                 write_golden(args.out / 'rust', rust_seen)
                 (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
@@ -1980,7 +2051,7 @@ def main(argv=None) -> int:
             else:
                 proof, proved = prove(build, recordings[0], chosen, plants.CHANGES, run, args.jobs)
             rust_lines, conforms, rust_seen = against_rust(
-                rust, recordings, chosen, load_intended(args.intended), run, args.jobs)
+                rust, recordings, chosen, intended, run, args.jobs, awaited)
             write_golden(args.out / 'rust', rust_seen)
             lines += ['', *proof, '', *rust_lines]
             ok = ok and proved and conforms

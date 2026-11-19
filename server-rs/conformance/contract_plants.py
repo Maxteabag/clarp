@@ -96,9 +96,9 @@ CHANGES = [
         'what': 'a command the router refuses is held, and a yes that follows gives its words to the agent',
         'file': 'server/lib/orchestrator.py',
         'find': ('                    final_action = FINAL_CLARIFY\n'
-                 '                    if not fallback_request:\n'
+                 '                    if aloud:\n'
                  '                        self._speak_as_session(refusal, requested_session)\n'),
-        'replace': ('                    if not fallback_request:\n'
+        'replace': ('                    if aloud:\n'
                     '                        self._speak_as_session(refusal, requested_session)\n'),
         'expect': {'channel': 'http', 'locator': r'\.body\.turns\[\d+\]\.text$', 'kinds': {'changed'}},
     },
