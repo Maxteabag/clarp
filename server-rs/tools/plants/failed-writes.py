@@ -47,13 +47,20 @@ PLANTS = [
     ('clarp-host/src/fleet.rs', 'port', 'a failed keep said by nobody', 'self.unkept(kind, &why.0);', 'let _ = why;'),
     ('clarp-host/src/fleet.rs', 'port', 'a failed keep said by another kind', 'self.unkept(kind, &why.0);', 'self.unkept("record", &why.0);'),
     ('clarp-host/src/fleet.rs', 'port', "the store's words not said", 'self.log.unkept(kind, why);', 'self.log.unkept(kind, "");'),
-    ('clarp-host/src/unkept.rs', 'guard', 'the line without its kind', '"clarp-host: a record of the kind {kind} was not kept: {why}"', '"clarp-host: a record was not kept: {why}"'),
+    ('clarp-host/src/unkept.rs', 'guard', 'the line without its kind', 'let line = format!("clarp-host: a record of the kind {kind} was not kept: {why}");', 'let line = format!("clarp-host: a record was not kept: {why}");'),
     ('clarp-host/src/edge.rs', 'port', "the let-go's failure dropped", 'Err(unavailable) => told(unavailable),', 'Err(_) => failed,'),
     ('clarp-host/src/edge.rs', 'port', 'a let-go that went told as failed', 'Ok(_) => failed,', 'Ok(_) => told(Unavailable("not let go".into())),'),
     ('clarp-host/src/unkept.rs', 'guard', "the Oracle's keep not a write", 'if (method && WRITES.contains(&last)) || called == "keep" {', 'if method && WRITES.contains(&last) {'),
     ('clarp-host/src/unkept.rs', 'guard', 'a function of its own taken for a write', 'if (method && WRITES.contains(&last)) || called == "keep" {', 'if WRITES.contains(&last) || called == "keep" {'),
     ('clarp-host/src/unkept.rs', 'guard', 'a delete not a write', '        "delete",\n', '        "deleted",\n'),
     ('clarp-host/src/unkept.rs', 'guard', 'the guard reads the first line only', '.filter(|sign| !sign.is_whitespace())', ".take_while(|sign| *sign != '\\n')"),
+    ('clarp-host/src/unkept.rs', 'guard', 'the count without the one that is said', 'let times = failure.since + 1;', 'let times = failure.since;'),
+    ('clarp-host/src/unkept.rs', 'guard', 'held back half a minute', 'pub const AGAIN_AFTER_MS: i64 = 60_000;', 'pub const AGAIN_AFTER_MS: i64 = 30_000;'),
+    ('clarp-host/src/unkept.rs', 'guard', 'held back through the minute itself', 'Some(failure) if now - failure.said_at < AGAIN_AFTER_MS => {', 'Some(failure) if now - failure.said_at <= AGAIN_AFTER_MS => {'),
+    ('clarp-host/src/unkept.rs', 'guard', 'the first held back', 'held.insert((kind.to_string(), why.to_string()), first);\n                    Some(line)', 'held.insert((kind.to_string(), why.to_string()), first);\n                    None'),
+    ('clarp-host/src/unkept.rs', 'guard', 'a count on a line nothing was held back for', 'if times > 1 {', 'if times > 0 {'),
+    ('clarp-host/src/unkept.rs', 'guard', 'the count not begun again', 'failure.since = 0;', 'failure.since += 0;'),
+    ('clarp-host/src/unkept.rs', 'guard', 'a failure never forgotten', 'held.retain(|_, failure| now - failure.said_at < FORGOTTEN_AFTER_MS);', 'held.retain(|_, _| true);'),
 ]
 
 if __name__ == "__main__":

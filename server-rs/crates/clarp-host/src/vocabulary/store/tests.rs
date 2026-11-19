@@ -120,7 +120,7 @@ impl Place {
             telling: Telling::new(OwnerFile::new(Some(dir.join("absent.toml")))),
             tally: crate::usage::tally().0,
             pools: Vec::new(),
-            log: crate::unkept::Log::stderr(),
+            log: crate::unkept::Log::stderr(Arc::new(SystemClock)),
         };
         let store = Counted {
             inner: self.engine.open(Path::new("vocab-test")).unwrap(),
