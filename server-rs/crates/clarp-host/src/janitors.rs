@@ -274,6 +274,27 @@ impl Desk {
         Ok(held)
     }
 
+    /// Hold the same ownership fence as a configure/pause while the checker publishes.
+    pub(crate) async fn label_document(
+        &self,
+        app: &App,
+        run: &str,
+        member: &crate::fleet::Member,
+        doc: &Value,
+    ) -> Result<bool, Unavailable> {
+        let held = self.held(app).await?;
+        if !held
+            .as_ref()
+            .is_some_and(|b| b.is_current(run, &Around::new(app), app.clock.now_ms()))
+        {
+            return Ok(false);
+        }
+        crate::library::label_document(member, doc)
+            .await
+            .map_err(|_| Unavailable("label report could not be saved".into()))?;
+        Ok(true)
+    }
+
     /// One reading of the book. Nothing is kept, and nothing of it is copied.
     pub(crate) async fn read<T>(
         &self,
@@ -592,6 +613,7 @@ async fn look(app: &App) -> Result<(), Unavailable> {
     crate::audio::keep(app).await;
     // And the Quota keeper looks where its look is due, beside the runner.
     crate::quota_keeper::look(app);
+    crate::label_checker::look(app);
     Ok(())
 }
 
@@ -713,15 +735,20 @@ async fn list(State(app): State<App>) -> Response {
         shown.map(as_sent).collect::<Vec<Value>>()
     });
     match listed.await {
-        Ok(janitors) => Json(json!({
-            "janitors": janitors,
-            "templates": rules::templates(),
-            "triggers": rules::triggers(),
-            // A scheduled task runs here; turning any other job on is refused in words.
-            "runtime_available": true,
-            "providers": [],
-        }))
-        .into_response(),
+        Ok(mut janitors) => {
+            for janitor in &mut janitors {
+                crate::label_checker::show_cadence(&app, janitor).await;
+            }
+            Json(json!({
+                "janitors": janitors,
+                "templates": rules::templates(),
+                "triggers": rules::triggers(),
+                // A scheduled task runs here; turning any other job on is refused in words.
+                "runtime_available": true,
+                "providers": [],
+            }))
+            .into_response()
+        }
         Err(why) => unavailable(&why),
     }
 }
@@ -732,7 +759,10 @@ async fn one(State(app): State<App>, Path(key): Path<String>) -> Response {
         .janitors
         .read(&app, |book, world, now_ms| book.shown(&key, world, now_ms));
     match shown.await {
-        Ok(Ok(janitor)) => Json(json!({ "janitor": as_sent(janitor) })).into_response(),
+        Ok(Ok(mut janitor)) => {
+            crate::label_checker::show_cadence(&app, &mut janitor).await;
+            Json(json!({ "janitor": as_sent(janitor) })).into_response()
+        }
         Ok(Err(refused)) => refusal(&refused),
         Err(why) => unavailable(&why),
     }

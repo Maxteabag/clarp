@@ -1,0 +1,44 @@
+[
+ {
+  "choice": "accurate",
+  "interval": 7200,
+  "activity": "idle",
+  "summary": "Nothing shown as working",
+  "runs": 0
+ },
+ {
+  "choice": "finished",
+  "interval": 3600,
+  "activity": "worked",
+  "summary": "Checked 1 working labels; 1 look wrong",
+  "runs": 1
+ },
+ {
+  "choice": "finished",
+  "interval": 7200,
+  "activity": "idle",
+  "summary": "Checked 1 working labels; 1 look wrong (already reported)",
+  "runs": 2
+ },
+ {
+  "choice": "accurate",
+  "interval": 14400,
+  "activity": "idle",
+  "summary": "Checked 1 working labels; 0 look wrong",
+  "runs": 3
+ },
+ {
+  "choice": "finished",
+  "interval": 3600,
+  "activity": "worked",
+  "summary": "Checked 1 working labels; 1 look wrong",
+  "runs": 4
+ },
+ {
+  "choice": "timeout",
+  "interval": 3600,
+  "activity": "failed",
+  "summary": "Jev did not answer; nothing reported",
+  "runs": 5
+ }
+]

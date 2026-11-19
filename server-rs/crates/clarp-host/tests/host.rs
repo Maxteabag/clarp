@@ -10613,9 +10613,9 @@ fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_
     );
     // One whose job does not run on this Host yet is refused in words. The one that explains
     // the use of tools runs here (its own test), and is turned on like the task above.
-    let auditor = host.get("/janitors/clarp-label-auditor")["janitor"].clone();
+    let auditor = host.get("/janitors/clarp-heartbeat-decider")["janitor"].clone();
     let (status, refused) = post(
-        "/janitors/clarp-label-auditor/enabled",
+        "/janitors/clarp-heartbeat-decider/enabled",
         json!({ "expected_revision": auditor["revision"], "enabled": true }),
     );
     assert_eq!(
@@ -10629,7 +10629,12 @@ fn a_janitors_scheduled_task_runs_when_its_schedule_says_and_closes_itself_with_
         refused["error"],
         clarp_kernel::janitors::cannot_run(false).as_str()
     );
-    assert!(refused["error"].as_str().unwrap().contains("Label checker"));
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap()
+            .contains("Heartbeat keeper")
+    );
     let explainer = host.get("/janitors/clarp-tool-explainer")["janitor"].clone();
     let (status, on) = post(
         "/janitors/clarp-tool-explainer/enabled",
@@ -40495,4 +40500,202 @@ fn a_quota_notice_that_reached_no_phone_waits_and_is_pushed_again_after_the_keep
         .unwrap();
     let settled = json!({ "enabled": true, "sent": 1, "failed": 0, "disabled": 0, "attempts": 2 });
     assert_eq!(receipt["delivery"], settled, "{receipt}");
+}
+
+#[test]
+fn working_labels_are_reported_in_the_checkers_own_chat() {
+    use clarp_ports::kv::KeyValueEngine as _;
+    const ROLE: &str = "clarp-label-auditor";
+    let place = Place::new("quiet-label-report");
+    let reply = json!({"answers":{"l_a1":{"choice":"finished","probabilities":{"accurate":0.30,"finished":0.50}}},"usage":{"input_tokens":8,"output_tokens":2}});
+    let (base, calls) = answers(vec![("/judge", "200 OK", reply.to_string())]);
+    let url = format!("{base}/judge");
+    let world = [
+        ("TYPESAFE_API_KEY", "example"),
+        ("CLARP_JUDGE_ENDPOINT", url.as_str()),
+        ("CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS", ""),
+    ];
+    let start = || place.start_in("fixture", &["--janitors-checked-every-ms", "100"], &world);
+    let host = start();
+    let settings = "/judgments/settings";
+    let path = format!("/janitors/{ROLE}");
+    let runs = |h: &Host| h.get(&format!("{path}/runs"))["runs"].clone();
+    let enable = |h: &Host, enabled: bool| {
+        let config = &h.get(&path)["janitor"];
+        h.post(
+            &format!("{path}/enabled"),
+            json!({"expected_revision":config["revision"],"enabled":enabled}),
+        )
+    };
+    assert_eq!(host.get(&path)["janitor"]["enabled"], false);
+    assert_eq!(host.get(settings)["settings"]["sites"]["labels"], false);
+    let session = host.new_agent("Subject");
+    assert_eq!(
+        tool(
+            &host,
+            &place.root,
+            None,
+            &["clarp-agent-bg", &session, "on", "Reviewing sample"]
+        )
+        .0,
+        0
+    );
+    enable(&host, true);
+    host.post(settings, json!({"enabled":true,"sites":{"labels":true}}));
+    // With a fresh subject the pass advances only its two time records.
+    wait_for("a pass with no eligible label", || {
+        // A pass can be observed via cadence even though it made no run.
+        host.get(&path)["janitor"]["cadence"][0]["last_activity"] == "idle"
+    });
+    assert_eq!(runs(&host), json!([]));
+    drop(host);
+    assert!(calls.lock().unwrap().is_empty());
+    let last = kept_records(&place, "label-checker-last-check");
+    assert!(last["label-auditor"].is_i64());
+    let mut lane = kept_records(&place, "label-checker-cadence")["label-auditor"].clone();
+    assert_eq!(lane["last_activity"], "idle");
+    assert!(kept_records(&place, "label-checker-fingerprint").is_empty());
+    assert!(kept_records(&place, "label-judgment-diagnostic").is_empty());
+    let due = |lane: &mut Value| {
+        lane["next_run_at"] = json!(0);
+        keep_record(&place, "label-checker-cadence", "label-auditor", lane);
+    };
+    due(&mut lane);
+    // Advance the fixture's age through the stopped Host's own storage port.
+    {
+        let mut store = clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap();
+        let (id, mut subject) = store
+            .list("agent")
+            .unwrap()
+            .into_iter()
+            .map(|(id, v)| (id, serde_json::from_slice::<Value>(&v).unwrap()))
+            .find(|(_, v)| v["session"] == session)
+            .unwrap();
+        subject["created_at_ms"] = json!(now_ms() - 960_000);
+        store
+            .put("agent", &id, &serde_json::to_vec(&subject).unwrap())
+            .unwrap();
+    }
+    let host = start();
+    let docs = |h: &Host| h.get(&format!("/artifacts?session={ROLE}"))["artifacts"].clone();
+    wait_for("a completed mismatch run", || {
+        runs(&host)[0]["status"] == "completed"
+    });
+    let list = docs(&host);
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    let doc = &list[0];
+    let id = doc["artifact_id"].as_str().unwrap();
+    assert_eq!(doc["title"], "1 working label looks wrong");
+    let read = host.get(&format!("/artifacts/{id}"));
+    assert_eq!(
+        read["artifact"]["payload"]["items"][0]["verdict"],
+        "finished"
+    );
+    assert!(!host.get("/attention/inbox").to_string().contains(id));
+    assert_eq!(
+        host.get("/agents/snapshot")["agents"][0]["status_text"],
+        "Reviewing sample"
+    );
+    assert!(host.conversation(&session).is_empty());
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    assert_eq!(runs(&host)[0]["activity"], "worked");
+    drop(host);
+    let rows = kept_records(&place, "label-judgment-diagnostic");
+    assert_eq!(rows["0"]["sequence"], 0);
+    assert_eq!(rows["0"]["outcome"], "a1=mismatch:finished");
+    assert_eq!(rows["0"]["input_tokens"], 8);
+    assert_eq!(rows["0"]["output_tokens"], 2);
+    assert_eq!(rows["0"]["fallback_used"], false);
+    assert_eq!(kept_records(&place, "label-checker-fingerprint").len(), 1);
+    let mut lane = kept_records(&place, "label-checker-cadence")["label-auditor"].clone();
+    due(&mut lane);
+    let host = start();
+    wait_for("repeated findings to settle idle", || {
+        runs(&host)[0]["activity"] == "idle"
+    });
+    assert_eq!(docs(&host).as_array().unwrap().len(), 1);
+    assert_eq!(calls.lock().unwrap().len(), 2);
+    drop(host);
+    // Wrap the diagnostic ring. The next call replaces slot 0 and leaves slot 99 alone.
+    keep_record(&place, "label-judgment-cursor", "labels", &json!(100));
+    keep_record(
+        &place,
+        "label-judgment-diagnostic",
+        "99",
+        &json!({"sequence":99}),
+    );
+    due(&mut lane);
+    let (broken, failed_calls) = answers(vec![("/judge", "402 Payment Required", "{}".into())]);
+    let broken_url = format!("{broken}/judge");
+    let mut failed_world = world;
+    failed_world[1] = ("CLARP_JUDGE_ENDPOINT", broken_url.as_str());
+    let host = place.start_in(
+        "fixture",
+        &["--janitors-checked-every-ms", "100"],
+        &failed_world,
+    );
+    wait_for("the failed batch to be accounted for", || {
+        runs(&host)[0]["status"] == "failed"
+    });
+    assert_eq!(
+        runs(&host)[0]["error"],
+        "Jev did not answer; nothing reported"
+    );
+    assert!(
+        host.get(settings)["settings"]["breaker_open_seconds"]
+            .as_f64()
+            .unwrap()
+            > 3500.0
+    );
+    assert_eq!(failed_calls.lock().unwrap().len(), 1);
+    assert_eq!(docs(&host).as_array().unwrap().len(), 1);
+    drop(host);
+    let rows = kept_records(&place, "label-judgment-diagnostic");
+    assert_eq!(rows["0"]["sequence"], 100);
+    assert_eq!(rows["0"]["error"], "billing refusal");
+    assert_eq!(rows["0"]["fallback_used"], true);
+    assert_eq!(rows["99"]["sequence"], 99);
+    assert!(!rows.contains_key("100"));
+    assert_eq!(kept_records(&place, "label-judgment-cursor")["labels"], 101);
+
+    // Pause while the judge holds a new mismatch. The run is cancelled and the
+    // reply cannot file another document for this generation.
+    due(&mut lane);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let held_url = format!("http://{}/judge", listener.local_addr().unwrap());
+    let (entered, started) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let peer = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _body = whole_request(&mut stream);
+        entered.send(()).unwrap();
+        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+        let body = r#"{"answers":{"l_a1":{"choice":"stalled","probabilities":{"stalled":1}}}}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    });
+    let mut held_world = world;
+    held_world[1] = ("CLARP_JUDGE_ENDPOINT", held_url.as_str());
+    let host = place.start_in(
+        "fixture",
+        &["--janitors-checked-every-ms", "100"],
+        &held_world,
+    );
+    started.recv_timeout(Duration::from_secs(10)).unwrap();
+    enable(&host, false);
+    release.send(()).unwrap();
+    peer.join().unwrap();
+    assert_eq!(runs(&host)[0]["status"], "cancelled");
+    assert_eq!(docs(&host).as_array().unwrap().len(), 1);
+    drop(host);
+    due(&mut lane);
+    let host = start();
+    assert_eq!(host.get(&path)["janitor"]["enabled"], false);
+    assert_eq!(calls.lock().unwrap().len(), 2);
 }

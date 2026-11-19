@@ -1421,6 +1421,19 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+**Checking working labels** (19 Nov 2026). The Janitor runner checks the labels site
+when its lane comes due. The checker starts paused and the site starts off. A pass
+uses the current roster, job and helper views in memory. It selects at most twelve
+eligible subjects, oldest unchanged first, before reading at most three conversation
+rows per selected subject. One Jev choice request shares their packets. With no
+eligible subjects the pass updates only the last check and its adaptive interval.
+A repeated set of findings produces one document across the checks; a successful
+all-clear permits a later recurrence to be reported. The document belongs to the
+checker’s chat and is excluded from Updates. The checker does not edit a subject.
+Last check, cadence and fingerprint each occupy a separate fleet record. Diagnostic
+entries occupy one hundred slots, each keyed separately; a full ring overwrites its
+oldest entry and advances its cursor in one storage operation.
+
 **Model fallbacks**. A Janitor inherits the Host's ordered model policy when its session
 is named in `POST /janitor-policy`. The update takes the revision shown by
 `GET /janitor-policy`. Each Janitor exposes its effective chain at
