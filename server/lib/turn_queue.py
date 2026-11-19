@@ -895,8 +895,10 @@ def mark_started(queue_id: str) -> None:
 # runtime start.
 HELD_SEND_GRACE_MS = 10 * 60_000
 HELD_SEND_NOT_RUN = "held_send_not_run"
-HELD_SEND_NOTICE = ("A message you sent while this agent was busy was never run, and it will not "
-                    "be run late. Send it again if you still want it.")
+# A Host notice: the first paragraph is the headline the apps show, the rest its detail.
+HELD_SEND_NOTICE = ("A message you sent was never run.\n\n"
+                    "It was sent while this agent was busy and was then held. It will not be run "
+                    "late; send it again if you still want it.")
 
 
 def settle_unsent_held_sends(*, can_steer: Callable[[str], bool],
@@ -942,8 +944,12 @@ def settle_unsent_held_sends(*, can_steer: Callable[[str], bool],
         done["failed"].append(queue_id)
         log("heldSendFailed", f"agent={agent_id} queue={queue_id} reason={HELD_SEND_NOT_RUN}")
         try:
+            conversation = agents.live_backend_session(agent_id) or ""
+            if not conversation:
+                # Written all the same, but in no conversation an app shows.
+                log("heldSendNoticeNoConversation", f"agent={agent_id} queue={queue_id}")
             message_store.record_system_notice(
-                agent_id=agent_id, backend_session_id=agents.live_backend_session(agent_id) or "",
+                agent_id=agent_id, backend_session_id=conversation,
                 notice_id=f"{HELD_SEND_NOT_RUN}:{queue_id}", text=HELD_SEND_NOTICE)
         except Exception as exc:  # noqa: BLE001 - the row is settled; the notice is told next time
             log_exception("heldSendNoticeFail", exc, detail=agent_id)
