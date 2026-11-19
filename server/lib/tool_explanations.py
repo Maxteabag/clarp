@@ -158,11 +158,13 @@ def _failure_reason(error: BaseException) -> str:
     """What a failed explanation run is told as, by what the failure says it is (issue 360, R88).
 
     model_fallbacks.execute() turns a CLI's TimeoutExpired into a ProviderFailure of category
-    "timeout" (R82), and the fallback model's own timeout has always been one, so a timeout is
-    read from the category, never from a type a lower layer converts. execute() raises the last
-    attempt's own error otherwise: a missing CLI stays a FileNotFoundError and an unparsable
-    answer a ValueError."""
-    if getattr(error, "category", "") == "timeout":
+    "timeout" (R82), and the fallback model's own timeout has always been one. A timeout is told
+    "timeout" however it arrives: by that category first, and by a raw subprocess.TimeoutExpired
+    or builtin TimeoutError as well, before any other type is asked (R85, ruled). execute()
+    raises the last attempt's own error otherwise: a missing CLI stays a FileNotFoundError and an
+    unparsable answer a ValueError."""
+    if (getattr(error, "category", "") == "timeout"
+            or isinstance(error, (subprocess.TimeoutExpired, TimeoutError))):
         return "timeout"
     if isinstance(error, FileNotFoundError):
         return "codex_unavailable"

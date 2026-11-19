@@ -126,30 +126,45 @@ def test_exhausted_fallbacks_are_bounded_and_visible(agent, monkeypatch):
 # --- Trigger policy: only an AI/provider failure switches models -------------
 
 
-@pytest.mark.parametrize(
-    "category",
-    ["usage_limit", "connection", "transient", "runner_exit", "timeout"],
-)
-def test_provider_failures_are_the_only_retry_trigger(category):
-    assert fallback.is_provider_failure(category)
+# The live decision is _as_provider_failure, on the error raised around a model call
+# (is_provider_failure, which took a dispatcher category, had no caller and is gone, R85).
 
 
 @pytest.mark.parametrize(
     "category, message",
     [
-        # The user pressed stop; the agent is not broken.
-        ("interrupted", "turn_aborted"),
-        # A turn the dispatcher could not name is not evidence of an outage.
-        ("unknown", "something odd happened"),
-        # The turn finished; its tools merely reported errors.
-        ("clean", "2 tests failed"),
-        # A refusal is an answer, not an outage.
-        ("runner_exit", "codex exited rc=1: permission denied"),
-        ("runner_exit", "codex exited rc=1: approval required"),
+        ("usage_limit", "You've hit your usage limit. Try again at Sep 13th"),
+        ("connection", "fetch failed"),
+        ("transient", "Error 529: overloaded"),
+        ("runner_exit", "agy exited rc=1"),
+        ("timeout", "turn timed out"),
     ],
 )
-def test_agent_work_failures_never_switch_models(category, message):
-    assert not fallback.is_provider_failure(category, message)
+def test_provider_failures_are_the_only_retry_trigger(category, message):
+    promoted = fallback._as_provider_failure(RuntimeError(message))
+    assert promoted is not None and promoted.category == category
+
+
+@pytest.mark.parametrize("message", ["something odd happened", "2 tests failed"])
+def test_a_cli_that_exited_without_a_refusals_or_an_interrupts_facts_is_a_failed_runner(message):
+    """A CLI that exits non-zero with words no pattern names (once 'unknown'), or a clean turn's
+    '2 tests failed', is a failed runner: the chain moves on, on main and since. The old expectation
+    (must not switch) was asserted on is_provider_failure, which no live path read (R85, ruled)."""
+    promoted = fallback._as_provider_failure(RuntimeError(message))
+    assert promoted is not None and promoted.category == "runner_exit"
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # The user pressed stop; the agent is not broken.
+        "turn_aborted",
+        # A refusal is an answer, not an outage.
+        "codex exited rc=1: permission denied",
+        "codex exited rc=1: approval required",
+    ],
+)
+def test_agent_work_failures_never_switch_models(message):
+    assert fallback._as_provider_failure(RuntimeError(message)) is None
 
 
 @pytest.mark.parametrize(
@@ -166,13 +181,13 @@ def test_real_provider_outage_messages_classify_as_failures(message, expected):
     promoted = fallback.provider_error(message)
     assert isinstance(promoted, fallback.ProviderFailure)
     assert promoted.category == expected
-    assert fallback.is_provider_failure(promoted)
+    assert fallback._as_provider_failure(RuntimeError(message)).category == expected
 
 
 def test_user_interrupt_from_a_runner_is_never_a_provider_failure():
     promoted = fallback.provider_error("turn_aborted by user")
     assert isinstance(promoted, fallback.Cancelled)
-    assert not fallback.is_provider_failure(promoted)
+    assert fallback._as_provider_failure(RuntimeError("turn_aborted by user")) is None
 
 
 ANSWER_SCHEMA = {
@@ -195,10 +210,12 @@ def test_structured_fallback_runs_on_every_provider(backend, monkeypatch, tmp_pa
     script = tmp_path / "cli"
     script.write_text('#!/bin/sh\necho \'{"answer":"from ' + backend + '"}\'\n')
     script.chmod(0o755)
+    # The class, not the shared instance: undoing an instance patch leaves the bound method ON
+    # the instance, where it shadows every later class patch (test_routing_input's stub).
     monkeypatch.setattr(
-        runner, "routing_cmd", lambda prompt, **kw: [str(script), prompt]
+        type(runner), "routing_cmd", lambda self, prompt, **kw: [str(script), prompt]
     )
-    monkeypatch.setattr(runner, "routing_text", lambda stdout: stdout)
+    monkeypatch.setattr(type(runner), "routing_text", lambda self, stdout: stdout)
     assert fallback.json_call(
         {"backend": backend, "model": "m", "effort": ""}, "explain", ANSWER_SCHEMA
     ) == {"answer": f"from {backend}"}
@@ -213,7 +230,7 @@ def test_structured_fallback_reports_a_dead_provider_as_a_provider_failure(
     script = tmp_path / "cli"
     script.write_text("#!/bin/sh\necho 'fetch failed' >&2\nexit 1\n")
     script.chmod(0o755)
-    monkeypatch.setattr(runner, "routing_cmd", lambda prompt, **kw: [str(script)])
+    monkeypatch.setattr(type(runner), "routing_cmd", lambda self, prompt, **kw: [str(script)])
     with pytest.raises(fallback.ProviderFailure) as raised:
         fallback.json_call(
             {"backend": "codex", "model": "m", "effort": ""}, "x", ANSWER_SCHEMA
@@ -243,3 +260,29 @@ def test_an_attempt_finishes_once_and_only_with_a_declared_status(agent):
     assert (row["status"], row["result_json"]) == ("failed", '{"why": "quota"}')
     assert row["finished_at"] is not None
     assert not db.conn().in_transaction
+
+
+def _probe_script():
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "probe_provider_fallbacks.py"
+    spec = importlib.util.spec_from_file_location("probe_provider_fallbacks", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("raised, switches, category", [
+    (fallback.ProviderFailure("usage limit reached", "usage_limit"), True, "usage_limit"),
+    (fallback.cli_failure("claude", "permission denied", prompt="x", returncode=1), False, "runner_exit"),
+    (fallback.Cancelled("turn_aborted"), False, ""),
+], ids=["a quota", "a refusal", "a stop"])
+def test_the_paid_probe_reports_the_live_decision_when_a_provider_fails(monkeypatch, raised, switches, category):
+    """scripts/probe_provider_fallbacks.py's failure branch, with a stub in place of the paid call."""
+    probe = _probe_script()
+
+    def failing(*args, **kwargs):
+        raise raised
+    monkeypatch.setattr(fallback, "json_call", failing)
+    result = probe.probe("claude", "", timeout=1)
+    assert (result["answered"], result["provider_failure"], result["category"]) == (False, switches, category)

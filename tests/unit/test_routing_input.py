@@ -319,6 +319,20 @@ def test_a_left_behind_prompt_directory_is_swept_once_no_call_can_still_use_it(t
     assert not old.exists() and young.exists() and other.exists()
 
 
+def test_a_stale_prompt_directory_of_another_user_is_left_alone(tmp_path, monkeypatch):
+    """Two users may share the temporary directory: only the Host's own user's directories go."""
+    import os
+    import tempfile
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    theirs = tmp_path / "clarp-routing-theirs"
+    theirs.mkdir()
+    os.utime(theirs, (1_000, 1_000))
+    real = os.getuid()
+    monkeypatch.setattr(routing_input.os, "getuid", lambda: real + 1)    # the directory is not ours
+    assert routing_input.sweep_stale(now=1_000 + 3601) == 0
+    assert theirs.exists()
+
+
 # ---- R82: no command line in any log line, stored reason, event or route answer ----------------
 
 MARKER = "PROMPT-MARKER-6f1c"
@@ -413,3 +427,15 @@ def test_the_attempt_rows_keep_the_failures_type_name(monkeypatch):
         return {"kind": "ok"}
     assert model_fallbacks.execute("agent", "request", primary, invoke) == {"kind": "ok"}
     assert reasons == ["TimeoutExpired"]
+
+
+def test_the_stub_still_answers_after_the_fallback_tests_ran_in_the_same_session():
+    """test_model_fallbacks used to patch the shared runner INSTANCE; monkeypatch's undo then left
+    the real routing_text on it, shadowing this file's class patch whenever that file ran first."""
+    import subprocess as sp
+    here = pathlib.Path(__file__)
+    ran = sp.run([sys.executable, "-m", "pytest", "-q", "-n0", "-p", "no:cacheprovider", "-o", "addopts=",
+                  str(here.with_name("test_model_fallbacks.py")) + "::test_structured_fallback_runs_on_every_provider",
+                  str(here) + "::test_the_routing_prompt_never_stands_on_the_command_line"],
+                 cwd=here.parents[2], capture_output=True, text=True, timeout=300)
+    assert ran.returncode == 0, ran.stdout[-2000:]

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from contextlib import contextmanager
 
 from . import lifecycle as lk
@@ -109,25 +110,109 @@ _DENIED_RE = re.compile(
 )
 
 
-def is_provider_failure(cause, message=""):
-    """True only when the AI/provider itself failed.
+# A CLI's own words on failure are what an operator debugs with ("rate limit reached", "unknown
+# model ..."), but a CLI that repeats its input puts the request into them (issue 360, R85). They
+# are kept only when they hold none of it: no run of ECHO_RUN characters in common with the prompt.
+ECHO_RUN = 24
+KEPT_MOST = 300
+_SPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|[\"\\/bfnrt'])")
+_BYTE_RUN = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
+_ESCAPED = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
 
-    ``cause`` is either a category already named by :mod:`error_classify` (the
-    dispatcher classified the turn) or the exception raised around a model
-    call. ``message`` supplies the failure text when ``cause`` is a category.
-    """
+
+def _plain(text):
+    """One line: control characters and runs of white space become one space."""
+    return _SPACE.sub(" ", text).strip()
+
+
+def _unescaped(text, *, utf8_bytes=False):
+    """``text`` with JSON and Python string escapes undone, as a tool that prints its input as a
+    JSON string, a repr, ascii() or unicode_escape writes it: \\uXXXX, \\UXXXXXXXX, \\xNN and the
+    one-letter escapes. ``utf8_bytes``: read as a bytes repr (b'...'), where each run of \\xNN is
+    UTF-8 bytes: decoded as such, an invalid sequence left as written, never raised; else each
+    \\xNN is the code point NN, as ascii() and unicode_escape write it."""
+    if utf8_bytes:
+        text = _BYTE_RUN.sub(lambda run: bytes(
+            int(pair, 16) for pair in run.group(0).split("\\x")[1:]).decode(
+                "utf-8", errors="backslashreplace"), text)
+
+    def one(match):
+        code = match.group(1)
+        if code[0] in "uUx":
+            value = int(code[1:], 16)
+            # Above U+10FFFF no character exists (chr raises ValueError on 3.13, OverflowError on
+            # 3.12 from 2**31): the escape stays as written.
+            return chr(value) if value <= sys.maxunicode else match.group(0)
+        return _ESCAPED.get(code, code)
+    return _ESCAPE.sub(one, text)
+
+
+def _nfkc(text):
+    import unicodedata
+    return unicodedata.normalize("NFKC", text)
+
+
+def echoes(text, prompt):
+    """Whether ``text`` shares a run of ECHO_RUN characters (the whole prompt when it is shorter)
+    with ``prompt``, read as written or with its string escapes undone; white space compared as
+    one space, both sides NFKC-normalised. Covered: JSON and Python string escapes (also \\xNN and
+    \\UXXXXXXXX up to U+10FFFF, a bytes repr read as UTF-8), ascii() and unicode_escape, decomposed
+    letters, full-width forms and ligatures, newlines and tabs written as spaces. Not covered:
+    base64, percent or HTML encoding, an echo wrapped at a narrow width with a prefix on every
+    line, a run broken by an inserted ellipsis."""
+    request = _plain(_nfkc(prompt or ""))
+    if not request:
+        return False
+    run = min(ECHO_RUN, len(request))
+    for form in {_plain(_nfkc(text)), _plain(_nfkc(_unescaped(text))),
+                 _plain(_nfkc(_unescaped(text, utf8_bytes=True)))}:
+        if any(form[at:at + run] in request for at in range(0, len(form) - run + 1)):
+            return True
+    return False
+
+
+def _kept_line(words, prompt):
+    """The CLI's own words as one line of at most KEPT_MOST characters, or "" when they hold any of
+    the request."""
+    line = _plain(words)[:KEPT_MOST]
+    return "" if not line or echoes(line, prompt) else line
+
+
+def cli_failure(backend, output, *, prompt, returncode=None):
+    """What a routing CLI's failure says, wherever it is caught: its own words as one line of at
+    most KEPT_MOST characters when they hold none of the request, else "<backend> exited with
+    status N (<category>)". The category is always kept: the fallback chain and the attempt rows
+    read it, never the words.
+
+    It never raises because of the words: the category and the refusal are read from the raw words
+    first, and the kept line is worked out in its own step; if that step raises, the exception's
+    type is logged and the line dropped, so the failure keeps its category and facts with no CLI text."""
     from . import error_classify
+    from .log import log_exception_type
 
-    if isinstance(cause, BaseException):
-        message = message or str(cause)
-        if isinstance(cause, (Cancelled, AlreadyAttempted, KeyboardInterrupt)):
-            return False
-        cause = (
-            cause.category
-            if isinstance(cause, ProviderFailure)
-            else error_classify.classify_error(message)
-        )
-    return bool(cause in PROVIDER_FAILURES and not _DENIED_RE.search(message))
+    words = (output or "").strip()
+    category = error_classify.classify_error(words)
+    if category != error_classify.INTERRUPTED and category not in PROVIDER_FAILURES:
+        category = error_classify.RUNNER_EXIT
+    denied = bool(_DENIED_RE.search(words))
+    status = f"exited with status {returncode}" if returncode is not None else "failed"
+    try:
+        line = _kept_line(words, prompt)
+    except Exception as error:  # noqa: BLE001 -- the words never cost the failure its facts
+        # Its type only: a message raised while reading the words may quote them (issue 360).
+        log_exception_type("cliFailureLineDropped", type(error).__name__, str(backend))
+        line = ""
+    line = line or f"{backend} {status} ({category})"
+    if category == error_classify.INTERRUPTED:
+        return Cancelled(line)
+    failure = ProviderFailure(line, category)
+    # A failure's facts are attributes, read by the code; its words are for a person (R85, ruled):
+    # whatever text is kept, a refusal stays a refusal and the exit stays known.
+    failure.denied = denied
+    failure.backend = backend
+    failure.returncode = returncode
+    return failure
 
 
 def provider_error(message):
@@ -158,7 +243,7 @@ def _as_provider_failure(error):
     """
     if isinstance(error, (Cancelled, AlreadyAttempted, KeyboardInterrupt)):
         return None
-    if _DENIED_RE.search(str(error)):
+    if getattr(error, "denied", False) or _DENIED_RE.search(str(error)):
         return None
     promoted = provider_error(str(error))
     return None if isinstance(promoted, Cancelled) else promoted
@@ -346,10 +431,8 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
                 except subprocess.TimeoutExpired:
                     payload = None  # communicate keeps its first input across retries
             if process.returncode:
-                raise provider_error(
-                    (stderr or stdout or "").strip()[:1000]
-                    or f"{cmd[0]} exited rc={process.returncode}"
-                )
+                raise cli_failure(runner.id, stderr or stdout, prompt=prompt,
+                                  returncode=process.returncode)
             return schema_object(runner.routing_text(stdout or ""), schema)
         finally:
             try:

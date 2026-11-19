@@ -745,6 +745,10 @@ def error_code(exc: BaseException) -> str:
     from . import model_fallbacks
     if isinstance(exc, model_fallbacks.ProviderFailure) and exc.category == "timeout":
         return "timeout"
+    if (isinstance(exc, model_fallbacks.ProviderFailure) and getattr(exc, "backend", "")
+            and getattr(exc, "returncode", None) is not None):
+        # The failure's facts, not its words (issue 360, R85): every backend's exit is named.
+        return f"{exc.backend}_exit_{exc.returncode}"
     match = re.search(r"agy exited (-?\d+)", text)
     if match:
         return f"agy_exit_{match.group(1)}"

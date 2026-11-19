@@ -1,0 +1,412 @@
+"""A routing CLI's failure keeps its own words only when they hold none of the request (issue 360,
+R85). A stub CLI on PATH fails with what ECHO_MODE says: its input repeated (whole, JSON-escaped,
+30 characters of it), or a provider's own message. No provider is asked anything."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import textwrap
+from types import SimpleNamespace
+
+import pytest
+
+from lib import agents, backends, eventlog, events, model_fallbacks, orchestrator
+from tests.unit.test_orchestrator_janitor import ROLE, builtins
+
+START = "MARKER-START-7d21"
+DEEP = "MARKER-DEEP-7d21"
+BACKENDS = ("claude", "codex", "grok", "muse", "agy", "opencode")
+STUB = textwrap.dedent(f"""\
+    #!{sys.executable}
+    import json, os, sys
+    argv = sys.argv[1:]
+    raw = b"" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.buffer.read()
+    given = raw.decode("utf-8", "surrogateescape")
+    if "--prompt-file" in argv:
+        given += open(argv[argv.index("--prompt-file") + 1], encoding="utf-8").read()
+    request = " ".join(argv) + " " + given
+    mode = os.environ.get("ECHO_MODE", "whole")
+    if mode == "whole":
+        said = "error: could not handle: " + request
+    elif mode == "json":
+        said = "error: " + json.dumps({{"input": given}})
+    elif mode == "denied":
+        said = "permission denied: " + request
+    elif mode == "ascii":
+        said = "error: " + ascii(request)
+    elif mode == "bytes":
+        said = "error: " + repr(request.encode("utf-8", "surrogateescape"))
+    elif mode == "unicode_escape":
+        said = "error: " + request.encode("unicode_escape").decode("ascii")
+    elif mode == "nfd":
+        import unicodedata
+        said = "error: " + unicodedata.normalize("NFD", request)
+    elif mode == "partial":
+        at = given.find(os.environ["PARTIAL_FROM"])
+        said = "bad input near '" + given[at:at + 30] + "'"
+    else:
+        said = os.environ["SAID"]
+    sys.stderr.write(said)
+    sys.exit(3)
+""")
+
+
+@pytest.fixture
+def failing(tmp_path, monkeypatch, fake_backend_cli):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for backend in BACKENDS:
+        name = backends.get(backend).routing_cmd("x")[0]
+        path = bin_dir / name
+        path.write_text(STUB)
+        path.chmod(0o755)
+        fake_backend_cli(path)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    def mode(name, **env):
+        monkeypatch.setenv("ECHO_MODE", name)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+    return mode
+
+
+def _router(monkeypatch, provider):
+    """A real router on ``provider``; DEEP is in the spoken-to agent's recent words, so it is in the
+    prompt (on argv for agy and opencode) and never in the utterance."""
+    for session in ("mike", "antoni"):
+        agents.create_agent(persona=session.title(), voice_id="", cwd="/tmp", session=session)
+    orchestrator.record_routing_message(session="mike", role="assistant", text=f"{DEEP} the plan")
+    builtins().ensure_builtins(initial={ROLE: {
+        "enabled": True, "backend": provider, "provider": provider, "model": "", "effort": "",
+        "options": {"fallback_only": False}}})
+    seen = []
+    real_emit = eventlog.emit
+    monkeypatch.setattr(eventlog, "emit", lambda *a, **k: (seen.append(repr((a, k))), real_emit(*a, **k))[1])
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: seen.append(repr(event)))
+    service = orchestrator.OrchestratorService(SimpleNamespace(
+        default_session="mike", stream=None, speak_announcement=lambda *a, **k: None))
+    return service, seen
+
+
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_router_cli_that_repeats_its_input_leaves_it_in_no_sink(failing, monkeypatch, capfd, provider):
+    from lib import db
+    failing("whole")
+    service, seen = _router(monkeypatch, provider)
+    outcome = service.handle_send(text="send the report", requested_session="mike", trace_id="t-85",
+                                  hands_free=True, synthesize_audio=False,
+                                  dispatch=lambda **kwargs: pytest.fail("nothing is dispatched"))
+    stored = [dict(row) for row in db.conn().execute("SELECT * FROM orchestrator_decisions")]
+    assert stored and stored[0]["error"] == f"{provider} exited with status 3 (runner_exit)"
+    sinks = {"log lines": capfd.readouterr().err, "eventlog and events": "\n".join(seen),
+             "stored errors": repr([row["error"] for row in stored]), "send answer": repr(outcome),
+             "listing": repr([row.get("error") for row in orchestrator.recent_decisions()])}
+    assert [name for name, text in sinks.items()
+            if DEEP in text or "could not handle" in text or "low-latency" in text] == []
+
+
+SCHEMA = {"type": "object", "properties": {"kind": {"type": "string"}}, "required": ["kind"]}
+
+
+def _json_call_failure(backend, prompt):
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": backend, "model": ""}, prompt, SCHEMA)
+    return str(caught.value)
+
+
+@pytest.mark.parametrize("provider", ["claude", "agy"])
+def test_a_fallback_call_that_repeats_its_input_from_the_start_keeps_none_of_it(failing, provider):
+    failing("whole")
+    said = _json_call_failure(provider, f"{START} the secret plan " + "and more words " * 400 + DEEP)
+    assert said == f"{provider} exited with status 3 (runner_exit)"
+
+
+def test_a_json_escaped_echo_is_recognised(failing):
+    """Every 15 characters a quote or a newline, so the escaped form shares no 24 characters with
+    the prompt unless its escapes are undone."""
+    failing("json")
+    prompt = "".join(f'part {n:04d} of it"\n' for n in range(200))
+    assert "\\n" not in prompt and '\\"' not in prompt
+    assert _json_call_failure("claude", prompt) == "claude exited with status 3 (runner_exit)"
+
+
+def test_an_echo_of_30_characters_from_deep_in_the_prompt_is_recognised(failing):
+    prompt = "Answer as JSON. " + "filler words " * 300 + "the quarterly numbers for Nordic sales " + "x" * 50
+    failing("partial", PARTIAL_FROM="quarterly numbers")
+    assert _json_call_failure("claude", prompt) == "claude exited with status 3 (runner_exit)"
+
+
+@pytest.mark.parametrize("message", [
+    "Error: rate limit reached for this organisation; retry after 30 s",
+    "unknown model claude-opus-5-5-very-long-model-identifier-20261118",
+    "not logged in: run `claude login`",
+])
+def test_a_providers_own_message_is_kept_word_for_word(failing, message):
+    failing("plain", SAID=message)
+    assert _json_call_failure("claude", "Answer as JSON: " + "the plan " * 100) == message
+
+
+def test_a_providers_message_is_one_line_of_at_most_300_characters(failing):
+    failing("plain", SAID="first line\n\tsecond\x07 line " + "y" * 400)
+    said = _json_call_failure("claude", "Answer as JSON: " + "the plan " * 100)
+    assert said == ("first line second line " + "y" * 400)[:300]
+
+
+def test_a_common_phrase_shorter_than_the_run_is_kept_and_one_as_long_is_not(failing):
+    phrase = "please try again later."          # 23 characters
+    assert len(phrase) == 23                     # one short of the run (24)
+    prompt = f"Text x{phrase}x Answer as JSON. " + "z" * 200     # shared: the phrase alone
+    failing("plain", SAID=f"busy:{phrase}")
+    assert _json_call_failure("claude", prompt) == f"busy:{phrase}"
+    longer = "please try again later!!"         # 24 characters; shared with the prompt, no more
+    assert len(longer) == 24
+    failing("plain", SAID=f"busy:{longer}")
+    assert _json_call_failure("claude", f"Text x{longer}x " + "z" * 200).endswith("(runner_exit)")
+
+
+def test_a_janitors_question_that_is_repeated_back_keeps_none_of_it(failing, monkeypatch):
+    from lib import janitor_autonomy, janitor_builtins
+    failing("whole")
+    monkeypatch.setattr(janitor_builtins, "is_current", lambda run_id: True)
+    monkeypatch.setattr(model_fallbacks, "execute",
+                        lambda agent_id, request_id, primary, invoke, current=None: invoke(primary))
+    run = {"agent_id": "a", "run_id": "r", "configuration": {
+        "provider": "claude", "model": "", "effort": "", "template_id": "t", "isolated": False}}
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        janitor_autonomy.model_json(run, f"{START} the secret plan")
+    assert str(caught.value) == "claude exited with status 3 (runner_exit)"
+
+
+def test_the_heartbeat_keepers_question_that_is_repeated_back_keeps_none_of_it(failing, monkeypatch):
+    from lib import janitor_autonomy, janitor_builtins
+    failing("whole")
+    monkeypatch.setattr(janitor_builtins, "is_current", lambda run_id: True)
+    monkeypatch.setattr(model_fallbacks, "execute",
+                        lambda agent_id, request_id, primary, invoke, current=None: invoke(primary))
+    run = {"agent_id": "a", "run_id": "r", "configuration": {
+        "provider": "codex", "model": "", "effort": "", "template_id": "t"}}
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        janitor_autonomy.decision_model({"goal": f"{START} the secret plan"}, run)
+    assert str(caught.value) == "codex exited with status 3 (runner_exit)"
+
+
+def test_an_isolated_antigravity_failure_that_repeats_the_question_keeps_none_of_it(monkeypatch):
+    from lib import janitor_autonomy, janitor_builtins
+    monkeypatch.setattr(janitor_builtins, "is_current", lambda run_id: True)
+    monkeypatch.setattr(model_fallbacks, "execute",
+                        lambda agent_id, request_id, primary, invoke, current=None: invoke(primary))
+    agy = type(backends.get("agy"))
+
+    def fails(self, prompt, **kwargs):
+        raise RuntimeError(f"agy exited 1 without JSON: --print={prompt}")
+    monkeypatch.setattr(agy, "isolated_oneshot", fails)
+    monkeypatch.setattr("shutil.which", lambda name: "/bin/true")
+    run = {"agent_id": "a", "run_id": "r", "configuration": {
+        "provider": "agy", "model": "", "effort": "", "template_id": "t", "isolated": True}}
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        janitor_autonomy.model_json(run, f"{START} the secret plan and its details")
+    assert str(caught.value) == "agy exited with status 1 (runner_exit)"
+    from lib import goal_keeper
+    assert goal_keeper.error_code(caught.value) == "agy_exit_1"
+    assert caught.value.__cause__ is None and caught.value.__suppress_context__   # no traceback shows it
+
+
+def test_the_map_rule_authors_failure_that_repeats_its_prompt_keeps_none_of_it(failing, monkeypatch, capfd):
+    """Outside the fallback chain: its failure was logged and answered as the CLI's stderr."""
+    from lib import viz_rule_author
+    failing("whole")
+    monkeypatch.setattr(viz_rule_author, "DEFAULT_MODEL_CMD", [backends.get("claude").routing_cmd("x")[0]])
+    clusters = [{"hint": f"{DEEP}-tool", "count": 3, "example": f"{START} ran it"}]
+    answer = viz_rule_author.propose(clusters)
+    said = repr(answer) + capfd.readouterr().err
+    assert START not in said and DEEP not in said and "could not handle" not in said
+    assert "exited with status 3 (runner_exit)" in repr(answer)
+
+
+# ---- R85 (a) and (b), ruled 01:03: a failure's facts are attributes; its words are for a person ----
+
+def test_a_refusal_that_repeats_its_prompt_is_still_a_refusal_not_a_fallback(failing):
+    failing("denied")
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": "claude", "model": ""}, f"{START} the secret plan", SCHEMA)
+    failure = caught.value
+    assert START not in str(failure) and "permission denied" not in str(failure)   # the words go
+    assert getattr(failure, "denied", None) is True                               # the fact stays
+    assert model_fallbacks._as_provider_failure(failure) is None
+
+
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_every_backends_exit_is_named_by_its_facts(failing, provider):
+    from lib import goal_keeper
+    failing("whole")
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": provider, "model": ""}, f"{START} the plan", SCHEMA)
+    assert (getattr(caught.value, "backend", None), getattr(caught.value, "returncode", None)) == (provider, 3)
+    assert goal_keeper.error_code(caught.value) == f"{provider}_exit_3"
+
+
+# ---- R85, the hold of 06:06: Norwegian prompts printed as ascii(), a bytes repr, unicode_escape or NFD ----
+
+NORWEGIAN = "Spør Bjørn: får vi ny pålogging på kundeportalen i år, eller må vi vente på neste høst?"
+DENSE = "Både økonomi og påløpte følgeskader må vurderes før søknad om støtte sendes, så få årsoppgjøret på plass først."
+SHAPES = ("ascii", "bytes", "unicode_escape", "nfd")
+
+
+def _encoded(shape, text):
+    import unicodedata
+    return {"ascii": ascii(text), "bytes": repr(text.encode("utf-8")),
+            "unicode_escape": text.encode("unicode_escape").decode("ascii"),
+            "nfd": unicodedata.normalize("NFD", text)}[shape]
+
+
+@pytest.mark.parametrize("sentence", [NORWEGIAN, DENSE], ids=["norwegian", "dense"])
+@pytest.mark.parametrize("shape", SHAPES)
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_norwegian_prompt_printed_in_any_shape_is_never_kept(failing, provider, shape, sentence):
+    failing(shape)
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": provider, "model": ""}, sentence, SCHEMA)
+    assert str(caught.value) == f"{provider} exited with status 3 (runner_exit)"
+
+
+@pytest.mark.parametrize("sentence", [NORWEGIAN, DENSE], ids=["norwegian", "dense"])
+@pytest.mark.parametrize("shape", SHAPES)
+def test_cli_failure_reads_every_shape_of_the_prompt(shape, sentence):
+    failure = model_fallbacks.cli_failure("claude", "error: " + _encoded(shape, sentence), prompt=sentence, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"
+
+
+def test_invalid_utf8_in_a_bytes_repr_is_left_as_written_and_never_raises():
+    failure = model_fallbacks.cli_failure("claude", r"error: b'\xff\xfe\xc3' broke", prompt=NORWEGIAN, returncode=3)
+    assert "\\xff" in str(failure) or "xff" in str(failure)
+
+
+@pytest.mark.parametrize("words, category", [
+    # A timed-out connection is named by ETIMEDOUT. (Five phrases name a timeout, "turn timed out"
+    # among them; an ordinary "timed out" ends as unknown and so runner_exit: R93.)
+    ("connect ETIMEDOUT 104.18.32.47:443", "connection"),
+    ("You've hit your usage limit. Try again at Sep 13th", "usage_limit"),
+    ("Error 529: overloaded", "transient"),
+], ids=["a timed-out connection", "a quota", "an overload"])
+def test_the_category_is_read_once_from_the_raw_words_however_late_they_come(words, category):
+    """The kept line is the first 300 characters; the words that name the failure come after 1,500
+    characters of other output, so a category read from the kept line would miss them."""
+    output = "x" * 1500 + " " + words
+    failure = model_fallbacks.cli_failure("claude", output, prompt="an unrelated request", returncode=3)
+    assert failure.category == category and len(str(failure)) <= model_fallbacks.KEPT_MOST
+
+
+def test_a_refusal_named_after_1500_characters_is_still_a_refusal():
+    failure = model_fallbacks.cli_failure("claude", "x" * 1500 + " permission denied", prompt="an unrelated request",
+                                          returncode=3)
+    assert failure.denied is True and model_fallbacks._as_provider_failure(failure) is None
+
+
+# ---- R85, the hold of 06:49: an escape above U+10FFFF, a raise while reading the words, NFKC ----
+
+ABOVE = ("\\UFFFFFFFF", "\\U0011FFFF", "\\U00110000")       # no character: left as written
+LAST = "\\U0010FFFF"                                       # the last one there is: undone
+REFUSAL = "permission denied; bad escape {}"
+RATE_LIMIT = "rate limited: too many requests; bad escape {}"
+
+
+@pytest.mark.parametrize("escape", ABOVE)
+def test_an_escape_above_the_last_character_is_left_as_written(escape):
+    assert model_fallbacks._unescaped(f"x {escape} y") == f"x {escape} y"
+
+
+def test_the_last_character_there_is_is_undone():
+    assert model_fallbacks._unescaped(f"x {LAST} y") == "x \U0010ffff y"
+
+
+@pytest.fixture
+def chained(monkeypatch):
+    """An agent whose fallback chain holds one more model than its primary."""
+    agents.create_agent(persona="Robot", voice_id="", cwd="/tmp", session="robot", backend="codex")
+    agent = agents.get_by_session("robot")
+
+    def run(provider, prompt):
+        second = {"backend": "claude" if provider != "claude" else "codex", "model": "", "effort": ""}
+        monkeypatch.setattr(model_fallbacks, "get", lambda agent_id: {"models": [second], "revision": 1})
+        calls = []
+
+        def invoke(model):
+            calls.append(model["backend"])
+            return model_fallbacks.json_call(model, prompt, SCHEMA)
+        with pytest.raises(Exception) as caught:
+            model_fallbacks.execute(agent["agent_id"], "request", {"backend": provider, "model": "", "effort": ""},
+                                    invoke)
+        return caught.value, calls, model_fallbacks.attempts(agent["agent_id"], "request")
+    return run
+
+
+@pytest.mark.parametrize("escape", ABOVE + (LAST,))
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_refusal_with_any_escape_never_falls_back(failing, chained, provider, escape):
+    failing("said", SAID=REFUSAL.format(escape))
+    failure, calls, attempts = chained(provider, f"{START} the plan")
+    assert isinstance(failure, model_fallbacks.ProviderFailure) and failure.denied is True
+    assert calls == [provider] and attempts == []                     # the refusal propagates
+    assert str(failure) == REFUSAL.format(escape)                     # the CLI's own words, as written
+
+
+@pytest.mark.parametrize("escape", ABOVE + (LAST,))
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_rate_limit_with_any_escape_falls_back_once(failing, chained, provider, escape):
+    from lib import error_classify
+    failing("said", SAID=RATE_LIMIT.format(escape))
+    failure, calls, attempts = chained(provider, f"{START} the plan")
+    assert isinstance(failure, model_fallbacks.ProviderFailure)
+    assert failure.category == error_classify.classify_error(RATE_LIMIT.format("")) != "runner_exit"
+    assert len(calls) == 2 and [row["reason"] for row in attempts] == ["ProviderFailure"]
+    assert str(failure) == RATE_LIMIT.format(escape)
+
+
+@pytest.mark.parametrize("said, denied", [(REFUSAL.format("x"), True), (RATE_LIMIT.format("x"), False)],
+                         ids=["a refusal", "a rate limit"])
+def test_a_raise_while_reading_the_words_costs_the_failure_nothing_but_its_text(monkeypatch, capfd, said, denied):
+    plain = model_fallbacks.cli_failure("claude", said, prompt="an unrelated request", returncode=3)
+
+    def planted(words, prompt):
+        raise RuntimeError(f"planted while reading {words}")
+    monkeypatch.setattr(model_fallbacks, "_kept_line", planted)
+    failure = model_fallbacks.cli_failure("claude", said, prompt="an unrelated request", returncode=3)
+    assert (failure.category, failure.denied, failure.returncode) == (plain.category, plain.denied, 3)
+    assert failure.denied is denied and failure.category in model_fallbacks.PROVIDER_FAILURES
+    assert (model_fallbacks._as_provider_failure(failure) is None) is denied     # the chain decides alike
+    assert str(failure) == f"claude exited with status 3 ({failure.category})"   # the line is dropped
+    err = capfd.readouterr().err
+    assert "cliFailureLineDropped" in err and "RuntimeError" in err and said not in err   # logged, words not
+
+
+CJK = "请在周五之前，把客户门户的新登录方式发给比约恩，并说明为什么需要更改。"
+FULL_WIDTH = "Ｐｌｅａｓｅ ｓｅｎｄ ｔｈｅ ｎｅｗ ｌｏｇｉｎ ｔｏ Ｂｊｏｒｎ ｂｅｆｏｒｅ Ｆｒｉｄａｙ"
+LIGATURE = "The ﬁnal ﬁgures for the ﬂoor plan go to the oﬃce before the ﬁrst of December"
+EMOJI = "🚀🔥 Deploy 🎉 the 🧪 tests 🐛 then 🛠️ fix 🚦 the 📦 build 🎯 before 🌙 night 🔔 and 📣 tell 🧑‍💻 the 🧭 team"
+DENSE_NFD = "Øyvind på Ås må få søknadene før åtte, så Ærø og Åse får svar på nøyaktig én måte"
+
+
+def _nfkd(text):
+    import unicodedata
+    return unicodedata.normalize("NFKD", text)
+
+
+@pytest.mark.parametrize("prompt, echoed", [
+    (CJK, _nfkd(CJK)),                                             # full-width commas become ASCII
+    (FULL_WIDTH, _nfkd(FULL_WIDTH)),                               # a full-width prompt echoed in ASCII
+    (LIGATURE, LIGATURE.replace("ﬁ", "fi").replace("ﬂ", "fl").replace("ﬃ", "ffi")),
+    (EMOJI, ascii(EMOJI)),                                         # needs \U undone
+    (EMOJI, EMOJI.encode("unicode_escape").decode("ascii")),
+], ids=["cjk under nfkd", "full-width", "a ligature", "emoji as ascii()", "emoji as unicode_escape"])
+def test_an_echo_in_a_compatibility_form_is_never_kept(prompt, echoed):
+    failure = model_fallbacks.cli_failure("claude", "error: " + echoed, prompt=prompt, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"
+
+
+def test_a_prompt_written_decomposed_and_echoed_composed_is_never_kept():
+    import unicodedata
+    prompt = unicodedata.normalize("NFD", DENSE_NFD)
+    assert prompt != DENSE_NFD
+    failure = model_fallbacks.cli_failure("claude", "error: " + DENSE_NFD, prompt=prompt, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"

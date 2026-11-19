@@ -125,7 +125,9 @@ def _call_model(prompt: str) -> str:
     out = subprocess.run(DEFAULT_MODEL_CMD, input=prompt, text=True,
                          capture_output=True, timeout=MODEL_TIMEOUT_S)
     if out.returncode != 0:
-        raise RuntimeError(f"model exited {out.returncode}: {out.stderr[:300]}")
+        # Its words only when they hold none of the prompt (issue 360, R85).
+        from .model_fallbacks import cli_failure
+        raise cli_failure(DEFAULT_MODEL_CMD[0], out.stderr, prompt=prompt, returncode=out.returncode)
     return out.stdout
 
 
