@@ -88,5 +88,52 @@ for why,old,new in [
     PLANTS.append(('clarp-host/src/library.rs','reply',why,old,new))
 
 PLANTS.append(('clarp-host/src/edge.rs','reply','queued form conceals its audio choice','"synthesize_audio": message.speak','"synthesize_audio": false'))
+RUNS['clock']=['test','--test','forms_events','a_countdown_crosses_its_target']
+RUNS['countdown']=['test','--test','host','countdowns_are_created_with_a_clock']
+CLOCK='clarp-kernel/src/artifacts/countdown.rs'
+for why,old,new in [
+ ('draft countdown appears active','("history", "draft")','("working", "active")'),
+ ('cancelled countdown returns to review','("history", "cancelled")','("review", "cancelled")'),
+ ('expired countdown stays for review','("history", "expired")','("review", "expired")'),
+ ('working countdown appears ready','("working", "active")','("review", "active")'),
+ ('failed countdown is hidden','("correction", "failed")','("history", "failed")'),
+ ('unknown state is paused','("unsupported", "unknown")','("working", "paused")'),
+ ('target instant is still upcoming','now < ms','now <= ms'),
+ ('last due millisecond is elapsed','< 60_000','< 59_999'),
+ ('a full minute after zero is still due','< 60_000','<= 60_000'),
+ ('invalid target hidden','("correction", "invalid_target")','("history", "invalid_target")'),
+ ('positive timestamp offsets added','micros - i128::from(seconds)','micros + i128::from(seconds)'),
+ ('unknown time zone accepted','zone.iana_name() == Some(name)','true'),
+]:
+    PLANTS.append((CLOCK,'countdown' if why=='unknown time zone accepted' else 'clock',why,old,new))
+
+for why,old,new,run in [
+ ('zero year admitted','civil.starts_with("0000")','civil.starts_with("9999")','countdown'),
+ ('valid minute before midnight refused','minutes >= 24 * 60','minutes >= 24 * 60 - 1','countdown'),
+ ('offset of a full day admitted','minutes >= 24 * 60','minutes > 24 * 60','countdown'),
+ ('western offset sign lost',"if offset.starts_with('-') { -1 } else { 1 }","1",'clock'),
+ ('fractional seconds truncated to hundredths','fraction.len().min(6)','fraction.len().min(2)','clock'),
+ ('seconds counted as milliseconds','1_000_000.0 * 1000.0','1_000_000.0 * 1.0','clock'),
+ ('completed countdown no longer projected','"ready" | "completed"','"ready" | "closing"','clock'),
+ ('invalid date error changes','countdown target_at requires a valid date/time and explicit UTC offset','invalid countdown target','countdown'),
+ ('wrong timestamp shape accepted as a date','ok_or(SHAPE)?','ok_or(DATE)?','countdown'),
+ ('time zone refusal changes','countdown time_zone must be an IANA timezone','time zone required','countdown'),
+]:
+    PLANTS.append((CLOCK,run,why,old,new))
+for why,old,new in [
+ ('failed timer shown as ready','"correction" => Some("blocking")','"correction" => Some("review")'),
+ ('ready timer hidden','"review" => Some("review")','"review" => None'),
+ ('active timer hidden','"working" => Some("working")','"working" => None'),
+]:
+    PLANTS.append(('clarp-kernel/src/artifacts/updates.rs','countdown',why,old,new))
+PLANTS.append(('clarp-kernel/src/artifacts.rs','countdown',
+    'countdown required-field validation skips the publish-time type check',
+    'let page = kind == "html_form";',
+    'if kind == "countdown" && let Some(Value::Object(raw)) = &new.payload { require_payload(&kind, raw, ctx.published)?; } let page = kind == "html_form";'))
+# The four former rollover mutations exercised a day-advance branch that
+# does not exist in the 3.13 reference. Plant the opposite of its refusal.
+PLANTS.append((CLOCK, 'countdown', 'hour 24 is admitted as midnight',
+    'let civil = &parts[1];',
+    'let normalized = parts[1].replace("T24:00:00","T00:00:00"); let civil = normalized.as_str();'))
 if __name__=='__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

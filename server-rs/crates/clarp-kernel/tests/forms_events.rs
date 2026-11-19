@@ -7,7 +7,7 @@ use serde_json::Value;
 fn event_validation_and_receipt_digests_match_the_reference() {
     let cases: Value = serde_json::from_str(include_str!("fixtures/forms-events.json")).unwrap();
     let mut count = 0;
-    for case in cases.as_array().unwrap() {
+    for case in cases["cases"].as_array().unwrap() {
         let (data, result) = (&case["data"], &case["output"]);
         let error = result.get("error").and_then(Value::as_str);
         match case["kind"].as_str().unwrap() {
@@ -49,4 +49,24 @@ fn event_validation_and_receipt_digests_match_the_reference() {
         count += 1;
     }
     assert_eq!(count, 59);
+}
+
+#[test]
+fn a_countdown_crosses_its_target_and_due_minute_at_the_reference_edges() {
+    use clarp_kernel::artifacts::countdown;
+    let cases: Value =
+        serde_json::from_str(include_str!("fixtures/countdown-attention.json")).unwrap();
+    let mut count = 0;
+    for c in cases["projections"].as_array().unwrap() {
+        let row = &c["row"];
+        let (bucket, phase) = countdown::project(
+            row["status"].as_str().unwrap(),
+            row.as_object().unwrap(),
+            c["now"].as_i64().unwrap(),
+        );
+        assert_eq!(c["projection"]["bucket"], bucket, "{c}");
+        assert_eq!(c["projection"]["phase"], phase, "{c}");
+        count += 1;
+    }
+    assert_eq!(count, 193);
 }
