@@ -119,7 +119,11 @@ async fn keep(
     let (book, went) = written(before, after);
     rows.extend(book);
     gone.extend(went);
-    app.fleet.change_together(rows, gone).await
+    app.fleet.change_together(rows, gone).await?;
+    app.janitors
+        .changes
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 /// What a schedule is taken to be apart when it cannot be read: a day.
 const A_DAY_S: i64 = 86_400;
@@ -134,6 +138,9 @@ const FROM_A_JANITOR: &str = "janitor";
 #[derive(Default)]
 pub struct Desk {
     book: tokio::sync::Mutex<Option<Book>>,
+    /// How often the book was kept since the Host started: whoever arms itself on the book
+    /// (the Quota keeper) sees by it that the book changed since.
+    changes: std::sync::atomic::AtomicU64,
 }
 
 /// What the book asks of the Host around it: the fleet as it stands, the machine's zones,
@@ -227,6 +234,11 @@ impl World for Around<'_> {
 }
 
 impl Desk {
+    /// How often the book was kept since the Host started.
+    pub(crate) fn changes(&self) -> u64 {
+        self.changes.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// The book, read where it is kept the first time it is asked for.
     async fn held(
         &self,
@@ -333,8 +345,6 @@ impl Desk {
         for run in cut_off {
             take_back(app, &run.agent_id, &run.run_id).await;
         }
-        // The Quota keeper may have been turned on, off or set anew.
-        app.quota_keeper.disarm();
         Ok(book.shown(key, &Around::new(app), now_ms))
     }
 

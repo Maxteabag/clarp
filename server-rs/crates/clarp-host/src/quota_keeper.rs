@@ -8,9 +8,11 @@
 //!
 //! **When it looks.** In the janitors' own runner ([`crate::janitors::run`]), as a kind of
 //! work that is due: when a look ends, the moment of the next is known and the runner is
-//! armed for it, and a look of the runner before then costs nothing. A change of any janitor
-//! disarms it: the keeper may have been turned on, off or set anew. A look runs beside the
-//! runner, one at a time.
+//! armed for it, beside the count of the janitors' book's writes it was armed at: a look of
+//! the runner before then costs nothing, unless the book was written since (the keeper may
+//! have been turned on, off or set anew; [`clarp_kernel::janitors::quota::due`]). A look runs
+//! beside the runner, one at a time. What could not be read is said once in the Host's log,
+//! by what failed.
 //!
 //! **What it reads**: what `GET /backend-usage` answers, which asks a provider only on a Host
 //! that was told to (`--ask-usage`).
@@ -20,7 +22,10 @@
 //! name the Python Host gives its memory), its receipts (`quota-keeper-receipt`, one record
 //! a receipt) and its lane (`quota-keeper-lane`: when it looks next). Then each receipt is
 //! pushed as the Python Host pushes it (the alert of a finished turn), and what became of the
-//! push is written on it.
+//! push is written on it, as there: a push that went to no phone (a relay that is down) is
+//! counted as failed and not tried again, on both Hosts. One the pusher never answered (it is
+//! gone) waits, and is tried again at the next look, as the Python Host tries a push that
+//! raised.
 //!
 //! **Who tells the owner.** Where an automatic Hotseat switcher is on, it tells of Claude and
 //! of Codex itself: such a receipt is kept, cancelled, as there. A receipt kept for a keeper
@@ -76,9 +81,11 @@ struct Receipt {
 /// The Quota keeper of this Host.
 #[derive(Default)]
 pub struct Desk {
-    /// When a look is due next: known once a look ended. Nothing: the next look of the
-    /// runner finds out.
-    armed: std::sync::Mutex<Option<i64>>,
+    /// When a look is due next, and the count of the janitors' book's writes it was armed at:
+    /// known once a look ended. Nothing: the next look of the runner finds out.
+    armed: std::sync::Mutex<Option<(i64, u64)>>,
+    /// What could not be read at the last look, said once in the Host's log.
+    failing: std::sync::Mutex<Option<String>>,
     /// One look at a time.
     looking: Arc<tokio::sync::Mutex<()>>,
     /// The receipts, by their ids: read where they are kept by the first look.
@@ -86,23 +93,38 @@ pub struct Desk {
 }
 
 impl Desk {
-    /// The keeper may have been turned on, off or set anew: the next look finds out.
-    pub(crate) fn disarm(&self) {
+    fn arm(&self, at: i64, changes: u64) {
         if let Ok(mut armed) = self.armed.lock() {
-            *armed = None;
+            *armed = Some((at, changes));
         }
     }
 
-    fn arm(&self, at: i64) {
-        if let Ok(mut armed) = self.armed.lock() {
-            *armed = Some(at);
-        }
-    }
-
-    fn due(&self, now_ms: i64) -> bool {
+    fn due(&self, now_ms: i64, changes: u64) -> bool {
         self.armed
             .lock()
-            .map_or(true, |armed| armed.is_none_or(|at| now_ms >= at))
+            .map_or(true, |armed| quota::due(*armed, now_ms, changes))
+    }
+
+    /// A read of a look failed: said once, by what failed and never by what it held.
+    fn failed(&self, what: &str, why: &crate::agent::Unavailable) {
+        let said = format!("{what}: {}", why.0);
+        let mut failing = self
+            .failing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if failing.as_deref() != Some(said.as_str()) {
+            eprintln!("clarp-host: the Quota keeper could not read {said}");
+            *failing = Some(said);
+        }
+    }
+
+    /// The reads of a look went through.
+    fn read_well(&self) {
+        let mut failing = self
+            .failing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *failing = None;
     }
 }
 
@@ -197,7 +219,7 @@ fn row<T: Serialize>(kind: &'static str, key: &str, value: &T) -> Row {
 /// unless one is under way.
 pub(crate) fn look(app: &App) {
     let desk = &app.quota_keeper;
-    if !desk.due(app.clock.now_ms()) {
+    if !desk.due(app.clock.now_ms(), app.janitors.changes()) {
         return;
     }
     let Ok(one) = desk.looking.clone().try_lock_owned() else {
@@ -213,18 +235,26 @@ pub(crate) fn look(app: &App) {
 /// One look of the keeper, where one is due.
 async fn pass(app: &App) {
     let desk = &app.quota_keeper;
+    // What changes the book from here on is seen at the next look.
+    let changes = app.janitors.changes();
     let keeper = app
         .janitors
         .read(app, |book, world, _| keeper_of(book, world));
-    let Some(keeper) = keeper.await.ok().flatten() else {
+    let keeper = match keeper.await {
+        Ok(keeper) => keeper,
+        Err(why) => return desk.failed("the janitors' book", &why),
+    };
+    let Some(keeper) = keeper else {
         // Nobody keeps: nothing is due until a janitor changes.
-        desk.arm(i64::MAX);
+        desk.arm(i64::MAX, changes);
+        desk.read_well();
         return;
     };
     let mut receipts = desk.receipts.lock().await;
     if receipts.is_none() {
-        let Ok(kept) = app.fleet.kept_all(RECEIPTS).await else {
-            return;
+        let kept = match app.fleet.kept_all(RECEIPTS).await {
+            Ok(kept) => kept,
+            Err(why) => return desk.failed("its receipts", &why),
         };
         let read = kept.iter().filter_map(|(id, written)| {
             let receipt: Receipt = serde_json::from_slice(written).ok()?;
@@ -236,9 +266,9 @@ async fn pass(app: &App) {
         return;
     };
     deliver(app, &keeper, receipts).await;
-    let lane = app.fleet.kept(LANE, THE_LANE.to_string()).await;
-    let Ok(lane) = lane else {
-        return;
+    let lane = match app.fleet.kept(LANE, THE_LANE.to_string()).await {
+        Ok(lane) => lane,
+        Err(why) => return desk.failed("its lane", &why),
     };
     let lane = lane.and_then(|kept| serde_json::from_slice::<Lane>(&kept).ok());
     let mut lane = Lane::of(lane, &keeper.agent_id, keeper.generation);
@@ -246,7 +276,8 @@ async fn pass(app: &App) {
     let now = app.clock.now_ms();
     let next = lane.next_run(base);
     if now < next {
-        desk.arm(next);
+        desk.arm(next, changes);
+        desk.read_well();
         return;
     }
     lane.start((base, longest), now);
@@ -265,8 +296,9 @@ async fn pass(app: &App) {
                 if windows.kept.contains_key(&name) {
                     continue;
                 }
-                let Ok(kept) = app.fleet.kept(WINDOWS, name.clone()).await else {
-                    return;
+                let kept = match app.fleet.kept(WINDOWS, name.clone()).await {
+                    Ok(kept) => kept,
+                    Err(why) => return desk.failed("what it remembers of a window", &why),
                 };
                 if let Some(kept) = kept.and_then(|kept| serde_json::from_slice(&kept).ok()) {
                     windows.kept.insert(name, kept);
@@ -351,7 +383,26 @@ async fn pass(app: &App) {
         }
         let (activity, summary, result) = quota::ran(told, &recoveries);
         let done = Some((activity, summary.as_str()));
-        let _ = book.complete_run(&run_id, "completed", Some(&result), "", done, world, at);
+        // A run that answers a request is kept as completed while it may still act; one that
+        // may not was cut off by the book (`Ok(false)`). One the book refused to complete
+        // (what it would keep is beyond its bounds) is closed as failed: a run left running
+        // keeps every later look of the keeper from beginning.
+        match book.complete_run(&run_id, "completed", Some(&result), "", done, world, at) {
+            Ok(true) => {}
+            Ok(false) => eprintln!("clarp-host: the Quota keeper's run {run_id} was cut off"),
+            Err(refused) => {
+                let why = format!("its result could not be kept: {}", refused.code);
+                let closed = book.complete_run(&run_id, "failed", None, &why, None, world, at);
+                eprintln!(
+                    "clarp-host: the Quota keeper's run {run_id} {why}; closed as failed{}",
+                    if closed.is_ok() {
+                        ""
+                    } else {
+                        ", and that was refused too"
+                    }
+                );
+            }
+        }
         lane.record((base, longest), (activity, &summary), now);
         rows.push(row(LANE, THE_LANE, &lane));
         // What was settled thirty days ago is let go.
@@ -367,14 +418,17 @@ async fn pass(app: &App) {
         }
         (Some(lane.next_run(base)), rows, gone)
     });
-    let Ok(next) = looked.await else {
-        return;
+    let next = match looked.await {
+        Ok(next) => next,
+        Err(why) => return desk.failed("the janitors' book to keep its look", &why),
     };
+    desk.read_well();
     // The keeper changed while it looked: the next look finds out how it stands.
     let Some(next) = next else {
         return;
     };
-    desk.arm(next);
+    // Armed after its own write: only what changes the book from now on moves the count.
+    desk.arm(next, app.janitors.changes());
     deliver(app, &keeper, receipts).await;
     crate::janitors::changed(app);
 }
@@ -414,10 +468,13 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
                 preview: said("preview"),
                 needs_response: false,
             };
-            let rang = app.pusher.turn_done_and_told(done).await;
-            rang.ok()
-                .and_then(|rang| rang.alert.map(|counted| counted.told()))
-                .unwrap_or_else(|| json!({}))
+            // A pusher that never answers (it is gone) leaves the receipt waiting, to be
+            // tried at the next look, as the Python Host leaves one whose push raised.
+            let Ok(rang) = app.pusher.turn_done_and_told(done).await else {
+                continue;
+            };
+            rang.alert
+                .map_or_else(|| json!({}), |counted| counted.told())
         };
         receipt.delivery = Some(delivery);
         receipt.settled_at = Some(now);
