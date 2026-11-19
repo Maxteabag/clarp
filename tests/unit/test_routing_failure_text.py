@@ -33,6 +33,15 @@ STUB = textwrap.dedent(f"""\
         said = "error: " + json.dumps({{"input": given}})
     elif mode == "denied":
         said = "permission denied: " + request
+    elif mode == "ascii":
+        said = "error: " + ascii(request)
+    elif mode == "bytes":
+        said = "error: " + repr(request.encode("utf-8", "surrogateescape"))
+    elif mode == "unicode_escape":
+        said = "error: " + request.encode("unicode_escape").decode("ascii")
+    elif mode == "nfd":
+        import unicodedata
+        said = "error: " + unicodedata.normalize("NFD", request)
     elif mode == "partial":
         at = given.find(os.environ["PARTIAL_FROM"])
         said = "bad input near '" + given[at:at + 30] + "'"
@@ -225,7 +234,6 @@ def test_a_refusal_that_repeats_its_prompt_is_still_a_refusal_not_a_fallback(fai
     assert START not in str(failure) and "permission denied" not in str(failure)   # the words go
     assert getattr(failure, "denied", None) is True                               # the fact stays
     assert model_fallbacks._as_provider_failure(failure) is None
-    assert model_fallbacks.is_provider_failure(failure) is False
 
 
 @pytest.mark.parametrize("provider", BACKENDS)
@@ -236,3 +244,60 @@ def test_every_backends_exit_is_named_by_its_facts(failing, provider):
         model_fallbacks.json_call({"backend": provider, "model": ""}, f"{START} the plan", SCHEMA)
     assert (getattr(caught.value, "backend", None), getattr(caught.value, "returncode", None)) == (provider, 3)
     assert goal_keeper.error_code(caught.value) == f"{provider}_exit_3"
+
+
+# ---- R85, the hold of 06:06: Norwegian prompts printed as ascii(), a bytes repr, unicode_escape or NFD ----
+
+NORWEGIAN = "Spør Bjørn: får vi ny pålogging på kundeportalen i år, eller må vi vente på neste høst?"
+DENSE = "Både økonomi og påløpte følgeskader må vurderes før søknad om støtte sendes, så få årsoppgjøret på plass først."
+SHAPES = ("ascii", "bytes", "unicode_escape", "nfd")
+
+
+def _encoded(shape, text):
+    import unicodedata
+    return {"ascii": ascii(text), "bytes": repr(text.encode("utf-8")),
+            "unicode_escape": text.encode("unicode_escape").decode("ascii"),
+            "nfd": unicodedata.normalize("NFD", text)}[shape]
+
+
+@pytest.mark.parametrize("sentence", [NORWEGIAN, DENSE], ids=["norwegian", "dense"])
+@pytest.mark.parametrize("shape", SHAPES)
+@pytest.mark.parametrize("provider", BACKENDS)
+def test_a_norwegian_prompt_printed_in_any_shape_is_never_kept(failing, provider, shape, sentence):
+    failing(shape)
+    with pytest.raises(model_fallbacks.ProviderFailure) as caught:
+        model_fallbacks.json_call({"backend": provider, "model": ""}, sentence, SCHEMA)
+    assert str(caught.value) == f"{provider} exited with status 3 (runner_exit)"
+
+
+@pytest.mark.parametrize("sentence", [NORWEGIAN, DENSE], ids=["norwegian", "dense"])
+@pytest.mark.parametrize("shape", SHAPES)
+def test_cli_failure_reads_every_shape_of_the_prompt(shape, sentence):
+    failure = model_fallbacks.cli_failure("claude", "error: " + _encoded(shape, sentence), prompt=sentence, returncode=3)
+    assert str(failure) == "claude exited with status 3 (runner_exit)"
+
+
+def test_invalid_utf8_in_a_bytes_repr_is_left_as_written_and_never_raises():
+    failure = model_fallbacks.cli_failure("claude", r"error: b'\xff\xfe\xc3' broke", prompt=NORWEGIAN, returncode=3)
+    assert "\\xff" in str(failure) or "xff" in str(failure)
+
+
+@pytest.mark.parametrize("words, category", [
+    # The classifier names no timeout by its words (a timeout reaches the router as its exception);
+    # a timed-out connection does: ETIMEDOUT.
+    ("connect ETIMEDOUT 104.18.32.47:443", "connection"),
+    ("You've hit your usage limit. Try again at Sep 13th", "usage_limit"),
+    ("Error 529: overloaded", "transient"),
+], ids=["a timed-out connection", "a quota", "an overload"])
+def test_the_category_is_read_once_from_the_raw_words_however_late_they_come(words, category):
+    """The kept line is the first 300 characters; the words that name the failure come after 1,500
+    characters of other output, so a category read from the kept line would miss them."""
+    output = "x" * 1500 + " " + words
+    failure = model_fallbacks.cli_failure("claude", output, prompt="an unrelated request", returncode=3)
+    assert failure.category == category and len(str(failure)) <= model_fallbacks.KEPT_MOST
+
+
+def test_a_refusal_named_after_1500_characters_is_still_a_refusal():
+    failure = model_fallbacks.cli_failure("claude", "x" * 1500 + " permission denied", prompt="an unrelated request",
+                                          returncode=3)
+    assert failure.denied is True and model_fallbacks._as_provider_failure(failure) is None

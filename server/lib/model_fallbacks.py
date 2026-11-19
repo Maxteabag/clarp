@@ -109,36 +109,14 @@ _DENIED_RE = re.compile(
 )
 
 
-def is_provider_failure(cause, message=""):
-    """True only when the AI/provider itself failed.
-
-    ``cause`` is either a category already named by :mod:`error_classify` (the
-    dispatcher classified the turn) or the exception raised around a model
-    call. ``message`` supplies the failure text when ``cause`` is a category.
-    """
-    from . import error_classify
-
-    if isinstance(cause, BaseException):
-        message = message or str(cause)
-        if isinstance(cause, (Cancelled, AlreadyAttempted, KeyboardInterrupt)):
-            return False
-        if getattr(cause, "denied", False):
-            return False
-        cause = (
-            cause.category
-            if isinstance(cause, ProviderFailure)
-            else error_classify.classify_error(message)
-        )
-    return bool(cause in PROVIDER_FAILURES and not _DENIED_RE.search(message))
-
-
 # A CLI's own words on failure are what an operator debugs with ("rate limit reached", "unknown
 # model ..."), but a CLI that repeats its input puts the request into them (issue 360, R85). They
 # are kept only when they hold none of it: no run of ECHO_RUN characters in common with the prompt.
 ECHO_RUN = 24
 KEPT_MOST = 300
 _SPACE = re.compile(r"[\s\x00-\x1f\x7f]+")
-_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|[\"\\/bfnrt'])")
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|x[0-9a-fA-F]{2}|[\"\\/bfnrt'])")
+_BYTE_RUN = re.compile(r"(?:\\x[0-9a-fA-F]{2})+")
 _ESCAPED = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
 
 
@@ -147,27 +125,43 @@ def _plain(text):
     return _SPACE.sub(" ", text).strip()
 
 
-def _unescaped(text):
-    """``text`` with JSON (and Python repr) string escapes undone, as a tool that prints its
-    input as a JSON or repr string writes it."""
+def _unescaped(text, *, utf8_bytes=False):
+    """``text`` with JSON and Python string escapes undone, as a tool that prints its input as a
+    JSON string, a repr, ascii() or unicode_escape writes it: \\uXXXX, \\UXXXXXXXX, \\xNN and the
+    one-letter escapes. ``utf8_bytes``: read as a bytes repr (b'...'), where each run of \\xNN is
+    UTF-8 bytes: decoded as such, an invalid sequence left as written, never raised; else each
+    \\xNN is the code point NN, as ascii() and unicode_escape write it."""
+    if utf8_bytes:
+        text = _BYTE_RUN.sub(lambda run: bytes(
+            int(pair, 16) for pair in run.group(0).split("\\x")[1:]).decode(
+                "utf-8", errors="backslashreplace"), text)
+
     def one(match):
         code = match.group(1)
-        if code[0] == "u":
+        if code[0] in "uUx":
             return chr(int(code[1:], 16))
         return _ESCAPED.get(code, code)
     return _ESCAPE.sub(one, text)
 
 
+def _nfc(text):
+    import unicodedata
+    return unicodedata.normalize("NFC", text)
+
+
 def echoes(text, prompt):
     """Whether ``text`` shares a run of ECHO_RUN characters (the whole prompt when it is shorter)
     with ``prompt``, read as written or with its string escapes undone; white space compared as
-    one space. Covered: JSON and Python string escapes, newlines and tabs written as spaces. Not
-    covered: base64, percent or HTML encoding, a run broken by an inserted ellipsis."""
-    request = _plain(prompt or "")
+    one space, both sides NFC-normalised. Covered: JSON and Python string escapes (also \\xNN and
+    \\UXXXXXXXX, a bytes repr read as UTF-8), ascii() and unicode_escape, decomposed letters,
+    newlines and tabs written as spaces. Not covered: base64, percent or HTML encoding, an echo
+    wrapped at a narrow width with a prefix on every line, a run broken by an inserted ellipsis."""
+    request = _plain(_nfc(prompt or ""))
     if not request:
         return False
     run = min(ECHO_RUN, len(request))
-    for form in {_plain(text), _plain(_unescaped(text))}:
+    for form in {_plain(_nfc(text)), _plain(_nfc(_unescaped(text))),
+                 _plain(_nfc(_unescaped(text, utf8_bytes=True)))}:
         if any(form[at:at + run] in request for at in range(0, len(form) - run + 1)):
             return True
     return False
