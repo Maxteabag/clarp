@@ -40513,7 +40513,6 @@ fn working_labels_are_reported_in_the_checkers_own_chat() {
     let world = [
         ("TYPESAFE_API_KEY", "example"),
         ("CLARP_JUDGE_ENDPOINT", url.as_str()),
-        ("CLAUDE_PWA_HEARTBEAT_ACTIVE_HOURS", ""),
     ];
     let start = || place.start_in("fixture", &["--janitors-checked-every-ms", "100"], &world);
     let host = start();
@@ -40694,8 +40693,61 @@ fn working_labels_are_reported_in_the_checkers_own_chat() {
     assert_eq!(runs(&host)[0]["status"], "cancelled");
     assert_eq!(docs(&host).as_array().unwrap().len(), 1);
     drop(host);
+    // Restart with the site still enabled and the checker paused. Make the lane due,
+    // then compare every kind of audit record across repeated looks and restarts.
     due(&mut lane);
-    let host = start();
-    assert_eq!(host.get(&path)["janitor"]["enabled"], false);
-    assert_eq!(calls.lock().unwrap().len(), 2);
+    let records = || {
+        [
+            "label-checker-last-check",
+            "label-checker-cadence",
+            "label-checker-fingerprint",
+            "label-judgment-diagnostic",
+            "label-judgment-cursor",
+            "janitor-run",
+        ]
+        .map(|kind| kept_records(&place, kind))
+    };
+    // Seed another document on the same stopped Janitor's shelf. Its exact id
+    // has no relationship to the label-checker's naming convention.
+    {
+        use clarp_ports::log::{LogEngine as _, NewItem};
+        let checker = read["artifact"]["agent_id"].as_str().unwrap();
+        let mut log = clarp_store_sqlite::SqliteEngine::new()
+            .open(
+                &place.root.join("data/agents").join(checker),
+                clarp_codec::standard_set("zstd").unwrap(),
+            )
+            .unwrap();
+        let original = log.find(&format!("a-{id}")).unwrap().unwrap();
+        let mut copy: clarp_kernel::artifacts::ArtifactRecord =
+            serde_json::from_slice(&original.body).unwrap();
+        copy.artifact.artifact_id = "ordinary-checker-document".into();
+        log.append(&[
+            NewItem::new(original.kind, now_ms(), serde_json::to_vec(&copy).unwrap())
+                .keyed("a-ordinary-checker-document"),
+        ])
+        .unwrap();
+    }
+    let before = records();
+    for _ in 0..3 {
+        let host = start();
+        assert_eq!(host.get(settings)["settings"]["sites"]["labels"], true);
+        assert_eq!(host.get(&path)["janitor"]["enabled"], false);
+        std::thread::sleep(Duration::from_millis(350));
+        let other = host.get("/artifacts/ordinary-checker-document");
+        assert_eq!(
+            other["artifact"]["artifact_id"],
+            "ordinary-checker-document"
+        );
+        assert_eq!(other["artifact"]["agent_id"], read["artifact"]["agent_id"]);
+        assert!(
+            !host
+                .get("/attention/inbox")
+                .to_string()
+                .contains("ordinary-checker-document")
+        );
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        drop(host);
+        assert_eq!(records(), before);
+    }
 }

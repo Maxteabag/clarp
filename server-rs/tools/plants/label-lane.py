@@ -32,4 +32,8 @@ for a,b in [
 ]:
     if a==b or "invalid judgment response" in a:continue
     plant(H,"host",a,b)
+RUNS["paused"] = ["test","--lib","a_paused_checker_leaves_history_and_storage_unopened_on_repeated_looks"]
+plant(H,"paused","None => Ok(i64::MAX),","None => active(Owner::default()).await,")
+plant("clarp-host/src/library.rs","host","let art = view.books.artifacts.get(artifact_id)?;",
+      'if !artifact_id.starts_with("label-audit-"){return None;} let art = view.books.artifacts.get(artifact_id)?;')
 if __name__=="__main__":raise SystemExit(runner.main(__file__,RUNS,plants))

@@ -1505,9 +1505,6 @@ pub(crate) fn badge(app: &App) -> Vec<String> {
 pub(crate) fn find(app: &App, artifact_id: &str) -> Option<Value> {
     let fleet = Fleet::of(app);
     artifacts::get(&fleet.shelves(), artifact_id, app.clock.now_ms()).or_else(|| {
-        if !artifact_id.starts_with("label-audit-") {
-            return None;
-        }
         app.fleet.directory().janitors.iter().find_map(|m| {
             let view = m.agent.view();
             let art = view.books.artifacts.get(artifact_id)?;

@@ -142,15 +142,6 @@ pub fn batch(entries: &[Evidence]) -> Option<Value> {
 
 pub const JUDGE_SECONDS: u64 = 15;
 
-/// Apply the heartbeat's active hours using the Host's local time at this check.
-pub fn quiet(span: &str, zone: &str, now: i64) -> bool {
-    let Ok(at) = jiff::Timestamp::from_millisecond(now) else {
-        return false;
-    };
-    let local = crate::oracle::threads::zone_named(zone).to_datetime(at);
-    crate::heartbeat::outside_active_hours(span, local.hour() as u32 * 60 + local.minute() as u32)
-}
-
 pub fn summary(checked: usize, found: usize, filed: bool) -> String {
     let repeat = if found > 0 && !filed {
         " (already reported)"
