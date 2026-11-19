@@ -74,7 +74,8 @@ def build_initial_prompt(
     include_technical_glossary: bool,
     max_prompt_chars: int = MAX_PROMPT_CHARS,
 ) -> str:
-    """Build a bounded previous-transcript hint, prioritising active names."""
+    """Build a bounded previous-transcript hint. The names come likeliest first
+    (VocabService.active_agent_names), so the budget cuts from the end (R109)."""
     if not include_agent_names and not include_technical_glossary:
         return ""
     names = _unique_names(active_agent_names)
@@ -84,7 +85,7 @@ def build_initial_prompt(
         len(name_prefix) + len(name_text) + 1 > max_prompt_chars
         or estimated_prompt_tokens(f"{name_prefix}{name_text}.") > PROMPT_TOKEN_LIMIT
     ):
-        names.pop(0)
+        names.pop()
         name_text = ", ".join(names)
     names_prompt = (
         f"{name_prefix}{name_text}." if include_agent_names and name_text else "")
