@@ -173,7 +173,7 @@ fn locked(state: &Mutex<State>) -> MutexGuard<'_, State> {
 }
 
 /// Starts a worker and has it load its model.
-fn load(worker: &Worker) -> Result<Running, String> {
+fn load(worker: &Worker) -> std::io::Result<Running> {
     let mut command = clarp_child::command(&worker.program);
     command
         .args(&worker.args)
@@ -182,15 +182,17 @@ fn load(worker: &Worker) -> Result<Running, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     let mut child = command.spawn().map_err(|error| {
-        format!(
+        std::io::Error::other(format!(
             "the transcription worker could not be started ({}): {error}",
             worker.program.display()
-        )
+        ))
     })?;
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err("the transcription worker has no pipes".to_string());
+        return Err(std::io::Error::other(
+            "the transcription worker has no pipes",
+        ));
     };
     let (sender, lines) = mpsc::channel();
     std::thread::spawn(move || {
@@ -214,7 +216,9 @@ fn load(worker: &Worker) -> Result<Running, String> {
         "language": worker.language,
     });
     if running.say(&asked).is_err() {
-        return Err(format!("{ENDED} before it loaded its model"));
+        return Err(std::io::Error::other(format!(
+            "{ENDED} before it loaded its model"
+        )));
     }
     let until = Instant::now() + worker.load_within;
     loop {
@@ -222,10 +226,15 @@ fn load(worker: &Worker) -> Result<Running, String> {
         let line = match running.lines.recv_timeout(left) {
             Ok(line) => line,
             Err(RecvTimeoutError::Timeout) => {
-                return Err("the transcription model took too long to load".to_string());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the transcription model took too long to load",
+                ));
             }
             Err(RecvTimeoutError::Disconnected) => {
-                return Err(format!("{ENDED} while it loaded its model"));
+                return Err(std::io::Error::other(format!(
+                    "{ENDED} while it loaded its model"
+                )));
             }
         };
         let Ok(said) = serde_json::from_str::<Value>(&line) else {
@@ -237,7 +246,9 @@ fn load(worker: &Worker) -> Result<Running, String> {
                 let why = said["error"].as_str().unwrap_or("unknown reason");
                 // The first line says what failed; what follows is where in the worker.
                 let first = why.lines().next().unwrap_or(why);
-                return Err(format!("the transcription model did not load: {first}"));
+                return Err(std::io::Error::other(format!(
+                    "the transcription model did not load: {first}"
+                )));
             }
             _ => {}
         }
@@ -251,6 +262,42 @@ impl Whisper {
             state: Arc::new(Mutex::new(State::Down)),
             clips: AtomicU64::new(0),
         }
+    }
+
+    /// Load an installed alternative on the calling thread. The caller serializes
+    /// replacement so the child that used the old model has exited first.
+    pub fn installed_variant(
+        &self,
+        id: &str,
+        directory: &Path,
+        language: Option<String>,
+    ) -> Result<Self, Deaf> {
+        let mut worker = self.worker.clone();
+        if !directory.is_absolute() {
+            return Err(Deaf::Failed(
+                "an installed transcription model needs an absolute path".into(),
+            ));
+        }
+        worker.model = directory
+            .to_str()
+            .ok_or_else(|| {
+                Deaf::Failed("the installed transcription model path is not UTF-8".into())
+            })?
+            .to_owned();
+        worker.language = language;
+        worker.scratch = worker.scratch.join("variant");
+        worker.env.push(("HF_HUB_OFFLINE".into(), "1".into()));
+        worker.load_within = Duration::from_secs(150);
+        let child = load(&worker).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                Deaf::Loading
+            } else {
+                Deaf::Failed(format!("could not load transcription model {id}: {error}"))
+            }
+        })?;
+        let loaded = Self::new(worker);
+        *locked(&loaded.state) = State::Up(child);
+        Ok(loaded)
     }
 
     /// Starts the worker now, so that its model is loaded when the first clip comes.
@@ -271,7 +318,7 @@ impl Whisper {
             *state = match loaded {
                 Ok(running) => State::Up(running),
                 Err(why) => State::Broken {
-                    why,
+                    why: why.to_string(),
                     at: Instant::now(),
                 },
             };
@@ -510,7 +557,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"op":"load"'*)
       case "$line" in
-        *'"model_source":"broken"'*)
+        *'"model_source":"broken"'*|*'/broken"'*)
           printf '%s\n' '{"event":"load_error","error":"no such model\n  File \"worker.py\", line 1"}'
           exit 1 ;;
       esac
@@ -596,6 +643,26 @@ done
             assert!(Instant::now() < end, "waited in vain for {what}");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn an_installed_variant_loads_before_its_first_clip() {
+        let place = Place::new();
+        let default = Whisper::new(place.worker("small.en"));
+        let variant = default
+            .installed_variant("faster-whisper:medium", &place.dir, None)
+            .unwrap();
+        assert!(variant.ready());
+        assert!(!default.ready());
+        let mut handed = None;
+        let heard = variant
+            .hear_observed(clip(), asked("", 0), &mut handed)
+            .unwrap();
+        assert_eq!(handed.as_deref(), Some("auto"));
+        assert!(heard.segments[0].text.contains("13 bytes"));
+        let broken =
+            default.installed_variant("faster-whisper:broken", &place.dir.join("broken"), None);
+        assert!(matches!(broken, Err(Deaf::Failed(why)) if why.contains("no such model")));
     }
 
     #[test]

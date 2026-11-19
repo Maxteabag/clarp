@@ -19,6 +19,9 @@
 
 pub(crate) mod call;
 pub(crate) mod guidance;
+mod inventory;
+mod managed;
+mod variants;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -62,6 +65,8 @@ pub struct Ears {
     /// The Host's own engine, and the model it runs (`small.en`). `None`: this Host has
     /// none of its own.
     own: Option<(Arc<Whisper>, String)>,
+    inventory: inventory::Inventory,
+    variants: variants::Variants,
     settings_lock: tokio::sync::Mutex<()>,
     /// ElevenLabs Scribe, which is there when its key is.
     scribe: Arc<dyn Listener>,
@@ -116,7 +121,8 @@ impl Ears {
 
     /// The engines this Host was configured with. The Host's own is started at once, so
     /// that its model is loaded when the first clip comes.
-    pub fn new(config: &Config) -> Self {
+    pub async fn new(config: &Config, fleet: &crate::fleet::FleetHandle) -> Result<Self, String> {
+        let inventory = inventory::Inventory::open(fleet).await?;
         let own = (!config.whisper_python.is_empty()).then(|| {
             let worker = Worker {
                 args: vec![config.whisper_worker.to_string_lossy().to_string()],
@@ -134,6 +140,12 @@ impl Ears {
             let engine = Arc::new(whisper);
             (engine, config.whisper_model.clone())
         });
+        let active = own
+            .as_ref()
+            .map(|(_, model)| format!("{OWN_PROVIDER}:{model}"));
+        inventory
+            .recover(fleet, &config.data_dir.join("models"), active.as_deref())
+            .await;
         let keys = OwnerFile::new(config.speech_keys.clone());
         let read = keys.clone();
         let mut scribe = Scribe::new("scribe_v2", Box::new(move || read.key("elevenlabs")));
@@ -167,8 +179,10 @@ impl Ears {
                 &config.chirp_decoder,
             ))
         };
-        Self {
+        Ok(Self {
             own,
+            inventory,
+            variants: Default::default(),
             judge: Default::default(),
             vocab: Default::default(),
             workspace: Default::default(),
@@ -183,7 +197,7 @@ impl Ears {
             language: config.speech_language.clone(),
             kept: config.data_dir.join("transcriptions"),
             jobs: Mutex::default(),
-        }
+        })
     }
 
     /// The key of a provider of engines, where the owner has one for it: read now, kept
@@ -332,18 +346,47 @@ impl Ears {
         listen_for: &str,
         clip: (&axum::body::Bytes, &str),
         observed: &mut Option<String>,
+        has_fallback: bool,
     ) -> Result<Heard, Told> {
-        let chosen = self
-            .engine_of(model)
-            .map_err(|(status, why)| refuse(status, why))?;
+        let variant =
+            model.starts_with("faster-whisper:") && self.own_id().as_deref() != Some(model);
+        let (chosen, selection) = if variant && let Some((default, _)) = &self.own {
+            let (engine, guard) = self
+                .variants
+                .select(default, model, &self.inventory, has_fallback)
+                .await?;
+            (
+                Chosen {
+                    engine,
+                    loading: format!("transcription model loading: {model}"),
+                    provider: None,
+                },
+                Some(guard),
+            )
+        } else {
+            (
+                self.engine_of(model)
+                    .map_err(|(status, why)| refuse(status, why))?,
+                None,
+            )
+        };
         let handed = match chosen.provider {
             Some(provider) => languages::handed(language, provider)
                 .map_err(|why| refuse(StatusCode::INTERNAL_SERVER_ERROR, why))?,
             None => {
-                let own = self.own.as_ref().map(|(_, model)| model.as_str());
+                let own = if variant {
+                    model.strip_prefix("faster-whisper:")
+                } else {
+                    self.own.as_ref().map(|(_, model)| model.as_str())
+                };
                 let knows = own.and_then(languages::own_language);
                 knows.map(str::to_string)
             }
+        };
+        let inference = if chosen.provider.is_none() {
+            Some(self.variants.inference().await?)
+        } else {
+            None
         };
         let (engine, listen_for) = (chosen.engine, listen_for.to_string());
         let (audio, kind) = (clip.0.clone(), clip.1.to_string());
@@ -359,6 +402,15 @@ impl Ears {
             };
             let mut captured = None;
             let result = engine.hear_observed(clip, asked, &mut captured);
+            let mut selection = selection;
+            if let Some(slot) = selection.as_mut()
+                && !engine.ready()
+            {
+                slot.take();
+            }
+            drop(engine);
+            drop(inference);
+            drop(selection);
             (result, captured)
         })
         .await;
@@ -709,6 +761,7 @@ async fn hear_chat(
                 listen_for,
                 (audio, content_type),
                 &mut None,
+                place + 1 < order.len(),
             )
             .await;
         match heard {
@@ -826,12 +879,21 @@ fn told_map(entries: Vec<(String, String)>) -> Value {
 /// one hears a clip nobody named one for.
 async fn capabilities(State(app): State<App>) -> Json<Value> {
     let ears = &app.ears;
-    let mut models = Vec::new();
-    if let (Some(id), Some((_, model))) = (ears.own_id(), &ears.own) {
-        models.push(json!({
-            "id": id, "name": heard::label(model), "provider": OWN_PROVIDER, "model": model,
-            "weight": heard::weight(model),
-        }));
+    let mut models = ears.inventory.models();
+    let registered: Vec<_> = models
+        .iter()
+        .filter_map(|r| r["id"].as_str().map(str::to_owned))
+        .collect();
+    if let (Some(id), Some((_, model))) = (ears.own_id(), &ears.own)
+        && !registered.contains(&id)
+    {
+        models.insert(
+            0,
+            json!({
+                "id": id, "name": heard::label(model), "provider": OWN_PROVIDER, "model": model,
+                "weight": heard::weight(model),
+            }),
+        );
     }
     let usable = |row: &Value| row["available"] == true;
     models.extend(cloud_models(ears).into_iter().filter(usable));
@@ -841,7 +903,7 @@ async fn capabilities(State(app): State<App>) -> Json<Value> {
         "engine": ears.default_engine(&app.fleet.directory()),
         "turn_taking": turn_taking(&app.fleet.directory()),
         "models": models,
-        "catalog": [],
+        "catalog": heard::inventory::catalog(&registered),
         "adapters": [],
     }))
 }
@@ -1075,6 +1137,10 @@ pub fn routes() -> Router<App> {
         )
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
+        .route(
+            "/transcription-models/remove",
+            post(inventory::remove_model),
+        )
         .route("/vocab/budgets", get(vocabulary_budgets))
         .route(
             "/transcription-providers",

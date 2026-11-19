@@ -2270,6 +2270,12 @@ request: once nothing, twice an item, the chip counts it while Mike works, a thi
 closes it; failing again, archived, failing once more, discarded; a restart keeps them) and the wrong rules
 `tools/plants/janitor-attention.py`.
 
+**Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn.
+
+The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.
+
+Removing an external model forgets its record. Removing a managed model deletes only its own directory under the Host’s models root. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`

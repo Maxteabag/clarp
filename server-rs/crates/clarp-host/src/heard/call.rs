@@ -130,7 +130,7 @@ pub(super) async fn hear(
             .unwrap_or(language);
         let result = app
             .ears
-            .heard_by(model, lang, listen_for, clip, &mut handed)
+            .heard_by(model, lang, listen_for, clip, &mut handed, Some(i) != last)
             .await;
         let elapsed = began.elapsed().as_millis() as u64;
         match result {
