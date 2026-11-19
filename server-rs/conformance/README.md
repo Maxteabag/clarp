@@ -58,7 +58,10 @@ Python Host. Every difference is exactly one of:
    in it is meant to stay, and two rules keep it true: **an awaited id the run did not show
    fails the run** (named: take it out of `awaited.txt`), so the port's commit has to take its
    lines out; and **an id in both `intended.txt` and `awaited.txt` is an error**. An awaited id
-   of a scenario the run did not run (a question about some scenarios) is not asked about.
+   of a scenario the run did not run (a question about some scenarios) is not asked about. That
+   is why a line names its scenario first: a line whose first word is no scenario of the corpus
+   would never be asked, so never be stale, and pass for ever; it is an error that names the
+   line wherever the register is loaded for a run, whichever scenarios the run chose.
 
 The suite counts only while its proof holds: every planted change is caught by a difference
 of the kind it names, in a scenario that ran to its end. A scenario that did not run to its
