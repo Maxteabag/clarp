@@ -185,6 +185,15 @@ pub(crate) async fn publish(
     if data.duplicate {
         return Err(no("invalid_object", "", catalog.as_ref().map_err(|e| *e)));
     }
+    // The route makes a text of every other value (`str()`): only a text can fail to be one.
+    let texts: Vec<(&str, &J)> = spec::ENVELOPE_TEXTS
+        .iter()
+        .filter_map(|key| Some((*key, data.get(key)?)))
+        .filter(|(_, value)| matches!(value, J::Text(_)))
+        .collect();
+    if let Err(refusal) = spec::envelope(&texts) {
+        return Err(answer(&refusal, catalog.as_ref().map_err(|e| *e)));
+    }
     let envelope = Envelope {
         session: field(data, "session", ""),
         title: field(data, "title", ""),
@@ -221,6 +230,15 @@ pub(crate) async fn update(
     let Some(payload) = data.get("payload") else {
         return Err(no("missing_key", "/payload", catalog));
     };
+    // Each as the body has it, before anything strips or slices it; one that is not given
+    // stays as it is (R72).
+    let given: Vec<(&str, &J)> = ["title", "summary", "status"]
+        .iter()
+        .filter_map(|key| Some((*key, data.get(key)?)))
+        .collect();
+    if let Err(refusal) = spec::envelope(&given) {
+        return Err(answer(&refusal, catalog));
+    }
     let or = |key: &str, otherwise: &str| data.get(key).map_or(otherwise.to_string(), python_str);
     let envelope = Envelope {
         session: current.session.clone(),
