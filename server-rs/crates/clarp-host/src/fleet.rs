@@ -3612,8 +3612,10 @@ impl Fleet {
         record.deleted_at_ms = Some(asked_before.unwrap_or_else(|| self.now_ms()));
         if asked_before.is_none() {
             self.stop_for_roster(&record, "agent deleted")?;
-            self.closing
-                .insert(record.agent_id.clone(), record.deleted_at_ms.unwrap_or_default());
+            self.closing.insert(
+                record.agent_id.clone(),
+                record.deleted_at_ms.unwrap_or_default(),
+            );
         }
         // Its thread is the one writer of what is its own: until it has closed, nothing of
         // that is touched, and the agent stays as it is. Its tombstone is kept.
