@@ -1347,6 +1347,7 @@ fn a_goal_change_keeps_its_event_and_number_in_its_owners_append() {
                 keep_spools: false,
                 accounts: clarp_kernel::recovery::Accounts::None,
                 epoch: "fixture".into(),
+                hides_coordination: false,
             };
             let (mut actor, _) = clarp_actor::Actor::open(
                 profile,

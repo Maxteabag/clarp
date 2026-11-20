@@ -23,6 +23,10 @@
 //! And an agent stops another's turn, or repairs it, with `clarp-admin stop` and `clarp-admin
 //! repair` (the skill `clarp-sessions`), known by its own turn.
 //!
+//! And an agent leaves a note for its user with `clarp-admin tell-user` (the Python Host's PR
+//! 482): from its own running turn, known by the turn's token, also from a turn that answers
+//! another agent ([`crate::coordination::leave_note`]).
+//!
 //! Everything else `clarp-admin` does belongs to the Python installation: asked for here, it
 //! says that it is not on this Host, and does nothing.
 
@@ -64,7 +68,7 @@ fn not_here(what: &str) -> ToolAnswer {
 
 /// `clarp-admin prompt`: a message to an agent of this Host, from an agent (`--from`) or
 /// from something that runs by itself (`--origin`).
-pub(crate) async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
+pub(crate) async fn prompt(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     let valued = [
         "--to", "--from", "--text", "--delay", "--origin", "--server",
     ];
@@ -145,7 +149,17 @@ pub(crate) async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
             ),
         };
     }
-    match edge::send_message(app, request).await {
+    // Made from the agent's own turn, by the token the turn gave its tools: the Host knows
+    // whose message it is (`coordination::principal`).
+    let token = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    let sent = match crate::coordination::made(app, token, false, false).await {
+        Ok(made) => edge::send_from(app, request, &made).await,
+        Err(failed) => Err(failed),
+    };
+    match sent {
         Ok(sent) => match serde_json::to_string_pretty(&sent) {
             Ok(shown) => ToolAnswer::printed(0, shown),
             Err(error) => ToolAnswer::said(1, format!("clarp-admin prompt: {error}")),
@@ -162,6 +176,64 @@ pub(crate) async fn prompt(app: &App, args: &[String]) -> ToolAnswer {
             1,
             format!(
                 "clarp-admin prompt: the Host could not do it: {}",
+                failed.message()
+            ),
+        ),
+    }
+}
+
+/// `clarp-admin tell-user --from SESSION --text TEXT`: a note for the user in the agent's own
+/// chat, shown and notified whatever turn it is in. Only from the agent's own running turn:
+/// the Host knows it by the token the turn gave its tools.
+async fn tell_user(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
+    let usage = |why: &str| {
+        ToolAnswer::said(
+            2,
+            format!(
+                "usage: clarp-admin tell-user [-h] --from FROM_SESSION --text TEXT\n\
+                 clarp-admin tell-user: error: {why}"
+            ),
+        )
+    };
+    let parsed = match parse(args, &["--from", "--text"], &[], &[]) {
+        Ok(parsed) => parsed,
+        Err(why) => return usage(&why),
+    };
+    let missing: Vec<&str> = ["--from", "--text"]
+        .into_iter()
+        .filter(|name| parsed.option(name).is_none())
+        .collect();
+    if !missing.is_empty() {
+        return usage(&format!(
+            "the following arguments are required: {}",
+            missing.join(", ")
+        ));
+    }
+    let body = json!({
+        "session": parsed.option("--from").unwrap_or_default(),
+        "text": parsed.option("--text").unwrap_or_default(),
+        // One id for the note, however often the tool has to ask: a note the Host wrote is
+        // answered again, not written twice.
+        "note_id": format!("tell-{}", ids::hex(8)),
+    });
+    let token = call
+        .env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str);
+    match crate::coordination::leave_note(app, &body, token).await {
+        Ok(answer) => shown(&answer),
+        Err(refused) if refused.status().is_client_error() => ToolAnswer::said(
+            4,
+            format!(
+                "clarp-admin tell-user: the Host refused it (HTTP {}): {}",
+                refused.status().as_u16(),
+                refused.message()
+            ),
+        ),
+        Err(failed) => ToolAnswer::said(
+            1,
+            format!(
+                "clarp-admin tell-user: the Host could not do it: {}",
                 failed.message()
             ),
         ),
@@ -1887,7 +1959,8 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
             crate::controller_action_tool::run(app, call, rest).await
         }
         Some((command, rest)) if command == "bookkeeping" => bookkeeping(app, rest).await,
-        Some((command, rest)) if command == "prompt" => prompt(app, rest).await,
+        Some((command, rest)) if command == "prompt" => prompt(app, call, rest).await,
+        Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,
         Some((command, rest)) if command == "agent" => agent(app, call, rest).await,
         Some((command, _)) if command == "sessions" => sessions(app),
         Some((command, rest)) if command == "model" => model(app, call, rest).await,

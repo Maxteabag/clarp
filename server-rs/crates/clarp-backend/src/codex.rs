@@ -813,7 +813,7 @@ mod tests {
         let mut hub = Hub::new("epoch-1", "agent-1", "rachel");
         let mut client = View::new();
         client.apply_snapshot(&json!({"epoch": "epoch-1", "lseq": 0}));
-        let mut sent = hub.begin_turn("rachel", "conv-1", "tr-1", None, 100);
+        let mut sent = hub.begin_turn("rachel", "conv-1", "tr-1", None, "user", 100);
         for (at, signal) in read_all(lines, (Some(0), None)).into_iter().enumerate() {
             if let Signal::Glimpse(glimpse) = signal {
                 sent.extend(hub.show(&glimpse, Some("tr-1"), 101 + at as i64));

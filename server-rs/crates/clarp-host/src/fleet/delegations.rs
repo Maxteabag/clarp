@@ -1034,6 +1034,7 @@ mod tests {
                 keep_spools: false,
                 accounts: clarp_kernel::recovery::Accounts::None,
                 epoch: "test".into(),
+                hides_coordination: false,
             };
             let open = || {
                 clarp_actor::Actor::open(

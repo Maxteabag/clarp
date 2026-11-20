@@ -65,6 +65,7 @@ impl World {
             keep_spools: false,
             accounts: clarp_kernel::recovery::Accounts::None,
             epoch: "epoch-test".to_string(),
+            hides_coordination: true,
         };
         Self {
             root,
@@ -4894,7 +4895,7 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
     let (asked, marks) = from_an_agent("u-a1", "tr-1");
     let now = world.tick();
     let (sent, out) = actor
-        .send_marked(&asked, Admission::Queue, &marks, now)
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
         .unwrap()
         .unwrap();
     assert_eq!(sent.turn, Some(TurnId(1)));
@@ -4958,7 +4959,7 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
     };
     assert_eq!(
         actor
-            .send_marked(&theirs, Admission::Queue, &named, now)
+            .send_marked(&theirs, Admission::Queue, None, &named, now)
             .unwrap()
             .unwrap_err(),
         TraceTaken
@@ -4969,14 +4970,14 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
     };
     assert_eq!(
         actor
-            .send_marked(&posing, Admission::Queue, &named, now)
+            .send_marked(&posing, Admission::Queue, None, &named, now)
             .unwrap()
             .unwrap_err(),
         TraceTaken,
         "the same id with another origin is another message"
     );
     let (retried, _) = actor
-        .send_marked(&asked, Admission::Queue, &marks, now)
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
         .unwrap()
         .unwrap();
     assert!(retried.duplicate);
@@ -5182,7 +5183,7 @@ fn costs(rows: u64) -> Costs {
         let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
         let now = world.tick();
         let (sent, out) = actor
-            .send_marked(&asked, Admission::Queue, &marks, now)
+            .send_marked(&asked, Admission::Queue, None, &marks, now)
             .unwrap()
             .unwrap();
         assert!(!sent.duplicate);

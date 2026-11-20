@@ -511,13 +511,16 @@ impl Hub {
     // --- turns ---
 
     /// A turn begins. A turn that never settled is ended first, interrupted. The same turn
-    /// begun again while it runs changes nothing.
+    /// begun again while it runs changes nothing. `audience` is whom it is for
+    /// (`coordination::AGENTS` for a turn that answers another agent, else `USER`), as the
+    /// Host decided it at the turn's message.
     pub fn begin_turn(
         &mut self,
         session: &str,
         conv: &str,
         turn_id: &str,
         started_at_ms: Option<i64>,
+        audience: &str,
         now: i64,
     ) -> Vec<Value> {
         let mut out = Vec::new();
@@ -548,7 +551,7 @@ impl Hub {
         let started = started_at_ms.filter(|at| *at != 0).unwrap_or(now);
         let turn = json!({
             "turn_id": turn_id, "status": "running", "started_at_ms": started,
-            "ended_at_ms": null, "worked_ms": null, "tool_count": 0,
+            "ended_at_ms": null, "worked_ms": null, "tool_count": 0, "audience": audience,
         });
         let op = json!({"op": "turn", "conv": self.conv, "turn": turn});
         self.emit(vec![op], (true, ""), now, &mut out);
