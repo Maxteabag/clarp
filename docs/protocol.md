@@ -598,6 +598,9 @@ recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 `X-Transcription-ID: <uuid>` for idempotent retries, `X-Transcription-Model`
 to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
 pass both ids on the following `/send`.
+When the engine cannot be handed the agent's language set (a set such as `no,en` goes only
+to Google Chirp or ElevenLabs Scribe), the Host hears the recording with one that can, or its
+own engine, and the response adds `engine_fallback`: `{"from", "to", "reason": "language_set"}`.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a
 participant also sends `X-Clarp-Call-Id: <call_id>` and

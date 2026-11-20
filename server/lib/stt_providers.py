@@ -84,6 +84,32 @@ CATALOG: tuple[dict, ...] = (
 VALID_IDS = frozenset(item["id"] for item in CATALOG)
 
 
+class LanguageSetUnsupported(ValueError):
+    """The engine cannot be handed the agent's language set ("no,en")."""
+
+
+# Hosted engines that can be handed a language set; any other refuses one.
+_SET_PROVIDERS = frozenset({"google", "elevenlabs"})
+
+
+def language_set_engine() -> str:
+    """A hosted engine that can take a language set, for a recording whose engine
+    cannot (R152): the Host's selected engine when it can, else the first one with
+    a key in catalogue order; "" when there is none (the Host's own engine hears it)."""
+    from .config import load
+    cfg = load()
+
+    def usable(model_id: str) -> bool:
+        provider = provider_of(model_id)
+        return (provider in _SET_PROVIDERS and _model_row(model_id) is not None
+                and bool(_key_for(cfg, provider)))
+
+    selected = selected_engine()
+    if usable(selected):
+        return selected
+    return next((row["id"] for item in CATALOG for row in item["models"] if usable(row["id"])), "")
+
+
 def provider_of(model_id: str) -> str:
     return model_id.split(":", 1)[0].strip().lower() if ":" in model_id else ""
 
@@ -372,8 +398,9 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     from .focus import current_focus_session
     session = stt_language.current_session() or current_focus_session()
     language = stt_language.current_language() or stt_language.language_for(session)
-    if "," in language and provider not in {"google", "elevenlabs"}:
-        raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
+    if "," in language and provider not in _SET_PROVIDERS:
+        raise LanguageSetUnsupported(
+            "agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
     # The argument handed to the adapter, as the attempt records it: Scribe
     # drops a set and detects without bound, so it is handed none.
     handed = None if provider == "elevenlabs" and "," in language else language

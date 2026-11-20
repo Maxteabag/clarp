@@ -356,3 +356,59 @@ def test_only_an_engine_with_a_fallback_after_it_bounds_its_selection_wait(monke
     tp._run_call_steps(calls, steps, call_stt, focus="", audio_bytes=b"audio",
                        ctype="audio/webm", prompt="")
     assert calls.bounds == [("a", 10.0), ("b", None)]
+
+
+# R152: a recording must never fail because of a choice made in another screen. A hosted
+# engine chosen on the device that cannot take the agent's language set ("no,en") answered
+# 500; the Host's chain now hears it and the answer says which engine did.
+def test_an_engine_that_cannot_take_the_language_set_falls_back_and_says_so(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "from elevenlabs:scribe_v2"
+    assert out.payload["engine_fallback"] == {
+        "from": "deepgram:nova-3", "to": "elevenlabs:scribe_v2", "reason": "language_set"}
+    assert [c[1] for c in stt.calls] == ["deepgram:nova-3", "elevenlabs:scribe_v2"]
+    assert rec.voice[-1][1]["detail"]["model"] == "elevenlabs:scribe_v2"
+
+
+def test_without_a_set_engine_the_hosts_own_engine_hears_it(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    stt = PerModelSTT({"cartesia:ink-whisper": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="cartesia:ink-whisper", focus="rachel")
+    assert out.status == 200 and out.payload["text"] == "hello there"       # transcribe_bytes
+    assert out.payload["engine_fallback"]["to"] == "server-default"
+
+
+def test_an_answer_without_a_fallback_has_no_new_field():
+    out = _run(_ctx(ModelSTT()), Recorder(), requested_model="deepgram:nova-3")
+    assert out.status == 200 and "engine_fallback" not in out.payload
+
+
+def test_only_the_language_set_refusal_falls_back(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "elevenlabs:scribe_v2")
+    stt = PerModelSTT({"deepgram:nova-3": ValueError("something else")})
+    assert _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3").status == 500
+    assert [c[1] for c in stt.calls] == ["deepgram:nova-3"]
+
+
+def test_the_set_engine_is_the_hosts_choice_first_then_the_first_with_a_key(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config())
+    keys = {"elevenlabs": "k", "google": "k"}
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: keys.get(provider, ""))
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    assert stt_providers.language_set_engine() == "google:chirp_3"
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "deepgram:nova-3")
+    assert stt_providers.language_set_engine() == "elevenlabs:scribe_v2"     # catalogue order
+    keys.clear()
+    assert stt_providers.language_set_engine() == ""
+
+
+def test_the_refusal_is_the_typed_error(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "current_language", lambda: "no,en")
+    with pytest.raises(stt_providers.LanguageSetUnsupported):
+        stt_providers.transcribe("deepgram:nova-3", b"", "audio/wav", "")
