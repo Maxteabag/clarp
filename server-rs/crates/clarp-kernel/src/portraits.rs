@@ -11,6 +11,14 @@
 //! writes. Whether a file is there and what is in it is the Host's to find out; nothing here
 //! reads a disk.
 
+/// The stored display choice shared by the roster and the settings route.
+pub const MODEL_SETTING: &str = "avatars.model_variants";
+
+/// How the stored display preference is read by the apps' snapshot and settings route.
+pub fn model_avatars(stored: Option<&str>) -> bool {
+    stored.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+}
+
 /// Where the pictures of names are fetched from.
 pub const AVATARS: &str = "/static/avatars";
 /// Where the pictures of a name on a family of model are fetched from.

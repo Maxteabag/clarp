@@ -1187,6 +1187,7 @@ pub(crate) fn agent_row(
     families: &Families,
     member: &Member,
     faces: &crate::faces::Faces,
+    owners: &toml::Table,
     used_up: &crate::quota::UsedUp,
 ) -> Value {
     let view = member.agent.view();
@@ -1213,7 +1214,11 @@ pub(crate) fn agent_row(
     row["avatar_symbol"] = json!(record.avatar_symbol);
     row["model_avatar_url"] = json!(match &own {
         Some(_) => String::new(),
-        None => faces.on_model(&record.persona, view.backend, &record.model),
+        None => {
+            let field = format!("{}_model", view.backend);
+            let default = crate::owner::text_at(owners, &["agents", &field]).unwrap_or_default();
+            faces.on_model(&record.persona, view.backend, &record.model, &default)
+        },
     });
     row["avatar_url"] = json!(match own {
         Some(own) => own,
@@ -1270,12 +1275,13 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let used_up = crate::quota::used_up(&app).await;
     // Which agents the user calls live: by their profiles, as they are now.
     let called_live = app.calls.taking(&app).await;
+    let owners = app.mouth.owners();
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| {
-            let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
+            let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
             if called_live.contains(&member.record.session) {
                 row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
             }
@@ -1290,7 +1296,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         if without_archived && put_away(member) {
             continue;
         }
-        let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
+        let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
         row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
         row["model_avatar_url"] = json!("");
@@ -1298,7 +1304,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     }
     // Who an agent can be: the personas this Host has built in, with the voices the owner's
     // file gives them and the look the owner gave them, and the personas the owner made.
-    let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
+    let [named, cartesia, gemini] = crate::owner::personas(&owners);
     let personas = directory.personas.listed(&clarp_kernel::personas::Owner {
         roster: &named,
         cartesia: &cartesia,
@@ -1355,7 +1361,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         "roster": roster,
         "personas": personas,
         "available_mcp_servers": [],
-        "model_avatars": false,
+        "model_avatars": clarp_kernel::portraits::model_avatars(directory.setting(clarp_kernel::portraits::MODEL_SETTING)),
         // Nothing explains a tool's use here, and an app is told so wherever it asks: it
         // then shows the tool's own command on the row.
         "tool_explanations": apps::explanations_told(&app),
@@ -1665,7 +1671,7 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
         .map(|member| {
             // Whether its tool's account is used up is none of the fields of this answer.
             let (families, unasked) = (Families::of(&directory), crate::quota::UsedUp::new());
-            agent_row(&directory, &families, member, &app.faces, &unasked)
+            agent_row(&directory, &families, member, &app.faces, &app.mouth.owners(), &unasked)
         })
         .unwrap_or_default();
     // Three of them the Python Host answers as it stores them: a number, 0 or 1.

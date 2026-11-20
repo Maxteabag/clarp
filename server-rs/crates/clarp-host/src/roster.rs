@@ -311,6 +311,7 @@ async fn archived(
     let page = rules::page(&order, limit, position.as_ref());
     let families = edge::Families::of(&directory);
     let used_up = crate::quota::used_up(&app).await;
+    let owners = app.mouth.owners();
     let agents: Vec<Value> = order[page.start..page.end]
         .iter()
         .filter_map(|(_, agent_id)| {
@@ -319,7 +320,7 @@ async fn archived(
                 .iter()
                 .find(|member| member.record.agent_id == *agent_id)?;
             Some(edge::agent_row(
-                &directory, &families, member, &app.faces, &used_up,
+                &directory, &families, member, &app.faces, &owners, &used_up,
             ))
         })
         .collect();

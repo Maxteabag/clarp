@@ -120,10 +120,6 @@ async fn portrait_generation() -> Json<Value> {
     Json(kept("/agent-portrait-generation"))
 }
 
-async fn avatar_settings() -> Json<Value> {
-    Json(kept("/avatar-settings"))
-}
-
 async fn no_pictures() -> ApiError {
     not_built("Making and choosing pictures is")
 }
@@ -357,7 +353,6 @@ pub fn routes() -> Router<App> {
             "/agent-portrait-generation",
             get(portrait_generation).post(no_pictures),
         )
-        .route("/avatar-settings", get(avatar_settings).post(no_pictures))
         .route(
             "/diagnostics/settings",
             get(crate::diagnostics::settings).post(crate::diagnostics::update),
