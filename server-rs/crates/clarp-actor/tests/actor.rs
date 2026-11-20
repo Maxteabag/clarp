@@ -8,7 +8,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use clarp_actor::conversation::Which;
-use clarp_actor::{Action, Actor, ImportedRow, Outputs, Profile, ShimOrder, TurnFate};
+use clarp_actor::{
+    Action, Actor, ImportedRow, Marks, Noted, Outputs, Profile, ShimOrder, TRACE_TAKEN, TraceTaken,
+    TurnFate,
+};
 use clarp_backend::Backend;
 use clarp_backend::claude::Claude;
 use clarp_backend::scripted::Scripted;
@@ -27,7 +30,7 @@ static WORLDS: AtomicU64 = AtomicU64::new(0);
 /// Everything around one agent's actor: its disk, its shims, and the clock.
 struct World {
     root: PathBuf,
-    engine: MemEngine,
+    engine: Box<dyn LogEngine>,
     profile: Profile,
     backend: Arc<dyn Backend>,
     now_ms: i64,
@@ -65,7 +68,7 @@ impl World {
         };
         Self {
             root,
-            engine: MemEngine::new(),
+            engine: Box::new(MemEngine::new()),
             profile,
             backend: Arc::new(Scripted::echo()),
             now_ms: 1_000,
@@ -200,6 +203,7 @@ fn shown(actor: &Actor) -> Vec<(String, String)> {
                 Entry::Notice(notice) => format!("notice: {}", notice.code),
                 Entry::TurnEnd(end) => format!("end: {}", end.status),
                 Entry::Commentary(part) => format!("along the way: {}", part.reply),
+                Entry::Note(note) => format!("note: {}", note.text),
                 Entry::Imported(imported) => format!(
                     "from before, {}: {}",
                     imported.row["role"].as_str().unwrap_or("?"),
@@ -4864,4 +4868,380 @@ fn r121_a_turn_that_waits_on_a_refused_launch_names_its_trace() {
     assert_eq!(tried.len(), 8, "{tried:?}");
     assert_eq!(actor.status().live, None);
     assert_eq!(actor.running_trace(1).unwrap(), None);
+}
+
+/// A message another agent sent, under a trace its caller named.
+fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
+    let message = Message {
+        trace_id: Some(trace.to_string()),
+        origin: Origin::Agent {
+            agent_id: "a-boss".to_string(),
+        },
+        ..message(id, "from an agent")
+    };
+    let marks = Marks {
+        coordination: Some("a-boss".to_string()),
+        trace_named: true,
+    };
+    (message, marks)
+}
+
+#[test]
+fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_are_counted_into_its_end() {
+    let mut world = World::new("coordination");
+    let mut actor = world.open();
+    let (asked, marks) = from_an_agent("u-a1", "tr-1");
+    let now = world.tick();
+    let (sent, out) = actor
+        .send_marked(&asked, Admission::Queue, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert_eq!(sent.turn, Some(TurnId(1)));
+    world.carry_out(&mut actor, out);
+    // The mark is the acceptance's, found by its key: one item, written with the turn.
+    assert_eq!(actor.mark(1).unwrap().as_deref(), Some("a-boss"));
+    // What the log holds under a key, as the agent's own log finds it.
+    let found = |world: &World, key: &str| {
+        let log = world
+            .engine
+            .open(&world.profile.dir, standard_set("zstd").unwrap())
+            .unwrap();
+        log.find(key).unwrap().map(|item| (item.kind, item.turn))
+    };
+    assert_eq!(
+        found(&world, "coordination-1"),
+        Some((kind::AGENT_EVENT, Some(1))),
+        "the acceptance of a marked turn has its key"
+    );
+
+    // A note from the running turn: a row of its own in the turn's trace.
+    let now = world.tick();
+    let (noted, out) = actor.leave_note(1, "note-a1-green", "Green.", now).unwrap();
+    assert_eq!(
+        noted,
+        Noted::Written {
+            id: "note-a1-green".to_string(),
+            trace_id: "tr-1".to_string()
+        }
+    );
+    assert!(out.changed.conversation);
+    // The same note again is the same note; the same id with other words is refused; a turn
+    // that is not the running one leaves none.
+    let now = world.tick();
+    let (again, out) = actor.leave_note(1, "note-a1-green", "Green.", now).unwrap();
+    assert_eq!(
+        again,
+        Noted::Again {
+            id: "note-a1-green".to_string(),
+            trace_id: "tr-1".to_string()
+        }
+    );
+    assert!(!out.changed.conversation);
+    let (other, _) = actor.leave_note(1, "note-a1-green", "Red.", now).unwrap();
+    assert_eq!(other, Noted::OtherWords);
+    let (elsewhere, _) = actor.leave_note(2, "note-a1-blue", "Blue.", now).unwrap();
+    assert_eq!(elsewhere, Noted::NotRunning);
+    let (second, _) = actor.leave_note(1, "note-a1-blue", "Blue.", now).unwrap();
+    assert!(matches!(second, Noted::Written { .. }));
+
+    // A send that names the trace another message has is refused; the same message again is
+    // the same message; a trace the Host minted is not asked about.
+    let now = world.tick();
+    let theirs = Message {
+        trace_id: Some("tr-1".to_string()),
+        ..message("u-mine", "mine")
+    };
+    let named = Marks {
+        trace_named: true,
+        ..Marks::default()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&theirs, Admission::Queue, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken
+    );
+    let posing = Message {
+        origin: Origin::User,
+        ..asked.clone()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&posing, Admission::Queue, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken,
+        "the same id with another origin is another message"
+    );
+    let (retried, _) = actor
+        .send_marked(&asked, Admission::Queue, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert!(retried.duplicate);
+    assert!(TRACE_TAKEN.starts_with("trace_id already belongs to another message"));
+
+    // A restart in the middle of the turn loses neither the mark nor the count.
+    drop(actor);
+    let mut actor = world.open();
+    assert_eq!(actor.mark(1).unwrap().as_deref(), Some("a-boss"));
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    let page = actor.tail(100).unwrap();
+    let rows: Vec<(String, Option<String>)> = page
+        .entries
+        .iter()
+        .map(|row| (row.entry.id().to_string(), row.coordination.clone()))
+        .collect();
+    let boss = Some("a-boss".to_string());
+    assert_eq!(
+        rows,
+        vec![
+            ("u-a1".to_string(), boss.clone()),
+            ("note-a1-green".to_string(), boss.clone()),
+            ("note-a1-blue".to_string(), boss.clone()),
+        ]
+    );
+    let end = page
+        .entries
+        .iter()
+        .find_map(|row| row.turn.clone())
+        .expect("the turn ended");
+    assert_eq!(end.note_count, 2);
+
+    // The user's turn after it is not marked, and its end counts no note.
+    world.send(&mut actor, "u-2", "and you?", Admission::Queue);
+    assert_eq!(actor.mark(2).unwrap(), None);
+    world.exits(2, Some(0), None);
+    world.hint(&mut actor);
+    let page = actor.tail(100).unwrap();
+    let mine = page
+        .entries
+        .iter()
+        .find(|row| row.entry.id() == "u-2")
+        .unwrap();
+    assert_eq!(mine.coordination, None);
+    assert_eq!(mine.turn.as_ref().map(|end| end.note_count), Some(0));
+    assert_eq!(
+        found(&world, "coordination-2"),
+        None,
+        "an unmarked turn's acceptance has no key"
+    );
+    assert_eq!(found(&world, "trace-tr-1").map(|(kind, _)| kind), Some(kind::TRACE));
+}
+
+/// Fills an agent's log with `turns` turns that are over, as a long conversation's log holds them:
+/// each its acceptance, its message, its reply, how it ended (a part of the reply's row) and its
+/// settling; another agent's mark on every 87th turn and on the newest `marked_newest`. Written
+/// straight into the log in large appends: the shape the actor reads, without running a turn.
+fn fill(world: &World, turns: u64, marked_newest: u64) {
+    use clarp_kernel::agent::AgentEvent;
+    use clarp_kernel::conversation::{Reply, TurnEnd};
+    use clarp_kernel::journal::coordination_key;
+    use clarp_kernel::turn::TurnEvent;
+    use clarp_ports::log::NewItem;
+    let mut log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let mut items = Vec::new();
+    for turn in 1..=turns {
+        let marked = turn % 87 == 0 || turn + marked_newest > turns;
+        let origin = if marked {
+            Origin::Agent {
+                agent_id: "a-boss".to_string(),
+            }
+        } else {
+            Origin::User
+        };
+        let at = 1_000 + i64::try_from(turn).unwrap();
+        let message_seq = (turn - 1) * 5 + 2;
+        let event = |change: TurnEvent| {
+            serde_json::to_vec(&AgentEvent::Turn {
+                turn: TurnId(turn),
+                change,
+            })
+            .unwrap()
+        };
+        let accepted = TurnEvent::Accepted {
+            turn: TurnId(turn),
+            message_seq,
+            origin: origin.clone(),
+            admission: Admission::Queue,
+            at_ms: at,
+            coordination: marked.then(|| "a-boss".to_string()),
+        };
+        let mut item = NewItem::new(kind::AGENT_EVENT, at, event(accepted)).in_turn(turn);
+        if marked {
+            item.key = Some(coordination_key(turn));
+        }
+        items.push(item);
+        let trace = Some(format!("tp{turn}"));
+        let said = Entry::Message(Message {
+            trace_id: trace.clone(),
+            origin: origin.clone(),
+            ..message(&format!("u-p{turn}"), &format!("message {turn}"))
+        });
+        items.push(said.to_item(at).unwrap().in_turn(turn));
+        let reply = Entry::Reply(Reply {
+            id: format!("r-p{turn}"),
+            turn,
+            text: format!("reply {turn}"),
+            trace_id: trace.clone(),
+            origin,
+            tools: Vec::new(),
+        });
+        items.push(reply.to_item(at).unwrap());
+        let end = Entry::TurnEnd(TurnEnd {
+            id: format!("t-{turn}"),
+            turn,
+            closes: format!("r-p{turn}"),
+            status: "completed".to_string(),
+            started_at_ms: Some(at),
+            ended_at_ms: at,
+            tool_count: 0,
+            trace_id: trace,
+            model: None,
+            tokens_in: None,
+            tokens_out: None,
+            context_tokens: None,
+            cost_micros: None,
+            cost_so_far: None,
+            total: None,
+            limits: None,
+            note_count: 0,
+        });
+        items.push(end.to_item(at).unwrap());
+        let settled = TurnEvent::Settled {
+            outcome: Outcome::Withdrawn {
+                by: "filled".to_string(),
+            },
+            at_ms: at,
+        };
+        items.push(NewItem::new(kind::AGENT_EVENT, at, event(settled)).in_turn(turn));
+        if items.len() >= 10_000 {
+            log.append(&items).unwrap();
+            items.clear();
+        }
+    }
+    if !items.is_empty() {
+        log.append(&items).unwrap();
+    }
+}
+
+/// The median of what `work` took, in microseconds, over `times` runs.
+fn median_us(times: usize, mut work: impl FnMut(usize)) -> u128 {
+    let mut took: Vec<u128> = (0..times)
+        .map(|at| {
+            let began = std::time::Instant::now();
+            work(at);
+            began.elapsed().as_micros()
+        })
+        .collect();
+    took.sort_unstable();
+    took[times / 2]
+}
+
+/// What the reads and writes of coordination cost in a conversation of `rows` rows.
+#[derive(Debug, Clone, Copy)]
+struct Costs {
+    /// A page of 100 of the newest rows, every turn marked.
+    tail_marked: u128,
+    /// A page of 100 rows from the middle, one turn in 87 marked.
+    before_unmarked: u128,
+    /// A send of another agent under a trace its caller named: the trace looked up by key, the
+    /// mark written with the acceptance.
+    send: u128,
+    /// A note from the running turn: the turn's state and the note's id, by key.
+    note: u128,
+    /// The end of a turn that left notes, its count kept as they were written.
+    settle: u128,
+}
+
+fn costs(rows: u64) -> Costs {
+    let mut world = World::new(&format!("costs-{rows}"));
+    world.engine = Box::new(clarp_store_sqlite::SqliteEngine::new());
+    let turns = rows / 2;
+    fill(&world, turns, 2_500.min(turns / 2));
+    let mut actor = world.open();
+    let middle = format!("u-p{}", turns / 2);
+    let tail_marked = median_us(31, |_| {
+        let page = actor.tail(100).unwrap();
+        assert!(page.entries.iter().all(|row| row.coordination.is_some()));
+    });
+    let before_unmarked = median_us(31, |_| {
+        let page = actor.before(&middle, 100).unwrap().unwrap();
+        assert_eq!(page.entries.len(), 100);
+    });
+    let mut sends = 0;
+    let send = median_us(9, |at| {
+        let (asked, marks) = from_an_agent(&format!("u-s{at}"), &format!("ts{at}"));
+        let now = world.tick();
+        let (sent, out) = actor
+            .send_marked(&asked, Admission::Queue, &marks, now)
+            .unwrap()
+            .unwrap();
+        assert!(!sent.duplicate);
+        world.carry_out(&mut actor, out);
+        sends += 1;
+    });
+    let first = turns + 1;
+    let note = median_us(9, |at| {
+        let now = world.tick();
+        let (noted, _) = actor
+            .leave_note(first, &format!("note-a1-n{at}"), "Noted.", now)
+            .unwrap();
+        assert!(matches!(noted, Noted::Written { .. }));
+    });
+    let settle = median_us(5, |at| {
+        let turn = first + u64::try_from(at).unwrap();
+        world.exits(turn, Some(0), None);
+        world.hint(&mut actor);
+    });
+    let end = actor
+        .tail(200)
+        .unwrap()
+        .entries
+        .into_iter()
+        .find(|row| row.entry.id() == "u-s0")
+        .and_then(|row| row.turn)
+        .expect("the first send's turn ended");
+    assert_eq!((sends, end.note_count), (9, 9));
+    Costs {
+        tail_marked,
+        before_unmarked,
+        send,
+        note,
+        settle,
+    }
+}
+
+#[test]
+fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_000() {
+    let small = costs(3_000);
+    let big = costs(300_000);
+    // Written past the test harness's capture, so that a passing run shows the numbers too.
+    let said = format!(
+        "coordination costs, median microseconds, 3,000 rows -> 300,000 rows: {small:?} -> {big:?}\n"
+    );
+    std::io::Write::write_all(&mut std::io::stderr(), said.as_bytes()).unwrap();
+    // Nothing of it grows with the conversation: at most twice the small one's, and a
+    // millisecond of room for a machine that is busy with other tests.
+    let bound = |small: u128| (small * 2).max(small + 1_000);
+    for (what, small, big) in [
+        ("a page of marked rows", small.tail_marked, big.tail_marked),
+        ("a page of unmarked rows", small.before_unmarked, big.before_unmarked),
+        ("a send's acceptance", small.send, big.send),
+        ("a note", small.note, big.note),
+        ("a turn's end", small.settle, big.settle),
+    ] {
+        assert!(big <= bound(small), "{what}: {small} us -> {big} us\n{said}");
+    }
+    // And a page of marked rows costs no more than twice one of unmarked rows.
+    assert!(
+        big.tail_marked <= bound(big.before_unmarked),
+        "marked {} us, unmarked {} us",
+        big.tail_marked,
+        big.before_unmarked
+    );
 }
