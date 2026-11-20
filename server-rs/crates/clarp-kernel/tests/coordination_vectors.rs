@@ -104,7 +104,9 @@ fn whether_a_note_pages_the_user_is_the_python_hosts() {
                 kind,
                 push,
                 muted,
-            } => json!({"notify": true, "reason": reason, "kind": kind, "push": push, "muted": muted}),
+            } => {
+                json!({"notify": true, "reason": reason, "kind": kind, "push": push, "muted": muted})
+            }
             Decision::Suppress { reason } => json!({"notify": false, "reason": reason}),
         };
         assert_eq!(ours, case["decision"], "{case}");
@@ -173,11 +175,8 @@ fn a_sends_origin_and_sender_are_the_python_hosts_from_what_it_claims_and_who_ma
         match ours {
             Ok(principal) => {
                 let origin = coordination::origin(text(&case["origin"]), &principal, peer);
-                let coordination = is_coordination(
-                    &target,
-                    Some(&origin),
-                    Some(&principal.sender_agent_id),
-                );
+                let coordination =
+                    is_coordination(&target, Some(&origin), Some(&principal.sender_agent_id));
                 let ours = json!({
                     "origin": origin,
                     "sender_agent_id": principal.sender_agent_id,
