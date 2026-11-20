@@ -155,7 +155,8 @@ def test_d_a_hidden_run_is_counted_once_on_the_first_visible_row_after_it_whatev
         chat.coordination_turn(f"c{k}")
     after_run = chat.user_turn("u2")
     chat.user_turn("u3")
-    want = {"messages": 6, "exchanges": 3, "agents": [{"agent_id": chat.boss, "name": "Boss"}]}
+    want = {"messages": 6, "exchanges": 3, "agents": [{"agent_id": chat.boss, "name": "Boss"}],
+            "capped": False}
     for limit in (1, 2, 3, 4, 6):
         seen = {}
         answer = chat.log(limit=limit)
@@ -175,7 +176,8 @@ def test_d_what_follows_the_newest_visible_row_is_counted_after_it(chat):
     chat.coordination_turn("c2")
     answer = chat.log()
     assert answer["hidden_after"] == {"messages": 4, "exchanges": 2,
-                                      "agents": [{"agent_id": chat.boss, "name": "Boss"}]}
+                                      "agents": [{"agent_id": chat.boss, "name": "Boss"}],
+                                      "capped": False}
     assert not any("hidden_before" in turn for turn in answer["turns"])
 
 
@@ -223,3 +225,48 @@ def test_o_a_card_published_in_a_coordination_turn_is_in_the_answer_under_hide(c
                             source_trace_id="c1")
     listed = [a["artifact_id"] for a in artifacts.list_artifacts(session="ivy")]
     assert card["artifact_id"] in listed
+
+
+# ---- capped counts -----------------------------------------------------------------------------
+
+def test_a_long_run_is_counted_up_to_the_cap_nearest_its_row_and_says_capped(chat, monkeypatch):
+    monkeypatch.setattr(coordination, "COUNT_CAP", 4)
+    chat.user_turn("u1")
+    for k in range(5):
+        chat.coordination_turn(f"c{k}")                 # 10 messages, 15 rows
+    after = chat.user_turn("u2")
+    answer = chat.log()
+    count = next(t["hidden_before"] for t in answer["turns"] if t["id"] == after[0])
+    assert count["capped"] is True and count["messages"] == 4 and count["exchanges"] == 2
+    chat.coordination_turn("c9")
+    assert chat.log()["hidden_after"] == {"messages": 2, "exchanges": 1, "capped": False,
+                                          "agents": [{"agent_id": chat.boss, "name": "Boss"}]}
+
+
+def test_the_row_cap_stops_a_run_of_rows_without_words(chat, monkeypatch):
+    monkeypatch.setattr(coordination, "COUNT_ROW_CAP", 3)
+    chat.user_turn("u1")
+    for k in range(3):
+        chat.coordination_turn(f"c{k}")                 # 9 rows
+    assert chat.log()["hidden_after"]["capped"] is True
+    assert chat.log()["hidden_after"]["messages"] <= 3
+
+
+def test_a_capped_count_is_the_same_whatever_the_page_size(chat, monkeypatch):
+    monkeypatch.setattr(coordination, "COUNT_CAP", 3)
+    chat.user_turn("u1")
+    for k in range(4):
+        chat.coordination_turn(f"c{k}")
+    after = chat.user_turn("u2")
+    chat.user_turn("u3")
+    counts = set()
+    for limit in (1, 2, 3, 5):
+        answer = chat.log(limit=limit)
+        while True:
+            for t in answer["turns"]:
+                if t["id"] == after[0]:
+                    counts.add(repr(t["hidden_before"]))
+            if not answer["has_more"]:
+                break
+            answer = chat.log(limit=limit, before_message_id=answer["turns"][0]["id"])
+    assert len(counts) == 1 and "'capped': True" in counts.pop()

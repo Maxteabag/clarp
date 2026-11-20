@@ -461,10 +461,14 @@ A note is never left out, and neither are the turns of an agent that cannot leav
 Every answer to a request with `coordination` (the newest page, each older page, each delta)
 echoes the policy it was read under: `coordination: {hidden, source, visibility}`, with
 `source` one of `global`, `chat`, `request`. A visible row that follows rows left out carries
-`hidden_before: {messages, exchanges, agents: [{agent_id, name}]}`. The count runs from the
-previous visible row of the chat, not of the page, so a run is counted once, on the same row,
-however the pages fall. A tail page or a delta carries `hidden_after` for the rows left out
-after the newest visible row. Hidden rows still move the revision: a delta that holds only
+`hidden_before: {messages, exchanges, agents: [{agent_id, name}], capped}`. The count runs from
+the previous visible row of the chat, not of the page, so a run is counted once, on the same
+row, however the pages fall. A tail page or a delta carries `hidden_after` (same shape) for the
+rows left out after the newest visible row. A count reads at most 100 messages (or 400 rows of
+any kind) of its run, nearest its row (`hidden_after`: nearest the newest visible row), and
+then says `capped: true`: draw it as "100+ messages between agents". `messages`, `exchanges`
+and `agents` are then what those first rows hold, not the whole run; a page never waits on
+counting a long run. `capped` is `false` on a count that holds the whole run. Hidden rows still move the revision: a delta that holds only
 hidden rows answers no rows and the new `latest_revision`. To show a hidden run, read the chat
 again with `coordination=show` for that visit; its rows come with `audience: agents`.
 
