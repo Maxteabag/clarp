@@ -10,7 +10,8 @@ use clarp_store_mem::{MemBlobs, MemEngine, MemKeyValue};
 use std::sync::{Condvar, Mutex};
 
 /// The agents' logs. One of a held agent does not open until it is let go; one of a broken
-/// agent ends the thread that opens it the first time.
+/// agent ends the thread that opens it the first time (once let go); one that is cut opens for
+/// its thread and for nobody after it.
 #[derive(Default)]
 struct Gate {
     logs: MemEngine,
@@ -22,12 +23,16 @@ struct Gate {
 struct GateState {
     held: HashSet<String>,
     broken: HashSet<String>,
+    cut: HashSet<String>,
     opened: BTreeMap<String, usize>,
 }
 
 impl Gate {
     fn hold(&self, id: &str) {
         self.state.lock().unwrap().held.insert(id.to_string());
+    }
+    fn mark(&self, id: &str, which: fn(&mut GateState) -> &mut HashSet<String>) {
+        which(&mut self.state.lock().unwrap()).insert(id.to_string());
     }
     fn let_go(&self, id: &str) {
         self.state.lock().unwrap().held.remove(id);
@@ -61,12 +66,15 @@ impl LogEngine for Gate {
         let count = state.opened.entry(id.clone()).or_default();
         *count += 1;
         let first = *count == 1;
+        while state.held.contains(&id) {
+            state = self.moved.wait(state).unwrap();
+        }
         if first && state.broken.contains(&id) {
             drop(state);
             panic!("the thread of {id} ends");
         }
-        while state.held.contains(&id) {
-            state = self.moved.wait(state).unwrap();
+        if !first && state.cut.contains(&id) {
+            return Err(clarp_ports::log::LogError::Storage("the log does not open".into()));
         }
         drop(state);
         self.logs.open(path, codecs)
@@ -186,6 +194,11 @@ impl Place {
     }
 }
 
+/// What the fleet counts as left out, by kind.
+fn counts(fleet: &FleetHandle) -> BTreeMap<String, u64> {
+    fleet.left_out().counts()
+}
+
 fn helper_state(fleet: &FleetHandle) -> Option<String> {
     fleet
         .directory()
@@ -290,7 +303,63 @@ async fn an_agent_that_answers_after_the_bound_is_removed_when_asked_again_and_n
     assert!(again.elapsed() < agent::CLOSE_WITHIN);
     removed_whole(&place, &fleet).await;
     // Deleted once: when it was first asked.
-    assert_eq!(stored(&fleet, HELD).await.deleted_at_ms, Some(deleted_at));
+    let kept = stored(&fleet, HELD).await;
+    assert_eq!(kept.deleted_at_ms, Some(deleted_at));
+    // Its removal is over: the agent taken in again under its id and deleted is deleted anew.
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    assert!(fleet.adopt(kept).await.unwrap().is_ok());
+    assert!(fleet.remove("held".into()).await.unwrap());
+    let again = stored(&fleet, HELD).await.deleted_at_ms.unwrap();
+    assert!(again > deleted_at, "{again} {deleted_at}");
+}
+
+#[tokio::test]
+async fn a_change_between_the_asks_does_not_undo_the_deletion() {
+    let place = Place::new("close-changed");
+    place.engine.hold(HELD);
+    // Its goals cannot be retired: the tombstone alone keeps it deleted.
+    place.engine.mark(HELD, |state| &mut state.cut);
+    let fleet = place.start();
+    not_closed(fleet.remove("held".into()).await);
+    let deleted_at = left_as_it_was(&place, &fleet).await;
+    // Meanwhile it is renamed: the fleet keeps the change at once (only who asked waits for
+    // its thread to take it), and the record it keeps names no deletion.
+    let renamed = fleet.amend("held".into(), Amend::Rename("Held Again".into()));
+    let renamed = tokio::time::timeout(Duration::from_millis(500), renamed).await;
+    assert!(renamed.is_err(), "its thread took the change");
+    assert_eq!(stored(&fleet, HELD).await.deleted_at_ms, None);
+    place.engine.let_go(HELD);
+    assert!(fleet.remove("held".into()).await.unwrap());
+    assert!(fleet.directory().by_session("held").is_none());
+    let kept = stored(&fleet, HELD).await;
+    assert_eq!(kept.deleted_at_ms, Some(deleted_at));
+    assert!(!kept.ledger_retired);
+    // The next start finds it deleted, and leaves its goals for a start that can retire them.
+    drop(fleet);
+    let fleet = place.start();
+    assert!(fleet.directory().by_session("held").is_none());
+    assert_eq!(counts(&fleet).get("agent-ledger"), Some(&1));
+}
+
+#[tokio::test]
+async fn an_agent_whose_thread_ends_while_its_close_waits_is_closed_then() {
+    let place = Place::new("close-ends");
+    place.engine.hold(HELD);
+    place.engine.mark(HELD, |state| &mut state.broken);
+    let fleet = place.start();
+    // Its thread ends a second into the wait, without answering.
+    let engine = place.engine.clone();
+    let ends = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(1));
+        engine.let_go(HELD);
+    });
+    let asked = Instant::now();
+    assert!(fleet.remove("held".into()).await.unwrap());
+    let waited = asked.elapsed();
+    assert!(waited >= Duration::from_secs(1), "{waited:?}");
+    assert!(waited < agent::CLOSE_WITHIN, "{waited:?}");
+    ends.join().unwrap();
+    removed_whole(&place, &fleet).await;
 }
 
 #[tokio::test]
@@ -319,14 +388,14 @@ async fn an_agent_that_never_answers_holds_no_other_request_and_is_never_half_re
 #[tokio::test]
 async fn an_agent_whose_thread_has_ended_is_closed_at_once() {
     let place = Place::new("close-ended");
-    place
-        .engine
-        .state
-        .lock()
-        .unwrap()
-        .broken
-        .insert(HELD.to_string());
+    place.engine.mark(HELD, |state| &mut state.broken);
     let fleet = place.start();
+    // Its thread has opened its log, and ended there.
+    let opened = Instant::now();
+    while place.engine.opened(HELD) == 0 && opened.elapsed() < Duration::from_secs(5) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
     let asked = Instant::now();
     assert!(fleet.remove("held".into()).await.unwrap());
     assert!(asked.elapsed() < Duration::from_secs(1));
@@ -334,7 +403,7 @@ async fn an_agent_whose_thread_has_ended_is_closed_at_once() {
 }
 
 #[tokio::test]
-async fn a_second_delete_while_the_first_waits_waits_on_the_same_close() {
+async fn a_second_delete_while_the_first_waits_is_bounded_too_and_deletes_once() {
     let place = Place::new("close-twice");
     place.engine.hold(HELD);
     let fleet = place.start();
