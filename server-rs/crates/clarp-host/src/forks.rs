@@ -216,6 +216,7 @@ async fn seed_of(member: &Member) -> String {
 /// Makes one child: its worktree, the helper, and its task sent from its parent. Answers
 /// its row.
 async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Result<Value, Refused> {
+    parent.agent.accepting_work().map_err(removing)?;
     let record = &parent.record;
     let cwd = if child.repo.is_empty() {
         let asked = if child.cwd.is_empty() {
@@ -298,6 +299,10 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
     Ok(row)
 }
 
+fn removing(why: crate::agent::Unavailable) -> Refused {
+    Refused::new(503, crate::agent::REMOVING_CODE, why.0)
+}
+
 /// Forks an agent into the children a request asks for. Answers the parent and a row for
 /// each child: its name and either its session, where it works, its tool, how it started
 /// and whether its task was delivered, or why it was not made. A request that is malformed
@@ -310,6 +315,10 @@ pub(crate) async fn fork_agent(app: &App, session: &str, request: &Value) -> Ans
         let none = Refused::new(404, "agent_not_found", format!("No live agent: {session}"));
         return Err(told(&none));
     };
+    parent
+        .agent
+        .accepting_work()
+        .map_err(|why| told(&removing(why)))?;
     if parent.agent.view().status.backend_session.is_none() {
         let why = format!("{} has no conversation to fork yet", parent.record.session);
         return Err(told(&Refused::new(409, "no_conversation", why)));
