@@ -87,7 +87,7 @@ fn dispatched(heard: &Mutex<Vec<Value>>, session: &str, client_msg_id: &str) -> 
     dispatched.unwrap()
 }
 
-/// A stand-in for Claude Code (and Codex) that writes down the token of the turn it runs in,
+/// A stand-in for Claude Code that writes down the token of the turn it runs in,
 /// under its agent's session, and runs on, where the test marked its session to hold, until
 /// the test lets it go. It answers "on it".
 fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
@@ -99,6 +99,9 @@ fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path
     for dir in [&tokens, &release, &holds] {
         std::fs::create_dir_all(dir).unwrap();
     }
+    // Claude's assistant message IDs are unique across turns. Expand the stand-in's PID
+    // inside its otherwise single-quoted JSON so a later reply has its own log row.
+    let answers = STAND_IN_ANSWERS.replace("msg_1", "msg_'\"$$\"'");
     let script = [
         "#!/bin/sh\nread -r message\n",
         &format!(
@@ -112,11 +115,22 @@ fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path
             release.display(),
             holds.display()
         ),
-        STAND_IN_ANSWERS,
+        &answers,
     ]
     .concat();
     let claude = place.root.join("claude");
     program(&claude, &script);
+    program(
+        &place.root.join("codex"),
+        r#"#!/bin/sh
+test "$1" = exec || exit 0
+cat >/dev/null
+printf '%s\n' '{"type":"thread.started","thread_id":"00000000-0000-7000-8000-00000000c0de"}'
+printf '%s\n' '{"type":"turn.started"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"on it"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}'
+"#,
+    );
     (tokens, release, holds)
 }
 
@@ -127,6 +141,7 @@ fn start_host(place: &Place) -> Host {
     let cache = home.join(".cache");
     let state = home.join(".local/state");
     let claude = place.root.join("claude");
+    let codex = place.root.join("codex");
     place.start_without(
         "",
         &[],
@@ -137,7 +152,7 @@ fn start_host(place: &Place) -> Host {
             ("XDG_CACHE_HOME", cache.to_str().unwrap()),
             ("XDG_STATE_HOME", state.to_str().unwrap()),
             ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
-            ("CLARP_CODEX_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
         ],
         &[
             "CLAUDE_CONFIG_DIR",
@@ -630,10 +645,11 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     assert_eq!(afar["audience"], "agents", "{afar}");
     assert!(afar.get("sender_agent_id").is_none(), "{afar}");
     // An agent on Codex is hidden here too: its turns carry this Host's token.
-    let (_, to_cody) = send(
+    let (status, to_cody) = send(
         &ivy_turn,
         json!({ "session": "cody", "text": "review", "client_msg_id": "c-6" }),
     );
+    assert_eq!(status, 200, "{to_cody}");
     wait_for("Cody's turn", || {
         answered(&host, "cody", &to_cody["trace_id"])
     });
@@ -741,7 +757,6 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     let before = token_of("hush");
     host.send("hush", "work quietly", "h-3");
     let hush = begun("hush", &before);
-    let told_before = told_of("hush").len();
     let (status, quiet) = note(
         &[("X-Clarp-Turn", hush.as_str())],
         json!({ "session": "hush", "text": "Done, quietly.", "note_id": "quiet" }),
@@ -751,10 +766,15 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         (200, &json!(true), &json!("agent-note-muted")),
         "{quiet}"
     );
+    let notification = || {
+        told_of("hush")
+            .into_iter()
+            .find(|event| event["source_message_id"] == quiet["message_id"])
+    };
     wait_for("the user to be told of the muted note", || {
-        told_of("hush").len() > told_before
+        notification().is_some()
     });
-    let told = told_of("hush").last().cloned().unwrap();
+    let told = notification().unwrap();
     assert_eq!(
         (&told["push"], &told["muted"], &told["reason"]),
         (&json!(false), &json!(true), &json!("agent-note-muted")),
