@@ -348,6 +348,9 @@ def run(action_id: str, *, actor: str, request_id: str, source: dict | None = No
                     result = {**(last[1] or {"action_id": action["id"], "title": action["title"],
                                              "type": action["type"], "ok": True}),
                               "debounced": True, "duration_ms": 0}
+                    # Kept under its request id like any answer (R132): the same request
+                    # repeated after the window is that answer again, not a second run.
+                    settings_store.set_text(key, json.dumps(result))
                     _audit("debounced", actor=actor, action_id=action["id"], source=source or {})
                     return result
                 done = threading.Event()
