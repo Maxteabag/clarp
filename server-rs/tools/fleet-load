@@ -240,12 +240,21 @@ def measure(root,shape,pop,env,deadline):
         finally:host.close(kill=index==3)
 
 
-def moves(root,shape,env,deadline,limit=None):
+def moves(root,shape,env,deadline,limit=None,local_jobs=0):
     done=records(root/"moves.jsonl")
     host=Host(root,env,"full")
     source_host=source(shape,root/"work")
     try:
         present={a["session"] for a in host.snapshot["agents"]}
+        if local_jobs:
+            current={a.get("persona") for a in host.snapshot["agents"] if a.get("is_janitor")}
+            for index in range(local_jobs):
+                name=f"Sample maintenance {index}"
+                if name not in current:
+                    get(host.port,"/janitors",{"name":name,"backend":"claude","cwd":str(root/"work"),
+                        "request_id":f"benchmark-job-{index}","template_id":"scheduled-prompt",
+                        "options":{"instructions":"Synthetic."},"attachments":[{"attachment_id":f"sample-{index}",
+                         "trigger_id":"schedule","config":{"cron":"15 3 * * *","timezone":"UTC"}}]})
         if any(session(i) in present for i in range(len(done),len(shape))):
             raise RuntimeError("unreceipted identity exists; reconcile before continuing")
         for i in range(len(done),len(shape) if limit is None else limit):
@@ -351,6 +360,8 @@ def observe(root,shape,env,deadline,stage):
         after=counters(host.proc.pid)
         result=dict(limit=target,first_line=host.first_line,bound=host.bound,ready=host.ready,http=host.http,
                     initial_missing=len(absent),early_log=early,sentinels=observed,visible=len(host.snapshot["agents"]),
+                    janitors=sum(bool(a.get("is_janitor")) for a in host.snapshot["agents"]),
+                    backend_counts={b:sum(a.get("backend")==b for a in host.snapshot["agents"]) for b in sorted({str(a.get("backend")) for a in host.snapshot["agents"]})},
                     samples=samples,idle_elapsed=NOW()-at,counters={k:after[k]-before[k] for k in before},
                     settled=memory(host.proc.pid),peak=host.peak,disk=footprint(root))
         if stage.get("turn") and target and NOW()+10<deadline:
@@ -416,7 +427,7 @@ def main():
         if not 0<=stage["limit"]<=len(shape):raise ValueError("invalid move endpoint")
         verify_limit()
     try:
-        if a.phase=="populate":moves(root,shape,env,start+remaining,stage["limit"])
+        if a.phase=="populate":moves(root,shape,env,start+remaining,stage["limit"],stage.get("janitors",0))
         elif a.phase=="observe":observe(root,shape,env,start+remaining,stage)
         elif a.phase=="move":moves(root,shape,env,start+remaining)
         else:measure(root,shape,a.phase,env,start+remaining)
