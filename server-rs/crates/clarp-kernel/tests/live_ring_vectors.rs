@@ -463,7 +463,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                         ticket: &minted.3,
                     };
                     let called = rings.user_call(
-                        (&principal, &step["agent"], None),
+                        (&principal, &step["agent"], step.get("client").and_then(Value::as_str)),
                         (&step["request_id"], &step["client_nonce"]),
                         &known,
                         &world,
@@ -488,7 +488,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                         opening_mode: step.get("opening_mode"),
                         request_id: step.get("request_id").unwrap_or(&Value::Null),
                         client_nonce: step.get("client_nonce").unwrap_or(&Value::Null),
-                        client: None,
+                        client: step.get("client").and_then(Value::as_str),
                     };
                     // A ring is answered as it was placed: with a call of the ordinary kind
                     // under one new name, or with a grant under four.

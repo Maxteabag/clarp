@@ -33,6 +33,12 @@ def generate():
                     {}, {'type': 'session.started', 'session': {'expires_at': 99}},
                     *[{'type': 'session.usage.updated', 'usage': {'seconds': n, 'voice_estimate_usd': n},
                        'context_window': {'usage_ratio': n}} for n in (0, 1, 1.1, 0.4, 42, 30, -1, True, '2', None)],
+                    # Active and standby time, priced apart when the provider gives both (the reference's PR 479).
+                    *[{'type': 'session.usage.updated', 'usage': {'seconds': 50 + n, **given}} for n, given in enumerate((
+                        {'active_seconds': 20, 'paused_seconds': 30}, {'active_seconds': 21},
+                        {'active_seconds': 1.5, 'paused_seconds': 0}, {'active_seconds': 2, 'paused_seconds': True},
+                        {'active_seconds': -1, 'paused_seconds': 3}, {'active_seconds': 7.25, 'paused_seconds': 12.5}))],
+                    {'type': 'session.usage.updated', 'usage': {'active_seconds': 1, 'paused_seconds': 1}},
                     {'type': 'session.closed', 'usage': {'seconds': end}, 'reason': 'r' * 125 if end else None},
                     {'type': 'session.usage.updated', 'usage': {'seconds': 100}},
                 ]:

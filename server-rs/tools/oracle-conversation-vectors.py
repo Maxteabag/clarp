@@ -1241,7 +1241,8 @@ def run(root) -> dict:
             'listed': listed, 'pending': pending, 'languages': languages,
             'thread': THREAD, 'owner': OWNER, 'roster': ROSTER, 'longest_sound': longest,
             'router': {'model': live.ROUTER, 'instructions': live.ROUTING, 'tools': live.router_tools()},
-            'voice': {'model': live.MODEL, 'voice': live.VOICE, 'prompt': live.PROMPT,
+            # The model a call opens with where the owner names none, as live_config reads it here (PR 479).
+            'voice': {'model': live.live_model(), 'voice': live.VOICE, 'prompt': live.PROMPT,
                       'direct': live.oracle_strategy.DIRECT_INSTRUCTIONS, 'narration_off': live.NARRATION_OFF,
                       'narration_on': live.NARRATION_ON, 'cut_note': live.APPEND_CUT_NOTE,
                       'languages': live.LANGUAGE_NAMES},

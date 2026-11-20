@@ -943,7 +943,7 @@ pub fn snapshot(
         "agent": { "agent_id": agent.agent_id, "session": agent.session },
         "story": story, "texts": texts, "event_context": context,
         "opening_text": context["opening_text"], "language": "nb-NO",
-        "provider": PROVIDER, "model": MODEL, "voice": VOICE,
+        "provider": PROVIDER, "voice": VOICE,
     });
     if let Some(tools) = tools(&profile, story) {
         snapshot["live_tools"] = tools;

@@ -559,7 +559,7 @@ def run(root) -> dict:
     sys.path.insert(0, str(REPO / 'server'))
     import datetime as datetimes
 
-    from lib import agent_live_settings, agent_ring_live, agent_ring_live_socket, group_calls, settings_store
+    from lib import agent_live_settings, agent_ring_live, agent_ring_live_socket, group_calls, oracle_live_wire, settings_store
 
     live, CallError = agent_ring_live, group_calls.CallError
     group_calls._host_id = lambda: 'host-1'
@@ -733,7 +733,11 @@ def run(root) -> dict:
                    'log_line_signs': live.LOG_LINE_CHARS, 'opening_signs': live.OPENING_TEXT_CHARS,
                    'profiles_scanned': live.PROFILE_SCAN_LIMIT, 'request_id_bytes': live.REQUEST_ID_MAX,
                    'team_most': agent_live_settings.MAX_AGENTS, 'request_signs': agent_live_settings.REQUEST_CHARS},
-        'names': {'feature': live.FEATURE, 'model': live.MODEL, 'voice': live.VOICE, 'provider': live.PROVIDER,
+        # The model a client that does not say it accepts another runs on; the names the owner may configure,
+        # the one when he names none, and from which client contract an app is given it (since the reference's PR 479).
+        'names': {'feature': live.FEATURE, 'model': oracle_live_wire.BASELINE_LIVE_MODEL,
+                  'live_models': list(oracle_live_wire.LIVE_MODELS), 'live_model_default': oracle_live_wire.DEFAULT_LIVE_MODEL,
+                  'min_client': live.AGENT_LIVE_MODEL_MIN_CLIENT, 'voice': live.VOICE, 'provider': live.PROVIDER,
                   'protocol': live.PROTOCOL, 'stories': list(live.STORIES), 'sources': list(live.SOURCES),
                   'bindings_key': live.USER_CALL_BINDINGS_KEY, 'phases': list(live.LIVE_PHASES),
                   'close_reasons': list(live.CLOSE_REASONS)},

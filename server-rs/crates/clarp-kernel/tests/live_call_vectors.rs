@@ -95,7 +95,10 @@ fn the_names_and_bounds_are_the_python_hosts() {
     );
     assert_eq!(
         json!({
-            "feature": live::FEATURE, "model": live::MODEL, "voice": live::VOICE,
+            "feature": live::FEATURE, "model": live::MODEL, "live_models": live::LIVE_MODELS,
+            "live_model_default": live::LIVE_MODEL_DEFAULT,
+            "min_client": live::AGENT_LIVE_MODEL_MIN_CLIENT.iter().map(|(name, at)| (name.to_string(), json!(at))).collect::<serde_json::Map<_, _>>(),
+            "voice": live::VOICE,
             "provider": live::PROVIDER, "protocol": live::PROTOCOL, "stories": live::STORIES,
             "sources": live::SOURCES, "bindings_key": live::BINDINGS_KEY, "phases": live::PHASES,
             "close_reasons": live::CLOSE_REASONS,
