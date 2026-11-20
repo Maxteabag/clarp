@@ -181,11 +181,15 @@ def test_release_only_clears_matching_stop_hook():
 
 
 def test_live_config_shape():
+    # No constant names the model: the session runs the one the Host is configured with (issue 473).
+    from lib.oracle_live_wire import live_model
     cfg = mod.live_config()
-    assert cfg == {"model": mod.MODEL, "instructions": PROMPT,
+    assert cfg == {"model": live_model(), "instructions": PROMPT,
                    "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                              "output": {"voice": mod.VOICE}},
                    "delegation": {"type": "client"}}
+    for model in ("gpt-live-1", "gpt-live-1.1"):
+        assert mod.live_config(model=model) == {**cfg, "model": model}
 
 
 def test_live_config_history_and_direct_strategy():

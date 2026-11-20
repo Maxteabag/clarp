@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 108  # render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 111  # render_spec switched on per client (iOS 74); GET /artifacts/<id>/export for the administrator (issue 428, R137). 110: GPT-Live-1.1: the configured model per Host and per agent-Live client; oracle_v2.standby; standby usage (#473). 109: An agent's voice and hearing as the Host resolves them: voice_profile on snapshot rows, voice_defaults (issue 475). 108: Coordination between agents, first part (issue 478): /log rows and the working state carry audience; an agent's note to the user (POST /agent-notes, kind note). 107: An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -237,6 +237,13 @@ FEATURES: tuple[str, ...] = (
     "goal_keeper_receipts",
     # Receipt outcome 'stalled' and the keeper's "Stalled since …" checkpoint.
     "goal_keeper_stalled",
+    "compaction_outcome",
+    # voice_profile on agent rows, the creation answer and roster events; voice_defaults
+    # and voice_profile_version on the snapshot head (docs/protocol.md).
+    "voice_profile",
+    # tts-error says why a reply was not spoken (reason, provider, trace_id), once per
+    # turn, also when no provider had a voice for the agent (docs/protocol.md).
+    "speech_outcome",
 )
 
 
@@ -302,6 +309,9 @@ FEATURE_CONTRACTS["live_activity_fcm"] = 95  # booked by Arnold, 13 Nov 2026 (94
 FEATURE_CONTRACTS["goal_updater"] = 96  # PROVISIONAL: next free above main's 95 (13 Nov 2026)
 FEATURE_CONTRACTS["goal_keeper_receipts"] = 97  # PROVISIONAL: next free above main's 96 (14 Nov 2026)
 FEATURE_CONTRACTS["goal_keeper_stalled"] = 98  # PROVISIONAL: next free above main's 97 (14 Nov 2026)
+FEATURE_CONTRACTS["compaction_outcome"] = 107
+FEATURE_CONTRACTS["voice_profile"] = 109
+FEATURE_CONTRACTS["speech_outcome"] = 109
 
 
 # Features that exist only while live events actually flow: the hub runs in

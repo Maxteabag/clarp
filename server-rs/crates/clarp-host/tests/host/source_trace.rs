@@ -24,10 +24,13 @@ fn vectors() -> Vec<Value> {
 ///
 /// Not staged here: a running turn without a trace (this Host gives every message one; the
 /// actor's own answer for such a turn is held in the actor's tests), a lookup that fails (the
-/// 503 every reader of a turn's token answers when its key cannot be read), and a turn parked
+/// 503 every reader of a turn's token answers when its key cannot be read), a turn parked
 /// for its account (a Host test cannot make an account run out; the Python Host's answer must
 /// be `none`, and the actor's test `source_trace_a_turn_names_its_trace_only_while_it_runs`
-/// holds that a parked turn names nothing, which is what the Host asks the actor).
+/// holds that a parked turn names nothing, which is what the Host asks the actor), and a turn
+/// that waits for a retry after a dropped connection, before and after its retry (the Python
+/// Host's answer must be `the trace` each time, with the first and the new token, which on
+/// this Host are one; the same actor's test holds it).
 #[test]
 fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names_it() {
     let place = Place::new("source-trace");
@@ -383,6 +386,22 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
                     vector["shown"], "none",
                     "the Python Host's parked turn ({kind}); this Host's is held by the actor's \
                      test source_trace_a_turn_names_its_trace_only_while_it_runs"
+                );
+                continue;
+            }
+            // A turn that waits for a retry after a dropped connection, and the same turn run
+            // again after it: held at the actor too (a Host test cannot drop a tool's
+            // connection). The Python Host gives the next attempt a new token; this Host's token
+            // is the turn's, so its first and its new token are one, and the two rows are
+            // compared with that one answer.
+            if case.starts_with("the turn waits for a retry")
+                || case.starts_with("the turn retried after a dropped connection")
+            {
+                assert_eq!(
+                    vector["shown"], "the trace",
+                    "the Python Host's turn that waits for a retry ({case}, {kind}); this \
+                     Host's is held by the actor's test \
+                     source_trace_a_turn_names_its_trace_only_while_it_runs"
                 );
                 continue;
             }
