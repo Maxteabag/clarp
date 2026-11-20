@@ -2110,7 +2110,13 @@ async fn log(
         (member.agent.tail(limit, which).await?, false)
     };
     let status = &member.agent.view().status;
-    let mut answer = wire::log_response(&member.record, status, &page, replace);
+    // Only an agent that can leave a note for its user has rows for the agents.
+    let hides = coordination::can_leave_note(
+        &member.record.agent_id,
+        Some(&member.record.backend),
+        app.turns.has_key(),
+    );
+    let mut answer = wire::log_response(&member.record, status, &page, replace, hides);
     answer["includes_automated"] = json!(include_automated);
     let no = |said: &Option<String>| {
         let said = said.as_deref().map(str::to_lowercase);
