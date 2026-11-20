@@ -70,6 +70,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.answer(401, {"error": "who are you"})
         body = seen["body"] or {}
         if path == "/provider/auth":
+            if (root / "hold-probe").exists():
+                # Answered when the test lets it, so that listings are asked meanwhile.
+                while not (root / "release-probe").exists():
+                    time.sleep(0.05)
             return self.answer(200, METHODS)
         provider = path.split("/")[2] if path.startswith("/provider/") else ""
         if path.endswith("/oauth/authorize"):
