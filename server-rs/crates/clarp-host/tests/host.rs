@@ -84,6 +84,10 @@ mod voice_events;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
+// What every process a test starts is given of the environment: nothing of the machine's.
+#[path = "host/sealed.rs"]
+mod sealed;
+
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
 /// end collide there. A new test goes into its piece's file under `tests/host/`, declared above.
@@ -208,7 +212,20 @@ impl Place {
             std::env::temp_dir().join(format!("clarp-host-{name}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("work")).unwrap();
+        std::fs::create_dir_all(sealed::home(&root)).unwrap();
+        std::fs::create_dir_all(root.join("tmp")).unwrap();
         Self { root }
+    }
+
+    /// A command that a test starts in this place: its environment is [`sealed::sealed`], with
+    /// nothing of the machine the tests run on. What the test adds to it goes over it.
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        sealed_command(&self.root, program)
+    }
+
+    /// The Host's own program, as a test starts it in this place.
+    fn host_command(&self) -> Command {
+        self.command(env!("CARGO_BIN_EXE_clarp-host"))
     }
 
     /// Starts a Host process in this place and waits until it listens.
@@ -231,6 +248,13 @@ impl Place {
         self.start_without(token, more, world, &[])
     }
 
+    /// A Host for a test that runs a real tool of this machine on purpose (only when asked: the
+    /// tests marked `#[ignore]`): the names given are the runner's own, as it has them, and a
+    /// name the runner lacks is taken from the sealed default too. Nothing else of the machine.
+    fn start_on_the_machine(&self, more: &[&str], names: &[&str]) -> Host {
+        self.start_on(&sealed::runner(), names, "", more, &[], &[])
+    }
+
     /// The same, in an environment that lacks what is named last.
     fn start_without(
         &self,
@@ -239,7 +263,22 @@ impl Place {
         world: &[(&str, &str)],
         without: &[&str],
     ) -> Host {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        self.start_on(&sealed::runner(), &[], token, more, world, without)
+    }
+
+    /// The same on a machine whose environment is `runner`, with what of it is `named` on
+    /// purpose: what a test of the harness itself starts on a machine of its own making.
+    fn start_on(
+        &self,
+        runner: &[(std::ffi::OsString, std::ffi::OsString)],
+        named: &[&str],
+        token: &str,
+        more: &[&str],
+        world: &[(&str, &str)],
+        without: &[&str],
+    ) -> Host {
+        let host = env!("CARGO_BIN_EXE_clarp-host");
+        let mut command = sealed_command_on(runner, &self.root, named, host);
         for name in without {
             command.env_remove(name);
         }
@@ -249,8 +288,6 @@ impl Place {
             .args(["--cwd", self.root.join("work").to_str().unwrap()])
             .args(["--listen", "127.0.0.1:0"])
             .args(more)
-            .env("CLARP_ZOXIDE_PROGRAM", self.root.join("no-zoxide"))
-            .env("CLARP_OPENCODE_PROGRAM", self.root.join("no-opencode"))
             .envs(world.iter().copied())
             .env("CLARP_HOST_TOKEN", token)
             .stdin(Stdio::null())
@@ -295,6 +332,22 @@ impl Drop for Place {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.root);
     }
+}
+
+/// A command a test starts with `root` for its place: [`sealed::sealed`] is all of its
+/// environment. A test that has a [`Place`] says `place.command`.
+fn sealed_command(root: &std::path::Path, program: impl AsRef<std::ffi::OsStr>) -> Command {
+    sealed_command_on(&sealed::runner(), root, &[], program)
+}
+
+/// The same on a machine whose environment is `runner`, with what of it is `named` on purpose.
+fn sealed_command_on(
+    runner: &[(std::ffi::OsString, std::ffi::OsString)],
+    root: &std::path::Path,
+    named: &[&str],
+    program: impl AsRef<std::ffi::OsStr>,
+) -> Command {
+    clarp_sealed::command(program, sealed::sealed(runner, root, named))
 }
 
 /// Records in a stopped test Host's fleet store, in the key order of the port.
@@ -788,7 +841,7 @@ fn tool(
     worker: Option<u32>,
     args: &[&str],
 ) -> (i32, String, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    let mut command = sealed_command(dir, env!("CARGO_BIN_EXE_clarp-host"));
     command
         .arg("tool")
         .args(args)
@@ -2678,7 +2731,7 @@ fn an_agent_asks_its_user_and_is_told_the_answer_and_what_it_made_is_in_the_libr
             asked_id.clone(),
         );
         std::thread::spawn(move || {
-            Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+            sealed_command(&dir, env!("CARGO_BIN_EXE_clarp-host"))
                 .args([
                     "tool",
                     "clarp-agent-artifacts",
@@ -4200,6 +4253,29 @@ fn a_host_that_is_killed_in_the_middle_of_turns_comes_back_and_every_turn_finish
     });
 }
 
+/// What of the machine a test of a real Claude Code takes: its program, where it is, and its
+/// login. Nothing else of the machine's.
+const REAL_CLAUDE: &[&str] = &[
+    "HOME",
+    "PATH",
+    "USER",
+    "LANG",
+    "CLARP_CLAUDE_PROGRAM",
+    "CLAUDE_CONFIG_DIR",
+    "XDG_CONFIG_HOME",
+];
+
+/// The same for a real Codex.
+const REAL_CODEX: &[&str] = &[
+    "HOME",
+    "PATH",
+    "USER",
+    "LANG",
+    "CLARP_CODEX_PROGRAM",
+    "CODEX_HOME",
+    "XDG_CONFIG_HOME",
+];
+
 /// A real Claude Code turn through the Host, with the Host killed while Claude's tool runs.
 ///
 /// It spends a few cents of a real account and needs a Claude Code that is logged in, so it runs
@@ -4213,7 +4289,8 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
         return;
     }
     let place = Place::new("claude");
-    let host = place.start();
+    let start = || place.start_on_the_machine(&[], REAL_CLAUDE);
+    let host = start();
     let made = host.post(
         "/agents",
         json!({ "name": "Real", "backend": "claude", "model": "claude-haiku-5-5" }),
@@ -4231,7 +4308,7 @@ fn a_real_claude_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it
     // The Host dies while Claude's command sleeps, and is away for a moment.
     host.kill();
     std::thread::sleep(Duration::from_secs(2));
-    let host = place.start();
+    let host = start();
 
     wait_long(&host, &session, "the turn to finish", || {
         host.state(&session) == "done"
@@ -4302,7 +4379,10 @@ fn a_turn_in_a_systemd_scope_gets_its_tool_unchanged_and_outlives_the_host() {
         return;
     }
     let place = Place::new("systemd");
-    let host = place.start_with("", &["--launcher", "systemd"]);
+    let host = place.start_on_the_machine(
+        &["--launcher", "systemd"],
+        &["XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"],
+    );
     let session = host.new_agent("Scoped");
 
     // The scripted tool's own script has `${...}` in it. If systemd-run rewrote the tool's
@@ -4350,7 +4430,8 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
         return;
     }
     let place = Place::new("codex");
-    let host = place.start();
+    let start = || place.start_on_the_machine(&[], REAL_CODEX);
+    let host = start();
     let made = host.post(
         "/agents",
         json!({ "name": "Realx", "backend": "codex", "effort": "low" }),
@@ -4368,7 +4449,7 @@ fn a_real_codex_turn_survives_a_kill_of_the_host_and_the_next_turn_remembers_it(
     // The Host dies while Codex's command sleeps, and is away for a moment.
     host.kill();
     std::thread::sleep(Duration::from_secs(2));
-    let host = place.start();
+    let host = start();
 
     wait_long(&host, &session, "the turn to finish", || {
         host.state(&session) == "done"
@@ -5296,14 +5377,14 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
     assert_eq!(host.get("/peers"), json!([named]), "never its token");
     // The owner's own command for it reads the same.
-    let listed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let listed = place.host_command()
         .args(["peer", "list", "--host", &host.address])
         .ended();
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout).trim(),
         format!("work http://{}", other.address)
     );
-    let unnamed = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let unnamed = place.host_command()
         .args([
             "peer",
             "add",
@@ -6106,7 +6187,7 @@ fn call_tool(
     session: &str,
     args: &[&str],
 ) -> (i32, Value, String) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+    let mut command = sealed_command(dir, env!("CARGO_BIN_EXE_clarp-host"));
     command
         .args(["tool", "clarp-admin", "call"])
         .args(args)
@@ -9670,7 +9751,7 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
     );
 
     // The command line asks the same Host for the same thing.
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place.host_command()
         .args([
             "pair",
             "--url",
@@ -9686,7 +9767,7 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
         String::from_utf8_lossy(&shown.stderr)
     );
     assert!(String::from_utf8_lossy(&shown.stdout).starts_with("clarp://pair?name="));
-    let refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let refused = place.host_command()
         .args([
             "pair",
             "--url",
@@ -10074,7 +10155,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
 
     // The move, as its owner would run it.
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = new_place.host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10273,7 +10354,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "{refused}"
     );
     // Asked for again, the files are the same files: nothing arrives twice.
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = new_place.host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10308,7 +10389,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     ];
     let kept = fetch(&third_host, "", "POST", "/media", &under_its_id, &long_ago);
     assert_eq!(kept.status, 200, "{}", kept.text());
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = third_place.host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .args(["--files-from", &third_host.address])
@@ -10373,7 +10454,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert_eq!(queue["paused"], false, "{queue}");
     // The first Host was read, not changed; and an agent arrives once.
     assert_eq!(old_host.conversation(&session), before);
-    let again = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let again = third_place.host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10383,7 +10464,7 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // The agent whose picture came along moves too. Its picture is here already, as a file
     // the first agent shows: it becomes its own here, in its gallery as it was, and it is
     // still one file. The first agent's gallery is as it was.
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = third_place.host_command()
         .args(["import", "--from", &old_host.address])
         .args(["--session", &other_session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10795,7 +10876,7 @@ fn the_user_changes_who_an_agent_is_and_the_host_keeps_it() {
 
     // An agent reads the roster and tunes itself with its own tool.
     let admin = |own: Option<&str>, args: &[&str]| -> (i32, String, String) {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_clarp-host"));
+        let mut command = place.host_command();
         command
             .args(["tool", "clarp-admin"])
             .args(args)
@@ -13540,7 +13621,7 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
         r#"{"children": [{"name": "Spec One", "task": "from a file"}]}"#,
     )
     .unwrap();
-    let own = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let own = place.host_command()
         .args([
             "tool",
             "clarp-admin",
@@ -15982,7 +16063,7 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     assert_eq!(said("script_token"), tools, "{seen}");
 
     // That token opens the tools, from this machine, and nothing the apps read or do.
-    let by_hand = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let by_hand = place.host_command()
         .args(["tool", "clarp-admin", "sessions"])
         .current_dir(&place.root)
         .env("CLARP_HOST_ADDR", &host.address)
@@ -23481,7 +23562,7 @@ fn an_agent_that_moves_stays_who_it_was() {
         old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
     });
 
-    let moved = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let moved = new_place.host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .current_dir(&new_place.root)
@@ -24610,7 +24691,7 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
         })
     );
     assert!(!status.to_string().contains(&key));
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place.host_command()
         .args(["network", "relay", "status", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -24630,7 +24711,7 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
             && link.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
         "{link}"
     );
-    let shown = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let shown = place.host_command()
         .args(["pair", "--relay", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -25029,7 +25110,7 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
     );
     assert!(worker.session_within(1).is_none(), "nothing is dialled");
     // A stand-in for the relay is on this machine, or it is none.
-    let elsewhere = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let elsewhere = place.host_command()
         .args(["--data", place.root.join("other").to_str().unwrap()])
         .env("CLARP_RELAY_DIAL", "ws://relay.example:80")
         .ended();
@@ -30270,7 +30351,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         ("CLARP_CLAUDE_PROGRAM", fallback.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let help = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let help = place.host_command()
         .arg("--help")
         .output()
         .unwrap();
@@ -30282,7 +30363,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         )
         .contains("--ask-usage")
     );
-    let mut refused = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let mut refused = place.host_command()
         .args([
             "--ask-usage",
             "--data",
@@ -30559,7 +30640,7 @@ else:sys.exit(2)
         )
         .unwrap();
         let mut path = vec![root.clone()];
-        path.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        path.extend(std::env::split_paths(sealed::PATH));
         let path = std::env::join_paths(path).unwrap();
         let env = [
             ("HOME", root.to_str().unwrap()),
@@ -34477,7 +34558,7 @@ fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns()
             "an address on this machine",
         ),
     ] {
-        let started = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        let started = other.host_command()
             .args(["--data", other.root.join("elsewhere").to_str().unwrap()])
             .env(variable, elsewhere)
             .ended();
@@ -41821,7 +41902,7 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         assert_eq!(refused_a_socket(&absent, &phone, "/oracle/v2").0, 503);
         assert_eq!(connections.load(Ordering::SeqCst), 0);
     }
-    let mut child = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let mut child = place.host_command()
         .arg("--data")
         .arg(place.root.join("data"))
         .arg("--run")

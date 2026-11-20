@@ -36,7 +36,9 @@ fn run_with_fixture_host_token(test: &str) -> bool {
         assert_eq!(std::env::var("CLARP_HOST_TOKEN").unwrap(), "synthetic");
         return false;
     }
+    // The test again, in a child that has nothing of the machine's but what it is given.
     let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .env_clear()
         .args(["--exact", test])
         .env("FIXTURE_SPEECH_PARENT", "1")
         .env("CLARP_HOST_TOKEN", "synthetic")

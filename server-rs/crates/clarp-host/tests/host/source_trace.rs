@@ -301,7 +301,7 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
     // tool sends it: what it publishes names the turn, as what is published over HTTP with that
     // token at that moment does.
     let over_http = named(&publish("document", Some(&later), None, "1"), &later_trace);
-    let tool = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let tool = place.host_command()
         .args([
             "tool",
             "clarp-agent-artifacts",

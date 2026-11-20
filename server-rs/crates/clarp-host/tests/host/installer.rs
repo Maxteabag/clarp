@@ -561,7 +561,9 @@ for line in sys.stdin:
 
 #[test]
 fn the_download_adapter_bounds_and_verifies_offline_streams() {
-    let result = std::process::Command::new("python3")
+    let place = Place::new("transcription-download-tool");
+    let result = place
+        .command("python3")
         .args([
             "-IB",
             concat!(

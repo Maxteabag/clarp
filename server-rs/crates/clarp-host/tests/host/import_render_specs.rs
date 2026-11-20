@@ -96,7 +96,7 @@ fn a_move_names_every_render_spec_left_on_the_source_and_takes_its_other_artifac
         ("/transcription-providers", "200 OK", "{}".into()),
     ]);
     let import = |session: &str, extra: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        place.host_command()
             .args([
                 "import",
                 "--from",

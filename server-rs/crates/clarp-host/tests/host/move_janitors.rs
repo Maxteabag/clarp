@@ -31,7 +31,7 @@ fn a_janitor_is_refused_before_any_move_and_its_neighbor_can_still_move() {
         ("/transcription-providers", "200 OK", "{}".to_string()),
     ]);
     let import = |session: &str, extra: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        place.host_command()
             .args([
                 "import",
                 "--from",

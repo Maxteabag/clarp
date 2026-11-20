@@ -339,6 +339,7 @@ mod tests {
             "launcher::tests::a_shim_uses_its_own_turn_identity_and_inherits_provider_settings";
         if std::env::var_os("FIXTURE_LAUNCH_PARENT").is_none() {
             let status = Command::new(std::env::current_exe().unwrap())
+                .env_clear()
                 .args(["--exact", HERE])
                 .env("FIXTURE_LAUNCH_PARENT", "1")
                 .env("CLARP_BACKGROUND_ORIGIN", "foreign-origin")

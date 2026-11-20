@@ -57,8 +57,10 @@ mod tests {
             "CLARP_PEER_TOKEN",
         ];
         if std::env::var_os("FIXTURE_CHILD_ORDER").is_none() {
+            // The test again, in a child that has nothing of the machine's but what it is given.
             let mut parent = Command::new(std::env::current_exe().unwrap());
             parent
+                .env_clear()
                 .args(["--exact", TEST])
                 .env("FIXTURE_CHILD_ORDER", "yes");
             for key in REMOVED {

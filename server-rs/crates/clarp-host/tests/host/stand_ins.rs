@@ -59,7 +59,7 @@ fn a_host_given_a_stand_in_not_on_this_machine_refuses_to_start_naming_the_varia
         for given in refused {
             // An engine of no name: a Host that took the address all the same ends there,
             // saying so, and is not left running.
-            let started = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+            let started = place.host_command()
                 .args(["--data", place.root.join("never").to_str().unwrap()])
                 .args(["--engine", "of-no-name"])
                 .env(variable, &given)
