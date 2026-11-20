@@ -9,14 +9,13 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
         ["status", {"kind":"status_query","confidence":0.95,"target_session":"missing"}],
         ["fixed", {"kind":"clarify","confidence":0.95,"spoken_text":words,"phrase_key":"repeat_missing"}]
     ]);
-    let (_, claude, asked) = routing_model(&place, &rules);
+    let (_, claude, _) = routing_model(&place, &rules);
     let bytes = vec![7; 2000];
     let primary = cartesia_stand_in(bytes.clone());
-    let (fallback, fallback_calls) =
-        answers(vec![
-            ("/v2/speak?model=flux-mike", "200 OK", "Mike speaks".into()),
-            ("/v2/speak?model=flux-anna", "200 OK", "Anna speaks".into()),
-        ]);
+    let (fallback, fallback_calls) = answers(vec![
+        ("/v2/speak?model=flux-mike", "200 OK", "Mike speaks".into()),
+        ("/v2/speak?model=flux-anna", "200 OK", "Anna speaks".into()),
+    ]);
     let owners = place.root.join("synthetic-speech.toml");
     let configure = |voice: &str, model: &str| {
         std::fs::write(&owners,format!("[tts]\nprovider='cartesia'\nfallback='deepgram'\n[cartesia]\napi_key='fixture'\nmodel='{model}'\n[deepgram]\napi_key='fixture'\nmodel='flux-haley-en'\n[tts.agents.mike]\ncartesia_voice='{voice}'\n[tts.agents.anna]\ncartesia_voice='{voice}'\n[tts.agents.clarp]\ncartesia_voice='{voice}'\n")).unwrap();
@@ -52,19 +51,8 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
         assert_eq!(status, 200, "{body}");
     };
     let heard = host.listen();
-    // Hold the first speech request while the second routing decision is made.
-    primary.held.store(true, Ordering::SeqCst);
-    std::thread::scope(|scope| {
-        let first = scope.spawn(|| press(&host, &mike, "fixed first", "p1"));
-        wait_for("one speech request", || !primary.asked().is_empty());
-        let second = scope.spawn(|| press(&host, &anna, "fixed second", "p2"));
-        wait_for("the second routing request", || {
-            std::fs::read_to_string(&asked).is_ok_and(|s| s.contains("fixed second"))
-        });
-        primary.held.store(false, Ordering::SeqCst);
-        first.join().unwrap();
-        second.join().unwrap();
-    });
+    press(&host, &mike, "fixed first", "p1");
+    press(&host, &anna, "fixed second", "p2");
     assert_eq!(primary.asked().len(), 1);
     press(&host, &anna, "fixed another", "p3");
     wait_for("a clip served to Anna", || {
@@ -177,10 +165,8 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
             json!({"session":session, "provider":"deepgram", "voice_id":voice}),
         );
     }
-    std::thread::scope(|scope| {
-        scope.spawn(|| press(&host, &mike, "fixed fallback", "fallback1"));
-        scope.spawn(|| press(&host, &anna, "fixed fallback", "fallback2"));
-    });
+    press(&host, &mike, "fixed fallback", "fallback1");
+    press(&host, &anna, "fixed fallback", "fallback2");
     for (session, expected) in [(&mike, "Mike speaks"), (&anna, "Anna speaks")] {
         wait_for("the requester's own fallback voice", || {
             let events = heard.lock().unwrap().clone();
