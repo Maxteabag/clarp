@@ -46,6 +46,12 @@ audible input, output or transcript it closes the session (`oracle_v2.idle`). So
 standby pays the standby rate ($0.02 a minute) from the timeout to 180 s, then
 the Host closes. No WebSocket path and no agent Live call sends standby.
 
+Cost and limits of the WebRTC path: the provider bills a WebRTC create for at
+least 15 seconds, credited against the duration once the session runs, so a call
+shorter than that, or a create whose sideband never attaches, costs 15 s that
+the Host's usage estimate does not show. The provider cuts a connected call at
+2 hours, and one still ringing at 3 minutes.
+
 ## Connection lifecycle
 
 The phone owns the session's lifetime; the Host owns one session per device
