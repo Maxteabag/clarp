@@ -913,6 +913,16 @@ report. Create it with `POST /artifacts`:
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
 
+### Which turn published an artifact: `source_trace_id`
+
+An artifact row carries `source_trace_id`: the trace of the turn that published it, or `''`.
+The Host sets it from the request's turn token (`X-Clarp-Turn`, which the publishing tools
+send) and only when that turn belongs to the artifact's own agent and is that agent's running
+turn when the artifact is created. A card published after its turn ended, by a job the turn
+started for example, has `''` and is placed by time. A Codex agent through the shared
+app-server has no per-turn token, so its artifacts have `''` too. A later revision of the
+artifact keeps the trace it was created with. `source_message_id` stays `''`.
+
 ### Artifact list summaries: `representation=summary-v1`
 
 `GET /artifacts`, `GET /pinned-artifacts` and `GET /attention/inbox` accept

@@ -59,6 +59,29 @@ class ArtifactRoutes:
     def _handle_artifact_archive(self, artifact_id: str):
         return self._handle_artifact_inbox_action(artifact_id, discard=False)
 
+    def _publishing_trace(self, session: str) -> str:
+        """The trace an artifact is published under (R102): the trace of the turn whose token the
+        request carries, only when that turn belongs to the artifact's own agent and is that
+        agent's running turn now. Anything else, a job its turn started publishing after the turn
+        ended included, gets '' and the apps place the card by time. Nothing the caller writes is
+        taken: the token is the Host's own proof. A lookup that fails is the retryable 503 the
+        turn identity gives (HTTP-N5)."""
+        from lib import agents, turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        token = (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")
+        if not token:
+            return ""
+        try:
+            agent_id, trace = turn_identity.caller_turn({TURN_ENV: token})
+        except Exception as exc:  # noqa: BLE001 - fail closed: refused, logged and retryable
+            from lib.log import log_exception
+            log_exception("turnCallerLookupFail", exc)
+            raise turn_identity.TurnIdentityUnavailable() from exc
+        owner = agents.get_by_session(session.strip()) if session.strip() else None
+        if not trace or not owner or owner["agent_id"] != agent_id:
+            return ""
+        return trace if turn_identity.running_trace(agent_id, trace) else ""
+
     def _handle_artifact_create(self):
         from lib import artifacts, render_spec
         data = self._read_json()
@@ -75,7 +98,8 @@ class ArtifactRoutes:
                 status=str(data.get("status") or "ready"),
                 reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
                 artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"),
-                validate_only=validate_only)
+                validate_only=validate_only,
+                source_trace_id=self._publishing_trace(str(data.get("session") or "")))
         except render_spec.Refusal as exc:
             return _spec_refusal(self, exc)
         except (ValueError, sqlite3.IntegrityError) as exc:

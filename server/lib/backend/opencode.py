@@ -325,7 +325,7 @@ class OpenCodeBackend(StreamJsonBackend):
             proc, handle = self.launch(run_cmd, cwd=cwd, session=session,
                                        env_extra={**self.turn_env(), **identity})
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                          provider=self.id, pid=proc.pid)
+                                          provider=self.id, pid=proc.pid, trace_id=trace_id)
             self.register_handle(runtime_agent_id, handle)
             self.start_drain(handle, self._drain_stdout, proc=proc,
                              handle=handle, **callbacks)
@@ -336,7 +336,7 @@ class OpenCodeBackend(StreamJsonBackend):
             stdin=subprocess.PIPE,
             env_extra={**self.turn_env(), **identity, "OPENCODE_SERVER_PASSWORD": password})
         provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                      provider=self.id, pid=proc.pid)
+                                      provider=self.id, pid=proc.pid, trace_id=trace_id)
         attach_stderr_drain(proc)
         handle = OpenCodeTurnHandle(
             proc=proc, drain_thread=None,
@@ -775,7 +775,8 @@ class OpenCodeBackend(StreamJsonBackend):
         turn_token, identity = provider_jobs.identity_env(agent_id)
         proc = popen_turn(run_cmd, cwd=cwd, session=session,
                           env_extra={**self.turn_env(), **identity})
-        provider_jobs.record_identity(turn_token, agent_id=agent_id, provider=self.id, pid=proc.pid)
+        provider_jobs.record_identity(turn_token, agent_id=agent_id, provider=self.id, pid=proc.pid,
+                                      trace_id=str(callbacks.get("trace_id") or ""))
         attach_stderr_drain(proc)
         handle.proc = proc
         handle.process_group = proc.pid if os.name == "posix" else None
