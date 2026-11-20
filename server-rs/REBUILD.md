@@ -3425,8 +3425,10 @@ Host started on a machine that has every tool signed in and every key set (no to
 OpenCode's, no key of a speaking engine, no provider asked), a tool run without an address beside an installed Host's
 file of settings (refused in words, the installed Host never reached), every tool a Host knows having a pinned
 program, and a scan of what the crates read from the environment, each name decided on in `clarp-sealed` (set,
-absent with its kind, or no variable). The unit tests that run themselves again as a child give the child nothing of
-the runner's either.
+absent with its kind, or no variable). A second scan reads every start of `import`, `peer`, `network` and `pair` in the
+Host's tests: each names `--host`, because told none these take `127.0.0.1:7690`, which no variable moves (a known
+weakness, section 7). The unit tests that run themselves again as a child give the child nothing of the runner's
+either.
 
 ## 7. Stages and gates
 
@@ -3519,6 +3521,12 @@ connection relay under the name the phone is paired with. Each of these is true 
   turn's states are, and what the turn passed through just before its end is not. To mend by
   telling an agent's states from the log itself (`Command::TurnMoved` is in it) and not from what
   one pass of the actor hands on.
+- **`import`, `peer`, `network` and `pair` speak to `127.0.0.1:7690` when told no Host** (found
+  20 Nov 2026, not built). An installation can put the Host elsewhere (`install-host --listen`),
+  and a command that takes the fixed address then speaks to nobody, or to another Host there. The
+  default should come from the installation (its file of settings, as `clarp-host tool` reads
+  it), and where there is none the command should refuse in words. Until then the Host's tests
+  name `--host` at every start of the four, and a scan in `tests/host/harness.rs` holds them to it.
 
 ## 8. Roles
 

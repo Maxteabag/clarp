@@ -5,8 +5,8 @@ A test Host sees nothing of the machine: the rule (`clarp-sealed`) that builds t
 Host's and the shim's tests start from nothing, its home and folders inside the test's own place, its constants, every
 program a person installs pinned to a path that is not there from the product's own table, and nothing of the
 runner's but what a test names; and the tests that hold it: the rule as a function, what a process really sees, a
-Host on a machine that has everything, the installed Host's file, the tools a Host knows, and the scan of what the
-Host's crates read.
+Host on a machine that has everything, the installed Host's file, the tools a Host knows, the scan of what the Host's
+crates read, and the scan of the starts of commands at a fixed address.
 """
 import runner
 
@@ -79,6 +79,9 @@ PLANTS = [
     # What the Host's crates read is decided on.
     (S, 'sealed', 'a variable the Host reads is decided on nowhere', '    ("CODEX_HOME", "home"),\n', ''),
     (S, 'sealed', 'a name nobody reads is listed', '    "AGY_OK",\n', '    "AGY_OK",\n    "NEVER_READ_ANYWHERE",\n'),
+    # A command at a fixed address names the Host it speaks to.
+    (H, 'sealed', "a test asks a Host's relay status at the fixed address", '        .args(["network", "relay", "status", "--host", &host.address])',
+     '        .args(["network", "relay", "status"])'),
 ]
 
 
