@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 use crate::fleet::FleetHandle;
 
 pub(crate) mod opencode;
+pub mod sign_in;
 
 /// What stands for a login file as it is now: nothing of what is in it. `None` when the file
 /// is not there or cannot be read.
