@@ -40,6 +40,14 @@ pub struct Config {
     /// that the tool is not installed.
     pub seats_tool: String,
     pub ask_usage: bool,
+    /// Whether a contact nobody gave a picture is drawn one by the provider of pictures
+    /// (`--contact-pictures`, which the install tool writes where its own word of that name is
+    /// given). Absent: never; nothing of it runs. It spends, so it is this Host's own word, not
+    /// a key of the owner's file, which the Python Host reads as on where it is absent.
+    pub contact_pictures: bool,
+    /// A stand-in for the provider of pictures on this machine (`CLARP_PICTURE_ENDPOINT`), as a
+    /// test gives it. Empty: OpenAI's own.
+    pub picture_endpoint: String,
     pub usage_loopback: Option<std::net::SocketAddr>,
     /// How often the logins of the agents' tools are looked at, where turns wait for an
     /// account.
@@ -164,7 +172,7 @@ pub const USAGE: &str = "usage: clarp-host [--data DIR] [--run DIR] [--listen AD
 [--name NAME] [--cwd DIR] [--keep-spools] [--jobs-checked-every-ms N] [--push-relay URL] \
 [--schedules-checked-every-ms N] [--heartbeats-checked-every-ms N] \
 [--janitors-checked-every-ms N] [--goals-kept-every-ms N] \
-[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--logins-checked-every-ms N] \
+[--accounts none|follow|select] [--seats-tool PROGRAM] [--ask-usage] [--contact-pictures] [--logins-checked-every-ms N] \
 [--helpers-checked-every-ms N] [--helper-idle-after-ms N] [--helper-archive-grace-ms N] \
 [--second-voice-hold-ms N] [--phone-idle-ms N] [--explain-within-ms N] \
 [--whisper-python PATH] [--whisper-worker PATH] [--whisper-model NAME] [--whisper-source NAME|DIR] \
@@ -304,6 +312,7 @@ impl Config {
         let mut default_cwd = home();
         let mut keep_spools = false;
         let mut ask_usage = false;
+        let mut contact_pictures = false;
         let mut accounts = clarp_kernel::recovery::Accounts::None;
         let mut seats_tool = String::new();
         let mut logins_checked_every_ms = 5_000;
@@ -346,6 +355,7 @@ impl Config {
                 "--cwd" => default_cwd = PathBuf::from(value("a directory")?),
                 "--keep-spools" => keep_spools = true,
                 "--ask-usage" => ask_usage = true,
+                "--contact-pictures" => contact_pictures = true,
                 "--accounts" => {
                     let named = value("none or follow")?;
                     accounts = clarp_kernel::recovery::Accounts::by_name(&named)
@@ -506,6 +516,7 @@ impl Config {
         let google_voice_endpoint = voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
         let eleven_voice_endpoint = voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
         let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
+        let picture_endpoint = stand_in("CLARP_PICTURE_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
         let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
         let local = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
@@ -595,6 +606,8 @@ impl Config {
             keep_spools,
             accounts,
             ask_usage,
+            contact_pictures,
+            picture_endpoint,
             usage_loopback: match std::env::var_os("CLARP_USAGE_LOOPBACK") {
                 None => None,
                 Some(raw) => Some(

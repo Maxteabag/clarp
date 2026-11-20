@@ -52,6 +52,88 @@ PERSONALITIES = [('Clara', 'claude'), ('clara', 'claude'), (' Clara ', 'claude')
                  ('Soren', 'codex'), ('Soren 12', 'codex'), ('Zoë Å', 'grok'), ('Anyone', 'gemini'),
                  ('Anyone', 'deepseek'), ('Anyone', 'nobody'), ('', 'claude')]
 
+# Whose picture is asked for, and of which tier: a tier given, none given (the name's, else the tool's).
+PROMPTS = [('Clara', '', ''), ('clara', 'claude', ''), (' Clara ', '', 'codex'), ('Soren', '', ''), ('Soren 12', '', ''),
+           ('Somebody', '', 'grok'), ('Somebody', '', 'agy'), ('Somebody', '', 'deepseek'), ('Somebody', '', 'nobody'),
+           ('Somebody', 'GEMINI', ''), ('Somebody', 'nobody', 'codex'), ('Mike', '', 'codex'), ('Zoë Å', 'grok', '')]
+
+
+# The life a contact's picture had before it is asked again: what each of its tries became, and when (minutes
+# before the asking), then how many other pictures were begun in the last day and the day before.
+ADMISSIONS = [
+    {'name': 'never tried', 'tries': [], 'others_today': 0},
+    {'name': 'one under way', 'tries': [('queued', 10)], 'others_today': 0},
+    {'name': 'one made', 'tries': [('succeeded', 60)], 'others_today': 0},
+    {'name': 'failed four minutes ago', 'tries': [('failed', 4)], 'others_today': 0},
+    {'name': 'failed six minutes ago', 'tries': [('failed', 6)], 'others_today': 0},
+    {'name': 'failed twice, the last 29 minutes ago', 'tries': [('failed', 120), ('failed', 29)], 'others_today': 0},
+    {'name': 'failed twice, the last 31 minutes ago', 'tries': [('failed', 120), ('failed', 31)], 'others_today': 0},
+    {'name': 'failed three times', 'tries': [('failed', 300), ('failed', 200), ('failed', 100)], 'others_today': 0},
+    {'name': 'cancelled six minutes ago', 'tries': [('cancelled', 6)], 'others_today': 0},
+    {'name': 'cancelled four minutes ago', 'tries': [('cancelled', 4)], 'others_today': 0},
+    {'name': 'nineteen begun today', 'tries': [], 'others_today': 19},
+    {'name': 'twenty begun today', 'tries': [], 'others_today': 20},
+    {'name': 'twenty begun, but the day before', 'tries': [], 'others_today': 0, 'others_yesterday': 20},
+    {'name': 'failed long ago, nineteen others today', 'tries': [('failed', 2000)], 'others_today': 19},
+    {'name': 'failed an hour ago, nineteen others today', 'tries': [('failed', 60)], 'others_today': 19},
+]
+
+
+def admissions(avatars, db) -> list:
+    """What the Python Host answers when a contact's picture is asked for, after each life in ADMISSIONS."""
+    from lib import background_jobs
+    minute = 60 * 1000
+    asked_at = 1_950_000_000_000
+    clock = {'now': asked_at}
+    real_now = db.now_ms
+    db.now_ms = lambda: clock['now']
+    window, backoffs = avatars.DAILY_WINDOW_MS, avatars.RETRY_BACKOFF_MS
+    out = []
+    for number, case in enumerate(ADMISSIONS):
+        kind = f'persona-avatar-case-{number}'
+        job_id = f'persona-avatar-case-{number}'
+
+        def enqueue(job, at):
+            clock['now'] = at
+            return background_jobs.enqueue_computer_capped(
+                computer_id='computer-of-the-test', job_id=job, kind=kind, title='A picture', max_launches=10_000,
+                window_ms=window, max_attempts=10_000, retry_backoffs_ms=(), now_ms=at)
+        for n in range(case['others_today']):
+            enqueue(f'{job_id}-other-{n}', asked_at - 60 * minute - n)
+        for n in range(case.get('others_yesterday', 0)):
+            enqueue(f'{job_id}-old-{n}', asked_at - 25 * 60 * minute - n)
+        tries = case['tries']
+        for at, (became, ago) in enumerate(tries):
+            begun = asked_at - (ago + 1) * minute
+            job, claimed = enqueue(job_id, begun)
+            assert claimed, (case['name'], at)
+            clock['now'] = asked_at - ago * minute
+            if became in ('succeeded', 'failed'):
+                background_jobs.finish(job_id, generation=job['generation'], status=became, reason='a test')
+            elif became == 'cancelled':
+                background_jobs.cancel(job_id)
+        clock['now'] = asked_at
+        row = db.conn().execute(
+            """SELECT COUNT(*) AS n FROM background_job_events e JOIN background_jobs j ON j.job_id = e.job_id
+                WHERE j.kind = ? AND e.status = 'queued' AND e.observed_at >= ?""",
+            (kind, asked_at - window)).fetchone()
+        before = background_jobs.get(job_id, reconcile=False)
+        job, claimed = background_jobs.enqueue_computer_capped(
+            computer_id='computer-of-the-test', job_id=job_id, kind=kind, title='A picture',
+            max_launches=avatars.DEFAULT_DAILY_LIMIT, window_ms=window, max_attempts=avatars.DEFAULT_MAX_ATTEMPTS,
+            retry_backoffs_ms=backoffs, now_ms=asked_at)
+        out.append({
+            'name': case['name'],
+            'before': None if before is None else {
+                'status': before['status'], 'generation': int(before['generation'] or 1),
+                'ended_ago_ms': None if before.get('terminal_at') is None else asked_at - int(before['terminal_at'])},
+            'begun_today': int(row['n']),
+            'admitted': bool(claimed),
+            'generation': int(job['generation']) if claimed else None,
+        })
+    db.now_ms = real_now
+    return out
+
 
 def taken_names(pool, initials):
     """Every name of a pool, and every name with an initial after it."""
@@ -143,7 +225,8 @@ def child(root) -> dict:
     clock = iter(range(1_900_000_000_000, 2_000_000_000_000))
     db.now_ms = lambda: next(clock)
     cases = cases_of(roster)
-    tiers = [{'id': spec.id, 'minted_names': list(spec.minted_names), 'personalities': list(spec.personalities)}
+    tiers = [{'id': spec.id, 'minted_names': list(spec.minted_names), 'personalities': list(spec.personalities),
+              'portrait_template': spec.portrait_template, 'portrait_varieties': list(spec.portrait_varieties)}
              for spec in roster.CONTACT_TIER_SPECS]
     told: dict = {'tiers': [{'backend': b, 'tier': roster.backend_to_tier(b)} for b in BACKENDS]}
     told['tier_backends'] = dict(roster.TIER_BACKENDS)
@@ -151,6 +234,27 @@ def child(root) -> dict:
                        for n, b, t in ALLOWED]
     told['personalities'] = [{'name': n, 'tier': t, 'personality': contact_minting.default_personality(n, t)}
                              for n, t in PERSONALITIES]
+    # What the provider of pictures is asked for a contact's picture: its tier's own words with one of its kinds of
+    # face, by the name (`persona_avatar_generation.prompt_for_persona`). Nothing is asked here.
+    from lib import persona_avatar_generation
+    # The bounds of the making of pictures, as the Python Host has them (its defaults: no config here).
+    told['picture_bounds'] = {
+        'daily_limit': persona_avatar_generation.DEFAULT_DAILY_LIMIT,
+        'daily_window_ms': persona_avatar_generation.DAILY_WINDOW_MS,
+        'max_attempts': persona_avatar_generation.DEFAULT_MAX_ATTEMPTS,
+        'retry_backoff_ms': list(persona_avatar_generation.RETRY_BACKOFF_MS),
+        'heartbeat_timeout_ms': persona_avatar_generation.HEARTBEAT_TIMEOUT_MS,
+        'answer_most': persona_avatar_generation.MAX_RESPONSE_BYTES,
+        'made_most': persona_avatar_generation.MAX_GENERATED_BYTES,
+        'kept_most': persona_avatar_generation.AVATAR_MAX_BYTES,
+        'model': persona_avatar_generation.MODEL,
+    }
+    # Whether a picture's job is begun (`background_jobs.enqueue_computer_capped`, as the picture asks it): each
+    # case is a kind and a contact of its own on the same database, on a clock the case sets.
+    told['admissions'] = admissions(persona_avatar_generation, db)
+    told['prompts'] = [{'name': n, 'tier': t, 'backend': b,
+                        'prompt': persona_avatar_generation.prompt_for_persona(n, tier=t, backend=b)}
+                       for n, t, b in PROMPTS]
     personas.ensure_builtins()
     told['names'] = []
     for case in cases['names']:
