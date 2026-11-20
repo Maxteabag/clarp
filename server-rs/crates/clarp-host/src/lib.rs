@@ -49,6 +49,7 @@ pub mod ids;
 pub mod janitors;
 pub mod joblog;
 pub mod keeper;
+pub mod kept;
 pub mod label_checker;
 pub mod labels;
 pub mod launch_directories;

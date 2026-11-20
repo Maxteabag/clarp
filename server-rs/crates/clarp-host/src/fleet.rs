@@ -509,6 +509,8 @@ pub struct Works {
     pub pools: Vec<Arc<crate::pool::Service>>,
     /// Where what the Host could not keep is said.
     pub log: crate::unkept::Log,
+    /// What could not be read of what the Host keeps, by its kind and key (`kept.rs`).
+    pub left_out: Arc<crate::kept::LeftOut>,
 }
 
 enum Ask {
@@ -741,6 +743,7 @@ pub struct FleetHandle {
     tx: Arc<mpsc::Sender<Ask>>,
     directory: watch::Receiver<Arc<Directory>>,
     log: crate::unkept::Log,
+    left_out: Arc<crate::kept::LeftOut>,
 }
 
 impl FleetHandle {
@@ -763,6 +766,11 @@ impl FleetHandle {
         {
             self.unkept("voice-events", "the fleet is closed");
         }
+    }
+
+    /// What could not be read of what the Host keeps.
+    pub fn left_out(&self) -> &crate::kept::LeftOut {
+        &self.left_out
     }
 
     /// The fleet as it is now.
@@ -1369,6 +1377,9 @@ struct Fleet {
     /// The personas the owner made, and how he made built-in ones look.
     book: Arc<Book>,
     directory: watch::Sender<Arc<Directory>>,
+    /// The names of the agents the Host keeps and does not run: those it could not read
+    /// (where their bytes name them) and those it could not set up. Nobody else gets them.
+    held: Vec<crate::kept::Name>,
 }
 
 pub(crate) fn non_empty(text: &str) -> Option<String> {
@@ -1446,6 +1457,28 @@ fn retire_goals(works: &Works, record: &AgentRecord, at: i64) -> Result<(), Stri
     clarp_actor::retire_goal_ledger(log.as_mut(), at).map_err(|e| e.to_string())
 }
 
+/// What is counted of a deleted agent whose goals could not be retired yet: it is tried again at
+/// the next start.
+const RETIRE: &str = "agent-ledger";
+
+/// The records of a kind that are JSON, as the records they are to be: one that is not is left
+/// out and counted like one that is no JSON at all.
+fn typed<T: serde::de::DeserializeOwned>(
+    rows: crate::kept::Rows<serde_json::Value>,
+    table: &str,
+    left: &crate::kept::LeftOut,
+    log: &crate::unkept::Log,
+) -> Vec<(String, T)> {
+    let mut read = Vec::new();
+    for (key, value) in rows.read {
+        match serde_json::from_value::<T>(value) {
+            Ok(record) => read.push((key, record)),
+            Err(_) => left.left_out(table, &key, log),
+        }
+    }
+    read
+}
+
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
 pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
@@ -1484,10 +1517,23 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let mut members = Vec::new();
     let mut gone = BTreeMap::new();
-    for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
-        let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
-            format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
-        })?;
+    // Every record of every kind is read alone: one that cannot be read is left out, counted
+    // and said, and never written over (`kept.rs`). Its names stay its own.
+    let (left, log) = (works.left_out.clone(), works.log.clone());
+    let read = |store: &dyn KeyValue,
+                table: &str|
+     -> Result<crate::kept::Rows<serde_json::Value>, String> {
+        crate::kept::rows::<serde_json::Value>(store, table, &left, &log).map_err(|e| e.to_string())
+    };
+    let agents = read(store.as_ref(), AGENTS)?;
+    let mut held: Vec<crate::kept::Name> = agents.names;
+    for (agent_id, stored) in agents.read {
+        let Ok(mut record) = serde_json::from_value::<AgentRecord>(stored.clone()) else {
+            left.left_out(AGENTS, &agent_id, &log);
+            let bytes = serde_json::to_vec(&stored).unwrap_or_default();
+            held.extend(crate::kept::Name::of(&bytes));
+            continue;
+        };
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
@@ -1496,7 +1542,12 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 (record.persona.clone(), record.session.clone()),
             );
             if !record.ledger_retired {
-                retire_goals(&works, &record, at)?;
+                // A ledger that cannot be retired now is retired at the next start: counted
+                // until then, and the agent stays deleted.
+                if retire_goals(&works, &record, at).is_err() {
+                    left.left_out(RETIRE, &agent_id, &log);
+                    continue;
+                }
                 record.ledger_retired = true;
                 let value = serde_json::to_vec(&record).map_err(|e| e.to_string())?;
                 store
@@ -1510,8 +1561,17 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 record,
                 agent: agent::spawn(setup),
             })),
-            // The agent stays in the store; a Host that has its backend will run it.
-            Err(why) => eprintln!("clarp-host: agent {} is left out: {why}", record.session),
+            // The agent stays in the store, and its names its own; a Host that has its
+            // backend will run it.
+            Err(why) => {
+                eprintln!("clarp-host: agent {} is left out: {why}", record.session);
+                held.push(crate::kept::Name {
+                    agent_id: record.agent_id.clone(),
+                    session: record.session.clone(),
+                    persona: record.persona.clone(),
+                    voice_id: record.voice_id.clone(),
+                });
+            }
         }
     }
     let focus = store
@@ -1524,9 +1584,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 .any(|member| member.record.agent_id == *agent_id)
         });
     let mut devices = HashMap::new();
-    for (device_id, stored) in store.list(DEVICES).map_err(|error| error.to_string())? {
-        let device: Device = serde_json::from_slice(&stored)
-            .map_err(|error| format!("the entry for device {device_id} cannot be read: {error}"))?;
+    for (_, device) in typed::<Device>(read(store.as_ref(), DEVICES)?, DEVICES, &left, &log) {
         if device.revoked_at.is_none() {
             devices.insert(device.token_hash.clone(), Arc::new(device));
         }
@@ -1542,33 +1600,21 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
     }
     let mut push = PushBook::new();
-    for (token, stored) in store.list(PUSH).map_err(|error| error.to_string())? {
-        let row: PushRow = serde_json::from_slice(&stored).map_err(|error| {
-            let named: String = token.chars().take(12).collect();
-            format!("the entry for the push token {named}… cannot be read: {error}")
-        })?;
+    for (_, row) in typed::<PushRow>(read(store.as_ref(), PUSH)?, PUSH, &left, &log) {
         push.apply(&[row]);
     }
     // The personas the owner made, and the looks he gave built-in ones.
-    let mut made: Vec<Made> = Vec::new();
-    for (id, stored) in store.list(PERSONAS).map_err(|error| error.to_string())? {
-        made.push(
-            serde_json::from_slice(&stored).map_err(|error| {
-                format!("the entry for the persona {id} cannot be read: {error}")
-            })?,
-        );
-    }
-    let mut looks: Vec<Look> = Vec::new();
-    for (id, stored) in store.list(LOOKS).map_err(|error| error.to_string())? {
-        looks.push(serde_json::from_slice(&stored).map_err(|error| {
-            format!("the entry for the look of the persona {id} cannot be read: {error}")
-        })?);
-    }
+    let made: Vec<Made> = typed::<Made>(read(store.as_ref(), PERSONAS)?, PERSONAS, &left, &log)
+        .into_iter()
+        .map(|(_, made)| made)
+        .collect();
+    let looks: Vec<Look> = typed::<Look>(read(store.as_ref(), LOOKS)?, LOOKS, &left, &log)
+        .into_iter()
+        .map(|(_, look)| look)
+        .collect();
     let book = Arc::new(Book::new(made, looks));
     let mut peers = BTreeMap::new();
-    for (name, stored) in store.list(PEERS).map_err(|error| error.to_string())? {
-        let peer: Peer = serde_json::from_slice(&stored)
-            .map_err(|error| format!("the entry for the peer {name} cannot be read: {error}"))?;
+    for (name, peer) in typed::<Peer>(read(store.as_ref(), PEERS)?, PEERS, &left, &log) {
         peers.insert(name, peer);
     }
     let (roster, janitors) = apart(&members);
@@ -1588,6 +1634,14 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }));
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
+    let left_out = works.left_out.clone();
+    // A write to a key that was left out is the owner's repair: it is said, and no longer
+    // counted.
+    let store: Box<dyn KeyValue> = Box::new(crate::kept::Watched::new(
+        store,
+        left_out.clone(),
+        log.clone(),
+    ));
     let fleet = Fleet {
         launch_usage,
         cwd_owners,
@@ -1605,6 +1659,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         settings,
         book,
         directory,
+        held,
     };
     std::thread::Builder::new()
         .name("fleet".to_string())
@@ -1615,6 +1670,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         tx,
         directory: read,
         log,
+        left_out,
     })
 }
 
@@ -2305,7 +2361,9 @@ impl Fleet {
     }
 
     fn taken(&self, session: &str) -> bool {
-        self.members
+        let held = self.held.iter().any(|name| name.session == session);
+        held || self
+            .members
             .iter()
             .any(|member| member.record.session == session)
     }
@@ -2333,7 +2391,7 @@ impl Fleet {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
             let wearers =
-                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+                self.wearers();
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
@@ -2361,7 +2419,7 @@ impl Fleet {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
             let wearers =
-                crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+                self.wearers();
             let agent = clarp_kernel::contacts::Assignee {
                 agent_id: &record.agent_id,
                 persona: &record.persona,
@@ -2393,10 +2451,12 @@ impl Fleet {
             .iter()
             .filter_map(|persona| persona["name"].as_str().map(str::to_string))
             .collect();
+        // The names of agents the Host keeps and does not run are taken too.
         let occupied: Vec<String> = self
             .members
             .iter()
             .map(|member| member.record.persona.clone())
+            .chain(self.held.iter().map(|kept| kept.persona.clone()))
             .collect();
         let Some((name, tier)) = clarp_kernel::contacts::given_name(backend, &occupied, &existing)
         else {
@@ -2413,11 +2473,35 @@ impl Fleet {
             .and_then(|persona| persona["name"].as_str().map(str::to_string)))
     }
 
-    fn owner_of_name(&self, name: &str, except: &str) -> Option<&AgentRecord> {
-        self.members
-            .iter()
-            .map(|member| &member.record)
-            .find(|record| record.agent_id != except && roster::same_name(&record.persona, name))
+    /// Who wears which contact, as the pool reads it: every member, and every agent the Host
+    /// keeps and does not run, whose contact is not given to another.
+    fn wearers(&self) -> Vec<clarp_kernel::contacts::Wearer<'_>> {
+        let mut wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+        wearers.extend(self.held.iter().map(|kept| clarp_kernel::contacts::Wearer {
+            agent_id: &kept.agent_id,
+            persona: &kept.persona,
+            voice_id: &kept.voice_id,
+        }));
+        wearers
+    }
+
+    /// Who has this name, when it is not `except`: its name and its session. An agent the Host
+    /// keeps and does not run has its name too.
+    fn owner_of_name(&self, name: &str, except: &str) -> Option<crate::kept::Name> {
+        let running = self.members.iter().map(|member| &member.record);
+        let mut running = running
+            .filter(|record| record.agent_id != except && roster::same_name(&record.persona, name));
+        let named = |record: &AgentRecord| crate::kept::Name {
+            agent_id: record.agent_id.clone(),
+            session: record.session.clone(),
+            persona: record.persona.clone(),
+            voice_id: record.voice_id.clone(),
+        };
+        running.next().map(named).or_else(|| {
+            let held = self.held.iter();
+            let mut held = held.filter(|kept| roster::same_name(&kept.persona, name));
+            held.next().cloned()
+        })
     }
 
     /// An agent started again in place, by the Python Host's rules for it
@@ -3478,3 +3562,7 @@ mod opening_reads {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod retirement_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tolerance_tests;
