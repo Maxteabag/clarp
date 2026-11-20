@@ -780,13 +780,15 @@ client shows it and derives nothing from `voice_id`.
   "hearing": {"engines": [{"id": "elevenlabs:scribe_v2", "provider": "elevenlabs",
                            "model": "scribe_v2", "label": "ElevenLabs Scribe v2"}],
               "engine_origin": "own", "device_may_override": false,
+              "device_cloud_languages": null,
               "languages": ["no", "en"], "language_origin": "own"}
 }
 ```
 
 - `speech.provider` is the provider the next clip is spoken with (a per-agent override
   and the configured fallback included), or `"none"`. `voice_id` is null when nothing is
-  heard; `silent_reason` then says why. `voice_label` is a name when the Host knows one.
+  heard; `silent_reason` then says why. `voice_label`, `provider_label` and each engine's `label` are a real name or null, never
+  an empty string; a client shows its own words for null.
 - `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
   provider's one default voice, the same for every agent without its own).
 - `speech.shared_with`: how many other active agents speak with the same provider and
@@ -800,6 +802,18 @@ client shows it and derives nothing from `voice_id`.
 - `hearing.device_may_override`: the one rule for a client. When it is true (the engine
   is the Host's default), a phone that sends its own `X-Transcription-Model` is heard
   with that model instead; such a client shows its own setting.
+- `hearing.device_cloud_languages` (null unless `device_may_override` is true): the codes a
+  hosted engine chosen on the device is handed for this agent (its own set, else the Host's
+  default). When the phone's own model applies, show the phone's engine, and with it these
+  languages for a hosted engine, or for a local or adapter model the `languages` of that
+  model's row in `GET /transcription-capabilities`; never this profile's `languages` beside
+  the phone's engine. A local model chosen on the device ignores the agent's languages (its
+  language is fixed when it loads: English for a `.en` model, detected otherwise), and a
+  custom adapter is handed no language at all.
+- `GET /transcription-capabilities` (and `GET /transcription-providers`): each hosted model
+  row has `accepts_language_set`, whether it can be handed a set such as `no,en`. An engine
+  that cannot refuses a recording for an agent with a set, so a client can warn before
+  recording ("this model cannot hear this agent's languages").
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
   `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks

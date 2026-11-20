@@ -125,6 +125,7 @@
             },
             "engine_origin": {"type": "string"},
             "device_may_override": {"type": "boolean"},
+            "device_cloud_languages": {"type": ["array", "null"], "items": {"type": "string"}},
             "languages": {"type": "array", "items": {"type": "string"}},
             "language_origin": {"type": "string"}
           }

@@ -33,7 +33,7 @@ def _describe(voice: dict) -> str:
 def cached_names() -> dict[str, str]:
     """voice id -> name of the voices already fetched; never a fetch (voice_profile)."""
     with _lock:
-        return {vid: name for vid, name, _ in (_cache[1] if _cache else ())}
+        return {vid: name for vid, name, _ in (_cache[1] if _cache else ()) if vid and name.strip()}
 
 
 def english_voices(*, force: bool = False) -> list[tuple[str, str, str]]:
