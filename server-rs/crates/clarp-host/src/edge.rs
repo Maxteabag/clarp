@@ -56,6 +56,15 @@ use crate::revisions::Revisions;
 use crate::tools::{self, ToolAnswer, ToolCall};
 use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire};
 
+/// What this desk keeps, declared once (`kept.rs`): the chat each client last opened, read by key alone (one
+/// for every client that ever opened one, and none is listed), judged as the object it reads.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    OPENED,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<serde_json::Map<String, Value>>,
+)
+.when_read()];
+
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
 pub const HOST_CONTRACT: u64 = 106;
@@ -551,6 +560,7 @@ impl App {
 pub fn router(app: App) -> Router {
     Router::new()
         .route("/server-info", get(server_info))
+        .route("/host/start", get(host_start))
         .route("/message-tool-details", get(tool_details))
         .route("/agents/snapshot", get(snapshot))
         .route("/agents", post(create_agent))
@@ -884,7 +894,7 @@ pub(crate) async fn last_opened(app: &App, who: &str) -> String {
         return String::new();
     }
     let key = clarp_kernel::heard::client_chat_key(who);
-    match app.fleet.kept(OPENED, key).await {
+    match app.fleet.kept_book(OPENED, key).await {
         Ok(kept) => {
             let text = kept.map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
             clarp_kernel::heard::client_chat(text.as_deref(), app.clock.now_ms())
@@ -1072,6 +1082,37 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
 
 async fn server_info(State(app): State<App>) -> Json<ServerInfo> {
     Json(identity(&app))
+}
+
+/// `GET /host/start`, this Host's own and the administrator's only: how its start went. How many
+/// agents it has, how many are still being opened and how many could not be (their logs stay
+/// as they were), and how many records of each kind it keeps and could not read
+/// (`kept.rs`). Not the reference's `/server-info` or `/status`, which keep their shape in every
+/// state: this is not zero for a moment at every start.
+async fn host_start(
+    State(app): State<App>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<Value>, ApiError> {
+    if !matches!(principal, Principal::Administrator) {
+        return Err(ApiError::new(StatusCode::FORBIDDEN, "administrator only"));
+    }
+    let directory = app.fleet.directory();
+    let all = directory.members.iter().chain(directory.janitors.iter());
+    let (mut agents, mut opening, mut broken) = (0_u64, 0_u64, 0_u64);
+    for member in all {
+        agents += 1;
+        match member.agent.view().broken.as_deref() {
+            None => {}
+            Some(crate::agent::OPENING) => opening += 1,
+            Some(_) => broken += 1,
+        }
+    }
+    Ok(Json(json!({
+        "agents": agents, "opening": opening, "broken": broken,
+        "left_out": app.fleet.left_out().counts(),
+        "not_run": app.fleet.left_out().not_run_counts(),
+        "judged_when_read": crate::kept::judged_when_read(),
+    })))
 }
 
 /// Who this Host is: what `GET /server-info` answers and what a pairing hands the new device.

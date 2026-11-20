@@ -57,6 +57,7 @@ DYNAMIC_SAMPLES = (
     # artifacts
     "/artifacts/a1", "/artifacts/a%2F1", "/artifacts/a1/html",
     "/artifacts/a1/events-config", "/artifacts/a1/events", "/artifacts/a1/revisions",
+    "/artifacts/a1/export",
     "/artifacts/a1/archive", "/artifacts/a1/discard", "/artifacts/a1/submit",
     "/artifacts/a1/pin",
     # decisions

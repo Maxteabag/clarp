@@ -116,6 +116,10 @@ def _get_artifact_revisions(handler, path):
     return handler._json_ok({"revision" if version is not None else "revisions": value})
 
 
+def _get_artifact_export(handler, path):
+    return handler._handle_artifact_export(unquote(path[len("/artifacts/"):-len("/export")].strip("/")))
+
+
 def _get_artifact(handler, path):
     return handler._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
 
@@ -266,6 +270,9 @@ GET = (
     Route("GET", "artifact-revisions",
           lambda path: path.startswith("/artifacts/") and path.endswith("/revisions"),
           _get_artifact_revisions),
+    Route("GET", "artifact-export",
+          lambda path: path.startswith("/artifacts/") and path.endswith("/export"),
+          _get_artifact_export),
     Route("GET", "artifact", lambda path: path.startswith("/artifacts/"), _get_artifact),
     Route("GET", "static", lambda path: path.startswith("/static/"), _get_static),
     Route("GET", "media", lambda path: path.startswith("/media/"), _get_media),
