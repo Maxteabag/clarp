@@ -37,6 +37,8 @@ mod installer;
 mod janitor_attention;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
+#[path = "host/launch_refused.rs"]
+mod launch_refused;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/pictures.rs"]
@@ -2911,8 +2913,9 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
     wait_for("the agent to be done", || host.state(&agent) == "done");
     drop(host);
 
-    // A launch that never starts (no shim to start the turn with): the turn fails at once, and
-    // the next message is taken too; the agent is never left busy.
+    // A launch that never starts (no shim to start the turn with): nothing was given to the
+    // tool, so the turn waits to be tried again and holds the agent (R121), the next message
+    // waits behind it, and the user's Stop ends it at once; the agent is not left busy.
     let place = Place::new("no-shim");
     let nowhere = place.root.join("no-shim-here");
     let shim = ["--shim", nowhere.to_str().unwrap()];
@@ -2928,15 +2931,16 @@ fn nothing_holds_an_agent_busy_with_no_process_behind_it_and_what_waits_runs() {
             .find(|row| row["session"] == agent.as_str())
             .unwrap()
     };
-    wait_for("both turns to have ended", || {
-        let turns = host.turns(&agent);
-        let ended = turns
-            .iter()
-            .filter(|turn| turn["turn"]["status"] == "failed")
-            .count();
-        ended == 2 && row(&host)["busy"] == false
+    wait_for("the first to wait, and the second behind it", || {
+        let row = row(&host);
+        row["busy"] == true && row["queued_turn_count"] == 1
     });
-    assert_eq!(row(&host)["queued_turn_count"], 0);
+    host.post("/stop", json!({ "session": agent }));
+    wait_for("the first to have ended, and the agent to be free", || {
+        let turns = host.turns(&agent);
+        let failed = turns.iter().any(|turn| turn["turn"]["status"] == "failed");
+        !failed && row(&host)["busy"] == false
+    });
     drop(host);
 
     // A turn that waits for an account when the Host restarts: still the account's to take up,
