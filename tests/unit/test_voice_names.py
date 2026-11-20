@@ -96,6 +96,70 @@ def test_the_worker_never_starts_under_tests():
     assert voice_names.worker_enabled() is False
 
 
+def test_a_failed_fetch_never_drops_the_names_a_provider_had(names_file):
+    """Reviewer 3's M4 (a refresh that replaces instead of merging): a refused ElevenLabs
+    lookup and a failed Cartesia catalogue keep each provider's names."""
+    names_file.write_text(json.dumps({"elevenlabs": {ELEVEN: "Old Name"},
+                                      "cartesia": {ADA_CARTESIA: "Brooke"}}))
+
+    def refused(key, voice_id):
+        raise OSError("401 quota_exceeded")
+    done = voice_names.refresh(_cfg("elevenlabs"), path=names_file,
+                               cartesia_all=lambda key: (_ for _ in ()).throw(OSError("down")),
+                               cartesia_one=refused, eleven_one=refused,
+                               voices_in_use=lambda _cfg: {"cartesia": {OTHER}, "elevenlabs": {ELEVEN}})
+    assert done == ["elevenlabs"]
+    assert voice_names.names("elevenlabs") == {ELEVEN: "Old Name"}
+    assert voice_names.names("cartesia") == {ADA_CARTESIA: "Brooke"}
+    speech = voice_profile.speech(_host(_cfg("elevenlabs")),
+                                  {"agent_id": "a", "persona": "Zed", "session": "zed",
+                                   "voice_id": json.dumps({"elevenlabs": ELEVEN})})
+    assert speech["voice_label"] == "Old Name"
+
+
+def test_no_keys_no_call_and_the_file_untouched(names_file):
+    """Reviewer 3's M10: without a Cartesia or an ElevenLabs key nothing is asked."""
+    import os
+    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}}))
+    os.utime(names_file, (1_700_000_000, 1_700_000_000))
+    before = (names_file.read_bytes(), names_file.stat().st_mtime_ns)
+    read_in_use = []
+
+    def fetch(*a):
+        read_in_use.append(("fetch",) + a)
+        return {}
+    done = voice_names.refresh(
+        _cfg("cartesia", cartesia_api_key="", eleven_api_key=""), path=names_file,
+        cartesia_all=lambda key: fetch(key) or [{"id": OTHER, "name": "New"}],
+        cartesia_one=fetch, eleven_one=fetch,
+        voices_in_use=lambda _cfg: read_in_use.append("in_use") or {"cartesia": {OTHER}, "elevenlabs": {ELEVEN}})
+    assert done == [] and read_in_use == []          # no provider call, not even the read of voices in use
+    assert (names_file.read_bytes(), names_file.stat().st_mtime_ns) == before
+    # A Cartesia key alone: ElevenLabs is never asked, whatever ids are in use.
+    done, asked = _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[],
+                           in_use=set(), eleven_in_use={ELEVEN})
+    assert [a for a in asked if a[0] == "eleven"] == []
+
+
+def test_at_most_a_hundred_lookups_per_provider(names_file):
+    """Reviewer 3's M5: 250 voices in use the catalogue misses -> exactly 100 by-id calls."""
+    missing = {f"c0000000-0000-4000-8000-{i:012x}" for i in range(1000, 1250)}
+    done, asked = _refresh(_cfg("cartesia", eleven_api_key=""), names_file, pages=[], in_use=missing)
+    assert done == ["cartesia"]
+    assert len([a for a in asked if a[0] == "one"]) == voice_names.MAX_LOOKUPS == 100
+
+
+def test_the_file_is_parsed_once_while_it_is_unchanged(names_file, monkeypatch):
+    """Reviewer 3's M2 (cost): names() and signature() reuse one parse per file state."""
+    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}}))
+    real, parsed = voice_names._parse, []
+    monkeypatch.setattr(voice_names, "_parse", lambda path: parsed.append(path) or real(path))
+    for _ in range(5):
+        assert voice_names.names("cartesia") == {ADA_CARTESIA: "Brooke"}
+        assert voice_names.signature()
+    assert len(parsed) == 1
+
+
 def test_a_damaged_or_missing_file_is_no_names(names_file):
     assert voice_names.names("cartesia") == {}
     names_file.write_text("{not json")
