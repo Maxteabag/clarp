@@ -507,7 +507,10 @@ mod tests {
         };
         let row = serde_json::to_value(&waited).unwrap();
         assert_eq!(row[SENT_AT], 1_700, "{row}");
-        assert_eq!(SENT_AT, "sent_at_ms", "the log's key is permanent once written");
+        assert_eq!(
+            SENT_AT, "sent_at_ms",
+            "the log's key is permanent once written"
+        );
         let read: Message = serde_json::from_value(row).unwrap();
         assert_eq!(read, waited);
     }
