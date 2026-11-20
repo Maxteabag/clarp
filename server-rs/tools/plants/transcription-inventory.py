@@ -39,7 +39,7 @@ changes("clarp-host/src/heard.rs", "host", [
 ])
 changes("clarp-host/src/heard/inventory.rs", "host", [
     ('records.iter().position(|r| r["id"] == id)', 'records.iter().position(|r| r["id"] != id)'),
-    ('!record["_managed_root"].is_null()', 'record["_managed_root"].is_null()'),
+    ('let Some(stored) = record.get("_managed_root")', 'let Some(stored) = record.get("_private_unused")'),
     ('installed_path(record).is_none()', 'installed_path(record).is_some()'),
     ('r["id"] == model', 'r["id"] != model'), ('kept("transcription-models", "records".into())', 'kept("transcription-models", "unknown".into())'),
     ('records.remove(index);', 'let _ = index;'),
@@ -51,12 +51,12 @@ changes("clarp-host/src/heard/install.rs", "host", [
     ('cannot remove the configured server default;', 'cannot remove default;'),
 ])
 changes("clarp-host/src/heard/managed.rs", "host", [
-    ('id.replace(\':\', "--")', 'id.replace(\':\', "-")'),
-    ('!resolved.starts_with(&resolved_root)', 'resolved == resolved_root'),
-    ('refusing to remove model outside managed caches:', 'model outside managed caches:'),
-    ('refusing to remove anything but the managed folder for', 'invalid model folder for'),
-    ('target != absolute_root.join(&name)', 'target == absolute_root.join(&name)'),
-    ('resolved != target', 'resolved == target'),
+    ('let name = id.replace(\':\', "--");', 'let name = id.replace(\':\', "-");'),
+    ('if kind.is_symlink()', 'if !kind.is_symlink()'),
+    ('its folder is a link or outside the managed models folder','invalid managed path'),
+    ('Some(Path::new(s)) == expected.as_deref()', 'Some(Path::new(s)) != expected.as_deref()'),
+    ('reason=stored_path','reason=bad_folder'),
+    ('if self.directory','if !self.directory'),
     ('std::fs::remove_dir_all(self.path())', 'Ok(())'),
 ])
 changes("clarp-host/src/heard/variants.rs", "host", [
@@ -80,8 +80,8 @@ changes("clarp-host/src/heard/inventory.rs", "host", [
     ('"records.unreadable".into()', '"records.backup".into()'),
 ])
 changes("clarp-host/src/heard/managed.rs", "host", [
-    ('std::io::ErrorKind::NotFound && resuming', 'std::io::ErrorKind::NotFound && !resuming'),
-    ('resuming && error.kind()', '!resuming && error.kind()'),
+    ('Ok(dir) => dir,\n                        Err(e) if e.kind() == std::io::ErrorKind::NotFound', 'Ok(dir) => dir,\n                        Err(e) if e.kind() != std::io::ErrorKind::NotFound'),
+    ('Ok(meta) => meta.file_type(),\n            Err(e) if e.kind() == std::io::ErrorKind::NotFound', 'Ok(meta) => meta.file_type(),\n            Err(e) if e.kind() != std::io::ErrorKind::NotFound'),
 ])
 # The 501 for install has been replaced by a working 202 route. Its rules live in transcription-installer.
 changes("clarp-host/src/heard/inventory.rs", "port", [

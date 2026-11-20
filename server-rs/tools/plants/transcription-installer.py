@@ -98,5 +98,13 @@ changes("clarp-host/src/heard/inventory.rs","upload",[
 changes("clarp-host/src/heard/install.rs","open",[
     ('"worker_never_started"', '"installer_not_started"'),
 ])
+changes(H,"restore",[
+    ('job.as_ref().filter(|j| j.status == JobStatus::Cancelled)', 'job.as_ref().filter(|_| false)'),
+    ('ManagedFolder::checked(&self.root, id)\n            .map_err', 'ManagedFolder::checked(&self.root, "faster-whisper:small")\n            .map_err'),
+])
+changes(H,"restore",[
+    ('gen_id != job.generation', 'gen_id == job.generation'),
+    ('inventory.remove(fleet, &self.root, id, true)', 'inventory.remove(fleet, &self.root, id, false)'),
+])
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
