@@ -9,6 +9,7 @@ import time
 
 from lib import tool_explanation_settings as settings
 from lib.live_explain import LiveExplainer
+from short_sockets import socket_path as short_socket
 
 
 class FakeService:
@@ -328,7 +329,7 @@ def test_a_tool_the_explainer_never_saw_is_explained_when_the_relay_connects(tmp
     hub.patch("a1", "cl:toolu_1", {"tool": {"explain": {"text": "Lists files", "level": 2, "status": "ready"}}})
     hub.patch("a1", "cl:toolu_2", {"tool": {"explain": {"text": None, "level": 2, "status": "failed"}}})
     hub.end_turn("a1")
-    socket_path = tmp_path / "rt.sock"
+    socket_path = short_socket("rt.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=_Dispatch(), status_provider=lambda: {})
     runtime.live_fanout, runtime.live_hub = fanout, hub
     threading.Thread(target=runtime.serve_forever, daemon=True).start()

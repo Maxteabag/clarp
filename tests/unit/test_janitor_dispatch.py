@@ -9,6 +9,7 @@ from lib import agents, db, janitors, message_store, turn_queue
 from lib import compaction, oracle_delegations, turn_dispatch as td
 from lib.agent_lifecycle import AgentLifecycleService, AgentLifecycleError
 from lib.runtime_rpc_server import RuntimeRPCServer
+from short_sockets import socket_path as short_socket
 
 
 class Backend:
@@ -239,7 +240,7 @@ def test_cancel_preserves_unrelated_active_work_and_queue(setup):
 @pytest.mark.parametrize("method", ["interrupt", "interrupt_any", "steer", "begin_stop", "release_agent"])
 def test_runtime_shared_controls_reject_janitors(setup, tmp_path, method):
     s = setup
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=s.service)
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"), dispatch_service=s.service)
     try:
         result = runtime.dispatch_request(method, {"agent_id": s.janitor_id, "backend": "codex"})
         assert result["ok"] is False and result["status"] == 409
@@ -252,7 +253,7 @@ def test_runtime_cancel_rpc_reaches_exact_run_helper(setup, tmp_path):
     s = setup
     dispatch(s)
     pause(s)
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=s.service)
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"), dispatch_service=s.service)
     try:
         result = runtime.dispatch_request("cancel_janitor_run", {"run_id": s.run["run_id"]})
         assert result["ok"] is True

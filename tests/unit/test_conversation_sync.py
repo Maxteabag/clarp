@@ -585,7 +585,7 @@ def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monk
     monkeypatch.setattr(backends, 'find_session_jsonl', lambda *a: source)
     def parse(*args):
         entered.set()
-        assert release.wait(3)
+        assert release.wait(30)
         return [{'role':'user','text':'new message','timestamp':'2026-01-01T00:00:00Z'}]
     monkeypatch.setattr(backends, 'parse_turns', parse)
     def reading():
@@ -599,19 +599,23 @@ def test_chat_read_returns_stored_rows_without_waiting_for_import(tmp_path, monk
     t = threading.Thread(target=reading)
     t.start()
     try:
-        assert returned.wait(.5), 'chat read blocked behind transcript import'
+        # By order, not seconds: the import is held in parse until release below, so a read that
+        # returns now did not wait for it (a read that waited would never return before release).
+        # 30 s is a deadlock guard; the 0.5 s and 1 s bounds were met only by an idle machine.
+        assert returned.wait(30), 'chat read blocked behind transcript import'
+        assert not release.is_set()
         assert not errors
         assert answers[0]['turns'][0]['text'] == 'stored message'
-        assert entered.wait(1)
+        assert entered.wait(30)
     finally:
         release.set()
-        t.join(4)
+        t.join(30)
         if hasattr(transcript_import_cache, 'wait_for_background'):
-            assert transcript_import_cache.wait_for_background(4)
+            assert transcript_import_cache.wait_for_background(30)
 
     refreshed = load_conversation(session='reliable', background_import=True)
     assert refreshed['turns'][0]['text'] == 'new message'
-    assert transcript_import_cache.wait_for_background(3)
+    assert transcript_import_cache.wait_for_background(30)
 
 
 def test_only_client_rows_do_not_make_adopted_history_warm(tmp_path, monkeypatch):

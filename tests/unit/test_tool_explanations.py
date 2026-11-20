@@ -45,7 +45,10 @@ def test_refined_prompts_match_user_selected_lab_and_keep_low(monkeypatch):
 
 
 def wait_ready(service, level=3):
-    for _ in range(100):
+    """Until the worker thread has answered. By the answer, not a time: the bound is a deadlock
+    guard only (it was 100 x 10 ms, which a loaded machine's worker could take longer than)."""
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
         result = service.request(level, [{"id": "phone", "activity": {"command": "ls"}}])
         if result["items"][0]["status"] != "pending":
             return result["items"][0]

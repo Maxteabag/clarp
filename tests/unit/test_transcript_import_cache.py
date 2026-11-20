@@ -83,7 +83,7 @@ def test_worker_completion_state_controls_after_and_freshness(tmp_path, outcome,
     try:
         assert cache.schedule_import(path, importer, owner="audit-owner",
                                      after=lambda: after.append("completed"))
-        assert cache.wait_for_background(2), "the worker must not wait for denied audit IO"
+        assert cache.wait_for_background(30), "the worker must not wait for denied audit IO"
         assert after == ([] if outcome == "deferred" else ["completed"])
         if outcome == "deferred":
             assert key not in cache._imported
@@ -126,12 +126,12 @@ def test_new_audit_generation_before_publication_cannot_satisfy_freshness(tmp_pa
             result = cache.import_if_changed(path, importer, owner="audit-owner")
         else:
             result = cache.import_for_snapshot(path, importer, owner="audit-owner", timeout=.02)
-        assert changed.wait(2), "the selected callback never reached the generation change"
+        assert changed.wait(30), "the selected callback never reached the generation change"
         assert importer.generation == previous_generation + 1 and not importer.eligible
         if entry == "snapshot":
             worker = selected_workers[0]
             assert worker is not threading.current_thread()
-            worker.join(2)
+            worker.join(30)
             assert not worker.is_alive(), "selected worker did not finish publication/cleanup"
         assert not result, "an old admission published completion after its audit generation changed"
         assert cache._imported[key] == previous_signature
@@ -152,7 +152,7 @@ def test_unopted_callback_results_keep_legacy_completion(tmp_path, value, monkey
     try:
         assert cache.schedule_import(path, lambda: value, owner="legacy",
                                      after=lambda: after.append("completed"))
-        assert cache.wait_for_background(2)
+        assert cache.wait_for_background(30)
         assert after == ["completed"]
         assert cache._validated_at.get(f"legacy\0{path}", cache._epoch)[0]
     finally:
@@ -180,7 +180,7 @@ def test_accepted_completion_is_not_retroactively_deferred_by_its_observer(tmp_p
         else:
             assert cache.schedule_import(path, importer, owner="observer",
                                          after=lambda: after.append("accepted"))
-            assert cache.wait_for_background(2)
+            assert cache.wait_for_background(30)
             result = after == ["accepted"]
         assert len(events) == 1 and not importer.eligible
         assert result, "a success already observed was retroactively returned as deferred"
@@ -223,7 +223,7 @@ def test_completion_observers_release_authority_and_cache_locks(tmp_path, observ
         threads.append(thread)
         thread.start()
         entered.set()
-        observed.append(acquired.wait(2))
+        observed.append(acquired.wait(30))
 
     if observer == "completion":
         importer._clarp_transcript_completed = observe
@@ -235,10 +235,10 @@ def test_completion_observers_release_authority_and_cache_locks(tmp_path, observ
 
     try:
         assert cache.schedule_import(path, importer, owner="observer", after=on_after)
-        assert entered.wait(3), "the actual observer was not invoked"
-        assert cache.wait_for_background(4)
+        assert entered.wait(30), "the actual observer was not invoked"
+        assert cache.wait_for_background(30)
         for thread in threads:
-            thread.join(2)
+            thread.join(30)
             assert not thread.is_alive()
         assert observed == [True], "observer IO retained authority or cache lock"
         assert after == ["accepted"]
@@ -252,7 +252,7 @@ def test_completion_observers_release_authority_and_cache_locks(tmp_path, observ
                 try:
                     # A failing start can leave an honestly unstarted object.
                     if thread.ident is not None:
-                        thread.join(3)
+                        thread.join(30)
                     assert not thread.is_alive(), "unknown/live observer contender"
                 except Exception as exc:
                     errors.append(exc)
@@ -295,12 +295,12 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
 
     def hold_import():
         entered.set()
-        if not release.wait(5):
+        if not release.wait(30):
             raise AssertionError("test did not release the admitted import")
 
     def waiting():
         waiting_entered.set()
-        if not waiting_release.wait(5):
+        if not waiting_release.wait(30):
             raise AssertionError("test did not release the waiting import")
 
     def completed():
@@ -309,12 +309,12 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
     importer.before_return = hold_import
     try:
         assert cache.schedule_import(path, importer, owner="reserved", after=completed)
-        assert entered.wait(2)
+        assert entered.wait(30)
         admitted = [cache.schedule_import(path, waiting, owner=f"waiting-{i}")
                     for i in range(64)]
         assert sum(admitted) == 63, "running retry reservation allowed a 65th owned intent"
         release.set()
-        assert waiting_entered.wait(2)
+        assert waiting_entered.wait(30)
         key = f"reserved\0{path}"
         with cache._guard:
             pending, deferred = cache._pending.get(key), cache._deferred.get(key)
@@ -333,7 +333,7 @@ def test_running_deferred_import_keeps_capacity_for_its_retry(tmp_path, monkeypa
             latest = cache._pending.get(key) or cache._deferred.get(key)
             assert latest is not None and latest[0][3] is completed and latest[0][5] == rank
         waiting_release.set()
-        assert cache.wait_for_background(4)
+        assert cache.wait_for_background(30)
         assert after == ["completed"], "the reserved dirty intent did not complete once"
     finally:
         release.set()
@@ -409,7 +409,7 @@ def test_worker_marker_descriptor_runs_before_locked_request_consumption(tmp_pat
     try:
         assert cache.schedule_import(path, GenericImporter(), owner="marker",
                                      after=lambda: after.append("original"))
-        assert cache.wait_for_background(3)
+        assert cache.wait_for_background(30)
         assert observations and all(unlocked and active for unlocked, active in observations), (
             "worker evaluated user marker under its guard or after losing active ownership")
         expected = ["replacement" if reenter == "replace" else "original"]
@@ -525,23 +525,23 @@ def test_background_coalesces_growth_without_losing_new_version(tmp_path, monkey
         calls.append(path.read_text())
         if len(calls) == 1:
             entered.set()
-            assert release.wait(3)
+            assert release.wait(30)
         else:
             finished.set()
     cache.schedule_import(path, importer, owner='one')
     try:
-        assert entered.wait(1)
+        assert entered.wait(30)
         path.write_text('second version')
         for _ in range(30):
             cache.schedule_import(path, importer, owner='one')
     finally:
         release.set()
-        assert finished.wait(4)  # adaptive completion window can defer the worker
-        assert cache.wait_for_background(4)
+        assert finished.wait(30)  # adaptive completion window can defer the worker
+        assert cache.wait_for_background(30)
     assert calls == ['first', 'second version']
     assert not cache.schedule_import(path, importer, owner='one')
     assert cache.schedule_import(path, importer, owner='other')
-    assert cache.wait_for_background(4)
+    assert cache.wait_for_background(30)
     assert calls[-1] == 'second version'
     assert len(calls) == 3
 
@@ -553,10 +553,10 @@ def test_background_failed_import_remains_retryable(tmp_path):
     def failed():
         raise OSError('offline fixture failure')
     cache.schedule_import(path, failed, owner='retry')
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     calls = []
     assert cache.schedule_import(path, lambda: calls.append('ok'), owner='retry')
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ['ok']
 
 
@@ -570,18 +570,18 @@ def test_background_queue_is_bounded_and_deferred_owner_can_retry(tmp_path, monk
     calls = []
     def blocking():
         entered.set()
-        assert release.wait(3)
+        assert release.wait(30)
     cache.schedule_import(path, blocking, owner='active')
     try:
-        assert entered.wait(1)
+        assert entered.wait(30)
         assert cache.schedule_import(path, lambda: calls.append('pending'), owner='pending')
         assert not cache.schedule_import(path, lambda: calls.append('deferred'), owner='deferred')
     finally:
         release.set()
-        assert cache.wait_for_background(4)
+        assert cache.wait_for_background(30)
     assert calls == ['pending']
     assert cache.schedule_import(path, lambda: calls.append('deferred'), owner='deferred')
-    assert cache.wait_for_background(4)
+    assert cache.wait_for_background(30)
     assert calls == ['pending', 'deferred']
 
 
@@ -603,9 +603,43 @@ def test_a_locked_database_retries_instead_of_dropping_the_import(tmp_path, monk
     assert attempts == [1, 1]
 
 
-def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_import(tmp_path, monkeypatch):
-    import time
+class _FiredByHand:
+    """threading.Timer as the cache arms it, fired by the test instead of by the wall clock."""
+    armed: list["_FiredByHand"] = []
 
+    def __init__(self, wait, function):
+        self.wait, self.function, self.args, self.daemon = wait, function, (), True
+        self._state = "new"
+
+    def start(self):
+        self._state = "armed"
+        _FiredByHand.armed.append(self)
+
+    def is_alive(self):
+        return self._state == "armed"
+
+    def cancel(self):
+        self._state = "cancelled"
+
+    def fire(self):
+        if self._state == "armed":
+            self._state = "fired"
+            self.function(*self.args)
+
+
+def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_import(tmp_path, monkeypatch):
+    """No import inside the owner's window however often the growing file is asked for, then one
+    trailing import that sees the latest file. On a planted clock with the window's timer fired
+    by hand: the four requests fall inside the 0.4 s window whatever the machine's load (they
+    had to fit in 0.4 s of real time, and the timer could fire among them)."""
+    import threading
+
+    class Planted:
+        now = 1_000.0
+
+        @classmethod
+        def monotonic(cls):
+            return cls.now
     transcript_import_cache.reset_for_tests()
     monkeypatch.setattr(transcript_import_cache, "_BACKGROUND_MIN_INTERVAL", 0.4)
     path = tmp_path / "rollout.jsonl"
@@ -615,18 +649,22 @@ def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_impo
     def importer():
         imported.append(len(path.read_text().splitlines()))
 
+    monkeypatch.setattr(transcript_import_cache, "time", Planted)
+    _FiredByHand.armed.clear()
+    monkeypatch.setattr(threading, "Timer", _FiredByHand)
     assert transcript_import_cache.schedule_import(path, importer, owner="a1")
-    assert transcript_import_cache.wait_for_background(2)
+    assert transcript_import_cache.wait_for_background(30)
     for n in range(2, 6):            # the file keeps growing; /log keeps asking
         path.write_text("".join(f"{i}\n" for i in range(1, n + 1)))
         _bump_mtime(path)
         transcript_import_cache.schedule_import(path, importer, owner="a1")
-        time.sleep(0.02)
+        Planted.now += 0.02
     assert imported == [1]           # no import inside the window
-    deadline = time.monotonic() + 3
-    while len(imported) < 2 and time.monotonic() < deadline:
-        time.sleep(0.05)
-    transcript_import_cache.wait_for_background(2)
+    assert len([timer for timer in _FiredByHand.armed if timer.is_alive()]) == 1
+    Planted.now += 0.4               # the window closes
+    for timer in list(_FiredByHand.armed):
+        timer.fire()
+    assert transcript_import_cache.wait_for_background(30)
     assert imported == [1, 5]        # one trailing import sees the latest file
 
 
@@ -642,7 +680,7 @@ def test_background_after_runs_once_the_import_has_completed(tmp_path, monkeypat
     order: list[str] = []
     assert cache.schedule_import(path, lambda: order.append("import"), owner="a",
                                  after=lambda: order.append(threading.current_thread().name))
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert order == ["import", "transcript-import"]
 
 
@@ -658,7 +696,7 @@ def test_background_after_runs_when_the_version_is_already_imported(tmp_path, mo
     calls: list[str] = []
     assert cache.schedule_import(path, lambda: calls.append("import"), owner="a",
                                  after=lambda: calls.append("after"))
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ["after"]
 
 
@@ -674,7 +712,7 @@ def test_background_after_never_runs_after_a_failed_import(tmp_path, monkeypatch
         raise OSError("offline fixture failure")
 
     cache.schedule_import(path, failed, owner="a", after=lambda: calls.append("after"))
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == []
 
 
@@ -692,18 +730,18 @@ def test_background_keeps_the_newest_import_and_after_for_a_pending_key(tmp_path
 
     def blocking():
         entered.set()
-        assert release.wait(3)
+        assert release.wait(30)
 
     cache.schedule_import(busy, blocking, owner="busy")
     try:
-        assert entered.wait(1)
+        assert entered.wait(30)
         cache.schedule_import(path, lambda: calls.append("old import"), owner="a",
                               after=lambda: calls.append("old after"))
         cache.schedule_import(path, lambda: calls.append("new import"), owner="a",
                               after=lambda: calls.append("new after"))
     finally:
         release.set()
-        assert cache.wait_for_background(4)
+        assert cache.wait_for_background(30)
     assert calls == ["new import", "new after"]
 
 
@@ -723,17 +761,17 @@ def test_a_later_request_without_after_keeps_the_pending_after(tmp_path, monkeyp
 
     def blocking():
         entered.set()
-        assert release.wait(3)
+        assert release.wait(30)
 
     cache.schedule_import(busy, blocking, owner="busy")
     try:
-        assert entered.wait(1)
+        assert entered.wait(30)
         cache.schedule_import(path, lambda: calls.append("streamer import"), owner="a",
                               after=lambda: calls.append("streamer after"))
         cache.schedule_import(path, lambda: calls.append("log import"), owner="a")
     finally:
         release.set()
-        assert cache.wait_for_background(4)
+        assert cache.wait_for_background(30)
     assert calls == ["log import", "streamer after"]
 
 
@@ -748,15 +786,15 @@ def test_reset_cancels_an_armed_deferred_import(tmp_path, monkeypatch):
     path.write_text("1\n")
     calls: list[int] = []
     assert cache.schedule_import(path, lambda: calls.append(1), owner="a")
-    assert cache.wait_for_background(2)
+    assert cache.wait_for_background(30)
     path.write_text("1\n2\n")
     _bump_mtime(path)
     assert cache.schedule_import(path, lambda: calls.append(2), owner="a")   # inside the window: timer armed
     timer = cache._deferred[f"a\0{path}"][1]
     assert cache.reset_for_tests()
-    timer.join(2)
+    timer.join(30)
     assert not timer.is_alive()
-    assert cache.wait_for_background(2)
+    assert cache.wait_for_background(30)
     assert calls == [1]
 
 
@@ -778,8 +816,8 @@ def test_a_deferred_request_whose_file_vanished_is_not_lost_on_the_timer_thread(
     assert cache.schedule_import(path, lambda: None, owner="a")
     timer = cache._deferred[f"a\0{path}"][1]
     path.unlink()
-    timer.join(2)
-    assert cache.wait_for_background(3)
+    timer.join(30)
+    assert cache.wait_for_background(30)
     assert escaped == []
 
 
@@ -811,7 +849,7 @@ def _wait_until(predicate, timeout=3.0):
 def _opened_window(cache, path, owner="a"):
     """Complete one import so the per-key window is open for the next request."""
     assert cache.schedule_import(path, lambda: None, owner=owner)
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
 
 
 def test_the_deferred_window_keeps_the_newest_import_and_after(tmp_path, monkeypatch):
@@ -830,7 +868,7 @@ def test_the_deferred_window_keeps_the_newest_import_and_after(tmp_path, monkeyp
     assert cache.schedule_import(path, lambda: calls.append("new import"), owner="a",
                                  after=lambda: calls.append("new after"))
     assert _wait_until(lambda: calls == ["new import", "new after"])
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ["new import", "new after"]
 
 
@@ -844,16 +882,16 @@ def test_is_active_covers_pending_and_running(tmp_path, monkeypatch):
 
     def blocking():
         entered.set()
-        assert release.wait(3)
+        assert release.wait(30)
 
     assert not cache.is_active(path, owner="a")
     cache.schedule_import(path, blocking, owner="a")
     try:
-        assert entered.wait(2)
+        assert entered.wait(30)
         assert cache.is_active(path, owner="a")            # running
     finally:
         release.set()
-        assert cache.wait_for_background(3)
+        assert cache.wait_for_background(30)
     assert not cache.is_active(path, owner="a")
 
 
@@ -873,7 +911,7 @@ def test_a_request_during_reset_is_refused_and_new_work_runs_after(tmp_path, mon
 
     def held(*args, **kwargs):
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(cache, "_schedule_deferred", held)
@@ -881,7 +919,7 @@ def test_a_request_during_reset_is_refused_and_new_work_runs_after(tmp_path, mon
     _bump_mtime(path)
     calls: list[str] = []
     assert cache.schedule_import(path, lambda: calls.append("old"), owner="a")
-    assert entered.wait(2)
+    assert entered.wait(30)
     result: dict = {}
     resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     resetter.start()
@@ -895,10 +933,10 @@ def test_a_request_during_reset_is_refused_and_new_work_runs_after(tmp_path, mon
         assert resetter.is_alive()                         # cannot succeed while the callback is held
     finally:
         release.set()
-        resetter.join(5)
+        resetter.join(30)
     assert result["ok"] is True and calls == []
     assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ["new"]
 
 
@@ -918,10 +956,10 @@ def test_an_import_finishing_during_reset_leaves_no_stale_state(tmp_path, monkey
     def blocking():
         calls.append("first")
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
 
     cache.schedule_import(path, blocking, owner="a")
-    assert entered.wait(2)
+    assert entered.wait(30)
     key = f"a\0{path}"
     lock_before = cache._path_locks[key]
     worker = cache._worker
@@ -933,7 +971,7 @@ def test_an_import_finishing_during_reset_leaves_no_stale_state(tmp_path, monkey
         assert resetter.is_alive() and cache._path_locks[key] is lock_before
     finally:
         release.set()
-        resetter.join(5)
+        resetter.join(30)
     assert result["ok"] is True
     assert not worker.is_alive()
     assert key not in cache._imported and key not in cache._last_started and not cache._path_locks
@@ -962,20 +1000,20 @@ def test_an_admitted_worker_item_passes_the_fence_and_writes_no_old_epoch_bookke
     def held_admitted(path_, importer, owner, epoch):
         if owner == "a":                                # only the worker's item is held at body entry
             at_body.set()
-            assert go_body.wait(5)
+            assert go_body.wait(30)
         return original(path_, importer, owner, epoch)
 
     monkeypatch.setattr(cache, "_import_admitted", held_admitted)
 
     def direct_importer():
         direct_in.set()
-        assert direct_go.wait(5)
+        assert direct_go.wait(30)
 
     direct = _threading.Thread(target=lambda: cache.import_if_changed(other, direct_importer, owner="d"))
     direct.start()
-    assert direct_in.wait(2)                            # admitted direct call in flight
+    assert direct_in.wait(30)                            # admitted direct call in flight
     cache.schedule_import(path, lambda: calls.append("admitted"), owner="a")
-    assert at_body.wait(2)                              # worker admitted, before the import body
+    assert at_body.wait(30)                              # worker admitted, before the import body
     result: dict = {}
     resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     resetter.start()
@@ -991,8 +1029,8 @@ def test_an_admitted_worker_item_passes_the_fence_and_writes_no_old_epoch_bookke
     finally:
         go_body.set()
         direct_go.set()
-        direct.join(5)
-        resetter.join(5)
+        direct.join(30)
+        resetter.join(30)
     assert result["ok"] is True and calls == ["admitted"]
 
 
@@ -1009,10 +1047,10 @@ def test_a_timed_out_reset_fails_closed_and_a_later_reset_resumes_the_same_drain
 
     def blocking():
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
 
     cache.schedule_import(path, blocking, owner="a")
-    assert entered.wait(2)
+    assert entered.wait(30)
     try:
         assert cache.reset_for_tests(deadline_s=0.2) is False
         drain = cache._drain
@@ -1026,7 +1064,7 @@ def test_a_timed_out_reset_fails_closed_and_a_later_reset_resumes_the_same_drain
     assert drain.epoch == cache._epoch                     # resumed, not re-bumped
     calls: list[str] = []
     assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ["new"]
 
 
@@ -1045,7 +1083,7 @@ def test_a_timer_held_across_two_resets(tmp_path, monkeypatch):
 
     def held(*args, **kwargs):
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
         return original(*args, **kwargs)
 
     monkeypatch.setattr(cache, "_schedule_deferred", held)
@@ -1053,7 +1091,7 @@ def test_a_timer_held_across_two_resets(tmp_path, monkeypatch):
     _bump_mtime(path)
     calls: list[str] = []
     cache.schedule_import(path, lambda: calls.append("old"), owner="a")
-    assert entered.wait(2)
+    assert entered.wait(30)
     timer = cache._deferred[f"a\0{path}"][1]               # its callback is held before _guard
     try:
         assert cache.reset_for_tests(deadline_s=0.2) is False
@@ -1066,7 +1104,7 @@ def test_a_timer_held_across_two_resets(tmp_path, monkeypatch):
     assert cache.reset_for_tests() is True
     assert cache._drain is None and calls == []
     assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
-    assert cache.wait_for_background(3)
+    assert cache.wait_for_background(30)
     assert calls == ["new"]
 
 
@@ -1082,10 +1120,10 @@ def test_a_concurrent_reset_is_refused_without_touching_the_owner_or_drain(tmp_p
 
     def blocking():
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
 
     cache.schedule_import(path, blocking, owner="a")
-    assert entered.wait(2)
+    assert entered.wait(30)
     result: dict = {}
     first = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     first.start()
@@ -1098,7 +1136,7 @@ def test_a_concurrent_reset_is_refused_without_touching_the_owner_or_drain(tmp_p
         assert cache._reset_owner is owner_token and cache._drain is drain
     finally:
         release.set()
-        first.join(5)
+        first.join(30)
     assert result["ok"] is True and cache._reset_owner is None
 
 
@@ -1112,11 +1150,11 @@ def test_reset_waits_for_an_admitted_direct_import(tmp_path):
 
     def blocking():
         entered.set()
-        assert release.wait(5)
+        assert release.wait(30)
 
     direct = _threading.Thread(target=lambda: cache.import_if_changed(path, blocking, owner="a"))
     direct.start()
-    assert entered.wait(2)
+    assert entered.wait(30)
     result: dict = {}
     resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     resetter.start()
@@ -1125,8 +1163,8 @@ def test_reset_waits_for_an_admitted_direct_import(tmp_path):
         assert resetter.is_alive()
     finally:
         release.set()
-        direct.join(5)
-        resetter.join(5)
+        direct.join(30)
+        resetter.join(30)
     assert result["ok"] is True
 
 
@@ -1153,7 +1191,7 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
             worker_closes.append(1)
             if len(worker_closes) == 2:
                 closing.set()
-                assert release.wait(5)
+                assert release.wait(30)
         return original_close()
 
     monkeypatch.setattr(database, "close_local", held_close)
@@ -1161,7 +1199,7 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
     result: dict = {}
     resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
     try:
-        assert closing.wait(2)
+        assert closing.wait(30)
         worker = cache._worker
         assert worker is not None                     # not cleared before the close returns
         resetter.start()
@@ -1171,7 +1209,7 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
     finally:
         release.set()                                 # never leave the worker held
         if resetter.ident is not None:
-            resetter.join(5)
+            resetter.join(30)
     assert result["ok"] is True and not worker.is_alive()
 
 
@@ -1202,8 +1240,8 @@ def test_a_popped_item_is_never_invisible_to_is_active_before_it_runs(tmp_path, 
 
     monkeypatch.setattr(cache, "_guard", CheckedGuard())
     assert cache.schedule_import(path, started.set, owner="a")
-    assert started.wait(3)
-    assert cache.wait_for_background(3)
+    assert started.wait(30)
+    assert cache.wait_for_background(30)
     assert gaps == []
 
 
@@ -1229,7 +1267,7 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
         me = _threading.current_thread()
         if me.name == "transcript-import" and cache._worker is not me and not unwinding.is_set():
             unwinding.set()
-            assert release.wait(5)
+            assert release.wait(30)
         return original_close()
 
     monkeypatch.setattr(database, "close_local", held_close)
@@ -1238,7 +1276,7 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
         # From the registry, not _worker: the worker may already have cleared
         # _worker by now. The reset at the start pruned every earlier thread.
         (worker,) = cache._threads
-        assert unwinding.wait(3)
+        assert unwinding.wait(30)
         assert cache._worker is None and worker.is_alive()
         assert cache.reset_for_tests(deadline_s=0.2) is False     # the tail is waited for
         assert cache._resetting and worker in cache._drain.threads
@@ -1265,7 +1303,7 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
     def held_log(event, *args, **kwargs):
         if event == "transcriptImportThreadStartFail":
             logging.set()
-            assert release.wait(5)
+            assert release.wait(30)
         return real_log(event, *args, **kwargs)
 
     monkeypatch.setattr(log_module, "log", held_log)
@@ -1279,7 +1317,7 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
 
     monkeypatch.setattr(cache, "threading", _threading_with(Thread=NoWorker))
     try:
-        assert logging.wait(3)
+        assert logging.wait(30)
         assert f"a\0{path}" not in cache._deferred and timer.is_alive()
         assert cache.reset_for_tests(deadline_s=0.2) is False
         assert timer in cache._drain.threads
@@ -1307,8 +1345,8 @@ def test_the_registry_prunes_finished_threads_instead_of_keeping_history(tmp_pat
         path.write_text("{}\n")
         assert cache.schedule_import(path, lambda: None, owner="a")
         (worker,) = cache._threads          # started in schedule's section; dead ones pruned there
-        assert cache.wait_for_background(3)
-        worker.join(3)
+        assert cache.wait_for_background(30)
+        worker.join(30)
         assert worker not in seen
         seen.append(worker)
         assert cache._threads == {worker}
@@ -1339,7 +1377,7 @@ def test_a_worker_that_fails_to_start_leaves_no_live_worker_or_pending_owner(tmp
     monkeypatch.setattr(cache, "threading", _threading)
     calls: list[int] = []
     assert cache.schedule_import(path, lambda: calls.append(1), owner="a")
-    assert cache.wait_for_background(3) and calls == [1]
+    assert cache.wait_for_background(30) and calls == [1]
 
 
 def test_a_window_timer_that_fails_to_start_is_not_left_armed(tmp_path, monkeypatch):
