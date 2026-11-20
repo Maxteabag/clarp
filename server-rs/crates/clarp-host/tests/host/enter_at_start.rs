@@ -26,7 +26,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
             took = took.display(),
             root = place.root.display(),
         ),
-        STAND_IN_ANSWERS,
+        // The backend uses the provider's message ID as the row ID. A shared ID
+        // for these separate replies would address the first turn's row again.
+        &STAND_IN_ANSWERS.replace("msg_1", r#"msg_'"$$"'"#),
     ]
     .concat();
     let claude = place.root.join("claude");
