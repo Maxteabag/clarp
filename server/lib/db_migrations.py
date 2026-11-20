@@ -299,7 +299,7 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v129(con)
         if version < 130:
             _migrate_to_v130(con)
-        if version < 131:  # PROVISIONAL: the next free number on main at merge
+        if version < 131:
             _migrate_to_v131(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
