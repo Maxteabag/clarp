@@ -174,6 +174,11 @@ def run(root) -> dict:
                    agent_of('Ada', json.dumps({'elevenlabs': ELEVEN_ID, 'gemini': 'Charon'})))
     spoken('no key for anyone', {'settings': settings('cartesia', tts_fallback='deepgram'),
                                  'keys': {k: False for k in ALL_KEYS}}, agent_of('Ada', ''))
+    for name, stored in (
+        ('a bare Google voice on the allowlist', 'nb-NO-Chirp3-HD-Aoede'),
+        ('a padded Google voice on the allowlist', '  nb-NO-Chirp3-HD-Aoede '),
+    ):
+        spoken(name, {'settings': settings('google')}, agent_of('Zed', stored))
     for refusal in ('google_id_collision', 'google_id_unverifiable'):
         spoken(f'google refused: {refusal}', {'settings': settings('google'), 'google_refusal': refusal},
                agent_of('Ada', '{}'))
