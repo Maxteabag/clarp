@@ -123,7 +123,6 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CARTESIA_API_KEY", "key"),
     ("TYPESAFE_API_KEY", "key"),
     ("GOOGLE_APPLICATION_CREDENTIALS", "key"),
-    ("OPENCODE_SERVER_PASSWORD", "key"),
     // Where a provider or an engine is: a stand-in only on this machine.
     ("CLARP_APNS_ENDPOINT", "endpoint"),
     ("CLARP_CARTESIA_ENDPOINT", "endpoint"),
@@ -192,7 +191,6 @@ pub const ABSENT: &[(&str, &str)] = &[
 /// Names shaped like a variable in a file that reads the environment that are not read from it:
 /// a marker, a word of a protocol, a file's name.
 pub const NOT_READ: &[&str] = &[
-    "ACTIVE",
     "AGENT",
     "AGY_OK",
     "AGY_TOOL_OK",
@@ -208,7 +206,6 @@ pub const NOT_READ: &[&str] = &[
     "DISABLED",
     "DONE",
     "ENABLED",
-    "ERROR",
     "GET",
     "INGRID",
     "LS",
