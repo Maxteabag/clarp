@@ -231,29 +231,6 @@ async fn no_update() -> ApiError {
     not_built("Updating this Host from an app is")
 }
 
-/// `GET /harness-providers?harness=`: the providers of models a harness can be signed in
-/// to. This Host runs no harness that takes one: none is installed, none is listed.
-async fn model_providers(Query(asked): Asked) -> Json<Value> {
-    let harness = match asked.get("harness").map(|said| said.trim()) {
-        Some(named) if !named.is_empty() => named,
-        _ => "opencode",
-    };
-    Json(json!({
-        "catalogue_available": false, "harness": harness, "installed": false,
-        "providers": [], "store_harness": harness, "tasks": {},
-    }))
-}
-
-/// `GET /harness-providers/models?provider=`: no provider is known here.
-async fn models_of_provider(Query(asked): Asked) -> ApiError {
-    let provider = asked.get("provider").map_or("", |said| said.trim());
-    bad(&format!("unknown provider {provider}"))
-}
-
-async fn no_model_providers(uri: Uri) -> ApiError {
-    not_built_at(&uri, "Signing a harness in to a provider of models is")
-}
-
 /// What an app can ask to have done to an agent that this Host cannot do yet: servers of
 /// its own for its tool.
 async fn no_servers() -> ApiError {
@@ -266,9 +243,7 @@ async fn no_teams() -> ApiError {
 
 pub fn routes() -> Router<App> {
     Router::new()
-        .route("/harness-providers", get(model_providers))
-        .route("/harness-providers/models", get(models_of_provider))
-        .route("/harness-providers/{action}", post(no_model_providers))
+        .merge(crate::harness_providers::routes())
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))

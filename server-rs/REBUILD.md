@@ -3452,3 +3452,37 @@ cannot be reached, 502 in words and never a change sent twice (a sign-in may hav
 its `tasks` are read back instead); (6) a code sent to the Host that holds the sign-in it is
 for. The client contract would not change, and the follower of logins already wakes the turns
 that wait when the login file changes.
+
+**A harness's providers of models, signed in from the app (20 Nov 2026).** OpenCode, and the
+DeepSeek card that runs through it, serve models of many providers, each with a sign-in of its
+own (`harness_model_providers`, listed at 75). `GET /harness-providers` lists OpenCode's catalogue
+(its cache of models.dev) with the type of each credential in OpenCode's store, never a key;
+`GET /harness-providers/models` lists a provider's models; `POST /harness-providers/login` writes
+an API key to OpenCode's store or starts the provider's own device or code sign-in in a private
+`opencode serve` (loopback, a password of its own), which writes the store itself;
+`/login-code` hands it the code; `/logout` takes a credential away. The rules are the Python
+Host's, run from its own module and route handlers (`tools/harness-provider-vectors.py`) and held
+in `clarp_kernel::harness_providers`; the Host reads and writes the files and runs OpenCode
+(`clarp-host` `harness_providers`). A key is written in one move, 0600 in a folder made 0700, and
+is in no answer, no log line and no error. One desk owns the sign-ins that run, and is told by
+threads of its own what OpenCode answered: a sign-in's server is ended before its end is told, and
+the app's picker of models is made to ask again before a completed sign-in is told, so whoever
+sees it complete finds the provider's models. Which sign-ins a phone can complete is asked of
+OpenCode aside, once a day, and kept in the fleet's settings, and only by a Host that keeps the
+tools: any other never starts OpenCode (the lead's review: a Host beside the Python Host would
+run the owner's tool in his home for a sign-in it refuses). The tools' logins and stores are one
+per machine, and one Host keeps a machine's tools (the lead's ruling): with `--accounts select` the
+Host changes them as the reference does; beside a Host that keeps them (`--accounts follow`) and
+with no mode it refuses every change in words, 409, before anything is read, and writes nothing;
+the readings answer in every mode.
+
+Not built: passing a change on to the Host that keeps the tools instead of refusing it. It needs
+the address of that Host and a credential of full-device scope on it (a peer today holds an
+address and a token for `/send` only; such a credential is the owner's to grant); the four
+changes passed on as they came, the key in the body over loopback only and never logged, and the
+other Host's status and body answered as they are; the sign-ins that run, which live in the
+memory of the Host that runs them, read from it too (the `tasks` of `GET /harness-providers`, or
+the whole answer), or an app never sees its code; this Host's picker of models made to ask again
+after a change passed on (or OpenCode's store watched by its digest, as the tools' logins are);
+and the other Host down means refused, and a change whose acceptance is not known is never sent
+again.

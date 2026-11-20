@@ -41,6 +41,7 @@ pub mod forks;
 pub mod goal_listener;
 pub mod goaltool;
 mod google_voice_guard;
+pub mod harness_providers;
 pub mod heard;
 pub mod heartbeat;
 pub mod helper_source;
