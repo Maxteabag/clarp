@@ -93,6 +93,7 @@ CORE = frozenset({f"lib.{m}" for m in (
     'runtime_bridge',
     'runtime_events',
     'server_identity',
+    'url_destination',
     'settings_store',
     'status_labels',
     'stream_pacing',

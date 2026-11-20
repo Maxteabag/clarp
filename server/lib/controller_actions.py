@@ -22,7 +22,7 @@ import urllib.request
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from . import settings_store
+from . import settings_store, url_destination
 from .controller_events import CONTROLLER_BUTTONS, CONTROLLER_EVENTS
 from .db import now_ms
 
@@ -64,22 +64,20 @@ SendPrompt = Callable[[str, str], dict]
 
 # ---- validation ---------------------------------------------------------
 
+def sendable_url(url: str, allowed_urls=()) -> str | None:
+    """The URL to send when `url`'s parsed destination is allow-listed, else None (R133).
+
+    One parse (lib.url_destination): scheme, host (case-folded, an IPv6 literal handled) and
+    port (the default made explicit) compared as parsed, the path on a path boundary; user
+    information in the authority is refused. The loopback defaults admit any port of their
+    host, as before; a configured prefix admits its own port only. The caller sends the URL
+    returned here, rebuilt from the parsed parts, never the text it was given."""
+    return url_destination.allowed(url, allowed_urls, any_port=DEFAULT_ALLOWED_URLS)
+
+
 def url_allowed(url: str, allowed_urls=()) -> bool:
-    """Whether `url` falls under one of the allowed prefixes on a URL
-    boundary: `https://a.com` admits `https://a.com/x`, not `https://a.com.evil`."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return False
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
-        return False
-    for prefix in (*DEFAULT_ALLOWED_URLS, *allowed_urls):
-        prefix = str(prefix).strip()
-        if not prefix or not url.startswith(prefix):
-            continue
-        if prefix.endswith("/") or len(url) == len(prefix) or url[len(prefix)] in "/:?#":
-            return True
-    return False
+    """Whether `url` may be sent to (sendable_url)."""
+    return sendable_url(url, allowed_urls) is not None
 
 
 def _text(data: dict, key: str, *, maximum: int, required: bool = True) -> str:
@@ -283,10 +281,12 @@ def default_http_post(url: str, body: dict, timeout: float) -> tuple[int, str]:
 def _execute(action: dict, *, allowed_urls, http_post: HttpPost | None,
              send_prompt: SendPrompt | None) -> dict:
     if action["type"] == "http_post":
-        if not url_allowed(action["url"], allowed_urls):
+        # Checked again at every run (an action stored before a rule changed is held to the
+        # rule of now), and what is sent is the parsed destination, not the stored text.
+        target = sendable_url(action["url"], allowed_urls)
+        if target is None:
             return {"ok": False, "error": "url is no longer allow-listed"}
-        status, text = (http_post or default_http_post)(action["url"], action["body"],
-                                                       HTTP_TIMEOUT_S)
+        status, text = (http_post or default_http_post)(target, action["body"], HTTP_TIMEOUT_S)
         result = {"ok": 200 <= int(status) < 300, "status": int(status),
                   "response": str(text or "")[:500]}
         if not result["ok"]:
