@@ -173,6 +173,9 @@ class SendRoutes:
                 orchestrator_fallback=getattr(
                     self, "_orchestrator_fallback_request", False),
                 caller_agent_id=self._turn_caller(),
+                # A peer Host names itself (lib.server_peers.send); the relay
+                # never lets the header in from outside.
+                peer=bool((getattr(self, "headers", None) or {}).get("X-Clarp-Peer")),
             )
         except SendRequestError as e:
             return self._send_request_error(e)

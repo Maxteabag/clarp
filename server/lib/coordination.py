@@ -50,7 +50,18 @@ NOTE_ORIGIN = "note"
 
 
 def is_coordination(*, agent_id: str, origin: str | None, sender_agent_id: str | None) -> bool:
-    """Whether a message to ``agent_id`` is another agent addressing it."""
+    """Whether a message to ``agent_id`` is another agent addressing it.
+
+    The user's own word (origin 'user' or 'oracle') never is, whatever sender
+    it names: a sender named in a request is a claim. A send made from an
+    agent's own turn never arrives with the user's word: the /send boundary
+    gives it that agent as its sender and origin 'agent' (lib.send_request).
+    Otherwise a resolved sender that is another agent is coordination
+    whatever the origin, and so is origin 'agent' with no sender this Host
+    knows (an agent of a peer Host). An agent addressing itself is not."""
+    from .origins import USER_WORD_ORIGINS
+    if (origin or "").strip() in USER_WORD_ORIGINS:
+        return False
     sender = (sender_agent_id or "").strip()
     if sender:
         return sender != agent_id
