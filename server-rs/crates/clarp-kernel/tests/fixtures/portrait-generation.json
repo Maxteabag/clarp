@@ -1202,6 +1202,38 @@
       [],
       false,
       "image provider returned duplicate portrait alternatives"
+    ],
+    [
+      [
+        "gif",
+        "ok"
+      ],
+      2,
+      [],
+      false,
+      "'image/gif'"
+    ],
+    [
+      [
+        "ok",
+        "gif"
+      ],
+      2,
+      [
+        "generated-portrait-1.png"
+      ],
+      false,
+      "'image/gif'"
+    ],
+    [
+      [
+        "gif",
+        "gif"
+      ],
+      2,
+      [],
+      false,
+      "image provider returned duplicate portrait alternatives"
     ]
   ],
   "ids": [

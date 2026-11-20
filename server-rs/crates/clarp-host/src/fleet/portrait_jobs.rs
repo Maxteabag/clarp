@@ -172,3 +172,8 @@ impl Fleet {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+#[path = "portrait_publication_tests.rs"]
+mod tests;

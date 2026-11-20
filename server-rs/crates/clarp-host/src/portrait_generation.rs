@@ -142,12 +142,19 @@ pub(crate) fn routes() -> Router<App> {
     Router::new().route("/agent-portrait-generation", get(status).post(start))
 }
 
-fn asset(member: &Member, bytes: &[u8], index: usize, now: i64) -> Result<Asset, String> {
+pub(crate) fn asset(
+    member: &Member,
+    bytes: &[u8],
+    index: usize,
+    now: i64,
+) -> Result<Asset, String> {
     let mime = rules::generated_kind(bytes)?;
     let extension = match mime {
         "image/png" => ".png",
         "image/webp" => ".webp",
-        _ => ".jpg",
+        "image/jpeg" => ".jpg",
+        // generate_two validates both signatures before resolving the media extensions.
+        other => return Err(format!("'{other}'")),
     };
     let (width, height) = clarp_kernel::media::image_size(bytes, mime);
     Ok(Asset {
@@ -272,7 +279,7 @@ async fn run(app: App, agent: String, generation: u64) {
                 Ok(true) => {
                     drop(_gallery);
                     let mut delay = 1;
-                    while let Err(error) = deliver(&app, &publication).await {
+                    while let Err(error) = deliver(&app.fleet, &app.blobs, &publication).await {
                         app.fleet.unkept(PENDING, &error.0);
                         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                         delay = (delay * 2).min(60);
@@ -304,18 +311,27 @@ async fn run(app: App, agent: String, generation: u64) {
 }
 
 /// The result was accepted durably. Replay only local, idempotent publication after a crash.
-async fn deliver(app: &App, publication: &Publication) -> Result<(), Unavailable> {
-    let member = app.fleet.directory().named(&publication.agent_id).cloned();
+pub(crate) async fn deliver(
+    fleet: &crate::fleet::FleetHandle,
+    store: &Arc<dyn clarp_ports::blobs::Blobs>,
+    publication: &Publication,
+) -> Result<(), Unavailable> {
+    let member = fleet.directory().named(&publication.agent_id).cloned();
     if let Some(member) = member {
         for asset in &publication.assets {
-            let raw = app
-                .fleet
+            let blobs = store.clone();
+            let name = asset.blob();
+            let picture = picture_name(&asset.sha256);
+            // Normally the fleet has already filled both immutable names before the gallery changed.
+            if matches!(blobs.len(&name),Ok(Some(n)) if n==asset.bytes)
+                && matches!(blobs.len(&picture),Ok(Some(n)) if n==asset.bytes)
+            {
+                continue;
+            }
+            let raw = fleet
                 .kept(BYTES, asset.asset_id.clone())
                 .await?
                 .ok_or_else(|| Unavailable("missing committed portrait bytes".into()))?;
-            let blobs = app.blobs.clone();
-            let name = asset.blob();
-            let picture = picture_name(&asset.sha256);
             tokio::task::spawn_blocking(move || {
                 blobs.put(&name, &raw)?;
                 blobs.put(&picture, &raw)
@@ -337,7 +353,7 @@ async fn deliver(app: &App, publication: &Publication) -> Result<(), Unavailable
         }
     }
     let [first, second] = &publication.assets;
-    app.fleet
+    fleet
         .change_together(
             vec![],
             vec![
@@ -353,7 +369,7 @@ pub async fn recover(app: &App) -> Result<(), Unavailable> {
     for (_, raw) in app.fleet.kept_all(PENDING).await? {
         let publication = serde_json::from_slice(&raw)
             .map_err(|e| Unavailable(format!("invalid portrait publication: {e}")))?;
-        deliver(app, &publication).await?;
+        deliver(&app.fleet, &app.blobs, &publication).await?;
     }
     for job in app
         .fleet

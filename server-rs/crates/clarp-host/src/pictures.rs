@@ -139,17 +139,7 @@ impl OpenAiPictures {
             .limit(rules::MAX_RESPONSE as u64 + 1)
             .read_to_vec()
             .map_err(|_| "OpenAI image response exceeded the safety limit".to_string())?;
-        if bytes.len() > rules::MAX_RESPONSE {
-            return Err("OpenAI image response exceeded the safety limit".to_string());
-        }
-        let answer: Value = serde_json::from_slice(&bytes)
-            .map_err(|_| "OpenAI image response was invalid".to_string())?;
-        let raw = answer["data"][0]["b64_json"]
-            .as_str()
-            .and_then(python::b64decode)
-            .ok_or_else(|| "OpenAI image response was invalid".to_string())?;
-        rules::generated_kind(&raw)?;
-        Ok(raw)
+        clarp_kernel::portrait_generation::edit_answer(&bytes)
     }
 
     fn asked_of(&self, key: &str, prompt: &str) -> Result<Vec<u8>, String> {
