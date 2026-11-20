@@ -510,7 +510,9 @@ class AutonomyJanitors:
         attention=completion.get('attention_required') and completion.get('generation')==owner['generation']
         if not result.get('verified') and not attention:return
         rid=digest(['banked-reset',provider,completion['id']])
+        left=result.get('resets_left')
         text=(f"Banked reset {result['status']} for {result['account']}; quota refill verified."
+              +(f" {left} banked reset{'s' if left!=1 else ''} left on it." if type(left) is int else '')
               if result.get('verified') else
               "Banked reset acceptance remains uncertain after six read-only checks. Automatic retries stopped; operator review is needed before further grants can be used.")
         if read_failed:text+=' Current account status could not be refreshed; recovery is unverified.'
@@ -519,6 +521,30 @@ class AutonomyJanitors:
                  'owner_generation':owner['generation']}
         # A durable phone-chat receipt, once per action. PR305 permits a push
         # only for stopped work, not for a refill or a successful switch.
+        from . import janitor_notices
+        janitor_notices.publish(self.notice_stream,owner,rid,text)
+        janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),db.now_ms())
+        if result.get('verified'):settings_store.set_text(f'hotseat-reset.{provider}.told','')
+
+    # What stops the automatic reset step, told to the owner once per stop (R145), not every run.
+    RESET_STOPS={'daily_cap':'{name}: no automatic banked reset now: the cap of {cap} in 24 hours is reached.',
+                 'empty':'{name}: no banked reset is left to redeem.',
+                 'ledger_unreadable':'{name}: the reset count cannot be read; no automatic reset until it is repaired.'}
+
+    def _reset_stop_notice(self,owner,run,provider,stop):
+        marker=f'hotseat-reset.{provider}.told'
+        if settings_store.get_text(marker,default='')==stop:return
+        settings_store.set_text(marker,stop)
+        if stop=='ledger_unreadable':
+            from .log import log
+            log('bankedResetLedgerUnreadable',f'provider={provider}: no automatic reset until hotseat-reset.{provider}.redeemed is repaired')
+        from . import config
+        cap=getattr(config.load(),janitor_hotseat.PROVIDERS[provider].reset_cap_field or '_',0)
+        text=self.RESET_STOPS[stop].format(name=provider.capitalize(),cap=cap)
+        rid=digest(['banked-reset-stop',provider,stop,run['run_id']])
+        payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],
+                 'persona':owner['name'],'preview':text,'push':False,'reason':'account_switch',
+                 'owner_generation':owner['generation']}
         from . import janitor_notices
         janitor_notices.publish(self.notice_stream,owner,rid,text)
         janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),db.now_ms())
@@ -621,18 +647,29 @@ class AutonomyJanitors:
                     # This run's FIRST read happened after completion and already went
                     # through the ordinary ledger, quarantine and in-flight guards.
                     self._reset_notice(owner,run,provider,reset_completion)
+                    # Only an empty bank is told: not_applicable (an account has room), cooldown and
+                    # busy are the broker's 'try later', nothing for the owner (R145).
+                    if reset_completion['result']['status']=='no_eligible_grant':
+                        self._reset_stop_notice(owner,run,provider,'empty')
                     self.reset_worker.ack(provider,reset_completion)
                     reset_text='Banked resets: '+reset_completion['result']['status']
                 reset_field=janitor_hotseat.PROVIDERS[provider].reset_command_field
+                reset_cap=janitor_hotseat.PROVIDERS[provider].reset_cap_field
+                saved=[str(a.get('alias')) for a in (raw_accounts or []) if a.get('alias')]
+                if decision['action']!='exhausted':settings_store.set_text(f'hotseat-reset.{provider}.told','')
                 if reset_reconciliation and options['mode']=='automatic' and reset_field and not reset_completion:
-                    status=self.reset_worker.offer(provider,reset_field,reset_reconciliation['models'],owner,reconcile_only=True)
+                    status=self.reset_worker.offer(provider,reset_field,reset_reconciliation['models'],owner,accounts=saved,reconcile_only=True)
                     reset_text='Banked reset reconciliation: '+status
                 elif decision['action']=='exhausted' and options['mode']=='automatic' and reset_field and not reset_completion:
                     raw_decision=janitor_hotseat.decide(raw_accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
                     # A withheld healthy account is not quota exhaustion. Never spend
                     # a grant merely because authentication repair hid a candidate.
-                    if raw_decision['action']=='exhausted':
-                        status=self.reset_worker.offer(provider,reset_field,req_models,owner)
+                    # A banked reset restores the window it is for: Codex's weekly one. Asked only when
+                    # every account is spent THERE by this read; an unreadable account authorises nothing.
+                    reset_due=janitor_hotseat.PROVIDERS[provider].reset_due
+                    if raw_decision['action']=='exhausted' and (reset_due is None or reset_due(raw_accounts)):
+                        status=self.reset_worker.offer(provider,reset_field,req_models,owner,accounts=saved,cap_field=reset_cap)
+                        if status in ('daily_cap','ledger_unreadable'):self._reset_stop_notice(owner,run,provider,status)
                         if status!='disabled':reset_text='Banked resets: '+status
                 switched=None;outcome='completed';error=''
                 if decision['action']=='switch' and options['mode']=='automatic':

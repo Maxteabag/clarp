@@ -220,7 +220,7 @@ class ResetReplies:
     def peek(self,provider,owner):return self.pending if provider=="claude" else None
     def reconciliation_due(self,provider,owner,field):return None
     def ack(self,provider,receipt):self.pending=None
-    def offer(self,provider,field,models,owner):
+    def offer(self,provider,field,models,owner,**kwargs):
         self.calls+=1
         if self.on_offer:self.on_offer()
         return next(self.statuses,"cooldown")
