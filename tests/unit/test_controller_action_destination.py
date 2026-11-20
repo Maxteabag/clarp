@@ -1,5 +1,5 @@
 """A controller action is sent where its parsed URL goes, and only if that destination is allowed
-(R133)."""
+(R133); a debounced request's answer is kept under its request id (R132)."""
 from __future__ import annotations
 
 import pytest
@@ -94,6 +94,24 @@ def test_a_prefix_that_does_not_parse_plainly_is_refused_at_configuration(text, 
         "https://allowed.example.invalid",)
     assert lines == ["config.controller_action_urls"]
     assert ca.sendable_url("https://allowed.example.invalid/x", (text,)) is None   # admits nothing
+
+
+def test_a_debounced_request_repeated_after_the_window_is_its_first_answer(monkeypatch):
+    """R132: A runs; B inside the window is answered debounced; B repeated after the window is
+    that answer again with duplicate: true, and nothing runs a second time."""
+    monkeypatch.setattr(ca, "DEBOUNCE_MS", 60_000)
+    ca.create_action({**ACTION, "url": "http://127.0.0.1:8765/api"}, actor="test")
+    calls = []
+
+    def post(url, body, timeout):
+        calls.append(url)
+        return 200, ""
+    first = ca.run("a1", actor="t", request_id="A", http_post=post)
+    debounced = ca.run("a1", actor="t", request_id="B", http_post=post)
+    monkeypatch.setattr(ca, "DEBOUNCE_MS", 0)                              # the window has passed
+    again = ca.run("a1", actor="t", request_id="B", http_post=post)
+    assert len(calls) == 1 and first["ok"] is True and debounced["debounced"] is True
+    assert again == {**debounced, "duplicate": True}
 
 
 @pytest.mark.parametrize("url", [
