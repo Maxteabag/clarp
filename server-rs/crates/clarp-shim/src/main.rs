@@ -1543,7 +1543,10 @@ mod tests {
         assert_eq!(status.signal(), Some(9), "killed where it stood");
         rig.out_read.read_exact(&mut [0; 10]).unwrap();
         let reply = holding.join().unwrap();
-        assert_eq!(reply.error.as_deref(), Some(ENDED_WHILE_HELD));
+        assert_eq!(
+            reply.error.as_deref(),
+            Some("the tool was ended while it was held")
+        );
         assert_eq!(reply.held, None);
         assert!(
             !rig.control.let_go("by the test"),
