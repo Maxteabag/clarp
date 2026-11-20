@@ -265,7 +265,13 @@ impl Chip {
     /// by its pace, a push by the budget.
     async fn sleeps(&self, app: &App) -> Option<Duration> {
         let mut guard = self.held.lock().await;
-        let held = Self::read(&mut guard, app).await.ok()?;
+        let held = match Self::read(&mut guard, app).await {
+            Ok(held) => held,
+            Err(why) => {
+                app.fleet.unkept(KIND, &why.0);
+                return Some(Duration::from_secs(60));
+            }
+        };
         let now_ms = app.clock.now_ms();
         let paced = held.pacer.wake_at().map(|wake| wake - now_ms);
         let budgeted = held
@@ -646,4 +652,26 @@ async fn unregister(
 
 pub fn routes() -> Router<App> {
     Router::new().route("/devices/live-activity", post(register).delete(unregister))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_unread_chip_arms_a_timed_look_until_its_store_recovers() {
+        let place = crate::unkept::at_the_port::place("chip-retry");
+        let app = place.app();
+        place.refuse_reads(KIND);
+        assert_eq!(app.chip.sleeps(&app).await, Some(Duration::from_secs(60)));
+        assert_eq!(
+            *place.said.lock().unwrap(),
+            [
+                "clarp-host: a record of the kind chip was not kept: storage failed: read refused here"
+            ]
+        );
+        place.allow_reads();
+        assert_eq!(app.chip.sleeps(&app).await, None);
+    }
 }

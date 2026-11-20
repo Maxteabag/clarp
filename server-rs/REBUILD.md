@@ -3132,6 +3132,13 @@ The Host retains 500 audit rows and ten minutes of results, including debounced 
 Duplicate requests share one execution. Prompts use the same admission as the local admin tool.
 HTTP checks the canonical destination at definition and execution, and never follows redirects.
 
+**Due work (20 Nov 2026).** An agent with a full mailbox checks its deadlines after 32 messages.
+The scheduled janitors, audio bookkeeper, quota keeper and label checker each get their pass even when a sibling
+cannot read the store. The fleet logs the failed obligation. The schedule and heartbeat desks publish a changed
+book after the store accepts it, so the next request can retry a refused write. A ring timer that fails at
+startup or expiry logs the failure and tries again a second later. An iOS chip whose state cannot be read
+arms another look in a minute. Each timer stays with the desk that knows when its work is due.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |

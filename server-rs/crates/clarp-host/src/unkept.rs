@@ -363,6 +363,10 @@ pub(crate) mod at_the_port {
             *self.refused.lock().unwrap() = kind.map(fleet::shelf);
         }
 
+        pub(crate) fn allow_reads(&self) {
+            *self.refused_read.lock().unwrap() = None;
+        }
+
         pub(crate) fn refuse_reads(&self, kind: &str) {
             *self.refused_read.lock().unwrap() = Some(fleet::shelf(kind));
         }
