@@ -111,6 +111,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D23 | A conversation's head revision is the revision of its newest change (its newest item in the log, or a reply being written), not of the log's newest item | A client compares the head with what it holds to know whether to ask. Bookkeeping must not make it ask |
 | D24 | Every turn's end is told to the apps, also when the next turn begins in the same write: first how the one ended, then that the next began. The answer a turn ended on is found by the row that closed it, not by being the newest row | An app that waits for an agent to be done must hear it, and the user is notified of every answer |
 | D26 | A shim never waits for the Host, and asks a tool to stop in the tool's own way through one signal to its direct child, bounded, before it signals the group | A restart must never hold a turn. The reference aborts a served tool before it ends it. OpenCode gives its abort request three seconds |
+| D-hold | A shim can hold its tool once a turn: every process of the tool's group stopped until each stands still, all it printed taken into the spool, and the answer how far the spool goes and whether a line was begun. It lets the tool go on a release or by itself after the smaller of what was asked and two seconds; a tool ended while held is killed where it stands. A served tool is not held | "Has this turn produced nothing" must be one decision: between the Host's last look and the end, the tool must not be able to print or act. A signal cannot do that (a tool can print its whole answer after a SIGTERM). The bound keeps D26: a Host that is gone never keeps a turn standing |
 | D25 | `busy` and `turn_started_at` in the snapshot are what an app counts a running turn from (issue 354). `busy` is true exactly while a turn holds the agent. `turn_started_at` is then the moment that turn was taken up: not when its message was accepted, not when one of its tools started, never an earlier turn's, and the same for as long as the turn runs. At rest it is 0, however the last turn ended (the Python Host kept the start of a turn that did not complete until its fix of 15 Nov 2026, PR 357) | The timer in the apps is the turn's time. Held by the conformance scenarios `turn-timer` and `turn-timer-after-stop` |
 | D15 | A conversation's revision is `seq * 2^20 + n`: the log position, with room in between for the changes of a reply that is shown while it is written and not stored. A restart that rejoins a turn writes once, so later revisions are above earlier ones | Clients sync by revision; the log gives it for free; a growing reply needs revisions of its own |
 | D16 | A turn starts at most once by construction: the shim creates the turn's spool exclusively; "spawned" is durable before the tool is given the message; the shim prints `ready`; a second shim for the turn leaves with exit 125 | Rule 1 must not depend on the server remembering what it started |
@@ -3210,6 +3211,34 @@ primary audio after the apps are offered their clip. The phrase book belongs to 
 to the blob store. A hit still names the speaker of the current request. Factoring out the session means
 two agents using the same engine voice can share one fill. No operator script or scheduled operation
 asks for audio. The first use after eviction follows the ordinary speech path.
+
+**The shim holds its tool** (20 Nov 2026, decision D-hold). Two requests on the shim's socket:
+`{"op":"hold","ms":N}` and `{"op":"release"}`. A hold stops every process of the tool's group (SIGSTOP), and
+looks in `/proc` until every thread of every process whose group is the tool's is stopped or a zombie; while one is
+not, the group is told again, so a process forked while the signal went out is stopped too. Then it takes everything
+the group printed: nothing waits in either pipe, neither pump has a chunk in hand (each pump reads and records under
+a turn of its own), no hook's report is half taken (a request on the socket is read and carried out under its
+connection's turn, and a connection is taken from the listener under the list of connections) and no connection
+waits to be taken, all at once. The spool's one writer then says how long the spool is after every record sent to it
+before. The answer gains `held`: `spool` (that length, the offset after the last whole record), `partial_out` and
+`partial_err` (the bytes of a line each pump holds that is not whole: it had begun to print) and `left_ms` (what is
+left of the bound). The bound is the smaller of what was asked and two seconds (`HOLD_MOST_MS`), counted from the
+first SIGSTOP. A thread of the shim lets the tool go at it (SIGCONT), whatever the Host does; a release lets it go
+sooner and says in `let_go` whether it was the one that did. A hold whose bound is spent before the tool stood still,
+or before all it printed was taken, lets the tool go and is refused in words. A turn is held once in its shim's life,
+counting a hold that was refused after it began. Stop, or the shim told to go, while the tool is held kills the group
+at once (SIGKILL, recorded as `stopping` with that signal and then `exited`, as any stopped turn's end) without a
+polite signal and without letting it run. Refused in words, nothing signalled: a tool that has ended, a tool already
+being stopped, a turn held once already, and a served tool (the shim's own OpenCode driver). A tool killed from
+outside while held is let go before the shim reaps it, so no process of its group is left stopped. Nothing of a hold
+is written in the spool: a turn never held is byte for byte as before, and a reader of today reads a held one. Not
+held: a process that left the tool's group (as it is not stopped today either), and the tool when the shim itself is
+killed while it holds it. No caller yet: the actor's side of a turn that produced nothing is a later piece. Held by
+thirteen tests in `crates/clarp-shim/tests/shim.rs` with stand-in tools (printed before the hold, a pipe full at the
+hold, half a line, a child, the bound with nobody to let go, ended while held, input written while held, held twice,
+a release when free and twice, a spent bound, a tool that has ended, one being stopped, one killed from outside, a
+hook's report under way, a served tool, how a request ends) and by unit tests of the count, the stillness and the held stop on a stand-in
+process group. Wrong rules: `tools/plants/shim-hold.py`.
 
 ## 7. Stages and gates
 
