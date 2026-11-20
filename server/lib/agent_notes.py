@@ -39,10 +39,19 @@ class Posted:
 
 
 def _running_trace(agent_id: str) -> str:
+    """The agent's running turn: its newest turn, neither ended nor settled.
+    A turn that completed normally is settled (settled_at, outcome) and may
+    keep ended_at empty: it is not running.
+
+    TODO(#470): a private copy of "this turn is still running". At the rebase
+    onto #470's fixed head this calls turn_identity.running_trace and the copy
+    goes; no third spelling survives the rebase."""
     row = db.conn().execute(
-        """SELECT trace_id, ended_at FROM turns WHERE agent_id = ?
+        """SELECT trace_id, ended_at, settled_at FROM turns WHERE agent_id = ?
             ORDER BY started_at DESC, turn_id DESC LIMIT 1""", (agent_id,)).fetchone()
-    return str(row["trace_id"] or "") if row is not None and row["ended_at"] is None else ""
+    if row is None or row["ended_at"] is not None or row["settled_at"] is not None:
+        return ""
+    return str(row["trace_id"] or "")
 
 
 def _conversation_of(agent_id: str, trace_id: str) -> str:
