@@ -1378,6 +1378,7 @@ mod tests {
                 name: COMPACTION.to_string(),
             },
             admission: Admission::Queue,
+            coordination: None,
         };
         let said = |turn: u64, before: u64| Command::RecordCompaction {
             turn: TurnId(turn),
