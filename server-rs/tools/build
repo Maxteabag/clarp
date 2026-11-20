@@ -74,6 +74,13 @@ case "$cmd" in
     *) echo "usage: build check|test [args]|clippy|fmt|conform [args]|answers [args]|release|status" >&2; exit 2 ;;
 esac
 
+# Keep source lines for backtraces without embedding full type and variable
+# information in each test executable. Explicit remote Cargo settings win.
+case "$cmd" in
+    check|test|clippy|conform|answers)
+        EXTRA_ENV="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV" ;;
+esac
+
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
 # What goes up is what differs in content, and it arrives with the time of its arrival, not with
 # the time it has here. cargo decides what to compile by comparing a source's time with the time
