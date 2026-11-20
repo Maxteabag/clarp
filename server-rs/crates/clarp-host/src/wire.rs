@@ -1171,14 +1171,19 @@ pub fn focus(record: &AgentRecord) -> Value {
 /// How a turn ended, on the row that closed it. A turn is named by the trace its message was
 /// sent under, which is the name the apps already know it by.
 fn turn_end(end: &TurnEnd) -> Value {
-    json!({
+    let mut summary = json!({
         "turn_id": end.trace_id.clone().unwrap_or_else(|| end.turn.to_string()),
         "status": end.status,
         "started_at_ms": end.started_at_ms,
         "ended_at_ms": end.ended_at_ms,
         "worked_ms": end.started_at_ms.map(|started| end.ended_at_ms - started),
         "tool_count": end.tool_count,
-    })
+    });
+    // How often the turn spoke to its user from the side (`POST /agent-notes`), when it did.
+    if end.note_count > 0 {
+        summary["note_count"] = json!(end.note_count);
+    }
+    summary
 }
 
 /// What a chat shows in place of the prompt of an automated turn: the prompt is the Host's
