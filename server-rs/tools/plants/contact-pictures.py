@@ -10,10 +10,12 @@ import runner
 RUNS = {
     'kernel': ['test', '-p', 'clarp-kernel', '--test', 'contact_vectors'],
     'host': ['test', '--test', 'host', '--', 'pictures::'],
+    'unit': ['test', '-p', 'clarp-host', '--lib', 'pictures::'],
 }
 K = 'clarp-kernel/src/contacts.rs'
 P = 'clarp-host/src/pictures.rs'
 F = 'clarp-host/src/fleet.rs'
+C = 'clarp-kernel/src/personas.rs'
 # NOT PLANTED, each with its reason:
 #   pictures.rs, the guard before the provider is asked: the job is begun and started in one go, so no test can end it
 #     between the two without a race; the guards of the keeping (the end waited for, the generation) are planted.
@@ -52,7 +54,15 @@ PLANTS = [
      '        app.fleet\n'
      '            .picture_made(persona_id.to_string(), picture)\n            .await\n            .map_err(|why| Some(why.0))\n'
      '    };\n    let made = work.await;\n'),
+    (P, 'unit', 'a scaler that does not end within its bound is waited for', '            Ok(None) if began.elapsed() >= bound => {',
+     '            Ok(None) if false && began.elapsed() >= bound => {'),
+    (P, 'unit', 'a scaler past its bound falls back to the picture as it came', '                return Err(SCALE_TOO_LONG.to_string());',
+     '                return Ok(false);'),
     (P, 'host', 'a picture a stopped Host left is ended as made', '            failed: Some(INTERRUPTED.to_string()),', '            failed: None,'),
+    (C, 'kernel', 'the keeping of a picture gives a contact without a voice one',
+     '        self.made[at].avatar = Some(digest.to_string());\n',
+     '        self.made[at].avatar = Some(digest.to_string());\n        if self.made[at].voice_id.is_empty() {\n'
+     '            self.made[at].voice_id = "{}".to_string();\n        }\n'),
     (F, 'host', 'the agents of a contact do not wear its picture', '            record.avatar.clone_from(&digest);\n', ''),
 ]
 

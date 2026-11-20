@@ -307,3 +307,45 @@ fn a_pictures_job_is_begun_as_the_python_host_begins_it() {
         );
     }
 }
+
+#[test]
+fn a_picture_kept_for_a_contact_changes_its_picture_and_nothing_else() {
+    use clarp_kernel::personas::{Book, Made};
+    // A contact kept with no voice, no symbol and its own words.
+    let made = Made {
+        persona_id: "persona-made-up".to_string(),
+        name: "Kit".to_string(),
+        voice_id: String::new(),
+        avatar_symbol: String::new(),
+        avatar: None,
+        personality: "Personality: made up.".to_string(),
+        created_at_ms: 1,
+    };
+    let mut book = Book::new(vec![made.clone()], Vec::new());
+    let owner = Owner::default();
+    let kept = book
+        .set_picture(&owner, "persona-made-up", "d1gest")
+        .unwrap();
+    assert_eq!(
+        kept,
+        Made {
+            avatar: Some("d1gest".to_string()),
+            ..made
+        }
+    );
+    assert_eq!(
+        book.picture_of(&owner, "persona-made-up"),
+        Some("d1gest".to_string())
+    );
+    let listed = book.named(&owner, "Kit").unwrap();
+    assert_eq!(
+        listed["voice_id"], "",
+        "a contact without a voice still has none: {listed}"
+    );
+    // Only a persona of the owner's is given a picture so; a built-in one is not.
+    assert!(book.set_picture(&owner, "builtin-mike", "d1gest").is_none());
+    assert!(
+        book.set_picture(&owner, "persona-nobody", "d1gest")
+            .is_none()
+    );
+}

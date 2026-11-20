@@ -437,6 +437,23 @@ impl Book {
             .map(|persona| self.dressed(persona.clone()))
     }
 
+    /// A picture made for a persona of the owner's, by its id: the digest it is kept under set
+    /// and nothing else changed (`personas.update_avatar`: only how it looks). What is to be
+    /// kept for it; `None` where no persona of the owner's that is awake has that id.
+    pub fn set_picture(
+        &mut self,
+        owner: &Owner<'_>,
+        persona_id: &str,
+        digest: &str,
+    ) -> Option<Made> {
+        let built_in = builtins(owner);
+        let at = self.made.iter().position(|made| {
+            made.persona_id == persona_id && self.built_in(&built_in, &made.name).is_none()
+        })?;
+        self.made[at].avatar = Some(digest.to_string());
+        Some(self.made[at].clone())
+    }
+
     /// The personas the owner made that are awake: no built-in persona has their name.
     fn awake<'a>(&'a self, built_in: &'a [Value]) -> impl Iterator<Item = &'a Made> {
         self.made

@@ -1869,23 +1869,35 @@ impl Fleet {
             return Ok(None);
         }
         let name = text("name");
-        let said = PersonaSaid {
-            name: name.clone(),
-            voice_id: text("voice_id"),
-            avatar_symbol: String::new(),
-            personality: text("personality"),
-            picture: clarp_kernel::python::b64encode(picture),
-        };
-        if self.persona_write(Some(&name), &said, &[], false)?.is_err() {
+        // The picture alone changes (`personas.update_avatar`): kept under its digest, and the
+        // contact's record with that digest and nothing else of it written again.
+        let Ok(Some((bytes, made_digest))) =
+            personas::picture(&clarp_kernel::python::b64encode(picture))
+        else {
             return Ok(None);
-        }
+        };
         let [named, cartesia, gemini] = self.works.telling.owner_tables();
         let owner = Owner {
             roster: &named,
             cartesia: &cartesia,
             gemini: &gemini,
         };
-        let digest = self.book.picture_of(&owner, persona_id);
+        let mut book = (*self.book).clone();
+        let Some(made) = book.set_picture(&owner, persona_id, &made_digest) else {
+            return Ok(None);
+        };
+        let failed = |error: clarp_ports::kv::StoreError| Unavailable(error.to_string());
+        self.works
+            .blobs
+            .put(&picture_name(&made_digest), &bytes)
+            .map_err(failed)?;
+        let kept = serde_json::to_vec(&made).map_err(|error| Unavailable(error.to_string()))?;
+        self.store
+            .put(PERSONAS, persona_id, &kept)
+            .map_err(failed)?;
+        self.book = Arc::new(book);
+        self.publish();
+        let digest = Some(made_digest);
         let bare: Vec<usize> = (0..self.members.len())
             .filter(|at| {
                 let record = &self.members[*at].record;
