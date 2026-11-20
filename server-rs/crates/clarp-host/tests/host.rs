@@ -37,10 +37,10 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
-#[path = "host/stand_ins.rs"]
-mod stand_ins;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/stand_ins.rs"]
+mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]

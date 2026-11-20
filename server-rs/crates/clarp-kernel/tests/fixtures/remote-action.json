@@ -2259,6 +2259,12 @@
       []
     ]
   ],
+  "malformed_actions": [
+    "{\"action\": true}",
+    "{\"action\": 1}",
+    "{\"action\": [\"record\"]}",
+    "{\"action\": {\"action\": \"record\"}}"
+  ],
   "limited": {
     "GET": false,
     "POST": false
