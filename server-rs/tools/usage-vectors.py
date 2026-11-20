@@ -23,7 +23,9 @@ import json
 import pathlib
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -117,7 +119,7 @@ def run() -> dict:
     def alone(kind, number, name):
         # Every story has a database of its own: in a process of its own.
         ran = subprocess.run([sys.executable, '-I', __file__, kind, str(number)], capture_output=True, text=True,
-                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                             env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
         if ran.returncode != 0:
             raise SystemExit(f'{name}: {ran.stderr[-3000:]}')
         return json.loads(ran.stdout.splitlines()[-1])
@@ -128,20 +130,20 @@ def run() -> dict:
     return {'since': SINCE, 'stories': out, 'rises': rises}
 
 
-def isolated(prefix):
+def isolated(root):
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix=prefix, dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
 
 
-def rise(number: int) -> list:
+@tool_scratch.case('clarp-usage-rise-vectors-')
+def rise(root, number: int) -> list:
     name, steps = RISES[number]
-    isolated('clarp-usage-rise-vectors-')
+    isolated(root)
     from lib import db, log, turn_usage
 
     db.conn()
@@ -154,12 +156,12 @@ def rise(number: int) -> list:
     return answered
 
 
-def story(number: int) -> list:
+@tool_scratch.case('clarp-usage-vectors-')
+def story(root, number: int) -> list:
     name, turns, asked_at = STORIES[number]
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-usage-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()

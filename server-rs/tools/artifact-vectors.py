@@ -20,26 +20,25 @@ import contextlib
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'artifact-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-artifact-vectors')
 T0 = 1_794_800_000_000
 STEP_MS = 1_000
 DAY_MS = 86_400_000
 
 
-def isolate() -> None:
+def isolate(root) -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     for name in ('CLAUDE_PWA_SESSION', 'CLARP_PROVIDER_TURN', 'CLARP_BACKGROUND_ORIGIN', 'CLARP_HEARTBEATS_DISABLED',
@@ -51,7 +50,8 @@ def isolate() -> None:
 class World:
     """One scenario's clock, ids and agents."""
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, root: pathlib.Path):
+        self.root = root
         import secrets
         from lib import agents, clock, db
         self.now = T0 + number * 10 * DAY_MS
@@ -67,7 +67,7 @@ class World:
         import types
         import uuid
         uuid.uuid4 = lambda: types.SimpleNamespace(hex=self.token_hex(16))
-        db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
+        db.reset_for_tests(root / f'scenario-{number}.sqlite')
         self.agents = {}
         for index, persona in enumerate(('Vera', 'Omar'), start=1):
             session = f'{persona.lower()}{number}'
@@ -98,7 +98,7 @@ class World:
         what its bytes are, which a podcast names."""
         from lib import media_store
         row = media_store.publish(session=session, blob=bytes.fromhex(blob_hex), source_name=source_name,
-                                  content_type=content_type, caption=caption, media_dir=SCRATCH / 'media')
+                                  content_type=content_type, caption=caption, media_dir=self.root / 'media')
         return {**row, 'sha256': media_store.get(row['asset_id'])['sha256']}
 
     def revisions(self, artifact_id: str, version=None, limit: int = 50, offset: int = 0):
@@ -946,10 +946,15 @@ def main(argv: list[str]) -> int:
         # The Python Host builds some objects from sets, whose fields then come in the order
         # of the run's hash seed. One seed, one order: the vectors change when the rules do.
         os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
-    isolate()
+    with tool_scratch.directory('clarp-artifact-vectors-') as name:
+        return generate(pathlib.Path(name), argv)
+
+
+def generate(root, argv):
+    isolate(root)
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):
-        world = World(number)
+        world = World(number, root)
         scenario(world)
         scenarios.append({'name': scenario.__name__, 'agents': list(world.agents.values()), 'calls': world.calls})
     if len(argv) == 3 and argv[1] == '--show':

@@ -29,7 +29,9 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -85,12 +87,12 @@ NARRATION = [-1, 0, 1, 2, 3, 4, '2', 'much', None, 2.9, True]
 WRITTEN = ['Hello there.', '', 'two\nlines', '--- user message ---', '[voice-mode] not a head\n\n--- user message ---\nx']
 
 
-def one(case: dict) -> dict:
+@tool_scratch.case('clarp-told-vectors-')
+def one(root, case: dict) -> dict:
     """Runs in a process of its own: what the Python Host tells the tool of one agent."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-told-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text(case['config'])
     host.isolate(root)
     host.loopback_only()
@@ -145,12 +147,12 @@ def one(case: dict) -> dict:
     return {'told': told, 'shared': shared}
 
 
-def changes() -> dict:
+@tool_scratch.case('clarp-told-vectors-')
+def changes(root) -> dict:
     """Runs in a process of its own: the setting of how human voices sound, changed step by step."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-told-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
@@ -188,7 +190,7 @@ def main() -> int:
     cases, shared = [], None
     for index, case in enumerate(CASES):
         ran = subprocess.run([sys.executable, '-I', __file__, '--case', str(index)], capture_output=True, text=True,
-                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                             env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
         if ran.returncode != 0:
             print(ran.stderr[-3000:], file=sys.stderr)
             return 1
@@ -197,7 +199,7 @@ def main() -> int:
         shared = answered['shared']
         cases.append({**case, 'told': answered['told']})
     ran = subprocess.run([sys.executable, '-I', __file__, '--changes'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1

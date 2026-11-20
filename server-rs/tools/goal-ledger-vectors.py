@@ -6,9 +6,11 @@ from pathlib import Path
 import runpy
 import sqlite3
 import sys
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT/'server-rs/crates/clarp-kernel/tests/fixtures/goal-ledger-vectors.json'
@@ -140,5 +142,5 @@ def reference(root):
 
 
 if __name__=='__main__':
-    with tempfile.TemporaryDirectory() as root:
+    with tool_scratch.directory() as root:
         OUT.write_text(json.dumps(reference(Path(root)),ensure_ascii=True,separators=(',',':'))+'\n')

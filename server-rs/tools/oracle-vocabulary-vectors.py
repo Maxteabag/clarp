@@ -25,10 +25,12 @@ import hashlib
 import importlib.util
 import json
 import pathlib
-import shutil
+from unittest.mock import patch
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 OUT = REPO / 'server-rs' / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'oracle-vocabulary-vectors.json'
@@ -136,24 +138,28 @@ CASES = [
 ]
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-oracle-vocabulary-vectors-')
+def run(root) -> dict:
     """Runs in a process of its own: what the Python Host's module does."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-oracle-vocabulary-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()
     sys.path.insert(0, str(REPO / 'server'))
     from lib import oracle_voice_context as rule
 
-    shutil.rmtree(PLACE, ignore_errors=True)
-    PLACE.mkdir()
+    # The absolute logical path is part of the signed sidecar fixture. Map
+    # that name to this case's private store only at the reference's file port.
+    def stored(name):
+        path = pathlib.Path(name)
+        return root / path.relative_to(PLACE) if path.is_relative_to(PLACE) else path
+
     played = []
-    try:
+    with patch.object(rule, 'Path', stored):
         for number, one in enumerate(CASES):
-            folder = PLACE / f'case-{number}'
+            folder = root / f'case-{number}'
             folder.mkdir()
             where = folder / one['at']
             text = one['text']
@@ -163,7 +169,7 @@ def run() -> dict:
                 where.write_bytes(text)
             elif text is not None:
                 where.write_bytes(text.encode('utf-8'))
-            binding = {'path': str(where), 'sha256': digest(text) if isinstance(text, (str, bytes)) else digest('')}
+            binding = {'path': str(PLACE / where.relative_to(root)), 'sha256': digest(text) if isinstance(text, (str, bytes)) else digest('')}
             binding.update(one['binding'])
             held = {'version': 1, 'primary_session': 'theo', 'prepared_context': binding,
                     'terms': ['Drammen', 'Stra' + chr(0xdf) + 'e', 'valve']}
@@ -186,8 +192,8 @@ def run() -> dict:
             named = held.get('prepared_context') if isinstance(held.get('prepared_context'), dict) else {}
             path = named.get('path') if isinstance(named, dict) and one['raw'] is None else None
             found = None
-            if isinstance(path, str) and pathlib.Path(path).is_absolute() and pathlib.Path(path).is_file():
-                found = base64.b64encode(pathlib.Path(path).read_bytes()).decode('ascii')
+            if isinstance(path, str) and pathlib.Path(path).is_absolute() and stored(path).is_file():
+                found = base64.b64encode(stored(path).read_bytes()).decode('ascii')
             done = {'name': one['name'], 'primary': one['primary'], 'file': base64.b64encode(small).decode('ascii'),
                     'bytes': len(small), 'asks_for': path if isinstance(path, str) else None, 'text': found}
             try:
@@ -200,8 +206,6 @@ def run() -> dict:
                 done['in_its_own_words'] = own
             played.append(done)
         nothing = [rule.load('theo', ''), rule.instructions(None)]
-    finally:
-        shutil.rmtree(PLACE, ignore_errors=True)
     return {'what': 'server/lib/oracle_voice_context.py: load', 'place': str(PLACE), 'cases': played,
             'without_a_file': nothing}
 
@@ -211,7 +215,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-3000:], file=sys.stderr)
         return 1

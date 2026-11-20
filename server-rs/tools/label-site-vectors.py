@@ -4,8 +4,10 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 KERNEL = ROOT / "server-rs/crates/clarp-kernel"
@@ -30,7 +32,7 @@ if __name__=="__main__":
     spec=importlib.util.spec_from_file_location("replay",ROOT/"tests/replay/host.py")
     replay=importlib.util.module_from_spec(spec)
     spec.loader.exec_module(replay)
-    with tempfile.TemporaryDirectory() as directory:
+    with tool_scratch.directory() as directory:
         root=Path(directory)
         (root/"scenario-config.toml").write_text("")
         replay.isolate(root)

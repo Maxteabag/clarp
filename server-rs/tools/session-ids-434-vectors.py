@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-backend/tests/fixtures/session-ids-434-vectors.json'
@@ -75,11 +77,11 @@ def record(work):
 
 if __name__ == '__main__':
     if '--isolated' in sys.argv:
-        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stderr(io.StringIO()):
+        with tool_scratch.directory() as tmp, contextlib.redirect_stderr(io.StringIO()):
             print(json.dumps(record(Path(tmp)), ensure_ascii=True))
     else:
         result = subprocess.check_output([sys.executable, '-I', __file__, '--isolated'],
-                                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, text=True)
+                                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), text=True)
         rows = json.loads(result.splitlines()[-1])
         groups = [' "' + key + '": [\n' + ',\n'.join('  ' + json.dumps(row, ensure_ascii=True)
                   for row in data) + '\n ]' for key, data in rows.items()]

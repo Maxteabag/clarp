@@ -20,7 +20,9 @@ import json
 import os
 import pathlib
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 OUT = REPO / 'server-rs' / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'direct-push-vectors.json'
@@ -256,7 +258,7 @@ def second_tries() -> list[dict]:
 
 
 def main() -> int:
-    with tempfile.TemporaryDirectory(prefix='clarp-direct-push-vectors-', dir='/var/tmp') as folder:
+    with tool_scratch.directory(prefix='clarp-direct-push-vectors-') as folder:
         tokens = provider_tokens(pathlib.Path(folder))
     answered = {
         'what': 'server/lib/apns.py: a push handed to the push service with a key of the Host own',

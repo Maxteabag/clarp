@@ -7,8 +7,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/provider-observer.json'
@@ -106,11 +108,11 @@ def record(directory):
 
 if __name__ == '__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as root:
+        with tool_scratch.directory() as root:
             print(json.dumps(record(Path(root))))
     else:
         data = json.loads(subprocess.check_output(
-            [sys.executable,'-I',__file__,'--record'], env={'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'}))
+            [sys.executable,'-I',__file__,'--record'], env=tool_scratch.child_env({'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'})))
         cases, reads = data
         for path, rows in [(OUT,cases),(OUT.with_name('provider-reader.json'),reads)]:
             path.write_text('[\n'+',\n'.join(json.dumps(row) for row in rows)+'\n]\n',encoding='ascii')
