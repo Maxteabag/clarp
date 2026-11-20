@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
+#[path = "host/agent_portraits.rs"]
+mod agent_portraits;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -25,6 +27,10 @@ mod delivery;
 mod diagnostics;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
+#[path = "host/harness.rs"]
+mod harness;
+#[path = "host/import_render_specs.rs"]
+mod import_render_specs;
 #[path = "host/installer.rs"]
 mod installer;
 #[path = "host/janitor_attention.rs"]
@@ -37,12 +43,20 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/remote_action.rs"]
+mod remote_action;
+#[path = "host/router_phrases.rs"]
+mod router_phrases;
+#[path = "host/source_trace.rs"]
+mod source_trace;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_timeline.rs"]
+mod voice_timeline;
 
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
@@ -63,6 +77,51 @@ fn this_file_holds_no_more_tests_than_it_held_when_each_piece_was_given_a_file()
 }
 
 static HOSTS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// Every Host the test on this thread started, by the line it said it listens with, and
+    /// what it has said since, while it lives: what a wait that times out shows.
+    static STARTED: std::cell::RefCell<Vec<(String, std::sync::Weak<Mutex<String>>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The last lines each Host of this test still living has said, each cut to a length that can
+/// be read: nothing when there is none. A Host whose shim is not beside it starts no turn and
+/// says so only to the turn: that is said here too.
+fn what_the_hosts_said() -> String {
+    const LINES: usize = 40;
+    const LONGEST: usize = 300;
+    STARTED.with(|started| {
+        let mut told = String::new();
+        let shim =
+            std::path::Path::new(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
+        if !started.borrow().is_empty() && !shim.exists() {
+            told.push_str(
+                "\n--- no clarp-shim beside the Host under test: no turn of its can start (a test \
+                 run named by package builds no other binary: build -p clarp-shim first)",
+            );
+        }
+        for (start, heard) in started.borrow().iter() {
+            let Some(heard) = heard.upgrade() else {
+                continue;
+            };
+            let heard = heard.lock().unwrap().clone();
+            let lines: Vec<&str> = heard.lines().collect();
+            let last = &lines[lines.len().saturating_sub(LINES)..];
+            told.push_str(&format!(
+                "\n--- the Host that said \"{start}\", its last {} of {} lines:",
+                last.len(),
+                lines.len()
+            ));
+            for line in last {
+                let cut: String = line.chars().take(LONGEST).collect();
+                let more = if cut.len() < line.len() { " [...]" } else { "" };
+                told.push_str(&format!("\n    {cut}{more}"));
+            }
+        }
+        told
+    })
+}
 
 /// A command of the Host's own program that is to end by itself: what it said and how it
 /// ended. One that does not end is ended, and that is a failure: a Host that starts where it
@@ -187,6 +246,8 @@ impl Place {
             startup.push_str(&line);
         };
         let heard = Arc::new(Mutex::new(startup));
+        let start = format!("clarp-host listens on {address}");
+        STARTED.with(|started| started.borrow_mut().push((start, Arc::downgrade(&heard))));
         let keeping = heard.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -383,10 +444,18 @@ const TOOLS: [&str; 7] = [
     "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
 ];
 
-fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+fn wait_for(what: &str, ready: impl FnMut() -> bool) {
+    wait_within(what, Duration::from_secs(30), ready);
+}
+
+/// The same, for as long as is given. When it gives up, it says what every Host the test
+/// started and that still lives last said.
+fn wait_within(what: &str, most: Duration, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + most;
     while !ready() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {what}{}", what_the_hosts_said());
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -415,7 +484,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 105);
+    assert_eq!(info["contract"]["host"], 106);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -8828,7 +8897,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 105);
+    assert_eq!(info["contract"]["host"], 106);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -18035,7 +18104,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     assert_eq!(response.status, 200);
     let ack: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(ack["ok"], true);
-    assert_eq!(ack["stored"], 0);
+    assert_eq!(ack["stored"], 500);
     drop(bytes);
     let too_many = post(
         "/voice-events",
@@ -21319,7 +21388,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }
 
     // An app's record of what its microphone and player did: taken, read as the Python Host
-    // reads it, and not kept on this Host yet.
+    // reads it, and kept on the corrected timeline.
     let report = |said: Value| host.ask("POST", "/voice-events", Some(&said));
     let (status, told) = report(json!({
         "source": "ios", "sent_at": now_ms(),
@@ -21327,7 +21396,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }));
     assert_eq!(
         (status, &told["ok"], &told["stored"]),
-        (200, &json!(true), &json!(0))
+        (200, &json!(true), &json!(1))
     );
     assert!(
         told["clock_offset_ms"]
@@ -23375,8 +23444,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/agent-portrait-generation", json!({ "session": echo })),
-        ("/avatar-settings", json!({ "model_avatars": true })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (

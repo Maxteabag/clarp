@@ -32,7 +32,7 @@ from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispat
     MAX_ATTEMPTS, BACKOFF_BASE_SEC, _TURN_LOCK, _SLOTS, _FAILOVERS, _pool_backend, account_failover,
     account_selector, _INFLIGHT, _QUEUED, _CLAIMED_AT, _RECOVERY_LOCK, _RECOVERY_BACKOFF,
     _RECOVERY_RESUMING_ORIGINS, _NO_LOCK, _JANITOR_SPAWN_LOCKS, _TERMINAL_SENTINEL,
-    _STOPPING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, LEAKED_SLOT_GRACE_MS,
+    _STOPPING_SENTINEL, _COMPACTING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, LEAKED_SLOT_GRACE_MS,
     ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launching, _launch_running, runtime_status,
     held_order, log_held_order, RECOVERY_PARK_PREFIX, _transfer_refusal, account_recovery_carry,
     resume_account_recovery, unpersisted_held, provider_turns, UPDATE_HOLD_HEADLINE,
@@ -81,7 +81,7 @@ def free_stale_slot(agent_id: str) -> str | None:
 
 
 from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
-    DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
+    DispatchResult, _turn_protocol, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
     _park, _park_at_head, DispatchError, _refuse_oversized, JanitorDispatchError,
     _LaunchReceiptUnrecorded, UNCONFIRMED_DELIVERY, _LaunchReceiptRefused, DELIVERY_HINT_BUSY_MS,
     _record_launch_attempt, _can_steer, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
@@ -90,7 +90,7 @@ from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-modu
     _default_retry_scheduler, OPENING_NOT_CONFIRMED, OPENING_WITHDRAWN, _AdmissionRefused,
     _ADMISSION_REFUSED, _is_call_opening, _mark_backend_invoked, _backend_invoked,
     _with_team_context, _with_delivery_context, _REQUEST_LOCKS, _REQUEST_LOCKS_GUARD,
-    DispatchCommand, _serialize_client_retry, _mark_preinvoke_failure,
+    DispatchCommand, _serialize_client_retry, _mark_preinvoke_failure, _launch_refused,
 )
 _DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
 
@@ -212,6 +212,23 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             spec = replace(spec, park_id=park_id, after_stop=True)
             _SLOTS.enqueue(agent_id, spec)
             return bool(park_id), True
+        if _SLOTS.get(agent_id) == _COMPACTING_SENTINEL:
+            # The user's compaction is working on this conversation. Every
+            # send waits behind it in arrival order and starts when it ends
+            # (finish_compaction); nothing preempts it. A send without a
+            # durable row gets its queue row first (the caller writes it
+            # outside this lock and comes back with queue_id set).
+            if not spec.queue_id:
+                queue_user.append(spec.trace_id)
+                return False, True
+            depth = _SLOTS.enqueue(agent_id, spec)
+            defer_on(_TURN_LOCK, lambda: (
+                eventlog.emit("server", "turnQueuedBehindCompaction",
+                              context=spec.context, detail={"depth": depth}),
+                log("turnQueuedBehindCompaction",
+                    f"agent={agent_id} depth={depth} "
+                    f"trace={spec.trace_id or '∅'} — compaction running, queued")))
+            return False, True
         # An interactive terminal is attached to this agent — queue behind
         # it so we never run a -p turn against a session another process is
         # holding open. drain_after_terminal() spawns this when it closes.
@@ -414,6 +431,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
+            self._steered_into(spec, active_trace)
             if spec.queue_id:
                 # Delivered into the running turn: its durable queue
                 # receipt is spent and the visible user row is due now.
@@ -425,6 +443,32 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                           detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
             log("turnSteered", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
         return accepted
+
+    def _steered_into(self, spec: _TurnSpec, active_trace: str) -> None:
+        """A message that is not coordination, steered into a coordination
+        turn, makes that turn the user's too: it is shown from now on
+        (lib.coordination.loosen), and the open turn says so on the live
+        channel at once. An agent's message steered into a user's turn is a
+        row of its own trace and changes nothing here."""
+        from . import coordination
+        if coordination.is_coordination(agent_id=spec.agent_id, origin=spec.origin,
+                                        sender_agent_id=spec.sender_agent_id):
+            return
+        try:
+            moved = coordination.loosen(spec.agent_id, active_trace)
+        except Exception as exc:  # noqa: BLE001 - a delivered steer never fails on it
+            log_exception("coordinationLoosenFail", exc, detail=spec.agent_id)
+            return
+        if not moved:
+            return
+        from . import live_hub
+        live_hub.report("set_turn_audience", spec.agent_id, active_trace, coordination.USER)
+        if getattr(self.ctx, "stream", None) is not None:
+            for backend_session_id in moved:
+                events.broadcast(self.ctx.stream, events.transcript_updated(
+                    agent_id=spec.agent_id, session=spec.session,
+                    backend_session_id=backend_session_id))
+        log("coordinationMixed", f"agent={spec.agent_id} trace={active_trace}")
 
     def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | bool | None":
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
@@ -448,7 +492,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 raise DispatchError(409, admission_policy.LEADER_NUDGE_DISABLED)
             digest, inbox_ids = team_store.pending_digest(spec.agent_id)
             spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
-                           team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
+                           team_protocol=_turn_protocol(spec.agent_id, origin=spec.origin,
+                                                        sender_agent_id=spec.sender_agent_id))
             # Re-arm the Claude pwa-voice source marker for THIS attempt, with a
             # fresh timestamp. The marker is single-use (the UserPromptSubmit hook
             # consumes it), so without re-writing here a retry — or a redispatch
@@ -599,11 +644,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                     if account_attempt is not None:
                         account_attempt.spawned.set()
             except BaseException as exc:
-                if state.get("spawn_started"):
+                if state.get("spawn_started") and not _launch_refused(exc):
                     _mark_backend_invoked(exc)
                 raise
         except BaseException as exc:
-            if not invocation_started:
+            # A backend that refused before sending anything (LaunchRefused)
+            # proves the turn unlaunched although spawn_turn was entered (R121).
+            if not invocation_started or _launch_refused(exc):
                 _mark_preinvoke_failure(exc, agent_id=spec.agent_id, trace_id=spec.trace_id)
             raise
 
@@ -788,3 +835,52 @@ def drain_after_terminal(ctx, agent_id: str) -> None:
     if next_spec is None:
         return
     TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec)
+
+
+def claim_for_compaction(agent_id: str) -> str:
+    """Take the agent's slot for the user's compaction. Returns "" when it is
+    taken, else why not, in words. Only an idle agent with nothing queued is
+    compacted: a send that arrives meanwhile waits behind it, in order."""
+    with _TURN_LOCK:
+        if _SLOTS.fenced:
+            return "the Host is handing over to an update — try again shortly"
+        current = _SLOTS.get(agent_id)
+        if current == _COMPACTING_SENTINEL:
+            return "already compacting"
+        if current or _terminal_live(agent_id):
+            return "agent is busy — try again when idle"
+        if _SLOTS.queue_depth(agent_id):
+            return "messages are waiting for this agent — try again when they have run"
+        _SLOTS.claim(agent_id, _COMPACTING_SENTINEL)
+        _SLOTS.mark_spawned(agent_id, _COMPACTING_SENTINEL)
+    return ""
+
+
+def finish_compaction(service, agent_id: str) -> None:
+    """The compaction ended: hand the slot to the first send that waited
+    behind it (started by ``service``, the dispatcher that owns turns), or
+    free it. A Stop that took the slot meanwhile runs the queue itself
+    (finish_stop), so this is then a no-op."""
+    with _TURN_LOCK:
+        if _SLOTS.get(agent_id) != _COMPACTING_SENTINEL:
+            return
+        next_spec = _SLOTS.pop_next(agent_id, expected=_COMPACTING_SENTINEL)
+    if next_spec is None:
+        return
+    if service is None:
+        # No dispatcher to start it from: give the slot back so the next send
+        # or the queue recovery starts it; nothing is dropped.
+        with _TURN_LOCK:
+            if _SLOTS.get(agent_id) == next_spec.trace_id:
+                _SLOTS.requeue_front(agent_id, next_spec)
+                _SLOTS.release(agent_id, next_spec.trace_id)
+        log("compactionQueueLeft", f"agent={agent_id} — no dispatcher; queue kept")
+        return
+    service._spawn_next(agent_id, next_spec)
+
+
+def compaction_holds_slot(agent_id: str) -> bool:
+    """Whether the compaction still owns the agent's slot. A Stop replaces it
+    with its barrier, which tells the compaction to end."""
+    with _TURN_LOCK:
+        return _SLOTS.get(agent_id) == _COMPACTING_SENTINEL

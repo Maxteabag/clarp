@@ -205,7 +205,8 @@ def test_default_model_effort_and_clean_effort_match_the_facade():
 
 COMPACTION = {
     "claude": CompactionStrategy(("claude", "--dangerously-skip-permissions", "--resume"), "/compact", True),
-    "codex": CompactionStrategy(("codex", "resume"), "/compact", False),
+    # Through the shared app-server that holds the thread (R148).
+    "codex": CompactionStrategy((), "thread/compact/start", False, in_process=True),
     "agy": CompactionStrategy(("env", "CLARP_AGY_MANAGED_TURN=1", "agy", "--dangerously-skip-permissions", "--conversation"), "/compress", False),
     "grok": CompactionStrategy(("grok", "--resume"), "/compact", False),
 }

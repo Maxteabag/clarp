@@ -1,4 +1,4 @@
--- user_version 128
+-- user_version 130
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -246,6 +246,9 @@ CREATE INDEX idx_podcast_source ON podcast_conversations(source_artifact_id, cre
 -- index idx_prompt_admissions_history on prompt_admissions
 CREATE INDEX idx_prompt_admissions_history ON prompt_admissions(agent_id, cooperative_principal, observed_at DESC, admission_id);
 
+-- index idx_prompt_admissions_trace on prompt_admissions
+CREATE INDEX idx_prompt_admissions_trace ON prompt_admissions(trace_id);
+
 -- index idx_provider_limit_episode_open on provider_limit_episodes
 CREATE INDEX idx_provider_limit_episode_open ON provider_limit_episodes(provider_instance_id, auth_generation_id, window_id, status);
 
@@ -266,6 +269,9 @@ CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
 
 -- index idx_queued_turns_status_seq on queued_turns
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
+
+-- index idx_queued_turns_trace on queued_turns
+CREATE INDEX idx_queued_turns_trace ON queued_turns(trace_id);
 
 -- index idx_runtimes_live_backend_session on runtimes
 CREATE INDEX idx_runtimes_live_backend_session ON runtimes(backend_session_id) WHERE ended_at IS NULL;
@@ -323,6 +329,9 @@ CREATE INDEX idx_turn_usage_backend_at ON turn_usage(backend, at);
 
 -- index idx_turns_agent_ts on turns
 CREATE INDEX idx_turns_agent_ts ON turns(agent_id, started_at);
+
+-- index idx_turns_trace on turns
+CREATE INDEX idx_turns_trace ON turns(trace_id);
 
 -- index idx_user_notifications_agent_done on user_notifications
 CREATE INDEX idx_user_notifications_agent_done ON user_notifications(agent_id, done_ts DESC);
@@ -831,6 +840,7 @@ CREATE TABLE agents (
     helper_state TEXT,
     helper_completed_at INTEGER,
     custom_status_at INTEGER,
+    coordination_visibility TEXT NOT NULL DEFAULT '',
     voice_verbosity INTEGER NOT NULL DEFAULT 0
 );
 
@@ -999,6 +1009,17 @@ CREATE TABLE conversation_heads (
     replace_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, backend_session_id)
 );
+
+-- table coordination_traces on coordination_traces
+CREATE TABLE coordination_traces (
+    agent_id TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    sender_agent_id TEXT NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT 'agents' CHECK (audience IN ('agents', 'mixed')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, trace_id)
+) WITHOUT ROWID;
 
 -- table cursor_positions on cursor_positions
 CREATE TABLE cursor_positions (
@@ -1909,7 +1930,8 @@ CREATE TABLE provider_turns (
     pid INTEGER,
     start_token TEXT NOT NULL DEFAULT '',
     started_at INTEGER NOT NULL,
-    exited_at INTEGER
+    exited_at INTEGER,
+    trace_id TEXT NOT NULL DEFAULT ''
 );
 
 -- table provider_usage_windows on provider_usage_windows

@@ -659,6 +659,7 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         "/diagnostics/settings": "_handle_diagnostics_settings_post",
         "/agent-dreaming": "_handle_agent_dreaming",
         "/agent-mute": "_handle_agent_mute",
+        "/agent-notes": "_handle_agent_note",
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
