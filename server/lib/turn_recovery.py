@@ -59,6 +59,13 @@ class RecoveryMixin:
         except Exception as exc:  # noqa: BLE001 - recovery must still run
             log_exception("startedUnshownPassFail", exc)
         try:
+            # A Host that died while a takeover held a turn's group stopped
+            # (issue 491, part B): the group is thawed from its durable record.
+            from . import takeover
+            takeover.thaw_left_frozen()
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("takeoverThawFail", exc)
+        try:
             # A listen-first claim left by an earlier process: a process
             # boundary is never proof of what it sent, whatever its age.
             from . import agent_rings

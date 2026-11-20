@@ -71,6 +71,27 @@ def prompt_uuid(trace_id: str) -> str:
     return str(uuid.uuid5(_PROMPT_UUID_NAMESPACE, trace))
 
 
+def note_output(handle, ev: dict) -> None:
+    """What a takeover judges (issue 491, part B): every line the drain has
+    read, and whether any of them was output: a word or a tool call, in a
+    stream event or a whole assistant message. Thinking alone is nothing."""
+    handle.lines_read = int(getattr(handle, "lines_read", 0)) + 1
+    if getattr(handle, "output_seen", False):
+        return
+    kinds = []
+    if ev.get("type") == "stream_event":
+        inner = ev.get("event") or {}
+        block = inner.get("content_block") or {}
+        delta = inner.get("delta") or {}
+        kinds = [block.get("type"), delta.get("type")]
+    elif ev.get("type") == "assistant":
+        content = (ev.get("message") or {}).get("content") or []
+        kinds = [part.get("type") for part in content if isinstance(part, dict)]
+    if any(kind in {"text", "text_delta", "tool_use", "input_json_delta", "server_tool_use"}
+           for kind in kinds):
+        handle.output_seen = True
+
+
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
     return (home / ".claude" / "projects") if home is not None else None
 
@@ -303,7 +324,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
 _SPAWN_KWARGS = frozenset({
     "text", "cwd", "backend_session_id", "is_new_session", "session",
     "agent_id", "on_session_init", "on_result", "on_error", "trace_id",
-    "model", "effort", "stream", "isolated", "hook_session",
+    "model", "effort", "stream", "isolated", "hook_session", "takeover",
 })
 
 
@@ -457,8 +478,18 @@ class ClaudeBackend(Backend):
         stream=None,
         isolated: bool = False,
         hook_session: str | None = None,
+        takeover: dict | None = None,
     ) -> TurnHandle:
         """Spawn the configured Claude CLI for ONE turn carrying `text` as the prompt.
+
+        ``takeover`` (issue 491, part B): this turn takes over one that was
+        ended before it printed anything. ``{"first": text, "resume_at": U,
+        "drops_turn": M}``: resume the session at entry U, dropping turn M
+        (message 1, never answered), and give BOTH messages as one user line
+        of two text blocks, so one answer covers both. With no ``resume_at``
+        (the session's first turn), message 1 is already the session's last,
+        unanswered entry: a plain resume with message 2 alone (recording case
+        7, first-plain).
 
         The subprocess is started immediately and a daemon thread is started
         that drains its stdout, parsing stream-json events and calling the
@@ -484,6 +515,11 @@ class ClaudeBackend(Backend):
             persona=persona,
             session=session,
         )
+        blocks = [text]
+        if takeover and takeover.get("resume_at"):
+            cmd += ["--resume-session-at", str(takeover["resume_at"]),
+                    "--resume-drops-turn", str(takeover["drops_turn"])]
+            blocks = [str(takeover.get("first") or ""), text]
         cli_bin = cmd[0]
         if shutil.which(cli_bin) is None:
             hint = (
@@ -504,7 +540,8 @@ class ClaudeBackend(Backend):
         user_msg = json.dumps({
             "type": "user",
             "uuid": prompt_uuid(trace_id),
-            "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+            "message": {"role": "user",
+                        "content": [{"type": "text", "text": block} for block in blocks]},
         })
         env_session = session if hook_session is None else hook_session
         flag = "new" if is_new_session else ("resume" if backend_session_id else "∅")
@@ -538,6 +575,10 @@ class ClaudeBackend(Backend):
                 proc.stdin.close()
         except (BrokenPipeError, OSError) as e:
             log_exception("clarpStdinWriteFail", e, detail=trace_id)
+        # A takeover may judge this turn (issue 491, part B): the drain below
+        # tells it what the CLI has printed, the process group lets it freeze.
+        handle.takeover_capable = not isolated and handle.process_group is not None
+        handle.takeover_of = bool(takeover)
         self.register_handle("" if isolated else agent_id, handle)
         start_drain(
             handle, self._drain_stdout, backend=self.runner,
@@ -628,6 +669,8 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                if handle is not None:
+                    note_output(handle, ev)
                 if evidence.suppress_event(ev):
                     continue
                 items.on_event(ev)

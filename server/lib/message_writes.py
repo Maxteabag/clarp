@@ -1936,7 +1936,9 @@ def turn_stamp(database, agent_id: str, trace_id: str):
     if not rows:
         return None
     summary = None
-    if turn is not None and turn["settled_at"] is not None:
+    # A turn a follow-up took over (issue 491, part B) printed nothing: its message is
+    # answered by the turn that took over, whose own summary tells it; it carries none.
+    if turn is not None and turn["settled_at"] is not None and turn["outcome"] != "replaced":
         started = int(turn["started_at"])
         ended = max(int(turn["settled_at"]), started)
         fields = {"turn_id": trace_id, "status": turn["outcome"],
