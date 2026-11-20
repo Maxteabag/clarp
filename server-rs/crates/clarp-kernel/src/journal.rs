@@ -224,7 +224,8 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
         AgentEvent::Turn { turn, .. }
         | AgentEvent::StopRequested { turn, .. }
         | AgentEvent::SentNow { turn, .. }
-        | AgentEvent::Reworded { turn, .. } => Some(turn.0),
+        | AgentEvent::Reworded { turn, .. }
+        | AgentEvent::Compacted { turn, .. } => Some(turn.0),
         AgentEvent::Paused { .. }
         | AgentEvent::Resumed { .. }
         | AgentEvent::Adopted { .. }

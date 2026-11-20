@@ -50,6 +50,7 @@ use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind};
 use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
+use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
@@ -474,6 +475,8 @@ pub struct Status {
     /// How many tokens the tool's conversation held when a turn last said so: the gauge an
     /// app shows. A turn that says nothing of it (a tool that died) leaves it as it was.
     pub context_tokens: Option<u64>,
+    /// What the user's last compaction of the agent did. None until its first.
+    pub last_compaction: Option<LastCompaction>,
     /// When a turn last ran to its end, and the model that answered last. A turn that
     /// failed or was stopped leaves both as they were.
     pub completed_at_ms: Option<i64>,
@@ -540,6 +543,14 @@ struct LiveTurn {
     context: Option<u64>,
     /// What the tool last said of its account's windows, and when.
     limits: Option<(i64, serde_json::Value)>,
+    /// The tool's newest record that it made the conversation shorter, in this turn: what the
+    /// user's compaction did is said from it ([`clarp_kernel::compaction`]).
+    compacted: Option<Boundary>,
+    /// How full the conversation was when the turn began: the size before a compaction, where
+    /// the tool's record says none.
+    gauge: Option<u64>,
+    /// The agent's tool.
+    backend: &'static str,
     /// What the tool said its conversation has cost so far, and what it had cost before the
     /// turn, where that is known: nothing for a conversation that begins with the turn.
     per_turn_cost: Option<u64>,
@@ -578,6 +589,9 @@ impl LiveTurn {
             base: self.base,
             context: self.context,
             limits: self.limits.clone(),
+            compacted: self.compacted,
+            gauge: self.gauge,
+            backend: self.backend,
             per_turn_cost: self.per_turn_cost,
             cost: self.cost,
             cost_before: self.cost_before,
@@ -934,13 +948,35 @@ struct Facts {
     base: Option<(u64, u64)>,
     context: Option<u64>,
     limits: Option<(i64, serde_json::Value)>,
+    compacted: Option<Boundary>,
+    gauge: Option<u64>,
+    backend: &'static str,
     per_turn_cost: Option<u64>,
     cost: Option<u64>,
     cost_before: Option<u64>,
 }
 
-/// How the turn that has just ended in this batch ended, for the row that closed it.
-fn closing(batch: &Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Option<Entry> {
+/// What the user's compaction whose turn ended in this batch did, in the same write: from the
+/// tool's record of it in that turn, else from how the turn ended. Nothing for any other turn.
+fn compaction_said(batch: &mut Batch<'_>, turn: TurnId, facts: &Facts) {
+    let Some(owed) = batch.agent().compaction_owed().filter(|owed| owed.id == turn).cloned() else {
+        return;
+    };
+    let model = facts.model.as_deref().unwrap_or_default();
+    let said = LastCompaction {
+        decided: compaction::decide(&owed.outcome, facts.compacted, facts.gauge, model),
+        backend: facts.backend.to_string(),
+        at: owed.ended_at_ms,
+    };
+    let command = Command::RecordCompaction { turn, said };
+    // Owed by this very batch: the agent takes it.
+    let _ = batch.command(command, owed.ended_at_ms);
+}
+
+/// How the turn that has just ended in this batch ended, for the row that closed it. What the
+/// user's compaction did, when the turn was one, is written with it.
+fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> Option<Entry> {
+    compaction_said(batch, turn, &facts);
     let ended = batch.agent().last().filter(|last| last.id == turn)?;
     let mut end = TurnEnd::of(ended, closes)?;
     end.trace_id = facts.trace_id;
@@ -1258,6 +1294,9 @@ impl Actor {
                 base: actor.total_before(turn)?,
                 context: None,
                 limits: None,
+                compacted: None,
+                gauge: actor.remembered.context_tokens,
+                backend: actor.backend.id(),
                 per_turn_cost: None,
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
@@ -1271,6 +1310,9 @@ impl Actor {
                 for_account: false,
             });
         }
+        // A compaction whose turn ended and whose outcome an actor before this one did not
+        // write: it is said now, from how the turn ended.
+        actor.say_owed_compaction()?;
         Ok((actor, out))
     }
 
@@ -1557,6 +1599,7 @@ impl Actor {
             label_at_ms: agent.label_at(),
             resting: agent.resting(),
             context_tokens: self.remembered.context_tokens,
+            last_compaction: agent.last_compaction().cloned(),
             completed_at_ms: self.remembered.completed_at_ms,
             answered_by: self.remembered.answered_by.clone(),
             arrived: agent.arrived(),
@@ -2819,6 +2862,7 @@ impl Actor {
         let silenced = by.is_the_users();
         let command = Command::Stop { by };
         let effects = self.recorder.handle(command, now_ms)?;
+        self.say_owed_compaction()?;
         let told = effects
             .iter()
             .filter(|effect| matches!(effect, Effect::StopTurn { .. }))
@@ -2990,6 +3034,7 @@ impl Actor {
             Err(JournalError::Refused(_)) => return Ok((false, Outputs::default())),
             Err(error) => return Err(error.into()),
         };
+        self.say_owed_compaction()?;
         let mut out = Outputs {
             changed: Changed {
                 conversation: false,
@@ -3214,7 +3259,7 @@ impl Actor {
                 }
                 batch.item(written(notice, now_ms)?);
             }
-            if let Some(end) = closing(&batch, turn, &closes, facts) {
+            if let Some(end) = closing(&mut batch, turn, &closes, facts) {
                 cut_off(&mut batch, &mut calls, &first_written, &end, now_ms)?;
                 batch.item(written(&end, now_ms)?);
             }
@@ -3421,6 +3466,10 @@ impl Actor {
         // What the tool said of its account in an attempt before this one stands until it
         // says it anew.
         let limits = before.as_ref().and_then(|before| before.limits.clone());
+        let (compacted, gauge) = before.as_ref().map_or_else(
+            || (None, self.remembered.context_tokens),
+            |before| (before.compacted, before.gauge),
+        );
         let (last_row, model, tokens, total, context) = match before {
             Some(before) => (
                 before.last_row,
@@ -3448,6 +3497,9 @@ impl Actor {
             base,
             context,
             limits,
+            compacted,
+            gauge,
+            backend: self.backend.id(),
             // What the conversation has cost so far is said again by the next attempt, with
             // what this one cost in it.
             per_turn_cost: None,
@@ -3511,11 +3563,13 @@ impl Actor {
             let message = self.message_at(message_seq)?;
             let facts = Facts {
                 trace_id: message.trace_id,
+                gauge: self.remembered.context_tokens,
+                backend: self.backend.id(),
                 ..Facts::default()
             };
             let mut batch = self.recorder.batch();
             if batch.command(command, now_ms).is_ok()
-                && let Some(end) = closing(&batch, turn, &message.id, facts)
+                && let Some(end) = closing(&mut batch, turn, &message.id, facts)
             {
                 batch.item(written(&end, now_ms)?);
             }
@@ -3532,6 +3586,7 @@ impl Actor {
         let mut per_turn_cost = None;
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
         let (mut total, mut limits) = (None, None);
+        let mut compacted = None;
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -3594,6 +3649,9 @@ impl Actor {
                             tokens_out,
                         } => total = Some((tokens_in, tokens_out)),
                         Signal::Context { tokens: held } => context = Some(held),
+                        Signal::Compacted(record) => {
+                            compacted = compaction::newest(compacted, Some(record));
+                        }
                         Signal::Limits(said) => limits = Some((record.t, said)),
                         Signal::TurnCost { micros } => per_turn_cost = Some(micros),
                         Signal::Cost { micros } => cost = Some(micros),
@@ -3635,6 +3693,9 @@ impl Actor {
             base: self.total_before(turn)?,
             context,
             limits,
+            compacted,
+            gauge: self.remembered.context_tokens,
+            backend: self.backend.id(),
             per_turn_cost,
             cost,
             cost_before: self.cost_before(turn)?,
@@ -3665,6 +3726,28 @@ impl Actor {
         }
         // What the tool wrote while nobody was reading.
         self.pump(out, now_ms)
+    }
+
+    /// What the user's compaction did, where its turn ended in a write that did not say it: a
+    /// Stop of a turn that waited for its next attempt, one taken back before it began, one
+    /// whose actor went before it could say it. From what the live turn saw, where it was that
+    /// turn; else from how it ended.
+    fn say_owed_compaction(&mut self) -> Result<(), ActorError> {
+        let Some(turn) = self.recorder.agent().compaction_owed().map(|owed| owed.id) else {
+            return Ok(());
+        };
+        let facts = match self.live.as_ref().filter(|live| live.turn == turn) {
+            Some(live) => live.facts(),
+            None => Facts {
+                gauge: self.remembered.context_tokens,
+                backend: self.backend.id(),
+                ..Facts::default()
+            },
+        };
+        let mut batch = self.recorder.batch();
+        compaction_said(&mut batch, turn, &facts);
+        batch.commit()?;
+        Ok(())
     }
 
     /// The live turn is over, in the log: its files have done their work.
@@ -3831,7 +3914,7 @@ impl Actor {
             }
             batch.item(written(&notice, now_ms)?);
         }
-        if let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
+        if let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts()) {
             cut_off(
                 &mut batch,
                 &mut live.calls,
@@ -3988,7 +4071,7 @@ impl Actor {
                             batch.item(written(&marker, t)?);
                         }
                         if failed
-                            && let Some(end) = closing(&batch, turn, &live.last_row, live.facts())
+                            && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
                         {
                             batch.item(written(&end, t)?);
                         }
@@ -4137,7 +4220,7 @@ impl Actor {
                             }
                             if ended
                                 && let Some(end) =
-                                    closing(&batch, turn, &live.last_row, live.facts())
+                                    closing(&mut batch, turn, &live.last_row, live.facts())
                             {
                                 cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
                                 batch.item(written(&end, t)?);
@@ -4182,6 +4265,10 @@ impl Actor {
                         }
                         Signal::Context { tokens } => {
                             live.context = Some(tokens);
+                            continue;
+                        }
+                        Signal::Compacted(record) => {
+                            live.compacted = compaction::newest(live.compacted, Some(record));
                             continue;
                         }
                         Signal::Limits(said) => {
@@ -4283,7 +4370,7 @@ impl Actor {
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
-                if ended && let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
+                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts()) {
                     cut_off(
                         &mut batch,
                         &mut live.calls,
@@ -4321,8 +4408,10 @@ impl Actor {
                     out.changed.conversation = true;
                 }
             }
+            let over = live.over;
+            self.say_owed_compaction()?;
             // The turn is over when its attempt is and it does not wait for another.
-            if live.over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
+            if over && self.recorder.agent().live().map(Turn::id) != Some(turn) {
                 self.forget_live();
             }
             self.carry_out(committed.effects, out)?;

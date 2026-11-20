@@ -739,6 +739,9 @@ impl ClaudeInterpreter {
                 if let Some(held) = event["compact_metadata"]["post_tokens"].as_u64() {
                     out.push(Signal::Context { tokens: held });
                 }
+                if let Some(record) = clarp_kernel::compaction::boundary(event) {
+                    out.push(Signal::Compacted(record));
+                }
             }
             _ => {}
         }
@@ -1088,6 +1091,7 @@ mod tests {
                         | Signal::Model(_)
                         | Signal::Usage { .. }
                         | Signal::Context { .. }
+                        | Signal::Compacted(_)
                         | Signal::Cost { .. }
                 )
             })
