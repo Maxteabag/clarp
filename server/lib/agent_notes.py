@@ -19,7 +19,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any
 
-from . import agents as agents_db, db, identity, message_store, user_notifications
+from . import agents as agents_db, db, identity, message_store, turn_identity, user_notifications
 
 COMMAND = "clarp-admin tell-user"
 MAX_TEXT = 8000
@@ -40,20 +40,13 @@ class Posted:
     backend_session_id: str
 
 
-def _running_trace(agent_id: str) -> str:
-    """The agent's running turn: its newest turn, neither ended nor settled.
-    A turn that completed normally is settled (settled_at, outcome) and may
-    keep ended_at empty: it is not running.
-
-    TODO(#470): a private copy of "this turn is still running". At the rebase
-    onto #470's fixed head this calls turn_identity.running_trace and the copy
-    goes; no third spelling survives the rebase."""
+def _newest_trace(agent_id: str) -> str:
+    """The trace of the agent's newest turn, whatever its state ('' when it has none);
+    whether it is running is turn_identity.running_trace's to say."""
     row = db.conn().execute(
-        """SELECT trace_id, ended_at, settled_at FROM turns WHERE agent_id = ?
+        """SELECT trace_id FROM turns WHERE agent_id = ?
             ORDER BY started_at DESC, turn_id DESC LIMIT 1""", (agent_id,)).fetchone()
-    if row is None or row["ended_at"] is not None or row["settled_at"] is not None:
-        return ""
-    return str(row["trace_id"] or "")
+    return str(row["trace_id"] or "") if row is not None else ""
 
 
 def _conversation_of(agent_id: str, trace_id: str) -> str:
@@ -105,9 +98,9 @@ def post(data: Any, *, caller_agent_id: str, caller_trace: str) -> Posted:
                                    f"run {COMMAND} --from {own}")
         raise NoteRefused(403, f"this turn belongs to an agent that no longer exists, not to "
                                f"{agent.get('session')}; {COMMAND} works only from its own turn")
-    running = _running_trace(agent_id)
-    trace = caller_trace if caller_agent_id == agent_id and caller_trace else running
-    if not running or trace != running:
+    # The Host's one reading of "this turn is still running" (PR 470).
+    trace = caller_trace or _newest_trace(agent_id)
+    if not turn_identity.running_trace(agent_id, trace):
         raise NoteRefused(409, f"{COMMAND} works only inside a running turn of {agent.get('session')}; "
                                "this call is not in one")
     backend_session_id = _conversation_of(agent_id, trace)
