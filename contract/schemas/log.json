@@ -33,6 +33,7 @@
           "reply_to_session": {"type": ["string", "null"]},
           "delivery": {"type": "string"},
           "automation_kind": {"type": ["string", "null"]},
+          "audience": {"enum": ["user", "agents"], "description": "Host contract 108: 'agents' for a row of a turn another agent's message started (coordination between agents); a note (kind 'note') is always 'user'."},
           "trace_id": {"type": "string"},
           "phase": {"enum": ["commentary", "final", null]},
           "turn": {

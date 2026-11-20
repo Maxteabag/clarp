@@ -45,6 +45,7 @@ use crate::agent::Unavailable;
 use crate::edge::App;
 use crate::fleet::{Amend, Directory, JanitorSeed, NotMade};
 use crate::ids;
+use crate::unkept::RecordFailure;
 
 /// The kind of thing the janitors' book is, among what is left with the fleet: what is left
 /// of it once its tables are kept apart.
@@ -661,15 +662,17 @@ async fn take_back(app: &App, agent: &str, run_id: &str) {
 
 /// One look of the runner at every trigger of a scheduled task that may act. The apps are
 /// told nothing by it, as on the Python Host: what a run's turn does is told like any turn.
-async fn look(app: &App) -> Result<(), Unavailable> {
+async fn look(app: &App) -> Result<(), RecordFailure> {
     let desk = &app.janitors;
     let ids = desk
         .read(app, |book, world, _| book.scheduled(world))
-        .await?;
+        .await
+        .map_err(RecordFailure::Read)?;
     for id in ids {
         let out = desk
             .read(app, |book, _, _| book.out_for(&id).cloned())
-            .await?;
+            .await
+            .map_err(RecordFailure::Read)?;
         let (started, ended) = out.as_ref().map_or((None, None), |run| turn_of(app, run));
         let (hand, _) = desk
             .update(app, |book, world, now_ms| {
@@ -683,7 +686,8 @@ async fn look(app: &App) -> Result<(), Unavailable> {
                 }
                 book.look(&id, ended.as_ref(), world, now_ms)
             })
-            .await?;
+            .await
+            .map_err(RecordFailure::Write)?;
         let Some(hand) = hand else {
             continue;
         };
@@ -691,11 +695,19 @@ async fn look(app: &App) -> Result<(), Unavailable> {
         let handed = desk.update(app, |book, world, now_ms| {
             book.handed(&id, &how, world, now_ms)
         });
-        let (taken, _) = handed.await?;
+        let (taken, _) = handed.await.map_err(RecordFailure::Write)?;
         if how == Delivery::Taken && !taken {
             // The run was cut off between the look and the hand-over.
             take_back(app, &hand.session, &hand.run_id).await;
         }
+    }
+    Ok(())
+}
+
+/// Each keeper gets its look even when another could not read its records.
+async fn tick(app: &App) {
+    if let Err(why) = look(app).await {
+        why.report(&app.fleet, KIND);
     }
     // After every look, what was seen of clips is written down: the bookkeeper asks no
     // model and has no turn of its own.
@@ -703,7 +715,6 @@ async fn look(app: &App) -> Result<(), Unavailable> {
     // And the Quota keeper looks where its look is due, beside the runner.
     crate::quota_keeper::look(app);
     crate::label_checker::look(app);
-    Ok(())
 }
 
 /// Only bound runtimes enter the rotation. A live turn shares its own
@@ -767,9 +778,7 @@ pub fn run(app: &App) {
         loop {
             tokio::time::sleep(every).await;
             visit_idle_bindings(&app, &mut after);
-            if let Err(why) = look(&app).await {
-                eprintln!("clarp-host: the janitors were not looked at: {}", why.0);
-            }
+            tick(&app).await;
         }
     });
 }
@@ -1529,6 +1538,41 @@ pub fn routes() -> Router<App> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_refused_janitor_book_still_gives_each_keeper_its_pass() {
+        let place = crate::unkept::at_the_port::place("janitor-passes");
+        let app = place.app().await;
+        place.refuse_reads("janitors");
+        tick(&app).await;
+        // Quota and labels do their work beside the tick. Wait for their actual reports.
+        let lines = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let lines = place.said.lock().unwrap().clone();
+                if lines.len() >= 4 {
+                    break lines;
+                }
+                place.notice.notified().await;
+            }
+        })
+        .await
+        .expect("each obligation reports the refusal");
+        let mut kinds = Vec::new();
+        for line in &lines {
+            let (kind, why) = line
+                .strip_prefix("clarp-host: the records of the kind ")
+                .unwrap()
+                .split_once(" could not be read: ")
+                .unwrap();
+            assert!(why.ends_with("storage failed: read refused here"));
+            kinds.push(kind);
+        }
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            ["audio-facts", "janitors", "label-auditor", "quota-monitor"]
+        );
+    }
 
     #[test]
     fn a_revision_is_read_as_the_python_host_reads_it() {

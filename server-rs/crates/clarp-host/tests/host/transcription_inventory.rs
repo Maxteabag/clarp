@@ -257,8 +257,21 @@ for line in sys.stdin:
     host.kill();
 
     let mut cases = fixture["removal"].as_array().unwrap().clone();
-    for kind in ["root", "sibling", "nested", "link", "linked-parent"] {
-        cases.push(json!({"kind":kind,"error":"R112","files_survive":true,"registered":true}));
+    for kind in [
+        "root",
+        "sibling",
+        "nested",
+        "link",
+        "linked-parent",
+        "empty",
+        "null",
+        "missing",
+        "owned-file",
+    ] {
+        cases.push(json!({"kind":kind,"error":null,"registered":false}));
+    }
+    for kind in ["owned-link", "owned-dangling", "stage-link"] {
+        cases.push(json!({"kind":kind,"error":"R112","registered":true}));
     }
     for case in cases {
         let kind = case["kind"].as_str().unwrap();
@@ -293,6 +306,27 @@ for line in sys.stdin:
         if !matches!(kind, "unknown" | "external" | "incomplete" | "active") {
             row["_managed_root"] = json!(target);
         }
+        match kind {
+            "stage-link" => {
+                symlink(&external, root.join(".install-faster-whisper--small")).unwrap()
+            }
+            "null" => row["_managed_root"] = Value::Null,
+            "empty" => row["_managed_root"] = json!(""),
+            "missing" => row["_managed_root"] = json!(root.join("absent")),
+            "outside" => std::fs::remove_dir_all(&own).unwrap(),
+            "owned-link" | "owned-dangling" | "owned-file" => {
+                std::fs::remove_dir_all(&own).unwrap();
+                if kind == "owned-file" {
+                    std::fs::write(&own, b"managed").unwrap();
+                } else if kind == "owned-link" {
+                    symlink(&external, &own).unwrap();
+                } else {
+                    symlink(root.join("absent"), &own).unwrap();
+                }
+                row["_local_path"] = json!(external);
+            }
+            _ => (),
+        }
         if kind == "incomplete" {
             std::fs::remove_file(own.join("model.bin")).unwrap();
         }
@@ -313,7 +347,9 @@ for line in sys.stdin:
         let (status, body) = host.ask("POST", ROUTE, Some(&json!({"model_id":format!(" {ID} ")})));
         if let Some(why) = case["error"].as_str() {
             let why = if why == "R112" {
-                format!("refusing to remove anything but the managed folder for {ID}")
+                format!(
+                    "refusing to remove {ID}: its folder is a link or outside the managed models folder"
+                )
             } else {
                 why.replace("<target>", target.to_str().unwrap())
             };
@@ -325,12 +361,47 @@ for line in sys.stdin:
                 "{kind}"
             );
         }
+        let log = host.heard.clone();
         host.kill();
+        let logged = log.lock().unwrap().clone();
+        let bad_stored = matches!(
+            kind,
+            "root"
+                | "sibling"
+                | "nested"
+                | "link"
+                | "linked-parent"
+                | "null"
+                | "empty"
+                | "missing"
+                | "outside"
+        );
         assert_eq!(
-            target.exists(),
-            case["files_survive"].as_bool().unwrap(),
+            logged
+                .lines()
+                .filter(|l| l.contains(&format!("model={ID} reason=stored_path")))
+                .count(),
+            usize::from(bad_stored),
             "{kind}"
         );
+        for line in logged
+            .lines()
+            .filter(|l| l.contains("model removal") || l.contains("model refused"))
+        {
+            assert!(!line.contains(place.root.to_str().unwrap()), "{kind}");
+        }
+        if kind == "stage-link" {
+            assert!(own.join("model.bin").is_file());
+            assert!(root.join(".install-faster-whisper--small").is_symlink());
+        } else if matches!(kind, "owned-link" | "owned-dangling") {
+            assert!(own.is_symlink());
+            assert!(logged.contains(&format!("model={ID} reason=link")));
+        } else if bad_stored || matches!(kind, "managed" | "owned-file") {
+            assert!(!own.exists(), "{kind}");
+        }
+        if let Some(expected) = case["files_survive"].as_bool() {
+            assert_eq!(target.exists(), expected, "{kind}");
+        }
         assert!(external.join("model.bin").is_file());
         assert!(sibling.join("model.bin").is_file());
         let store = clarp_store_sqlite::SqliteKeyValue
@@ -412,8 +483,10 @@ for line in sys.stdin:
     let host = place.start_with_token("admin");
     assert!(!listed(&host));
     host.kill();
-    assert_eq!(rows(), json!([unsafe_row]));
+    assert_eq!(rows(), json!([]));
+    assert!(!folder.exists());
     assert!(other.join("model.bin").is_file());
+    file_set(&folder);
     save(&place, &json!([marked]));
     let host = place.start_with(
         "admin",

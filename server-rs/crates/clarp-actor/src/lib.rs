@@ -26,6 +26,7 @@
 //! An error from an actor means its log or its files could not be read or written. The actor is
 //! then in no known state: drop it and open it again. That is the same path as a restart.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -39,6 +40,7 @@ use clarp_kernel::conversation::{
     ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
+pub mod bookkeeping;
 pub mod delegation;
 mod goal_ledger;
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -254,6 +256,13 @@ pub struct Outputs {
     pub damaged_lines: usize,
 }
 
+/// A committed timeline entry for live delivery. Its payload comes from
+/// the canonical job book at publication, as in the reference watcher.
+pub struct JobEvent {
+    pub id: String,
+    pub at: i64,
+    pub revision: u64,
+}
 /// The actor's log or files failed. Drop the actor and open it again.
 #[derive(Debug)]
 pub enum ActorError {
@@ -545,6 +554,9 @@ struct LiveTurn {
     /// The same calls as they were told: what is written once more when the turn is
     /// interrupted and they never return.
     calls: Vec<ToolCall>,
+    /// When each call that is a row by itself was first written. Written again (when it
+    /// ends, or is cut off), it keeps that time: a row has one time, whoever reads it.
+    first_written: HashMap<String, i64>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
     /// Which attempt of the turn this is, from 1: whose spool is read.
@@ -612,10 +624,12 @@ pub struct Actor {
     for_its_model: bool,
     /// The agent's background jobs, as the log has them and as they were last heard from.
     jobs: JobBook,
+    job_events: Vec<JobEvent>,
     provider_sessions: std::collections::BTreeMap<String, clarp_kernel::provider_tasks::Session>,
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     delegation: Option<delegation::Binding>,
+    listener_heartbeat: Option<i64>,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
@@ -957,6 +971,7 @@ fn follow(
 fn cut_off(
     batch: &mut Batch<'_>,
     calls: &mut Vec<ToolCall>,
+    first_written: &HashMap<String, i64>,
     end: &Entry,
     ts_ms: i64,
 ) -> Result<(), ActorError> {
@@ -966,7 +981,12 @@ fn cut_off(
     for mut call in calls.drain(..) {
         call.status = ToolStatus::Interrupted;
         call.ended_at_ms = Some(ts_ms);
-        batch.item(written(&Entry::Tool(call), ts_ms)?);
+        // A call that is a row by itself keeps the time of its first writing.
+        let at = match call.reply {
+            None => first_written.get(&call.id).copied().unwrap_or(ts_ms),
+            Some(_) => ts_ms,
+        };
+        batch.item(written(&Entry::Tool(call), at)?);
     }
     Ok(())
 }
@@ -1013,34 +1033,49 @@ impl Actor {
     ) -> Result<(Self, Outputs), ActorError> {
         let recorder = Recorder::open(log)?;
         let mut jobs = JobBook::new();
-        records(
-            recorder.log(),
-            kind::JOBS,
-            kind::JOB,
-            |record: JobRecord| {
-                jobs.apply(&record);
-            },
-        )?;
         let mut provider_sessions = std::collections::BTreeMap::new();
-        records(
-            recorder.log(),
-            kind::JOBS,
-            kind::PROVIDER_JOBS,
-            |entry: clarp_kernel::provider_tasks::JournalEntry| {
-                for record in entry.records {
-                    jobs.apply(&record);
+        let mut after = 0;
+        loop {
+            let page = recorder.log().read_after(after, kind::JOBS, WINDOW)?;
+            let Some(last) = page.last() else {
+                break;
+            };
+            after = last.seq;
+            for item in page {
+                let corrupt = |e: serde_json::Error| {
+                    ActorError::Corrupt(format!("invalid job record at {}: {e}", item.seq))
+                };
+                match item.kind {
+                    kind::JOB => jobs.apply(&serde_json::from_slice(&item.body).map_err(corrupt)?),
+                    kind::PROVIDER_JOBS => {
+                        let entry: clarp_kernel::provider_tasks::JournalEntry =
+                            serde_json::from_slice(&item.body).map_err(corrupt)?;
+                        for record in entry.records {
+                            jobs.apply(&record);
+                        }
+                        provider_sessions.insert(entry.native, entry.session);
+                    }
+                    _ => {}
                 }
-                provider_sessions.insert(entry.native, entry.session);
-            },
-        )?;
+            }
+        }
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
         let mut goals = GoalBook::new();
+        let mut older_imports = std::collections::BTreeMap::new();
         records(
             recorder.log(),
             kind::GOALS,
             kind::GOAL,
             |record: GoalRecord| {
+                if record.accounting.is_some() {
+                    older_imports.remove(&record.plan_id);
+                } else if record.goal
+                    && record.event_count > 0
+                    && goals.plan(&record.plan_id).is_none()
+                {
+                    older_imports.insert(record.plan_id.clone(), record.event_count);
+                }
                 goals.apply(&record);
             },
         )?;
@@ -1072,6 +1107,7 @@ impl Actor {
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
             delegation,
+            listener_heartbeat: None,
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,
@@ -1084,6 +1120,7 @@ impl Actor {
             recorder,
             jobs,
             provider_sessions,
+            job_events: Vec::new(),
             goals,
             artifacts,
             media,
@@ -1095,6 +1132,7 @@ impl Actor {
             remembered: Remembered::default(),
         };
         actor.open_goal_ledger(now_ms)?;
+        actor.recover_imported_accounts(older_imports, now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
         // The sends whose turn is not over are what the agent's state holds, as they were;
         // each one's names are read from its message, once (a queue's length of reads).
@@ -1156,6 +1194,7 @@ impl Actor {
                 drafts: Vec::new(),
                 tools: Vec::new(),
                 calls: Vec::new(),
+                first_written: HashMap::new(),
                 over: true,
                 attempt,
                 for_account: false,
@@ -1620,6 +1659,19 @@ impl Actor {
         })
     }
 
+    /// The trace of this turn, as its rows carry it, when it is the agent's running turn now:
+    /// `None` for a turn that does not run (one that ended, or another), and the empty text
+    /// for a running turn whose message came without one.
+    pub fn running_trace(&self, turn: u64) -> Result<Option<String>, ActorError> {
+        let message_seq = match self.recorder.agent().live() {
+            Some(Turn::Starting(live)) if live.id.0 == turn => live.message_seq,
+            Some(Turn::Running(live)) if live.id.0 == turn => live.message_seq,
+            _ => return Ok(None),
+        };
+        let message = self.message_at(message_seq)?;
+        Ok(Some(message.trace_id.unwrap_or_default()))
+    }
+
     /// What the agent last finished for one of those `asked_by` names (by the contract's
     /// word for who began a turn), when none of them wrote to it since: the message that
     /// began that turn and the row that closed it, which says how and when it ended.
@@ -1927,22 +1979,57 @@ impl Actor {
         &mut self,
         command: JobCommand,
         now_ms: i64,
-        revision: u64,
+        mut revision: impl FnMut() -> u64,
     ) -> Result<(Result<JobChange, JobRefusal>, Outputs), ActorError> {
-        let change = match self.jobs.decide(command, now_ms, revision) {
+        let registered = matches!(command, JobCommand::Register { .. });
+        let mut change = match self.jobs.decide(command, now_ms, revision()) {
             Ok(change) => change,
             Err(refusal) => return Ok((Err(refusal), Outputs::default())),
         };
         let mut out = Outputs::default();
-        if let Some(record) = &change.record {
-            let body = serde_json::to_vec(record).map_err(|error| {
-                ActorError::Corrupt(format!("a job record could not be written: {error}"))
-            })?;
-            let item = NewItem::new(kind::JOB, now_ms, body).keyed(format!("j-{}", record.job.id));
+        if let Some(record) = &mut change.record {
+            let mut invalidated = Vec::new();
+            if registered {
+                let previous = self.jobs.get(&record.job.id).map(|j| &j.metadata);
+                for metadata in std::iter::once(&record.job.metadata).chain(previous) {
+                    let (Some("claude"), Some(native), Some(tool)) = (
+                        metadata["provider"].as_str(),
+                        metadata["native_session_id"].as_str(),
+                        metadata["tool_use_id"].as_str(),
+                    ) else {
+                        continue;
+                    };
+                    let id =
+                        clarp_kernel::provider_tasks::job_id(&self.profile.agent_id, native, tool);
+                    if let Some(job) = self.jobs.get(&id).filter(|j| j.provider_owned()) {
+                        let mut job = job.clone();
+                        job.revision = record.job.revision;
+                        record.job.revision = revision();
+                        invalidated.push(JobRecord {
+                            job,
+                            at_ms: now_ms,
+                            note: "Display projection changed; native task lifecycle unchanged"
+                                .into(),
+                            timeline: true,
+                        });
+                    }
+                }
+                change.job = Some(record.job.clone());
+            }
             let mut batch = self.recorder.batch();
-            batch.item(item);
+            for entry in invalidated.iter().chain(std::iter::once(&*record)) {
+                batch.item(record_item(
+                    kind::JOB,
+                    format!("j-{}", entry.job.id),
+                    entry,
+                    now_ms,
+                )?);
+            }
             batch.commit()?;
-            self.jobs.apply(record);
+            for entry in invalidated.iter().chain(std::iter::once(&*record)) {
+                self.jobs.apply(entry);
+                self.remember_job_event(entry);
+            }
             out.changed.jobs = true;
         }
         if let Some(beat) = &change.beat {
@@ -1951,6 +2038,19 @@ impl Actor {
             out.changed.jobs = true;
         }
         Ok((Ok(change), out))
+    }
+
+    fn remember_job_event(&mut self, record: &JobRecord) {
+        if record.timeline || !record.job.provider_owned() {
+            self.job_events.push(JobEvent {
+                id: record.job.id.clone(),
+                revision: record.job.revision,
+                at: record.at_ms,
+            });
+        }
+    }
+    pub fn take_job_events(&mut self) -> Vec<JobEvent> {
+        std::mem::take(&mut self.job_events)
     }
 
     /// The agent's goals and plans.
@@ -2202,6 +2302,12 @@ impl Actor {
                 .as_mut()
                 .filter(|_| kept.imported_events.is_some() || matches!(kept.author, Author::Legacy))
             {
+                record.accounting = Some(
+                    events
+                        .iter()
+                        .filter_map(clarp_kernel::goals::bookkeeping::accounting_row)
+                        .collect(),
+                );
                 record.event_count = i64::try_from(events.len())
                     .map_err(|_| ActorError::Corrupt("too many imported goal events".into()))?;
                 record.last_event_at = events.iter().map(|e| e.at).max();
@@ -2922,10 +3028,13 @@ impl Actor {
             .as_ref()
             .map(|live| live.last_row.clone())
             .unwrap_or_default();
-        let mut calls = self
+        let (mut calls, first_written) = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.calls))
+            .map(|live| {
+                let first = std::mem::take(&mut live.first_written);
+                (std::mem::take(&mut live.calls), first)
+            })
             .unwrap_or_default();
         let mut batch = self.recorder.batch();
         for draft in unfinished {
@@ -2971,7 +3080,7 @@ impl Actor {
                 batch.item(written(notice, now_ms)?);
             }
             if let Some(end) = closing(&batch, turn, &closes, facts) {
-                cut_off(&mut batch, &mut calls, &end, now_ms)?;
+                cut_off(&mut batch, &mut calls, &first_written, &end, now_ms)?;
                 batch.item(written(&end, now_ms)?);
             }
         }
@@ -3213,6 +3322,7 @@ impl Actor {
             drafts: Vec::new(),
             tools: Vec::new(),
             calls: Vec::new(),
+            first_written: HashMap::new(),
             over: false,
             attempt,
             for_account: false,
@@ -3292,6 +3402,7 @@ impl Actor {
         let mut drafts = Vec::new();
         let mut tools = Vec::new();
         let mut calls = Vec::new();
+        let mut first_written = HashMap::new();
         let mut signals = Vec::new();
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the
@@ -3329,8 +3440,10 @@ impl Actor {
                         }
                         Signal::Tool(call) => {
                             follow_tool(&mut tools, &mut calls, &call);
-                            // A use that is a part of a reply is no row: that reply is.
+                            // A use that is a part of a reply is no row: that reply is. A row
+                            // was first written at the time of the record that first told it.
                             if call.reply.is_none() {
+                                first_written.entry(call.id.clone()).or_insert(record.t);
                                 last_row = call.id;
                             }
                         }
@@ -3394,6 +3507,7 @@ impl Actor {
             drafts,
             tools,
             calls,
+            first_written,
             over: false,
             attempt,
             for_account: false,
@@ -3559,7 +3673,13 @@ impl Actor {
             batch.item(written(&notice, now_ms)?);
         }
         if let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
-            cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
+            cut_off(
+                &mut batch,
+                &mut live.calls,
+                &live.first_written,
+                &end,
+                now_ms,
+            )?;
             batch.item(written(&end, now_ms)?);
         }
         let effects = batch.commit()?.effects;
@@ -3831,7 +3951,7 @@ impl Actor {
                                 && let Some(end) =
                                     closing(&batch, turn, &live.last_row, live.facts())
                             {
-                                cut_off(&mut batch, &mut live.calls, &end, t)?;
+                                cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
                                 batch.item(written(&end, t)?);
                             }
                             continue;
@@ -3931,7 +4051,15 @@ impl Actor {
                     if piece.part_of().is_none() {
                         live.last_row = piece.id().to_string();
                     }
-                    batch.item(written(&piece, t)?);
+                    // A call that is a row by itself and is written again keeps the time of
+                    // its first writing.
+                    let at = match &piece {
+                        Entry::Tool(call) if call.reply.is_none() => {
+                            *live.first_written.entry(call.id.clone()).or_insert(t)
+                        }
+                        _ => t,
+                    };
+                    batch.item(written(&piece, at)?);
                 }
                 // The turn moved on to something else: what was read up to here is written
                 // down by itself, and how the agent stood is noted, before what came after.
@@ -3968,7 +4096,13 @@ impl Actor {
                     batch.item(written(&notice, now_ms)?);
                 }
                 if ended && let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
-                    cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
+                    cut_off(
+                        &mut batch,
+                        &mut live.calls,
+                        &live.first_written,
+                        &end,
+                        now_ms,
+                    )?;
                     batch.item(written(&end, now_ms)?);
                 }
             }

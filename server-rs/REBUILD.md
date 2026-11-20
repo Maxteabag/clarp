@@ -255,6 +255,21 @@ The rules and binding rotation are in `clarp-kernel/src/provider_tasks.rs`. The 
 `tools/provider-background-tasks-vectors.py` and `tools/provider-observer-vectors.py` record
 the Python Host's own functions, including 1,142 lifecycle steps and 320 binding selections.
 
+The feature `provider_background_tasks` is listed at contract 24. Managed Claude turns receive
+one Bash PreToolUse hook through inline settings. The shim reads at most 64 KiB of JSON, returns
+no permission decision and never contacts the Host. The hook attaches the exact agent, native
+session and tool-use id to a worker registration. A registration with that binding takes the native
+row's place in the list; its own detail and timeline remain available. Full devices can read
+the last 64 KiB of the receipted task's output with secrets redacted. A limited device sees only
+progress and history. Cancelling a native job gives a 409 receipt and leaves its state intact.
+
+The hook's turn advice is held by `tools/provider-hook-vectors.py` and the Host test that runs
+the repository's `run_detached_job.sh --goal` against its own tools. A worker awaiting a refused
+checkpoint never started the command. A successful launch stored the worker and goal dependency
+before returning and woke the agent when it finished. A separate setsid child answered after
+the managed turn ended and after the Host restarted. Registration and output are held by
+`tools/provider-registration-vectors.py`.
+
 **What agents make and ask is there, for the plain kinds** (15 Nov 2026). The rules of `server/lib/artifacts.py`
 are in the kernel (`artifacts.rs`, `artifacts/decisions.rs`, held to the Python module by 264 recorded calls,
 123 of them refusals): documents, research, data, code changes, releases, directories and workflow runs; a
@@ -1346,8 +1361,25 @@ and release of both keys commit together. A Host opening its stores releases an 
 completes the release for a logged stop. An agent reopening its log stops an active binding whose reservation
 is missing. A damaged reservation is left in the fleet store and counted in the startup journal.
 The principal serves ordinary work while the fleet repairs a mismatch. The fleet waits up to
-three seconds for each actor reply. History for either participant is read from the delegation rows. Listener launch and delegate
-observe/record are later parts of this feature.
+three seconds for each actor reply. History for either participant is read from the delegation rows.
+
+**Bookkeeping listener** (20 Nov 2026). The Host checks active grants every two seconds.
+Each delegate has a background job. A burst of principal activity gets eight seconds of quiet,
+with the first wake due after at most a minute. An outstanding wake waits for application; an
+unfinished or queued turn holds a retry even after fifteen minutes. A repeat after a failed send
+backs off. The principal keeps dispatch and application separately in its log. On restart the
+listener resumes from those cursors and checks the delegate’s queue before sending.
+The principal keeps the listener heartbeat in memory so a quiet grant does not grow its journal.
+
+**Delegate observation and recording** (20 Nov 2026). A verified delegate with the relationship
+credential can page its principal’s messages and goal events and see its ten most recently changed
+open goals. The reader excludes the delegate’s own messages and this delegation’s events before
+counting either page. A claim, observation, discrepancy or unknown keeps a snapshot of each cited
+source. A delegate can propose a subgoal or update its bookkeeping with an expected revision.
+The principal commits the events, subgoal changes, replay keys, applied cursors and application
+time in one append. An empty acknowledgement also advances the cursors and time. A retry after a
+restart finds the committed keys. The plan shows the latest fifty subject-and-kind pairs drawn from
+its newest five hundred accounting entries. An older imported goal gets that projection on upgrade.
 
 **A goal’s ledger** (19 Nov 2026). The owning agent appends a goal change, its attributable
 events, their per-plan ordinals and their ID locators together. The next number belongs to the
@@ -1362,7 +1394,7 @@ as its keeper cursor in the same append. A moved goal retains the cursor up to i
 The keeper bounds its initial page by the owner's committed high-water inside the same actor ask.
 An owner can add, update and retire explicit subgoals. Each edit keeps the changed subgoal and its
 ledger event in the same append. The subgoal has its own revision and evidence accumulates across edits.
-Bookkeeping delegations remain separate work.
+The bookkeeping delegate records its own account beside the owner’s changes.
 
 **The Goal keeper** (17 Nov 2026). The janitor that ran most on the owner's Host after the explainer (1,647
 runs in the counted week), and the one a long piece of work leans on: agents rarely keep their own goal's
@@ -2312,7 +2344,7 @@ The Host marks a managed model before deleting its folder. While marked it is hi
 
 The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.
 
-Removing an external model forgets its record. Removing a managed model deletes only its own directory under the Host’s models root. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
+Removing an external model forgets its record. Removal computes the managed directory from the model id. A wrong stored path is logged by id and reason only and cannot select or prevent deletion. An absent computed directory has nothing to delete. A symlink there refuses removal before files or records change. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
 
 **The computer’s background jobs.** A Host operation can register a queued or running job through
 the fleet and use its generation to start, report progress, finish or cancel it. The computer owns
@@ -2351,6 +2383,17 @@ to staging. Stale intent cannot move a replacement's files. Staging is cleaned o
 removal and publication, and an orphan older than seven days is swept. The install changes the
 available models. The warm default remains the model named at Host installation. A newly installed
 variant is selectable by name or as the configured engine for clips.
+
+**The voice timeline.** A client batch adds at most 500 rows to the owner's permanent
+timeline. Each row keeps its raw timestamp alongside the time corrected by the batch offset.
+An offset more than six hours from the receipt clock uses receipt time instead.
+The fleet commits each batch and its event sequence together through the storage port.
+Server producers enqueue their events. A subsequent read through the fleet observes earlier
+messages in order. A failed fire-and-forget write is reported through the coalescing store logger.
+The event query returns the newest matching window in chronological order. Utterance summaries
+also join trace-only events before filtering by session. Audio measurements run outside the
+transcription request using the speech environment, with a bounded decoding time. Podcast history
+has no producer here. The wire vectors use synthetic event names, measurements and text.
 
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
@@ -3151,6 +3194,17 @@ The Host retains 500 audit rows and ten minutes of results, including debounced 
 Duplicate requests share one execution. Prompts use the same admission as the local admin tool.
 HTTP checks the canonical destination at definition and execution, and never follows redirects.
 
+**Due work (20 Nov 2026).** An agent with a full mailbox checks its deadlines after 32 messages.
+The scheduled janitors, audio bookkeeper, quota keeper and label checker each get their pass even when a sibling
+cannot read the store. The fleet logs the failed obligation. The schedule and heartbeat desks publish a changed
+book after the store accepts it, so the next request can retry a refused write. A ring timer that fails at
+startup or expiry logs the failure and tries again a second later. An iOS chip whose state cannot be read
+arms another look in a minute. Each timer stays with the desk that knows when its work is due.
+
+**Remote action (20 Nov 2026).** The Shortcut's GET and POST send a live event to listening apps.
+A limited paired device may use either door. A controller edge requires POST and the receipt names the
+same event ID as the broadcast. Reconnecting clients cannot replay an earlier button press.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
@@ -3303,3 +3357,34 @@ come ("We will wait with reviewers", 16 Nov 2026).
   verdicts stand, and what runs again on the new commit is what reads the rest of the repository: its own
   gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
   twenty minutes, both times by a hook of Claude Code and its tests).
+
+**Model portraits and the avatar display preference.** The Host keeps the owner's
+choice from `POST /avatar-settings` and returns it to the settings screen and in
+the agents' snapshot. For bundled model art the Host tries the agent's model,
+the tool's configured default in the owner's settings, then the family the tool
+names. Janitors wear the bundled picture of their role or the default janitor
+picture. These reads and display changes make no image request.
+
+**Portrait edits requested by the owner.** A full-access POST to
+`/agent-portrait-generation` starts a Computer job. The capability GET tells
+the app which account pays, why a request is unavailable, and which generation
+is active. Opening the gallery, changing a display setting, and restarting the
+Host make no paid request. Up to twenty launches of this kind may begin per
+Computer in a rolling day. All attempts count. An active duplicate costs
+nothing.
+
+The worker sends the current primary portrait to two successive OpenAI image
+edits with the fixed close-up and everyday-scene prompts. Both use
+`gpt-image-2` at medium quality, 1024 by 1024. A dispatched request can cost
+money even if the other fails or the owner cancels. Each request has a
+180-second deadline. An input or generated image is bounded at 20 MiB, a
+provider response at 32 MiB. `CLARP_PICTURE_ENDPOINT` is the shared loopback
+test base for `generations` and `edits`.
+
+At acceptance the fleet checks the running generation and the primary again.
+One store transaction records the two new alternates, the successful job and
+the local publication receipt with both images. The agent's journal receives
+the two media records together. Once local publication finishes the Host
+removes the receipt and its staging bytes. On restart a committed receipt can
+finish locally and an interrupted generation ends failed. The bounded edit
+fixtures come from the Python Host's own functions in an isolated store.

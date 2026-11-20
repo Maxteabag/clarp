@@ -1,6 +1,7 @@
 """Durable ledger for explicit queue-after-current-turn requests."""
 from __future__ import annotations
 
+import collections
 import threading
 import json
 import contextlib
@@ -617,6 +618,35 @@ def _nothing_to_write(row, turn) -> bool:
             and turn["settled_at"] is None and turn["ended_at"] is None)
 
 
+# R121: what queueReceiptDeferred has said, per receipt (store, queue id, its
+# row's queue_seq): the line is written when a receipt first becomes
+# undecidable and when its reason changes, not on every pass. A receipt the
+# pass then decides is forgotten; the memory keeps the latest few thousand.
+_DEFERRED_LOGGED: "collections.OrderedDict[tuple[str, str, int], str]" = collections.OrderedDict()
+_DEFERRED_LOGGED_MAX = 4096
+_DEFERRED_LOGGED_LOCK = threading.Lock()
+
+
+def _deferred_is_news(queue_id: str, queue_seq: int, reason: str) -> bool:
+    key = (str(db.DB_PATH), str(queue_id), int(queue_seq))
+    with _DEFERRED_LOGGED_LOCK:
+        known = _DEFERRED_LOGGED.get(key)
+        _DEFERRED_LOGGED[key] = reason
+        _DEFERRED_LOGGED.move_to_end(key)
+        while len(_DEFERRED_LOGGED) > _DEFERRED_LOGGED_MAX:
+            _DEFERRED_LOGGED.popitem(last=False)
+        return known != reason
+
+
+def _forget_deferred(queue_ids) -> None:
+    store, gone = str(db.DB_PATH), {str(queue_id) for queue_id in queue_ids}
+    if not gone:
+        return
+    with _DEFERRED_LOGGED_LOCK:
+        for key in [key for key in _DEFERRED_LOGGED if key[0] == store and key[1] in gone]:
+            del _DEFERRED_LOGGED[key]
+
+
 def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
                        on_deferred: Callable[[str, int, str], None] | None = None) -> dict[str, int]:
     """Converge one bounded page from exact durable turn evidence.
@@ -738,8 +768,10 @@ def reconcile_receipts(*, skip: Callable[[str, int], bool] | None = None,
     for queue_id, agent_id, target, turn_id in repaired:
         log("queueReceiptReconciled", f"queue={queue_id} agent={agent_id} "
             f"reason=durable_turn target={target} turn={turn_id}")
+    _forget_deferred(queue_id for queue_id, *_rest in repaired)
     for queue_id, queue_seq, agent_id, reason in deferred:
-        log("queueReceiptDeferred", f"queue={queue_id} agent={agent_id} reason=launch_{reason}")
+        if _deferred_is_news(queue_id, queue_seq, reason):
+            log("queueReceiptDeferred", f"queue={queue_id} agent={agent_id} reason=launch_{reason}")
         if on_deferred is not None:
             on_deferred(str(queue_id), int(queue_seq), str(reason))
     return counts
@@ -954,6 +986,48 @@ def settle_unsent_held_sends(*, can_steer: Callable[[str], bool],
         except Exception as exc:  # noqa: BLE001 - the row is settled; the notice is told next time
             log_exception("heldSendNoticeFail", exc, detail=agent_id)
     return done
+
+
+# R121: a queued send whose launch a backend refused before anything was sent
+# (backend.base.LaunchRefused), recovery_backoff.PARK_AFTER times in a row with
+# the same error or REFUSED_IN_ALL times in all, ends ``failed`` instead of
+# parking for good.
+REFUSED_LAUNCH = "launch_refused"
+REFUSED_LAUNCH_NOTICE = ("A message you sent was never run.\n\n"
+                         "The agent could not be started for it {failures} times in a row: "
+                         "{error}. It will not be tried again; send it again once the agent "
+                         "can start.")
+
+
+def fail_refused_launch(row, *, failures: int, error: str) -> bool:
+    """End the queued ``row`` ``failed`` (queued -> failed, as R120's held
+    sends) and tell its sender in the conversation the message was sent to,
+    by a Host notice. (A peer request's waiting goal is not settled here:
+    peer requests are a feature above this layer; its deadline ends it.)
+    Returns whether the row moved; a row no longer queued is left as it is
+    and nobody is told."""
+    from . import agents, message_store
+    queue_id, agent_id = str(row["queue_id"]), str(row["agent_id"])
+    with _receipt_write("fail_unrun", (queue_id,), agent_ids={queue_id: agent_id}):
+        moved = _cas("fail_unrun", "queue_id = ?", (queue_id,),
+                     values={"text": "", "sender_agent_id": "", "prompt_admission_id": ""})
+        if moved:
+            _bump_revision(agent_id)
+    if not moved:
+        return False
+    log("launchRefusedFailed", f"agent={agent_id} queue={queue_id} failures={failures} "
+                               f"reason={REFUSED_LAUNCH}")
+    try:
+        conversation = agents.live_backend_session(agent_id) or ""
+        if not conversation:
+            log("launchRefusedNoticeNoConversation", f"agent={agent_id} queue={queue_id}")
+        message_store.record_system_notice(
+            agent_id=agent_id, backend_session_id=conversation,
+            notice_id=f"{REFUSED_LAUNCH}:{queue_id}",
+            text=REFUSED_LAUNCH_NOTICE.format(failures=failures, error=error.rstrip(".")))
+    except Exception as exc:  # noqa: BLE001 - the row is settled; the sender is told below
+        log_exception("launchRefusedNoticeFail", exc, detail=agent_id)
+    return True
 
 
 def remove(queue_id: str) -> bool:

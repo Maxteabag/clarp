@@ -19,6 +19,7 @@ import pytest
 
 from lib import db, message_store, message_writes, turn_lifecycle
 from lib import transcript_incremental as inc
+from lib.lifecycle import transaction
 from tests.unit.test_transcript_incremental import AGENT, SESSION, _append, _checkpointed, claude_lines, clock  # noqa: F401
 
 WHOLE_CONVERSATION = re.compile(r"FROM messages WHERE agent_id=\? AND backend_session_id=\? ORDER BY message_id")
@@ -219,3 +220,37 @@ def test_why_the_snapshot_must_end_first(tmp_path):
         first.execute("INSERT INTO t VALUES (2)")
     assert time.monotonic() - started < 1.0          # at once, not after the 5 s busy wait
     first.execute("ROLLBACK")
+
+
+def test_a_checkpoint_that_moved_before_the_frontiers_write_gets_no_frontier(tmp_path, clock, monkeypatch):  # noqa: F811
+    """The frontier's own transaction writes the record only if the checkpoint row is still the
+    one the import wrote. Another import's checkpoint and frontier, written meanwhile, keep their
+    frontier: this import's late record does not replace it (one frontier row per transcript).
+    The reviewer of 464: no test moved the checkpoint there."""
+    transcript, _before = _tail(tmp_path, clock)
+    real = inc.frontier_after_commit
+    moved = []
+
+    def frontier(checkpoint, *args, **kwargs):
+        con = db.conn()
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("UPDATE transcript_import_checkpoints SET updated_at = updated_at + 1 "
+                    "WHERE agent_id=? AND backend_session_id=? AND source_file=?",
+                    (checkpoint.agent_id, checkpoint.backend_session_id, checkpoint.source_file))
+        con.execute("COMMIT")
+        moved.append(inc.load_checkpoint(con, checkpoint.agent_id, checkpoint.backend_session_id,
+                                         checkpoint.source_file))
+        with transaction(con):                                       # the other import's own frontier
+            record = inc.inputs_record(message_writes._prepare_import_prelude(
+                con, AGENT, SESSION, [], raw_only=True, session_rows=True), moved[0], True)
+            inc.write_frontier(con, moved[0], "the other import's hash", record)
+        return real(checkpoint, *args, **kwargs)
+    monkeypatch.setattr(inc, "frontier_after_commit", frontier)
+    codes = []
+    tail_log = inc._tail_log
+    monkeypatch.setattr(inc, "_tail_log", lambda code, **kw: (codes.append(code), tail_log(code, **kw))[1])
+    result = _import(transcript)
+    assert result.get("apply_mode") == "tail" and len(moved) == 1
+    other = inc.load_frontier(db.conn(), moved[0])                  # not overwritten by this one's
+    assert other is not None and other["file_hash"] == "the other import's hash"
+    assert codes.count("frontier_not_published_checkpoint_moved") == 1

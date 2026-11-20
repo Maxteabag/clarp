@@ -13,6 +13,8 @@ import argparse
 import ast
 import os
 from pathlib import Path
+import re
+import stat
 import subprocess
 import sys
 
@@ -69,17 +71,33 @@ def fixed_scratch(tree, *, generator):
     return None
 
 
-def source_check():
-    for example in ("ROOT = Path('/var/tmp/clarp-shared'); ROOT.mkdir()",
-                    "shutil.rmtree(pathlib.Path('/tmp') / 'shared')"):
-        if not fixed_scratch(ast.parse(example), generator=True):
-            raise SystemExit('scratch guard failed its fixed-directory self-check')
-    if fixed_scratch(ast.parse("label = Path('/var/tmp/fixture'); print(label)"), generator=True):
-        raise SystemExit('scratch guard mistook a fixture label for an allocation')
+# Direct interpreter paths, or env selecting Python (including env -S).
+PYTHON_SHEBANG = re.compile(
+    rb'^#![ \t]*(?:(?:[^\s]*/)?env\s+(?:(?:-\S+|\w+=\S*)\s+)*)?'
+    rb'(?:[^\s]*/)?python(?:\d+(?:\.\d+)*)?(?=\s|$)'
+)
+
+
+def python_sources(root):
+    for directory, children, files in os.walk(root):
+        children[:] = sorted(name for name in children if name != 'target')
+        for name in sorted(files):
+            path = Path(directory, name)
+            if not stat.S_ISREG(path.lstat().st_mode):
+                continue
+            if path.suffix == '.py':
+                yield path
+                continue
+            with path.open('rb') as source:
+                if source.read(2) == b'#!' and PYTHON_SHEBANG.match(b'#!' + source.readline()):
+                    yield path
+
+
+def scan_sources(root):
     examined = 0
-    for path in sorted(SERVER.rglob('*.py')):
-        relative = path.relative_to(SERVER)
-        if path == TOOLS / 'scratch.py' or 'target' in relative.parts:
+    for path in python_sources(root):
+        relative = path.relative_to(root)
+        if relative == Path('tools/scratch.py'):
             continue
         tree = ast.parse(path.read_bytes(), filename=str(path))
         if line := fixed_scratch(tree, generator=path.name.endswith("-vectors.py")):
@@ -88,8 +106,31 @@ def source_check():
             if ((isinstance(node, ast.Attribute) and node.attr in FORBIDDEN)
                     or (isinstance(node, ast.ImportFrom) and node.module == 'tempfile'
                         and any(n.name in FORBIDDEN or n.name == '*' for n in node.names))):
-                raise SystemExit(f'{path.relative_to(REPO)}:{node.lineno}: use tools/scratch.py')
+                raise SystemExit(f'{relative}:{node.lineno}: use tools/scratch.py')
         examined += 1
+    return examined
+
+
+def source_check():
+    for example in ("ROOT = Path('/var/tmp/clarp-shared'); ROOT.mkdir()",
+                    "shutil.rmtree(pathlib.Path('/tmp') / 'shared')"):
+        if not fixed_scratch(ast.parse(example), generator=True):
+            raise SystemExit('scratch guard failed its fixed-directory self-check')
+    if fixed_scratch(ast.parse("label = Path('/var/tmp/fixture'); print(label)"), generator=True):
+        raise SystemExit('scratch guard mistook a fixture label for an allocation')
+    with scratch.directory('guard-') as box:
+        root = Path(box)
+        tool = root / 'fixtures' / 'fleet-load'
+        tool.parent.mkdir()
+        tool.write_text('#!/usr/bin/env -S python3 -I\nimport tempfile\ntempfile.mkdtemp()\n')
+        try:
+            scan_sources(root)
+        except SystemExit as failure:
+            if str(failure) != 'fixtures/fleet-load:3: use tools/scratch.py':
+                raise
+        else:
+            raise SystemExit('scratch guard missed an allocation in a tool with a Python shebang')
+    examined = scan_sources(SERVER)
     print(f'scratch guard: {examined} Python files checked; no direct allocation or fixed scratch directory; no deferred files', flush=True)
 
 

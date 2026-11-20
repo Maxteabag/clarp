@@ -49,7 +49,8 @@ FULL_SAMPLES = {
     SSEType.AGENT_STATE: lambda: events.agent_state(
         session="s", agent_id="a", kind="thinking", persona="P", ts=1,
         detail={}, status_text="", trace_id="t", client_msg_id="m",
-        queue_started=False, queue_remaining=0, origin="janitor"),
+        queue_started=False, queue_remaining=0, origin="janitor",
+        audience="agents", sender_agent_id="b", sender_name="B"),
     SSEType.AGENT_ACTIVITY: lambda: events.agent_activity(
         agent_id="a", session="s", persona="P", kind="tool", phase="tool",
         status="running", tool="Read", action="read", summary="x",
