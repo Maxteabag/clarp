@@ -1,4 +1,4 @@
--- user_version 130
+-- user_version 131
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -1578,6 +1578,7 @@ CREATE TABLE messages (
     prompt_admission_id TEXT,
     phase TEXT,
     turn_json TEXT,
+    sent_at INTEGER,
     trace_id TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );
@@ -1976,7 +1977,9 @@ CREATE TABLE queued_turns (
     started_at INTEGER,
     claimed_at INTEGER,
     prompt_admission_id TEXT NOT NULL DEFAULT '',
-    allow_paused INTEGER NOT NULL DEFAULT 0
+    allow_paused INTEGER NOT NULL DEFAULT 0,
+    kind TEXT NOT NULL DEFAULT 'later',
+    shown_at INTEGER
 );
 
 -- table runtimes on runtimes

@@ -374,7 +374,7 @@ def cancel_for_session(
         from . import turn_queue
         for row in candidates:
             if row["status"] == "queued":
-                turn_queue.remove(str(row["client_msg_id"] or ""))
+                turn_queue.remove(str(row["client_msg_id"] or ""), withdraw_shown=True)
         if callable(release):
             release({str(row["trace_id"] or "") for row in candidates})
     return [

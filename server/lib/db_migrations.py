@@ -299,6 +299,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
             _migrate_to_v129(con)
         if version < 130:
             _migrate_to_v130(con)
+        if version < 131:
+            _migrate_to_v131(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1121,6 +1123,31 @@ def _migrate_to_v130(con: sqlite3.Connection) -> None:
             con.execute(statement)
     if "coordination_visibility" not in {row[1] for row in con.execute("PRAGMA table_info(agents)")}:
         con.execute("ALTER TABLE agents ADD COLUMN coordination_visibility TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v131(con: sqlite3.Connection) -> None:
+    """A message that waits for a running turn enters the conversation when its turn
+    starts (issue 491): ``messages.sent_at`` keeps when it was sent; ``queued_turns.kind``
+    says why an item waits (``later``: asked to; ``waiting``: met a busy agent) and
+    ``queued_turns.shown_at`` when its conversation row was written. An open item whose
+    row the older code already wrote is marked shown, so it is not also shown in the
+    queue. Additive with NULL or constant defaults: older code ignores the columns and a
+    rollback needs no down-migration; guarded, so a rerun is a no-op."""
+    if "sent_at" not in {row[1] for row in con.execute("PRAGMA table_info(messages)")}:
+        con.execute("ALTER TABLE messages ADD COLUMN sent_at INTEGER")
+    columns = {row[1] for row in con.execute("PRAGMA table_info(queued_turns)")}
+    if columns and "kind" not in columns:
+        con.execute("ALTER TABLE queued_turns ADD COLUMN kind TEXT NOT NULL DEFAULT 'later'")
+    if columns and "shown_at" not in columns:
+        con.execute("ALTER TABLE queued_turns ADD COLUMN shown_at INTEGER")
+        con.execute("""UPDATE queued_turns SET shown_at = enqueued_at
+                        WHERE status IN ('queued', 'claimed', 'parked')
+                          AND EXISTS (SELECT 1 FROM messages m
+                                       WHERE m.message_id IN (
+                                             'u-' || COALESCE(NULLIF(TRIM(queued_turns.client_msg_id), ''),
+                                                              TRIM(queued_turns.trace_id)),
+                                             COALESCE(NULLIF(TRIM(queued_turns.client_msg_id), ''),
+                                                      TRIM(queued_turns.trace_id))))""")
 
 
 def _migrate_to_v128(con: sqlite3.Connection) -> None:

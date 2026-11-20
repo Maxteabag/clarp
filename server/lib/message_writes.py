@@ -219,9 +219,12 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                         origin: str = "user", sender_agent_id: str | None = None,
                         prompt_admission_id: str = "",
                         trace_id: str = "",
+                        sent_at: int | None = None,
                         ) -> dict[str, Any] | None:
     """Record a user message the moment /send accepts it, keyed by the
-    client-authored `client_msg_id` (idempotency key).
+    client-authored `client_msg_id` (idempotency key). A message that waited
+    for a running turn is recorded when its own turn starts instead, with
+    ``sent_at`` (ms) the time it was sent (issue 491).
 
     This is the DURABLE user row — not a transient placeholder. The client
     renders its bubble under the same id, so the two match by identity. The
@@ -280,14 +283,15 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                    message_id, agent_id, backend_session_id, source_file, seq,
                    role, timestamp, text, kind, tool_name, tools_json,
                    display_cells_json, updated_at, revision, origin,
-                   sender_agent_id, prompt_admission_id, trace_id
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   sender_agent_id, prompt_admission_id, trace_id, sent_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(message_id) DO NOTHING""",
             (
                 msg_id, agent_id, backend_session_id, f"client:{client_msg_id}", seq,
                 "user", timestamp, text, None, None, "[]", "[]",
                 timestamp_ms, revision, origin, sender_agent_id,
                 prompt_admission_id or None, (trace_id or "").strip() or None,
+                int(sent_at) if sent_at is not None and sent_at < timestamp_ms else None,
             ),
         )
         if inserted.rowcount != 1:
@@ -303,6 +307,7 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                 sender_agent_id=sender_agent_id,
                 prompt_admission_id=prompt_admission_id,
                 trace_id=trace_id,
+                sent_at=sent_at,
             )
         if coordination.is_coordination(agent_id=agent_id, origin=origin,
                                         sender_agent_id=sender_agent_id):
