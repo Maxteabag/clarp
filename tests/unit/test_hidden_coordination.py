@@ -353,10 +353,10 @@ def test_a_note_is_refused_outside_the_agents_own_running_turn(world, pushes):
     assert other.answer[0] == 403 and "clarp-admin tell-user --from peer" in other.answer[1]["error"]
     stale = _note("Hello", token=_token(world.id, "t-old"))
     assert stale.answer[0] == 409 and "clarp-admin tell-user" in stale.answer[1]["error"]
-    # Without a token (the shared Codex app-server) the agent's running turn is taken.
-    assert _note("Hello from the turn").answer[1]["trace_id"] == "t-boss"
+    running = _token(world.id, "t-boss")
+    assert _note("Hello from the turn", token=running).answer[1]["trace_id"] == "t-boss"
     turn_lifecycle.close_turns_for_trace(world.id, "t-boss")
-    idle = _note("Hello")
+    idle = _note("Hello", token=running)
     assert idle.answer[0] == 409 and "works only inside a running turn of worker" in idle.answer[1]["error"]
     empty = _note("   ")
     assert empty.answer[0] == 400 and "a note needs words: clarp-admin tell-user" in empty.answer[1]["error"]
@@ -367,7 +367,7 @@ def test_a_note_is_refused_outside_the_agents_own_running_turn(world, pushes):
 def test_a_muted_agents_note_badges_without_a_push_and_a_quiet_agents_stays_quiet(world, pushes):
     world.turn("t-user", "Hello", "Hi.", settle=False)
     agents.update_agent(world.id, muted=True)
-    muted = _note("Muted, but here.").answer[1]
+    muted = _note("Muted, but here.", token=_token(world.id, "t-user")).answer[1]
     assert muted["notified"] and muted["reason"] == "agent-note-muted"
     assert pushes[-1]["push"] is False and pushes[-1]["badge"] is True
     quiet = notification_policy.note_decision(notification_policy.AgentCapabilities(present=True, quiet=True))
@@ -418,10 +418,9 @@ def test_a_note_after_its_turn_completed_normally_is_refused(tmp_path, pushes):
     call["on_result"]({"duration_ms": 50})
     row = db.conn().execute("SELECT ended_at, settled_at FROM turns WHERE trace_id='t-done'").fetchone()
     assert row["settled_at"] is not None          # what the dispatcher's completion leaves
-    for request in (_note("After it ended.", session="mike", token=token),
-                    _note("After it ended.", session="mike")):
-        assert request.answer[0] == 409, request.answer
-        assert "works only inside a running turn of mike" in request.answer[1]["error"]
+    request = _note("After it ended.", session="mike", token=token)
+    assert request.answer[0] == 409, request.answer
+    assert "works only inside a running turn of mike" in request.answer[1]["error"]
 
 
 # ---- the user's word, and who said it (the /send boundary) -----------------------------------
@@ -638,6 +637,7 @@ def test_the_mark_is_never_written_or_read_for_a_trace_that_holds_the_users_word
     assert _audiences(agent_id, "t-boss") == ["user"]
 
 
+
 # ---- F5: a note's id is its agent's; F6: only the agent's own turn speaks for it -------------
 
 def test_another_agents_note_id_is_a_new_note_and_a_repeat_is_the_same_one(world, pushes):
@@ -656,3 +656,28 @@ def test_another_agents_note_id_is_a_new_note_and_a_repeat_is_the_same_one(world
     assert len(pushes) == before
     other = _note("Other words.", token=_token(world.id, "t-boss"), note_id="n-shared")
     assert other.answer[0] == 409 and "already a note of worker with other words" in other.answer[1]["error"]
+
+
+def test_a_note_without_the_agents_own_turn_token_is_refused_for_every_principal(world, pushes, headers):
+    world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
+    request = _Request({"session": "worker", "text": "As if from the worker."})
+    request.headers = dict(headers)
+    request._handle_agent_note()
+    assert request.answer[0] == 403 and "clarp-admin tell-user works only from a turn of worker" in \
+        request.answer[1]["error"]
+    assert not any(row["kind"] == "note" for row in world.log())
+    assert pushes == []
+
+
+def test_a_turn_token_in_the_query_string_or_of_a_deleted_agent_is_no_token(world, pushes):
+    world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
+    request = _Request({"session": "worker", "text": "Hello", "X-Clarp-Turn": _token(world.id, "t-boss")})
+    request._handle_agent_note()                                 # only the header counts
+    assert request.answer[0] == 403
+    gone = agents.create_agent(persona="Gone", session="gone", voice_id="v", cwd="/tmp")
+    token = _token(gone, "t-gone")
+    with db.conn() as con:
+        con.execute("UPDATE agents SET deleted_at=1 WHERE agent_id=?", (gone,))
+    db.close_local()
+    refused = _note("Hello", token=token)
+    assert refused.answer[0] == 403 and "no longer exists" in refused.answer[1]["error"]

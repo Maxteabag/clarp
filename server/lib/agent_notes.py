@@ -6,10 +6,12 @@ keep out of the chat (lib.coordination). The note is a row of the calling
 turn in the agent's own chat, always shown, and it notifies on its own
 (reason ``agent-note``). It is never spoken in this version.
 
-It must come from the agent's own running turn: a turn token that names
-another agent is refused, like ``clarp-admin prompt --from``, and so is an
-agent with no turn running. Without a token (the shared Codex app-server)
-the agent's running turn is taken, as the named sender is for a prompt.
+It must come from the agent's own running turn, proven by its Host-issued
+turn token (X-Clarp-Turn): a call without one is refused for every
+principal (a device, a peer Host, the Host's own token, which every agent
+holds), and so is another agent's token and an agent with no turn running.
+An agent on the shared Codex app-server has no turn token and so cannot
+leave a note in this version.
 """
 from __future__ import annotations
 
@@ -91,11 +93,18 @@ def post(data: Any, *, caller_agent_id: str, caller_trace: str) -> Posted:
     if not agent:
         raise NoteRefused(404, "no such agent")
     agent_id = agent["agent_id"]
-    if caller_agent_id and caller_agent_id != agent_id:
+    if not caller_agent_id:
+        # Only the agent's own turn may speak for it: not a device, not a peer
+        # Host, not the Host's own token, which every agent holds (F6).
+        raise NoteRefused(403, f"{COMMAND} works only from a turn of {agent.get('session')}: "
+                               "this call carries no turn of an agent")
+    if caller_agent_id != agent_id:
         own = (identity.lookup(caller_agent_id) or {}).get("session")
         if own:
             raise NoteRefused(403, f"this turn belongs to {own}, not to {agent.get('session')}; "
                                    f"run {COMMAND} --from {own}")
+        raise NoteRefused(403, f"this turn belongs to an agent that no longer exists, not to "
+                               f"{agent.get('session')}; {COMMAND} works only from its own turn")
     running = _running_trace(agent_id)
     trace = caller_trace if caller_agent_id == agent_id and caller_trace else running
     if not running or trace != running:
