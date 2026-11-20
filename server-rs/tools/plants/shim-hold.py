@@ -53,6 +53,8 @@ MAIN = 'clarp-shim/src/main.rs'
 #   that a connection is taken from the listener under the list of connections (`let mut connections = lock(...)`
 #     in `accept`): what it guards is a connection taken and not yet in the list, a window of one system call.
 #     That a connection waiting in the listener is in a count's way is planted below.
+#   trimming CR on a CRLF request: serde_json already accepts trailing CR as whitespace, so the planted
+#     omission did not change acceptance. Keep the trim for the same input to malformed-request diagnostics.
 PLANTS = [
     # The words a client is told, and the bound.
     (LIB, 'bound', 'the bound is three seconds', 'pub const HOLD_MOST_MS: u64 = 2_000;', 'pub const HOLD_MOST_MS: u64 = 3_000;'),
@@ -106,7 +108,7 @@ PLANTS = [
     (MAIN, 'unit-count', 'a connection in the listener is not waited for', '                .is_none_or(|listener| waits(listener.as_fd(), false));', '                .is_some_and(|_| false);'),
     (MAIN, 'unit-count', 'no connection is waited for', '                idle = connection.idle();', '                idle = true;'),
     (MAIN, 'unit-count', 'the count waits for its own connection', '            for connection in connections.iter().filter(|c| !Arc::ptr_eq(c, own)) {', '            for connection in connections.iter() {'),
-    (MAIN, 'unit-count', 'a connection is not waited for while it carries out a request', '                turns.push(lock(&connection.turn));', '                drop(connection.turn.try_lock());'),
+    (MAIN, 'unit-count', 'a connection is not waited for while it carries out a request', '                turns.push(lock(&connection.turn));', '                turns.extend(connection.turn.try_lock());'),
     (MAIN, 'unit-count', 'a request read and not carried out is no request', '        !self.pending.load(Ordering::SeqCst) && !waits(self.socket.as_fd(), false)', '        !waits(self.socket.as_fd(), false)'),
     (MAIN, 'unit-count', 'what waits in a connection is no request', '        !self.pending.load(Ordering::SeqCst) && !waits(self.socket.as_fd(), false)', '        !self.pending.load(Ordering::SeqCst)'),
     (MAIN, 'unit-count', 'what waits in standard output is not waited for', '                if !out.waits(false) && !err.waits(false) {', '                if !err.waits(false) {'),
@@ -146,7 +148,6 @@ PLANTS = [
     # The connections, rewritten for the count: what they did before still holds.
     (MAIN, 'shim', 'a request is carried out only when the next one comes', '            me.pending.store(whole > 0, Ordering::SeqCst);', '            me.pending.store(false, Ordering::SeqCst);'),
     (MAIN, 'shim', 'the last request without its line end is dropped', '                Ok(0) => ended = true,', '                Ok(0) => break,'),
-    (MAIN, 'shim', 'a line ending in a carriage return is not a request', "        if line.last() == Some(&b'\\r') {", "        if line.last() == Some(&b'\\x7f') {"),
     (MAIN, 'once', 'a connection is not forgotten when it ends', '    lock(&control.connections).retain(|other| !Arc::ptr_eq(other, me));', '    let _ = &control.connections;'),
     # Added at the lead's word of 20 Nov 18:21: a report begun, the log's line, a system without /proc.
     (MAIN, 'unit-count', 'a report begun is not said', '                    reports_begun += 1;', '                    reports_begun += 0;'),
