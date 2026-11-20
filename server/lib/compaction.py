@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
@@ -54,8 +55,8 @@ UNKNOWN = "unknown"
 _OUTCOME_KEY = "compaction.last."
 
 _active: set[str] = set()
-# A terminal compaction's CLI that outlived its kill, by session (pid).
-_lingering: dict[str, int] = {}
+# A terminal compaction's CLI that outlived its kill, by session.
+_lingering: dict[str, "_Process"] = {}
 _lock = threading.Lock()
 _REAP_SEC = 10.0              # a killed terminal CLI gets this long to exit
 _runtime_client: Any | None = None
@@ -126,6 +127,11 @@ def compact_session(session: str, *, dispatch: Any = None) -> dict[str, Any]:
     from . import turn_dispatch
     refusal = turn_dispatch.claim_for_compaction(agent_id)
     if refusal == "already compacting":
+        with _lock:
+            running = session in _active
+        if not running:
+            # Its outcome is recorded; only a process of it still ends.
+            return _refuse(session, "the last compaction is still ending — try again shortly")
         return {"ok": True, "status": "already_compacting", "backend": backend}
     if refusal:
         return _refuse(session, refusal)
@@ -263,6 +269,11 @@ def _run(session: str, agent: dict, backend: str, bsid: str, cwd: str,
         result = outcome(UNKNOWN, detail=f"the compaction failed: {e}")
     finally:
         record(agent_id, session, backend, result or outcome(UNKNOWN, detail="interrupted"))
+        # The compaction is over: the agent no longer reads as compacting,
+        # even while a process that still holds its conversation keeps the
+        # slot below (a send then waits as behind any stuck session).
+        with _lock:
+            _active.discard(session)
         try:
             # The slot is given back only once nothing still works on the
             # conversation: sends that waited never run on top of it.
@@ -270,8 +281,9 @@ def _run(session: str, agent: dict, backend: str, bsid: str, cwd: str,
         except Exception as e:  # noqa: BLE001
             log_exception("compactHoldFail", e, detail=session)
         with _lock:
-            _active.discard(session)
-            _lingering.pop(session, None)
+            lingering = _lingering.pop(session, None)
+        if lingering is not None:
+            lingering.close()
         try:
             from . import turn_dispatch
             turn_dispatch.finish_compaction(dispatch, agent_id)
@@ -289,7 +301,46 @@ def _alive(items) -> bool:
     return False
 
 
+class _Process:
+    """The terminal compaction's CLI, held by a pidfd where the system has
+    one: its exit is seen even before anyone reaps it, and a signal through
+    it can reach no other process, whatever pid reuse does. Without a pidfd
+    (macOS, an old kernel) the Host never signals it and waits only a
+    bounded time."""
+
+    def __init__(self, pid: int, fd: int | None):
+        self.pid, self.fd = pid, fd
+
+    def exited(self) -> bool:
+        if self.fd is None:
+            return True             # nothing reliable to watch: never held for it
+        readable, _, _ = select.select([self.fd], [], [], 0)
+        return bool(readable)       # readable once it exited, zombie or not
+
+    def kill(self) -> bool:
+        if self.fd is None:
+            return False
+        try:
+            signal.pidfd_send_signal(self.fd, signal.SIGKILL)
+        except ProcessLookupError:
+            pass                    # already gone
+        except OSError as e:
+            log_exception("compactCliKillFail", e, detail=str(self.pid))
+            return False
+        return True
+
+    def close(self) -> None:
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+
+
 def _pid_alive(pid: int) -> bool:
+    """For the no-pidfd path's bounded wait only (a zombie or a reused pid
+    reads alive here, so it decides nothing but when to stop waiting)."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -304,8 +355,8 @@ def _still_held(session: str, agent_id: str, backend: str) -> bool:
     turn handle (a Codex compaction not ended yet), a process holding its
     session (a detached, stuck Codex process until it is recycled), or the
     interactive CLI a terminal compaction started, if it outlived its kill."""
-    pid = _lingering.get(session)
-    if pid and _pid_alive(pid):
+    lingering = _lingering.get(session)
+    if lingering is not None and not lingering.exited():
         return True
     return (_alive(backends.active_handles(backend, agent_id))
             or _alive(backends.turn_holders(backend, agent_id)))
@@ -360,7 +411,7 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
             offset = 0
     tmux = f"pwa-compact-{session}"
     ending = "stopped"
-    pid = 0
+    proc: _Process | None = None
     try:
         subprocess.run(["tmux", "kill-session", "-t", tmux],
                        capture_output=True, check=False)
@@ -369,7 +420,7 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
              *strategy.launch, bsid],
             check=True, capture_output=True, text=True,
         )
-        pid = _pane_pid(tmux)
+        proc = _pane_process(tmux)
         stopped = lambda: not turn_dispatch.compaction_holds_slot(agent_id)  # noqa: E731
         if _sleep(_STARTUP_WAIT_SEC, stopped):
             subprocess.run(["tmux", "send-keys", "-t", tmux, strategy.command, "Enter"],
@@ -378,10 +429,13 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
     finally:
         subprocess.run(["tmux", "kill-session", "-t", tmux],
                        capture_output=True, check=False)
-        if pid and not _reap(pid):
-            # Still running after SIGKILL: the slot is kept while it lives.
-            with _lock:
-                _lingering[session] = pid
+        if proc is not None:
+            if _reap(proc):
+                proc.close()
+            else:
+                # Still running after SIGKILL: the slot is kept while it lives.
+                with _lock:
+                    _lingering[session] = proc
     if not strategy.watches_transcript:
         return outcome(UNKNOWN, detail=(
             f"stopped; {backend} gives the Host no size to compare" if ending == "stopped"
@@ -391,37 +445,66 @@ def _compact_in_terminal(session: str, agent_id: str, backend: str, bsid: str,
     return decide_claude(before, proof, transcript=jsonl is not None, ending=ending)
 
 
-def _pane_pid(tmux: str) -> int:
-    """The interactive CLI's pid (tmux runs it as the pane's process)."""
+def _pane_state(tmux: str) -> tuple[int, bool]:
+    """(pane pid, pane dead) of the session's only pane; (0, True) unknown."""
     try:
-        out = subprocess.run(["tmux", "display-message", "-p", "-t", tmux, "#{pane_pid}"],
-                             capture_output=True, text=True, check=False).stdout.strip()
-        return int(out) if out.isdigit() else 0
+        out = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", tmux, "#{pane_pid} #{pane_dead}"],
+            capture_output=True, text=True, check=False).stdout.split()
+        return (int(out[0]), out[1] == "1") if len(out) == 2 and out[0].isdigit() else (0, True)
     except (OSError, ValueError):
-        return 0
+        return 0, True
 
 
-def _reap(pid: int) -> bool:
-    """After the tmux kill: wait for the CLI to exit (bounded), SIGKILL it if
-    it does not, and say whether it is gone. A compaction's CLI must not keep
-    writing the conversation while the agent's next turn runs."""
+def _pane_process(tmux: str) -> _Process | None:
+    """The interactive CLI (tmux runs a multi-argument command as the pane's
+    process itself, without sh -c). Its pidfd is opened while the pane is
+    alive, and the pane is asked again after: same pid and still alive means
+    the pidfd is that CLI, not a process that reused its pid."""
+    pid, dead = _pane_state(tmux)
+    if not pid or dead:
+        return None
+    opener = getattr(os, "pidfd_open", None)
+    if opener is None or not hasattr(signal, "pidfd_send_signal"):
+        return _Process(pid, None)
+    try:
+        fd = opener(pid)
+    except OSError:
+        return None                 # already gone
+    again, dead = _pane_state(tmux)
+    if again != pid or dead:
+        os.close(fd)
+        return None
+    return _Process(pid, fd)
+
+
+def _reap(proc: _Process) -> bool:
+    """After the tmux kill: wait for the CLI to exit (bounded), SIGKILL it
+    through its pidfd if it does not, and say whether it is gone. A
+    compaction's CLI must not keep writing the conversation while the agent's
+    next turn runs. Without a pidfd: no signal, a bounded wait, then the slot
+    is released with a log line."""
+    if proc.fd is None:
+        deadline = time.time() + _REAP_SEC
+        while time.time() < deadline and _pid_alive(proc.pid):
+            time.sleep(0.2)
+        if _pid_alive(proc.pid):
+            log("compactCliUnwatched",
+                f"pid={proc.pid} — no pidfd to watch or signal it; released after "
+                f"{_REAP_SEC:g} s")
+        return True
     deadline = time.time() + _REAP_SEC
     while time.time() < deadline:
-        if not _pid_alive(pid):
+        if proc.exited():
             return True
         time.sleep(0.2)
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        return False
+    proc.kill()
     deadline = time.time() + 2.0
     while time.time() < deadline:
-        if not _pid_alive(pid):
+        if proc.exited():
             return True
         time.sleep(0.1)
-    log("compactCliLingers", f"pid={pid} — still running after SIGKILL")
+    log("compactCliLingers", f"pid={proc.pid} — still running after SIGKILL")
     return False
 
 
