@@ -658,6 +658,8 @@ def test_another_agents_note_id_is_a_new_note_and_a_repeat_is_the_same_one(world
     assert other.answer[0] == 409 and "already a note of worker with other words" in other.answer[1]["error"]
 
 
+@pytest.mark.parametrize("headers", [{}, {"X-Clarp-Peer": "work"}, {"Authorization": "Bearer device-token"}],
+                         ids=["host-token", "peer-host", "device"])
 def test_a_note_without_the_agents_own_turn_token_is_refused_for_every_principal(world, pushes, headers):
     world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
     request = _Request({"session": "worker", "text": "As if from the worker."})
@@ -681,3 +683,32 @@ def test_a_turn_token_in_the_query_string_or_of_a_deleted_agent_is_no_token(worl
     db.close_local()
     refused = _note("Hello", token=token)
     assert refused.answer[0] == 403 and "no longer exists" in refused.answer[1]["error"]
+
+
+def test_a_note_and_its_turns_done_in_the_same_millisecond_both_notify(world, pushes):
+    """F9: the note took the millisecond first; the turn's reply was then dropped as a
+    duplicate of it. The note moves to the next free millisecond and keeps its id."""
+    world.turn("t-user", "Hello there, please list the files", "Here are the files you asked for.",
+               settle=False)
+    note = _note("A side note.", token=_token(world.id, "t-user")).answer[1]
+    stored = db.conn().execute("SELECT notification_id, done_ts FROM user_notifications"
+                               " WHERE source_message_id=?", (note["message_id"],)).fetchone()
+    turn = user_notifications.classify_completed_turn(
+        agent_id=world.id, session="worker", persona="Worker", done_ts=int(stored["done_ts"]),
+        backend_session_id="native", trace_id="t-user", settle_timeout_s=0)
+    assert turn["notify"] and turn["reason"] == "text-reply" and turn["source_message_id"] != note["message_id"]
+    moved = db.conn().execute("SELECT notification_id, done_ts, reason FROM user_notifications"
+                              " WHERE source_message_id=?", (note["message_id"],)).fetchone()
+    assert moved["notification_id"] == stored["notification_id"] and moved["reason"] == "agent-note"
+    assert moved["done_ts"] == stored["done_ts"] + 1
+
+
+def test_a_notes_push_on_android_is_an_ordinary_notification_message():
+    """The FCM data map as really built (fcm.data_payload over apns.turn_done_payload): the kind
+    every reply has, the note's words as the body, and no reason (the apps take none)."""
+    from lib import apns, fcm
+    data = fcm.data_payload(apns.turn_done_payload("Worker", "worker", "The release is out.",
+                                                   notification_id="pn-1"),
+                            {"agent_id": "a", "badge": True, "unread": True})
+    assert data["kind"] == "user-notification" and data["body"] == "The release is out."
+    assert data["title"] == "Worker" and data["notification_id"] == "pn-1" and "reason" not in data

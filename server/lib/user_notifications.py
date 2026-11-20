@@ -353,6 +353,18 @@ def _persist(payload: dict[str, Any]) -> dict[str, Any]:
         original = database.execute(
             "SELECT * FROM user_notifications WHERE agent_id=? AND done_ts=?",
             (payload["agent_id"], payload["done_ts"])).fetchone()
+        if (original is not None and original["origin"] == coordination.NOTE_ORIGIN
+                and payload["origin"] != coordination.NOTE_ORIGIN):
+            # A note took this millisecond first (F9). The turn's completion is
+            # keyed by its own done ts; the note moves to the next free one and
+            # keeps its notification id, so neither stands for the other.
+            free = int(original["done_ts"]) + 1
+            while database.execute("SELECT 1 FROM user_notifications WHERE agent_id=? AND done_ts=?",
+                                   (payload["agent_id"], free)).fetchone() is not None:
+                free += 1
+            database.execute("UPDATE user_notifications SET done_ts=? WHERE notification_id=?",
+                             (free, original["notification_id"]))
+            original = None
         if original is not None and original["notify"]:
             return _nonpublishing(_row_payload(original))
         if payload["notify"] and payload["source_message_id"]:
@@ -591,7 +603,9 @@ def classify_note(*, agent_id: str, session: str, persona: str, note: dict[str, 
     now = db.now_ms()
     preview = _visible_text_preview(note.get("text"))
     payload = {
-        "notification_id": _notification_id(agent_id, done_ts),
+        # Keyed by the note's own row, never by the millisecond: a turn's
+        # completion at the same done ts has the id that millisecond gives (F9).
+        "notification_id": "pn-" + hashlib.sha256(f"note\0{message_id}".encode()).hexdigest()[:20],
         "agent_id": agent_id, "session": session, "persona": persona,
         "backend_session_id": backend_session_id, "trace_id": str(note.get("trace_id") or ""),
         "done_ts": done_ts, "source_message_id": message_id, "cause_message_id": "",
