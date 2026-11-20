@@ -37,6 +37,8 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/source_trace.rs"]
+mod source_trace;
 #[path = "host/stand_ins.rs"]
 mod stand_ins;
 #[path = "host/start_tolerance.rs"]
