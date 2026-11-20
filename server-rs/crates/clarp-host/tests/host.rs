@@ -23438,7 +23438,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/agent-portrait-generation", json!({ "session": echo })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (

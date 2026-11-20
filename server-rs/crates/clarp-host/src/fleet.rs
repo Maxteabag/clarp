@@ -39,6 +39,7 @@ use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
 mod computer_jobs;
+pub(crate) mod portrait_jobs;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
@@ -706,6 +707,21 @@ enum Ask {
         picture: Vec<u8>,
         answer: Answer<Option<String>>,
     },
+    PortraitStatus {
+        id: String,
+        answer: Answer<(Option<ComputerJob>, u32)>,
+    },
+    BeginPortraits {
+        agent: String,
+        answer: Answer<portrait_jobs::Admission>,
+    },
+    AcceptPortraits {
+        id: String,
+        generation: u64,
+        publication: Box<portrait_jobs::Publication>,
+        bytes: [Vec<u8>; 2],
+        answer: Answer<bool>,
+    },
     /// The owner removes a persona of his own. Answers whether there was one to remove.
     PersonaRemove {
         name: String,
@@ -1064,6 +1080,36 @@ impl FleetHandle {
         self.ask(|answer| Ask::PictureMade {
             persona_id,
             picture,
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn portrait_status(
+        &self,
+        id: String,
+    ) -> Result<(Option<ComputerJob>, u32), Unavailable> {
+        self.ask(|answer| Ask::PortraitStatus { id, answer }).await
+    }
+    pub(crate) async fn begin_portraits(
+        &self,
+        agent: String,
+    ) -> Result<portrait_jobs::Admission, Unavailable> {
+        self.ask(|answer| Ask::BeginPortraits { agent, answer })
+            .await
+    }
+    pub(crate) async fn accept_portraits(
+        &self,
+        id: String,
+        generation: u64,
+        publication: portrait_jobs::Publication,
+        bytes: [Vec<u8>; 2],
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::AcceptPortraits {
+            id,
+            generation,
+            publication: Box::new(publication),
+            bytes,
             answer,
         })
         .await
@@ -1760,6 +1806,22 @@ impl Fleet {
                     answer,
                 } => {
                     let _ = answer.send(self.picture_made(&persona_id, &picture));
+                }
+                Ask::PortraitStatus { id, answer } => {
+                    let _ = answer.send(Ok((self.computer_jobs.get(&id), self.portrait_count())));
+                }
+                Ask::BeginPortraits { agent, answer } => {
+                    let _ = answer.send(self.begin_portraits(&agent));
+                }
+                Ask::AcceptPortraits {
+                    id,
+                    generation,
+                    publication,
+                    bytes,
+                    answer,
+                } => {
+                    let _ =
+                        answer.send(self.accept_portraits(&id, generation, &publication, bytes));
                 }
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));

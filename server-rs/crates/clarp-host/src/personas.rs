@@ -239,6 +239,7 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
         "" => clarp_kernel::addressed::DEFAULT_SESSION,
         session => session,
     };
+    let _gallery = crate::portrait_generation::GALLERY_WRITE.lock().await;
     let directory = app.fleet.directory();
     let member = directory.by_session(session).cloned();
     let member = member.ok_or_else(|| declined(kept::UNKNOWN_SESSION))?;

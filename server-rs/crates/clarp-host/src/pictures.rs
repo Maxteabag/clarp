@@ -16,7 +16,7 @@ use clarp_kernel::contacts::picture::{ANSWER_MOST, MADE_MOST};
 pub use clarp_kernel::contacts::picture::{KEPT_MOST, MODEL};
 
 /// Where a picture is asked, unless a stand-in is given.
-const PROVIDER: &str = "https://api.openai.com/v1/images/generations";
+const PROVIDER: &str = "https://api.openai.com/v1/images";
 
 /// The provider of pictures: the bytes of a picture for what it is asked, with the owner's
 /// key, or why not.
@@ -41,7 +41,7 @@ impl OpenAiPictures {
         let url = if endpoint.is_empty() {
             PROVIDER.to_string()
         } else {
-            endpoint.to_string()
+            endpoint.trim_end_matches('/').to_string()
         };
         Self {
             client: config.into(),
@@ -104,11 +104,59 @@ impl PictureMaker for OpenAiPictures {
 }
 
 impl OpenAiPictures {
+    /// One edit of the same primary. Refusals expose the status, never input bytes or credentials.
+    pub(crate) fn edit(
+        &self,
+        key: &str,
+        prompt: &str,
+        source: &[u8],
+        mime: &str,
+    ) -> Result<Vec<u8>, String> {
+        use clarp_kernel::portrait_generation as rules;
+        let boundary = format!("----clarp-{}", crate::ids::uuid().replace('-', ""));
+        let body = rules::multipart(&boundary, prompt, source, mime);
+        let mut response = self
+            .client
+            .post(format!("{}/edits", self.url))
+            .header("Authorization", format!("Bearer {key}"))
+            .header(
+                "Content-Type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .header("Accept", "application/json")
+            .header("User-Agent", "clarp-portrait-generation/1")
+            .send(body.as_slice())
+            .map_err(|_| "OpenAI image edit request failed".to_string())?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "OpenAI image edit failed: HTTP {}",
+                response.status().as_u16()
+            ));
+        }
+        let bytes = response
+            .body_mut()
+            .with_config()
+            .limit(rules::MAX_RESPONSE as u64 + 1)
+            .read_to_vec()
+            .map_err(|_| "OpenAI image response exceeded the safety limit".to_string())?;
+        if bytes.len() > rules::MAX_RESPONSE {
+            return Err("OpenAI image response exceeded the safety limit".to_string());
+        }
+        let answer: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| "OpenAI image response was invalid".to_string())?;
+        let raw = answer["data"][0]["b64_json"]
+            .as_str()
+            .and_then(python::b64decode)
+            .ok_or_else(|| "OpenAI image response was invalid".to_string())?;
+        rules::generated_kind(&raw)?;
+        Ok(raw)
+    }
+
     fn asked_of(&self, key: &str, prompt: &str) -> Result<Vec<u8>, String> {
         let body = asked(prompt).to_string();
         let mut response = self
             .client
-            .post(&self.url)
+            .post(format!("{}/generations", self.url))
             .header("Authorization", &format!("Bearer {key}"))
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")

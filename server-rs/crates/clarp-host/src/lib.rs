@@ -71,6 +71,7 @@ pub mod pictures;
 pub mod places;
 pub mod plans;
 pub mod pool;
+pub mod portrait_generation;
 pub mod process;
 pub mod push;
 pub mod pusher;

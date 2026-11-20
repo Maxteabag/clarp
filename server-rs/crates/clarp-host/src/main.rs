@@ -322,6 +322,9 @@ async fn serve(config: Config) -> Result<(), String> {
     {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
+    clarp_host::portrait_generation::recover(&app)
+        .await
+        .map_err(|e| e.0)?;
     // The janitors a Host has of its own are installed, each once, paused.
     if let Err(why) = clarp_host::janitors::install(&app).await {
         eprintln!("clarp-host: its own janitors were not installed: {}", why.0);

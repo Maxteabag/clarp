@@ -116,14 +116,6 @@ async fn no_agent_goal(uri: Uri) -> ApiError {
     not_built_at(&uri, "A goal of this kind is")
 }
 
-async fn portrait_generation() -> Json<Value> {
-    Json(kept("/agent-portrait-generation"))
-}
-
-async fn no_pictures() -> ApiError {
-    not_built("Making and choosing pictures is")
-}
-
 // ---- how the Host speaks up and judges ---------------------------------------------------------
 
 /// `GET /hotseat/status`: how the account seats stand, as they were last read. Nothing is
@@ -349,10 +341,6 @@ pub fn routes() -> Router<App> {
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
-        .route(
-            "/agent-portrait-generation",
-            get(portrait_generation).post(no_pictures),
-        )
         .route(
             "/diagnostics/settings",
             get(crate::diagnostics::settings).post(crate::diagnostics::update),

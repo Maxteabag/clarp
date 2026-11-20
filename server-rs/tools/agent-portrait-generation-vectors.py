@@ -17,6 +17,42 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/portrait-generation.json'
 
 
+def starts(root, gen):
+    """Drive the real handler and launcher branches; no process or request is started."""
+    from lib.routes.personas import PersonaRoutes
+    rows=[]
+    for body in [None, [], {}, {'session':'fixture'}, {'session':'missing'}, {'session':'janitor'}]:
+        for prior in [None,'queued','running','succeeded','failed','cancelled']:
+            for able in (False,True):
+                with ExitStack() as guards:
+                    agent={'agent_id':'fixture-id','persona':'Fixture','session':'fixture'}
+                    guards.enter_context(patch.object(gen.agents,'get_by_session',
+                        side_effect=lambda session: agent if session=='fixture' else None))
+                    known={'job_id':gen.job_id_for('fixture-id'),'generation':1,'status':prior} if prior else None
+                    guards.enter_context(patch.object(gen,'capability',return_value={
+                        'available':able,'reason':'' if able else 'Add or select a primary portrait first','job':known}))
+                    guards.enter_context(patch.object(gen.background_jobs,'get',return_value=known))
+                    queued={'job_id':gen.job_id_for('fixture-id'),'generation':2 if known else 1,'status':'queued'}
+                    register=guards.enter_context(patch.object(gen.background_jobs,'upsert_computer',return_value=queued))
+                    guards.enter_context(patch.object(gen.background_jobs,'claim_queued_launch',return_value=True))
+                    guards.enter_context(patch.object(gen.server_identity,'get_server_info',return_value={'server_id':'fixture-computer'}))
+                    guards.enter_context(patch.dict(os.environ,{'CLARP_DEPLOYMENT_MODE':'container'}))
+                    launched=guards.enter_context(patch.object(gen.subprocess,'Popen'))
+                    answers=[]
+                    handler=SimpleNamespace(_read_json=lambda:body,ctx=SimpleNamespace(default_session='fixture',media_dir=root),
+                        _json_error=lambda code,why: answers.append([code,why]),
+                        _json=lambda code,reply: answers.append([code,None]))
+                    def janitor(data):
+                        if isinstance(data,dict) and data.get('session')=='janitor':
+                            answers.append([403,'janitor_inspection_only'])
+                            return True
+                        return False
+                    handler._reject_janitor_control=janitor
+                    PersonaRoutes._handle_agent_portrait_generation_start(handler)
+                    rows.append([body,prior,able,*answers[0],register.called,launched.called])
+    return rows
+
+
 def record(root):
     spec = importlib.util.spec_from_file_location('replay_host', ROOT / 'tests/replay/host.py')
     replay = importlib.util.module_from_spec(spec)
@@ -89,7 +125,7 @@ def record(root):
                 except gen.GenerationError as exc:
                     error = str(exc)
                 edits.append([results,len(calls),published,replace.called,error])
-    return dict(preferences=preferences,updates=updates,capabilities=cases,edits=edits,
+    return dict(starts=starts(root, gen),preferences=preferences,updates=updates,capabilities=cases,edits=edits,
                 ids=[[agent,gen.job_id_for(agent)] for agent in ('','A','a','fixture',chr(233))],
                 prompts=list(gen.PROMPTS),
                 multipart=[gen._multipart('fixture',{'model':gen.MODEL,'prompt':prompt,
