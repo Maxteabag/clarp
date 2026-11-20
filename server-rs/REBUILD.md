@@ -2312,7 +2312,7 @@ The Host marks a managed model before deleting its folder. While marked it is hi
 
 The additional process holds its model and inference buffers. A published CPU small-int8 benchmark used about 1.5 GB. Resident memory varies with model and workload. An idle timeout could reclaim that memory on machines under swap pressure at the cost of another cold load. This Host retains the worker as the reference does.
 
-Removing an external model forgets its record. Removing a managed model deletes only its own directory under the Host’s models root. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
+Removing an external model forgets its record. Removal computes the managed directory from the model id. A wrong stored path is logged by id and reason only and cannot select or prevent deletion. An absent computed directory has nothing to delete. A symlink there refuses removal before files or records change. The configured default is protected. R112 also applies to cancellation cleanup when the installer is built. Registration by an installer will need an explicit model id and path for each external model. The Host never consults a different Host’s registry.
 
 **The computer’s background jobs.** A Host operation can register a queued or running job through
 the fleet and use its generation to start, report progress, finish or cancel it. The computer owns

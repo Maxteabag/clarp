@@ -495,6 +495,10 @@ for line in sys.stdin:
     assert_eq!(host.get(key)["job"]["status"], "succeeded");
     assert_eq!(requests(), 2);
     host.kill();
+    let kept = kept_records(&place, "transcription-models");
+    let records = kept["records"].as_array().unwrap();
+    let installed = records.iter().find(|r| r["id"] == ID).unwrap();
+    assert_eq!(installed["_managed_root"], json!(data));
     let host = start();
     assert_eq!(row(&host)["installed"], true);
     assert_eq!(
@@ -589,6 +593,10 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
         "superseded",
         "unsafe",
         "cancelled",
+        "cancelled-link",
+        "cancelled-stored",
+        "cancelled-external",
+        "cancelled-newer",
         "orphan-old",
         "orphan-young",
     ] {
@@ -633,7 +641,24 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
         if boundary == "superseded" {
             registered.job.generation = 2;
         }
-        if boundary == "cancelled" {
+        if boundary.starts_with("cancelled") {
+            if boundary == "cancelled-link" {
+                symlink(&outside, &final_path).unwrap();
+            } else {
+                fs::create_dir(&final_path).unwrap();
+            }
+            if boundary == "cancelled-stored" {
+                let record = json!({"id":ID,"model":"base.en","provider":"faster-whisper","_local_path":stage,"_managed_root":outside,"_install_generation":1});
+                keep_record(&place, "transcription-models", "records", &json!([record]));
+            }
+            if boundary == "cancelled-external" || boundary == "cancelled-newer" {
+                let mut record = json!({"id":ID,"model":"base.en","provider":"faster-whisper","_local_path":outside});
+                if boundary == "cancelled-newer" {
+                    record["_managed_root"] = json!(outside);
+                    record["_install_generation"] = json!(2);
+                }
+                keep_record(&place, "transcription-models", "records", &json!([record]));
+            }
             registered.job.status = clarp_kernel::jobs::JobStatus::Cancelled;
         }
         if boundary == "committed" {
@@ -701,7 +726,7 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
             let job = &host.get(&format!("/background-jobs/{KEY}"))["job"];
             let expected = match boundary {
                 "committed" => "succeeded",
-                "cancelled" => "cancelled",
+                name if name.starts_with("cancelled") => "cancelled",
                 _ => "failed",
             };
             assert_eq!(job["status"], expected, "{boundary}");
@@ -718,13 +743,27 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
         }
         assert_eq!(
             stage.exists(),
-            !matches!(boundary, "committed" | "cancelled" | "orphan-old"),
+            !matches!(
+                boundary,
+                "committed"
+                    | "cancelled"
+                    | "cancelled-stored"
+                    | "cancelled-external"
+                    | "orphan-old"
+            ),
             "{boundary}"
         );
         if matches!(boundary, "renamed" | "partial" | "intent" | "superseded") {
             assert_eq!(fs::read(stage.join("model.bin")).unwrap(), b"resume me");
         }
-        assert_eq!(final_path.exists(), boundary == "committed", "{boundary}");
+        assert_eq!(
+            final_path.exists(),
+            matches!(
+                boundary,
+                "committed" | "cancelled-link" | "cancelled-external" | "cancelled-newer"
+            ),
+            "{boundary}"
+        );
         assert!(outside.join("keep").is_file());
         if boundary == "orphan-young" {
             assert_eq!(
@@ -740,6 +779,14 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
         }
         assert!(!marker.exists(), "{boundary} called the downloader on open");
         host.kill();
+        if boundary.starts_with("cancelled-") && boundary != "cancelled-link" {
+            let stored = kept_records(&place, "transcription-models");
+            assert_eq!(
+                stored["records"].as_array().unwrap().len(),
+                usize::from(boundary == "cancelled-newer"),
+                "{boundary}"
+            );
+        }
         assert_eq!(
             kept_records(&place, "model-publication").contains_key(ID),
             boundary == "unsafe"

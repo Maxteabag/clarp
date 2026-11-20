@@ -146,7 +146,7 @@ impl Ears {
         let inventory = inventory::Inventory::open(fleet).await?;
         let installs = install::Desk::new(config.data_dir.join("models"), downloader);
         installs
-            .recover(fleet)
+            .recover(fleet, &inventory)
             .await
             .map_err(|e| format!("reconciling model installs: {e:?}"))?;
         let own = (!config.whisper_python.is_empty()).then(|| {
