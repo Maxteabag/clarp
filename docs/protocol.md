@@ -452,7 +452,7 @@ user steps into (a message of theirs steered into it while it runs) is `user`
 from then on: its rows get new revisions, so a delta carries them again, and it
 never goes back to `agents`. An agent's message steered into a turn the user
 started is a row of its own trace and is the only row marked. A turn that holds the user's own word is never `agents`, whatever arrives in it. `POST /send` refuses (409) a `trace_id` that already belongs to another message (an admission, a queued send, a turn or a row) unless the request is a retry of that very message: the same `client_msg_id`, sender and origin. Rows from before
-contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting. Until feature `hidden_coordination` is advertised
+contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting, and a turn marked while it could leave no note stays shown after it moves to a backend that can. Until feature `hidden_coordination` is advertised
 
 **Hidden coordination (feature `hidden_coordination`).** Under `coordination=hide`, or `auto`
 on a chat whose effective setting is `hide`, the rows of a turn that is `agents` are left out
