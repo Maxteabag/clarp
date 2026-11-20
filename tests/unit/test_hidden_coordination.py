@@ -387,7 +387,7 @@ def test_a_notes_row_is_exactly_what_every_app_draws_as_an_ordinary_reply(world,
     assert stored == {"role": "assistant", "kind": "note", "origin": "note", "sender_agent_id": None,
                       "source_file": "note:n-exact", "negative": 1, "trace_id": "t-boss", "tool_name": None,
                       "tools_json": "[]", "display_cells_json": "[]", "text": "The release is out."}
-    row = next(row for row in world.log() if row["id"] == "note-n-exact")
+    row = next(row for row in world.log() if row["id"] == message_store.note_message_id(world.id, "n-exact"))
     assert {key: row[key] for key in (
         "role", "kind", "origin", "text", "tool_name", "tools", "display_cells", "trace_id",
         "sender_agent_id", "sender_name", "sender_session", "reply_to_agent_id", "reply_to_name",
@@ -636,3 +636,23 @@ def test_the_mark_is_never_written_or_read_for_a_trace_that_holds_the_users_word
         con.execute("UPDATE coordination_traces SET audience='agents' WHERE trace_id='t-boss'")
     db.close_local()
     assert _audiences(agent_id, "t-boss") == ["user"]
+
+
+# ---- F5: a note's id is its agent's; F6: only the agent's own turn speaks for it -------------
+
+def test_another_agents_note_id_is_a_new_note_and_a_repeat_is_the_same_one(world, pushes):
+    world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
+    mine = _note("The worker's words.", token=_token(world.id, "t-boss"), note_id="n-shared").answer[1]
+    agents.bind_backend_session(world.peer, "peer-native")
+    agents.open_turn(agent_id=world.peer, source="pwa", trace_id="t-peer")
+    theirs = _note("The peer's words.", session="peer", token=_token(world.peer, "t-peer"),
+                   note_id="n-shared").answer[1]
+    assert theirs["created"] and theirs["notified"] and theirs["trace_id"] == "t-peer"
+    assert theirs["message_id"] != mine["message_id"]
+    assert pushes[-1]["preview"] == "The peer's words." and pushes[-1]["session"] == "peer"
+    before = len(pushes)
+    again = _note("The worker's words.", token=_token(world.id, "t-boss"), note_id="n-shared").answer
+    assert again[0] == 200 and again[1]["created"] is False and again[1]["notified"] is False
+    assert len(pushes) == before
+    other = _note("Other words.", token=_token(world.id, "t-boss"), note_id="n-shared")
+    assert other.answer[0] == 409 and "already a note of worker with other words" in other.answer[1]["error"]

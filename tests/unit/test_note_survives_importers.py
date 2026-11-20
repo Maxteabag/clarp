@@ -62,7 +62,7 @@ def test_every_backends_import_keeps_a_note(tmp_path, backend, monkeypatch):
     now[0] = BASE + 3_000
     note = message_store.record_note(agent_id=agent_id, backend_session_id=session, note_id="n-1",
                                      text="For you.", trace_id="t-note")
-    want = [("note-n-1", "For you.", "t-note", "note", "note", "note:n-1")]
+    want = [(message_store.note_message_id(agent_id, "n-1"), "For you.", "t-note", "note", "note", "note:n-1")]
     assert [tuple(row) for row in _note_row(agent_id)] == want
     current["turns"] = _conversation()
     imported()                                                # a later import
@@ -79,7 +79,7 @@ def test_every_backends_import_keeps_a_note(tmp_path, backend, monkeypatch):
     assert [tuple(row) for row in _note_row(agent_id)] == want
     shown = _on_log(agent_id, session)
     assert [(row["id"], row["text"], row["trace_id"], row["audience"]) for row in shown] == [
-        ("note-n-1", "For you.", "t-note", "user")]
+        (message_store.note_message_id(agent_id, "n-1"), "For you.", "t-note", "user")]
     assert note["created"] is True
 
 
@@ -99,7 +99,8 @@ def test_agys_commit_at_the_end_of_its_turn_keeps_a_note_written_during_it(tmp_p
     agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-agy",
                                      snapshot=snapshot, terminal_status="success", text="Done.")
     rows = {row["message_id"]: (row["text"], row["trace_id"]) for row in _note_row(agent_id)}
-    assert rows == {"note-n-before": ("Said before.", "t-before"), "note-n-during": ("Said during.", "t-agy")}
+    assert rows == {message_store.note_message_id(agent_id, "n-before"): ("Said before.", "t-before"),
+                    message_store.note_message_id(agent_id, "n-during"): ("Said during.", "t-agy")}
     assert earlier["created"] is True
 
 
@@ -114,7 +115,8 @@ def test_the_codex_app_servers_finalize_keeps_a_note(tmp_path):
                               text="For you.", trace_id="t-cx")
     message_store.finalize_live_assistant_message(agent_id=agent_id, backend_session_id="native",
                                                   trace_id="t-cx", text="Work done.")
-    assert [(row["message_id"], row["trace_id"]) for row in _note_row(agent_id)] == [("note-n-cx", "t-cx")]
+    assert [(row["message_id"], row["trace_id"]) for row in _note_row(agent_id)] == [
+        (message_store.note_message_id(agent_id, "n-cx"), "t-cx")]
     assert coordination.audience_of(agent_id, "t-cx") == "user"
 
 
