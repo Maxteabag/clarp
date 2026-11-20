@@ -245,27 +245,7 @@ pub fn capable(header: Option<&str>, minimum: Option<i64>) -> bool {
     let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 1)) else {
         return false;
     };
-    let Some((platform, rest)) = header.split_once('/') else {
-        return false;
-    };
-    let mut signs = platform.chars();
-    let platform_ok = signs
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && platform.len() <= 32
-        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');
-    let Some((build, contract)) = rest.split_once(' ') else {
-        return false;
-    };
-    let build_ok = (1..=80).contains(&build.len())
-        && build
-            .chars()
-            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '.' | '_' | '-'));
-    let Some(number) = contract.strip_prefix("contract=") else {
-        return false;
-    };
-    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());
-    platform_ok && build_ok && number_ok && number.parse::<i64>().is_ok_and(|n| n >= minimum)
+    crate::client::named(header).is_some_and(|(_, contract)| contract >= minimum)
 }
 
 /// Whether a submission id is one (`[A-Za-z0-9-]{16,80}`).

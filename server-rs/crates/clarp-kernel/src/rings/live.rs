@@ -76,9 +76,23 @@ pub struct Live {
     pub client_nonce: String,
     /// The phone that started the call, when the user did.
     pub user_call: String,
+    /// The model the call runs on, chosen for the client that answered it (or asked for it)
+    /// when its grant was made: what the grant, the session's frame and the voice's session
+    /// all name. Empty in a log from before it was kept: the model every app accepts.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 impl Live {
+    /// The model the call runs on ([`Live::model`]).
+    pub fn running(&self) -> &str {
+        if self.model.is_empty() {
+            live_call::MODEL
+        } else {
+            &self.model
+        }
+    }
+
     /// Whether the call has authority: from its answer to its end.
     fn holds(&self) -> bool {
         PHASES.contains(&self.phase.as_str())
@@ -136,6 +150,10 @@ pub struct World<'a> {
     /// Whether the Host runs the tools a profile may opt its calls into. One that does not
     /// holds no call whose voice would be told that it has them.
     pub runs_tools: bool,
+    /// The owner's model of GPT-Live, and from which client contract, by the client's exact
+    /// name, an agent's live call runs on it ([`live_call::agent_live_model`]).
+    pub live_model: &'static str,
+    pub live_model_min_client: &'a [(String, i64)],
 }
 
 impl World<'_> {
@@ -185,6 +203,8 @@ pub struct Joined {
     pub snapshot: Value,
     /// The phone that joined.
     pub principal: String,
+    /// The model the call runs on, as its grant named it.
+    pub model: String,
 }
 
 /// The first half of a switch to an ordinary call.
@@ -617,13 +637,13 @@ impl Rings {
     fn grant(
         &mut self,
         place: usize,
-        asked: (&str, Option<&str>, &Value, &Value),
+        asked: (&str, Option<&str>, &Value, &Value, Option<&str>),
         minted: Minted,
         world: &World,
         now_ms: i64,
         out: &mut Effects,
     ) -> Result<bool, Refused> {
-        let (principal, mode, request_id, client_nonce) = asked;
+        let (principal, mode, request_id, client_nonce, client) = asked;
         let ring = &self.rings[place];
         let Some(live) = ring.live.as_ref() else {
             return Err(refused(409, "live_mode_conflict"));
@@ -670,6 +690,11 @@ impl Rings {
             live.join_expires_at = now_ms + JOIN_MS;
             live.request_id = request_id.to_string();
             live.client_nonce = client_nonce.to_string();
+            // The model is chosen for the client that answers, and kept with the call: a
+            // repeat of the answer is given the same.
+            let model =
+                live_call::agent_live_model(client, world.live_model, world.live_model_min_client);
+            live.model = model.to_string();
         }
         out.changed.rings = true;
         let ring = &self.rings[place];
@@ -693,7 +718,7 @@ impl Rings {
                 "protocol": live_call::PROTOCOL, "host_id": host_id, "ring_id": ring.ring_id,
                 "agent_id": ring.agent_id, "call_id": live.call_id, "call_epoch": live.call_epoch,
                 "attempt_id": live.attempt_id, "context_digest": live.context_digest,
-                "provider": live_call::PROVIDER, "model": live_call::MODEL, "voice": live_call::VOICE,
+                "provider": live_call::PROVIDER, "model": live.running(), "voice": live_call::VOICE,
                 "owner_nonce": live.owner_nonce, "join_ticket": live.join_ticket,
                 "expires_at": live.join_expires_at, "join_consumed": live.join_consumed,
                 "opening_owner": "live",
@@ -715,7 +740,13 @@ impl Rings {
         let mode = live_call::mode_of(asked.conversation_mode, None)?;
         self.settle(now_ms, out);
         let place = self.place_of(asked.ring_id)?;
-        let wanted = (asked.principal, mode, asked.request_id, asked.client_nonce);
+        let wanted = (
+            asked.principal,
+            mode,
+            asked.request_id,
+            asked.client_nonce,
+            asked.client,
+        );
         let fresh = self.grant(place, wanted, minted, world, now_ms, out)?;
         let ring = &self.rings[place];
         if fresh {
@@ -741,7 +772,7 @@ impl Rings {
     /// to nobody. The same request is answered with the same grant.
     pub fn user_call(
         &mut self,
-        (principal, agent): (&str, &Value),
+        (principal, agent, client): (&str, &Value, Option<&str>),
         (request_id, client_nonce): (&Value, &Value),
         known: &dyn Fn(&str) -> Option<super::Caller>,
         world: &World,
@@ -834,7 +865,8 @@ impl Rings {
             self.rings.drain(..dropped);
         }
         let place = self.rings.len() - 1;
-        let wanted = (principal, Some(LIVE), request_id, client_nonce);
+        // Granted as an answer is: its model chosen for the client that asks.
+        let wanted = (principal, Some(LIVE), request_id, client_nonce, client);
         if let Err(why) = self.grant(place, wanted, minted, world, now_ms, out) {
             // A call that is not granted was never placed.
             self.rings.pop();
@@ -937,6 +969,7 @@ impl Rings {
             context_digest: live.context_digest.clone(),
             snapshot: live.snapshot.clone(),
             principal: principal.to_string(),
+            model: live.running().to_string(),
         };
         if let Some(live) = self.rings[place].live.as_mut() {
             live.join_consumed = true;

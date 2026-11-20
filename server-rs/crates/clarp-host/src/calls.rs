@@ -348,6 +348,8 @@ impl Desk {
                 host_id: &app.server_id,
                 has_key: app.ears.key("openai").is_some(),
                 runs_tools: true,
+                live_model: app.config.live_model,
+                live_model_min_client: &app.config.live_model_min_client,
             };
             let known = |agent_id: &str| -> Option<rings::Caller> {
                 let mut members = directory.members.iter();
@@ -1179,6 +1181,7 @@ async fn ring_look(
 async fn ring_answer(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    headers: axum::http::HeaderMap,
     bytes: Bytes,
 ) -> Response {
     let (caller, said) = match ring_asked(&principal, &bytes) {
@@ -1194,6 +1197,8 @@ async fn ring_answer(
         opening_mode: said.get("opening_mode"),
         request_id: &said["request_id"],
         client_nonce: &said["client_nonce"],
+        // A live call's model is chosen for the client that answers.
+        client: crate::render_spec::client(&headers),
     };
     // A ring is answered as it was placed: with a call, or with the grant of a live one.
     let names = live::Names::new();

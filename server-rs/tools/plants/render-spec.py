@@ -16,6 +16,8 @@ J = 'clarp-kernel/src/artifacts/render_spec/json.rs'
 C = 'clarp-kernel/src/artifacts/render_spec/catalog.rs'
 V = 'clarp-kernel/src/artifacts/render_spec/validate.rs'
 R = 'clarp-kernel/src/artifacts/render_spec.rs'
+# Who a client says it is: the one reader (`clarp_kernel::client`) a render spec's threshold asks.
+CL = 'clarp-kernel/src/client.rs'
 A = 'clarp-kernel/src/artifacts.rs'
 U = 'clarp-kernel/src/artifacts/updates.rs'
 F = 'clarp-kernel/src/artifacts/forms.rs'
@@ -239,18 +241,18 @@ PLANTS = [
     (R, 'vectors', 'an element more is counted', '    kept.insert("element_count".to_string(), json!(count));', '    kept.insert("element_count".to_string(), json!(count + 1));'),
     (R, 'vectors', 'a spec does not say its catalog', '    kept.insert("catalog_sha256".to_string(), json!(catalog.sha256));\n', ''),
     (R, 'vectors', 'a threshold of nothing is one', '    let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 1)) else {', '    let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 0)) else {'),
-    (R, 'vectors', 'a platform may begin with a digit', '        .is_some_and(|first| first.is_ascii_alphabetic())', '        .is_some_and(|first| first.is_ascii_alphanumeric())'),
-    (R, 'vectors', 'a platform may have a sign more', '        && platform.len() <= 32', '        && platform.len() <= 33'),
-    (R, 'vectors', 'a platform has no low line', "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');", "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '-');"),
-    (R, 'vectors', 'a platform has no dash', "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');", "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_');"),
-    (R, 'vectors', 'a build may be empty', '    let build_ok = (1..=80).contains(&build.len())', '    let build_ok = (0..=80).contains(&build.len())'),
-    (R, 'vectors', 'a build may have a sign more', '    let build_ok = (1..=80).contains(&build.len())', '    let build_ok = (1..=81).contains(&build.len())'),
-    (R, 'vectors', 'a build has no point', "            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '.' | '_' | '-'));", "            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '_' | '-'));"),
-    (R, 'vectors', 'the build ends at any blank', "    let Some((build, contract)) = rest.split_once(' ') else {", '    let Some((build, contract)) = rest.split_once(char::is_whitespace) else {'),
-    (R, 'vectors', 'the contract may be named in large letters', '    let Some(number) = contract.strip_prefix("contract=") else {', '    let Some(number) = contract.strip_prefix("contract=").or(contract.strip_prefix("Contract=")) else {'),
-    (R, 'vectors', 'a contract may have ten digits', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", "    let number_ok = (1..=10).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());"),
-    (R, 'vectors', 'a contract may have a sign', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", '    let number_ok = (1..=9).contains(&number.len());'),
-    (R, 'vectors', 'a contract at the threshold is below it', '    platform_ok && build_ok && number_ok && number.parse::<i64>().is_ok_and(|n| n >= minimum)', '    platform_ok && build_ok && number_ok && number.parse::<i64>().is_ok_and(|n| n > minimum)'),
+    (CL, 'vectors', 'a platform may begin with a digit', '        .is_some_and(|first| first.is_ascii_alphabetic())', '        .is_some_and(|first| first.is_ascii_alphanumeric())'),
+    (CL, 'vectors', 'a platform may have a sign more', '        && platform.len() <= 32', '        && platform.len() <= 33'),
+    (CL, 'vectors', 'a platform has no low line', "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');", "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '-');"),
+    (CL, 'vectors', 'a platform has no dash', "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');", "        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_');"),
+    (CL, 'vectors', 'a build may be empty', '    let build_ok = (1..=80).contains(&build.len())', '    let build_ok = (0..=80).contains(&build.len())'),
+    (CL, 'vectors', 'a build may have a sign more', '    let build_ok = (1..=80).contains(&build.len())', '    let build_ok = (1..=81).contains(&build.len())'),
+    (CL, 'vectors', 'a build has no point', "            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '.' | '_' | '-'));", "            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '_' | '-'));"),
+    (CL, 'vectors', 'the build ends at any blank', "    let (build, contract) = rest.split_once(' ')?;", '    let (build, contract) = rest.split_once(char::is_whitespace)?;'),
+    (CL, 'vectors', 'the contract may be named in large letters', '    let number = contract.strip_prefix("contract=")?;', '    let number = contract.strip_prefix("contract=").or(contract.strip_prefix("Contract="))?;'),
+    (CL, 'vectors', 'a contract may have ten digits', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", "    let number_ok = (1..=10).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());"),
+    (CL, 'vectors', 'a contract may have a sign', "    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());", '    let number_ok = (1..=9).contains(&number.len());'),
+    (R, 'vectors', 'a contract at the threshold is below it', '    crate::client::named(header).is_some_and(|(_, contract)| contract >= minimum)', '    crate::client::named(header).is_some_and(|(_, contract)| contract > minimum)'),
     (R, 'vectors', 'a submission id may be a sign shorter', '    (16..=80).contains(&text.len())', '    (15..=80).contains(&text.len())'),
     (R, 'vectors', 'a submission id may be a sign longer', '    (16..=80).contains(&text.len())', '    (16..=81).contains(&text.len())'),
     (R, 'vectors', 'a submission id may have a low line', "            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')", "            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')"),

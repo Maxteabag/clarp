@@ -42,11 +42,17 @@ fn threshold(app: &App) -> Option<i64> {
     }
 }
 
+/// What the client of a request says it is (`X-Clarp-Client`), as it said it: read by one
+/// reader (`clarp_kernel::client`) wherever a rule asks it.
+pub(crate) fn client(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(CLIENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+}
+
 /// Whether the client of this request can see a spec and answer it.
 pub(crate) fn capable(app: &App, headers: &HeaderMap) -> bool {
-    let header = headers
-        .get(CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok());
+    let header = client(headers);
     header.is_some() && spec::capable(header, threshold(app))
 }
 

@@ -265,13 +265,13 @@ impl Session {
             "ring_id": call.ring_id, "agent_id": call.agent_id, "call_id": call.call_id,
             "call_epoch": call.call_epoch, "attempt_id": call.attempt_id,
             "context_digest": call.context_digest, "provider": live_call::PROVIDER,
-            "model": live_call::MODEL, "voice": live_call::VOICE,
+            "model": call.model, "voice": live_call::VOICE,
         });
         self.tell(wire, of_the_call);
         let begin = json!({
             "type": "session.start",
             "session": {
-                "model": live_call::MODEL,
+                "model": self.call.model,
                 "instructions": live_call::instructions(&self.call.snapshot),
                 "audio": {
                     "output": { "voice": live_call::VOICE },

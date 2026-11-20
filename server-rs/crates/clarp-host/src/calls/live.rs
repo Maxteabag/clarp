@@ -313,6 +313,8 @@ impl Desk {
             host_id: &app.server_id,
             has_key: true,
             runs_tools: true,
+            live_model: app.config.live_model,
+            live_model_min_client: &app.config.live_model_min_client,
         };
         books.rings.sees(ring, principal, &world)
     }
@@ -453,6 +455,7 @@ pub(super) fn placed(rings: &Rings, ring: rings::Ring, world: &rings::World) -> 
 async fn user_call(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    headers: axum::http::HeaderMap,
     bytes: Bytes,
 ) -> Response {
     let (caller, said) = match ring_asked(&principal, &bytes) {
@@ -472,7 +475,12 @@ async fn user_call(
             return Err(refusal(400, "live_request_invalid"));
         }
         rings.user_call(
-            (&caller, &said["agent"]),
+            // The call's model is chosen for the client that asks for it.
+            (
+                &caller,
+                &said["agent"],
+                crate::render_spec::client(&headers),
+            ),
             (&said["request_id"], &said["client_nonce"]),
             with.known,
             &with.world,

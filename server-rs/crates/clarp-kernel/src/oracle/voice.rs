@@ -109,6 +109,8 @@ pub fn language_fact(codes: &[String]) -> String {
 /// What a call begins with.
 #[derive(Debug, Clone, Copy)]
 pub struct Beginning<'a> {
+    /// The model the call runs on: what the Host advertises of its calls, from one place.
+    pub model: &'a str,
     /// The agents there are and the Oracle's contact, as the tools of the fleet list them.
     pub roster: Option<&'a Value>,
     /// Everything goes to the one contact.
@@ -259,7 +261,7 @@ pub fn beginning(told: &Beginning) -> Value {
         instructions += &language_fact(told.languages);
     }
     let mut session = json!({
-        "model": model(),
+        "model": told.model,
         "instructions": instructions,
         "audio": {
             "format": { "type": "audio/pcm", "rate": 24000 },

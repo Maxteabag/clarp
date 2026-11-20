@@ -172,8 +172,8 @@ PLANTS = [
     (T, 'call', 'work is handed on for the administrator whoever asked', '    let taken = delegations::handed(app, owner, work).await.ok()?;', '    let taken = delegations::handed(app, "administrator", work).await.ok()?;'),
     (T, 'call', 'the roster of a call has its janitors... none of its agents', '    roster.map(|member| known(member)).collect()', '    roster.take(0).map(|member| known(member)).collect()'),
     # ---- what calls a Host says it can hold
-    (O, 'refused', 'a Host without a key says that a call can be held', '    let key = app.ears.key("openai").is_some();\n    let (model, voice)', '    let key = true;\n    let (model, voice)'),
-    (O, 'call', 'a Host with a key says that no call can be held', '    let key = app.ears.key("openai").is_some();\n    let (model, voice)', '    let key = false;\n    let (model, voice)'),
+    (O, 'refused', 'a Host without a key says that a call can be held', '    let key = app.ears.key("openai").is_some();\n', '    let key = true;\n'),
+    (O, 'call', 'a Host with a key says that no call can be held', '    let key = app.ears.key("openai").is_some();\n', '    let key = false;\n'),
     (O, 'call', 'the first kind of call is said to be held where the key is', '        "available": false,\n        "model": FIRST_KIND.0,', '        "available": key,\n        "model": FIRST_KIND.0,'),
     (O, 'call', 'WebRTC is claimed', '        "webrtc": false,\n        "v2": {', '        "webrtc": true,\n        "v2": {'),
     (O, 'call', 'detours into a podcast are claimed', '            "podcast": false,\n            "podcast_history": false,\n            "voice_provider": choice["provider"],', '            "podcast": true,\n            "podcast_history": false,\n            "voice_provider": choice["provider"],'),

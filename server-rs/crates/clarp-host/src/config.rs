@@ -166,6 +166,13 @@ pub struct Config {
     pub relay_config: Option<PathBuf>,
     /// A stand-in for the relay, on this machine. Empty: the relay the settings name.
     pub relay_stand_in: String,
+    /// The model of GPT-Live this Host runs, as the owner named it in his file (`[openai]
+    /// live_model`, read once, here): one of `live_call::LIVE_MODELS`, else the default.
+    pub live_model: &'static str,
+    /// From which client contract, by the client's exact name, an agent's live call runs on
+    /// that model: `live_call::AGENT_LIVE_MODEL_MIN_CLIENT`, overridden by name by the owner's
+    /// file (`[openai] live_model_min_client`, a table of name and contract, read once here).
+    pub live_model_min_client: Vec<(String, i64)>,
     /// No agent of this Host is woken by a heartbeat, whatever its own switch says, and a
     /// heartbeat sent from outside is refused (`CLARP_HEARTBEATS_DISABLED`, as on the
     /// Python Host).
@@ -302,6 +309,55 @@ pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
     } else {
         otherwise.to_path_buf()
     }
+}
+
+/// The model of GPT-Live the owner named in his file (`[openai] live_model`), read once: none
+/// named, or no file, is the default; another than the two there are is refused, said in one
+/// line, and the default runs.
+fn live_model_of(file: Option<&toml::Table>) -> &'static str {
+    let named = file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get("live_model"));
+    let told = named.map(|named| named.as_str().unwrap_or_default());
+    clarp_kernel::live_call::live_model(told).unwrap_or_else(|model| {
+        eprintln!(
+            "config.openai.live_model refused: not one of {}; {model} runs",
+            clarp_kernel::live_call::LIVE_MODELS.join(", ")
+        );
+        model
+    })
+}
+
+/// The owner's file, where one is given and it reads: read once, where the configuration is.
+fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
+    owners
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.parse::<toml::Table>().ok())
+}
+
+/// From which client contract an agent's live call runs on the owner's model, by the client's
+/// exact name: the two the apps named, and what the owner's file says of a name (`[openai]
+/// live_model_min_client`); a number that is no whole number of at least 1 is refused in one
+/// line, and that name keeps what it had.
+fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
+    let mut minimums: Vec<(String, i64)> = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT
+        .iter()
+        .map(|(name, minimum)| ((*name).to_string(), *minimum))
+        .collect();
+    let table = file
+        .and_then(|file| file.get("openai"))
+        .and_then(|openai| openai.get("live_model_min_client"))
+        .and_then(toml::Value::as_table);
+    for (name, value) in table.into_iter().flatten() {
+        match value.as_integer().filter(|minimum| *minimum >= 1) {
+            Some(minimum) => match minimums.iter_mut().find(|(known, _)| known == name) {
+                Some(known) => known.1 = minimum,
+                None => minimums.push((name.clone(), minimum)),
+            },
+            None => eprintln!("config.openai.live_model_min_client refused for one client name"),
+        }
+    }
+    minimums
 }
 
 /// A stand-in for a provider or an engine, given in `variable`: none where nothing is given, and
@@ -562,6 +618,8 @@ impl Config {
         // A stand-in for the relay is on this machine too: the key a Host dials with goes
         // over TLS, or stays here.
         let relay_stand_in = here("CLARP_RELAY_DIAL", Local::SOCKET)?;
+        // The owner's file, read once for what this Host keeps of it.
+        let owners = owners_of(speech_keys.as_deref());
         Ok(Self {
             run_dir,
             listen: listen
@@ -625,6 +683,8 @@ impl Config {
             whisper_model,
             whisper_compute,
             speech_language,
+            live_model: live_model_of(owners.as_ref()),
+            live_model_min_client: live_model_min_client_of(owners.as_ref()),
             speech_keys,
             push_keys,
             static_dir,

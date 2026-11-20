@@ -36,8 +36,17 @@ pub const FEATURE: &str = "agent_ring_live";
 /// The ways a ring's conversation can be held.
 pub const CLASSIC: &str = "classic";
 pub const LIVE: &str = "agent_live_v1";
-/// The voice model, its voice and who gives it: fixed, never another in its place.
+/// The models of GPT-Live a Host may run, by the owner's word (`[openai] live_model` in his
+/// file, which both Hosts read), and the one it runs when he names none.
+pub const LIVE_MODELS: [&str; 2] = ["gpt-live-1", "gpt-live-1.1"];
+pub const LIVE_MODEL_DEFAULT: &str = "gpt-live-1.1";
+/// The model an agent's live call runs on for a client that does not say it accepts another:
+/// the one every app has accepted from the first.
 pub const MODEL: &str = "gpt-live-1";
+/// The lowest client contract, by the client's exact name, from which an app accepts an
+/// agent's live call on the owner's model (`AGENT_LIVE_MODEL_MIN_CLIENT`); the owner's file
+/// may say others (`[openai] live_model_min_client`).
+pub const AGENT_LIVE_MODEL_MIN_CLIENT: [(&str, i64); 2] = [("ios", 75), ("android", 29)];
 pub const VOICE: &str = "marin";
 pub const PROVIDER: &str = "openai";
 /// The version of what a phone and a Host say to each other in such a call.
@@ -59,6 +68,37 @@ pub const VOICE_EVENTS: [&str; 10] = [
     "session.closed",
     "error",
 ];
+
+/// The model the owner named (`[openai] live_model`): one of [`LIVE_MODELS`]; none named is
+/// [`LIVE_MODEL_DEFAULT`]; another is refused (`Err`), and the default runs.
+pub fn live_model(named: Option<&str>) -> Result<&'static str, &'static str> {
+    match named {
+        None => Ok(LIVE_MODEL_DEFAULT),
+        Some(named) => LIVE_MODELS
+            .iter()
+            .find(|model| **model == named)
+            .copied()
+            .ok_or(LIVE_MODEL_DEFAULT),
+    }
+}
+
+/// The model an agent's live call runs on for the client that answers it (or asks for it):
+/// the owner's where the client says exactly a name of `minimums` and a contract at least its
+/// number; else [`MODEL`], as every app has always been given. No header, or one that says
+/// nothing exactly ([`crate::client::named`]), is the latter.
+pub fn agent_live_model(
+    client: Option<&str>,
+    configured: &'static str,
+    minimums: &[(String, i64)],
+) -> &'static str {
+    let named = client.and_then(crate::client::named);
+    let accepts = named.is_some_and(|(platform, contract)| {
+        minimums
+            .iter()
+            .any(|(name, minimum)| name == platform && contract >= *minimum)
+    });
+    if accepts { configured } else { MODEL }
+}
 
 /// What the journal says of an event of the voice no part of this Host reads, once a call:
 /// its type alone (never what it carries), bounded, and in signs a journal line holds; `None`
@@ -1224,5 +1264,102 @@ mod unread_voice_events {
                 "{event}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod live_models {
+    use super::*;
+
+    #[test]
+    fn the_owners_model_is_one_of_the_two_and_none_named_is_the_default() {
+        assert_eq!(live_model(None), Ok("gpt-live-1.1"));
+        assert_eq!(live_model(Some("gpt-live-1")), Ok("gpt-live-1"));
+        assert_eq!(live_model(Some("gpt-live-1.1")), Ok("gpt-live-1.1"));
+        for refused in [
+            "gpt-live-2",
+            "",
+            "GPT-LIVE-1",
+            " gpt-live-1",
+            "gpt-live-1.1 ",
+        ] {
+            assert_eq!(
+                live_model(Some(refused)),
+                Err("gpt-live-1.1"),
+                "{refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_agents_live_call_runs_the_owners_model_only_for_a_client_that_accepts_it() {
+        let minimums: Vec<(String, i64)> = AGENT_LIVE_MODEL_MIN_CLIENT
+            .iter()
+            .map(|(name, minimum)| ((*name).to_string(), *minimum))
+            .collect();
+        for (client, runs) in [
+            (Some("ios/2985 contract=75"), "gpt-live-1.1"),
+            (Some("ios/2984 contract=74"), "gpt-live-1"),
+            (Some("android/120 contract=29"), "gpt-live-1.1"),
+            (Some("android/119 contract=28"), "gpt-live-1"),
+            (Some("IOS/2985 contract=99"), "gpt-live-1"),
+            (Some("Android/120 contract=99"), "gpt-live-1"),
+            (Some("desktop/1 contract=200"), "gpt-live-1"),
+            (Some("ios/2985 contract="), "gpt-live-1"),
+            (Some("ios contract=99"), "gpt-live-1"),
+            (Some(""), "gpt-live-1"),
+            (None, "gpt-live-1"),
+        ] {
+            assert_eq!(
+                agent_live_model(client, "gpt-live-1.1", &minimums),
+                runs,
+                "{client:?}"
+            );
+        }
+        // The owner's model is what runs for a client that accepts it, whichever it is.
+        assert_eq!(
+            agent_live_model(Some("ios/2985 contract=75"), "gpt-live-1", &minimums),
+            "gpt-live-1"
+        );
+        // The release owner's cases (both Hosts answer them alike): the name as it is sent,
+        // the contract a number of digits, and nothing more or less than the one blank.
+        let long_name = format!("{}/1 contract=99", "i".repeat(33));
+        let long_build = format!("ios/{} contract=99", "1".repeat(81));
+        for (client, runs) in [
+            ("iOS/2985 contract=75", "gpt-live-1"),
+            ("Android/1 contract=29", "gpt-live-1"),
+            ("ios/2985 contract=075", "gpt-live-1.1"),
+            ("ios/2985 contract=74", "gpt-live-1"),
+            ("ios/2985  contract=75", "gpt-live-1"),
+            ("ios/2985 contract=75 ", "gpt-live-1"),
+            ("ios/2985\tcontract=75", "gpt-live-1"),
+            ("ios/2985 contract=75\n", "gpt-live-1"),
+            ("ios/2985 contract=75x", "gpt-live-1"),
+            (long_name.as_str(), "gpt-live-1"),
+            (long_build.as_str(), "gpt-live-1"),
+            ("ios/2985 contract=1000000000", "gpt-live-1"),
+        ] {
+            assert_eq!(
+                agent_live_model(Some(client), "gpt-live-1.1", &minimums),
+                runs,
+                "{client:?}"
+            );
+        }
+        for client in [
+            Some("ios/2985 contract=75"),
+            Some("android/1 contract=29"),
+            None,
+        ] {
+            assert_eq!(
+                agent_live_model(client, "gpt-live-1", &minimums),
+                "gpt-live-1",
+                "{client:?}"
+            );
+        }
+        // No minimum named for a client: never.
+        assert_eq!(
+            agent_live_model(Some("ios/2985 contract=99"), "gpt-live-1.1", &[]),
+            "gpt-live-1"
+        );
     }
 }
