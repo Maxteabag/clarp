@@ -50,8 +50,12 @@ launch so restarts and concurrent service instances cannot bypass that budget.
 It runs off the shared Janitor loop, so a slow reset cannot block Codex or other
 Janitors. It receives `{"models":["claude-fable-5-2"]}` on stdin and has a 150-second
 deadline; timeout, shutdown or owner/Stop changes kill its owned process group,
-including children. Only exit zero plus `verified:true`, `status:redeemed|reconciled` and a
-canonical `account:aiN` permits a fresh account read and ordinary guarded routing.
+including children. Only exit zero plus `verified:true`, `status:redeemed|reconciled` and an
+`account` that is one of the provider's saved aliases, as the keeper's own read listed them,
+permits a fresh account read and ordinary guarded routing. (Before R145 the account had to match
+the pattern `aiN`.) The aliases are stored with the attempt, so a reconcile after a restart checks
+the same names. The command is started with only `HOME`, `PATH`, `LANG`, `LC_*` and `XDG_*` from
+the Host's environment: no key, token or session name of the Host reaches it.
 A completed command schedules a fresh ordinary account check. That read always
 passes through the same repair ledger, quarantine and in-flight withholding as
 every other check. Authentication withholding alone cannot admit a reset.
@@ -75,6 +79,21 @@ and peer evidence that no usable alternative exists. Missing, stale or throttled
 quota cannot establish that condition. Never enable Full based on an empty list
 or a failed peer request. Preserve explicit pauses and verify actual affected
 turn progress plus subsequent rejection state after capacity changes.
+
+### Codex
+
+`agents.codex_reset_command` is the same kind of argv list for Codex, through the same lane: one
+attempt at a time, admission persisted before launch, an uncertain attempt reconciled before
+another. It receives `{"models":[]}` (with `"reconcile_only":true` when reconciling). The Host
+calls it only when every saved Codex account's own weekly window is at least 99 % used by the
+Host's reading; a five-hour or spend-control block never calls it, and an account whose weekly
+reading is missing authorises nothing. `agents.codex_reset_max_per_day` caps the automatic
+redemptions in a rolling 24 hours: unset is 1, 0 switches the step off, and a value that is not
+a whole number of 0 or more is refused with a log line and taken as 0. Every receipt that claims
+a redemption (`redeemed` or `reconciled`) counts, verified or not; a redemption made by hand does
+not. The count is kept in the settings store (`hotseat-reset.codex.redeemed`); if it cannot be
+read, nothing is redeemed until it is repaired. The owner is told of each redemption, and once
+each when the cap, an empty bank (`no_eligible_grant`) or an unreadable count stops the step.
 
 ## Runtime behavior
 
