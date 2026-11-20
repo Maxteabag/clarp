@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import scratch
 import socket
 import subprocess
 import threading
@@ -146,7 +147,7 @@ class Host:
         addr=f"127.0.0.1:{self.port}"
         self.first_line=None
         self.proc=subprocess.Popen([BINARY,"--listen",addr,"--data",root/pop/"data","--run",root/pop/"run",
-            "--cwd",root/"work","--static",root/"static","--accounts","none"],cwd=root/"work",env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
+            "--cwd",root/"work","--static",Path(env["TMPDIR"])/"static","--accounts","none"],cwd=root/"work",env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
         self.bound=None
         self.peak={}
         self.stop=threading.Event()
@@ -442,32 +443,41 @@ def main():
     if remaining<(20 if stage else 55):raise ValueError("measurement budget reached")
     slice_id=len(charges)
     write(ledger,dict(id=slice_id,phase=a.phase,seconds=remaining+20))
-    for name in ("home","work","bin","tmp","static"):(root/name).mkdir(exist_ok=True)
-    trap=root/"bin"/"unavailable"
+    # Keep interrupted slices inside the caller's private campaign directory as well.
+    os.environ["TMPDIR"]=str(root)
+    try:
+        with scratch.directory("fleet-") as name:
+            run_slice(a.phase,root,Path(name),shape,stage,start+remaining)
+    finally:
+        write(ledger,dict(id=slice_id,phase=a.phase,seconds=NOW()-start+2))
+    print("Private measurement slice completed.")
+
+
+def run_slice(phase,root,area,shape,stage,deadline):
+    # Only the synthetic home, launch cwd and measured stores span queued slices.
+    for name in ("home","work"):(root/name).mkdir(exist_ok=True)
+    for name in ("bin","static"):(area/name).mkdir()
+    trap=area/"bin"/"unavailable"
     trap.write_text('#!/bin/sh\nprintf "%s\\n" "${0##*/}" >> "$HOME/attempts"\nexit 125\n')
     trap.chmod(0o700)
     for name in ("claude","codex","agy","grok","muse","opencode","hotseat","zoxide","git","tmux","systemctl"):
-        link=root/"bin"/name
+        link=area/"bin"/name
         if not link.exists():link.symlink_to(trap)
-    env=dict(PATH=str(root/"bin"),HOME=str(root/"home"),TMPDIR=str(root/"tmp"),LANG="C",CLARP_HOST_TOKEN=AUTH,
+    env=dict(PATH=str(area/"bin"),HOME=str(root/"home"),TMPDIR=str(area),LANG="C",CLARP_HOST_TOKEN=AUTH,
              CLARP_SOURCE_TOKEN=AUTH,CLARP_HEARTBEATS_DISABLED="1")
     if stage:
         # Scripted::echo invokes sh. Its fixture executable emits only the input
         # it is given, without executing shell text or touching any provider.
-        script=root/"bin/sh"
+        script=area/"bin/sh"
         script.write_text('#!/bin/sh\nIFS= read -r message\nprintf "%s\\n" "$message"\nprintf "echo\\n" >> "$HOME/scripted-count"\n')
         script.chmod(0o700)
         if not 0<=stage["limit"]<=len(shape):raise ValueError("invalid move endpoint")
         verify_limit()
-    try:
-        if a.phase=="populate":moves(root,shape,env,start+remaining,stage["limit"],stage.get("janitors",0))
-        elif a.phase=="observe":observe(root,shape,env,start+remaining,stage)
-        elif a.phase=="move":moves(root,shape,env,start+remaining)
-        else:measure(root,shape,a.phase,env,start+remaining)
-        if (root/"home/attempts").exists():raise RuntimeError("unexpected child launch; inspect private counter")
-    finally:
-        write(ledger,dict(id=slice_id,phase=a.phase,seconds=NOW()-start+2))
-    print("Private measurement slice completed.")
+    if phase=="populate":moves(root,shape,env,deadline,stage["limit"],stage.get("janitors",0))
+    elif phase=="observe":observe(root,shape,env,deadline,stage)
+    elif phase=="move":moves(root,shape,env,deadline)
+    else:measure(root,shape,phase,env,deadline)
+    if (root/"home/attempts").exists():raise RuntimeError("unexpected child launch; inspect private counter")
 
 
 if __name__=="__main__":
