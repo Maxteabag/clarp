@@ -16,18 +16,15 @@ use super::*;
 #[test]
 fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts() {
     let place = Place::new("enter-at-start");
-    // A stand-in for Claude Code that writes down each message it is given, then waits for the
-    // test to let it answer: one file `go` lets one turn answer.
+    // Give each stand-in its own gate so a stopped turn cannot take the next turn's signal.
     let took = place.root.join("took");
-    let gate = place.root.join("go");
     let script = [
         "#!/bin/sh\nread -r message\n",
         &format!(
-            "printf '%s\\n' \"$message\" >> \"{took}\"\n\
-             while [ -d \"{root}\" ] && ! rm \"{gate}\" 2>/dev/null; do sleep 0.05; done\n",
+            "printf '%s %s\\n' \"$$\" \"$message\" >> \"{took}\"\n\
+             while [ -d \"{root}\" ] && [ ! -f \"{root}/go-$$\" ]; do sleep 0.05; done\n",
             took = took.display(),
             root = place.root.display(),
-            gate = gate.display(),
         ),
         STAND_IN_ANSWERS,
     ]
@@ -42,14 +39,20 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     );
     assert_eq!(made["session"], "ada", "{made}");
     let session = "ada";
-    let taken = || -> Vec<String> {
+    let taken = || -> Vec<(u32, String)> {
         std::fs::read_to_string(&took)
             .unwrap_or_default()
             .lines()
-            .map(str::to_string)
+            .map(|line| {
+                let (pid, message) = line.split_once(' ').unwrap();
+                (pid.parse().unwrap(), message.to_string())
+            })
             .collect()
     };
-    let answer = || std::fs::write(&gate, "").unwrap();
+    let answer = |index: usize| {
+        let (pid, _) = &taken()[index];
+        std::fs::write(place.root.join(format!("go-{pid}")), "").unwrap();
+    };
     let rows = |host: &Host| -> Vec<(String, String)> {
         host.turns(session)
             .iter()
@@ -173,9 +176,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
 
     // The first answers: the second starts, on its new words, and only now is a row, below
     // the answer that did not read it.
-    answer();
+    answer(0);
     wait_for("the second turn to run", || taken().len() == 2);
-    assert!(taken()[1].contains("two, better"), "{:?}", taken());
+    assert!(taken()[1].1.contains("two, better"), "{:?}", taken());
     wait_for("the second message's row", || {
         users(&host) == ["u-m1", "u-m2"]
     });
@@ -212,22 +215,30 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     let after = host.send(session, "five", "m5");
     assert_eq!(after["ok"], true, "{after}");
     wait_for("the fifth to run", || taken().len() == 3);
-    assert!(taken()[2].contains("five"), "{:?}", taken());
+    assert!(taken()[2].1.contains("five"), "{:?}", taken());
     assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5"]);
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
-    answer();
-    wait_for("the fifth's answer", || {
-        rows(&host)
-            .last()
-            .is_some_and(|(_, role)| role == "assistant")
-    });
+    answer(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let all = rows(&host);
+        if all.last().is_some_and(|(_, role)| role == "assistant") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for the fifth's answer: {all:?}{}",
+            what_the_hosts_said()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
     assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5"], "held, it is no row");
 
     // Let go: the trigger's runs, and enters at its start, below the answer before it.
     host.post("/turn-queue/resume", json!({ "session": session }));
     wait_for("the trigger's turn to run", || taken().len() == 4);
     wait_for("its row", || users(&host).len() == 4);
-    answer();
+    answer(3);
     wait_for("its answer", || {
         let all = rows(&host);
         all.len() >= 2 && all[all.len() - 2].0 == "u-t3" && all[all.len() - 1].1 == "assistant"
