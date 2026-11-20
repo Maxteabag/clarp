@@ -37985,7 +37985,17 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
     // The origin exported by the hook links an explicit registration to
     // exactly this task. Detail stays canonical while live clients remove
     // the superseded row before they receive the new worker's event.
-    let events = host.listen();
+    let events = host.listen_at(&format!("/events?token={TOKEN}"));
+    wait_for(
+        "the authenticated subscriber receives its initial roster",
+        || {
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event["type"] == "agent-roster")
+        },
+    );
     let register = |host: &Host, raw: &str| {
         let result = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
             .args([
@@ -38019,6 +38029,10 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
             .is_none()
     );
     register(&host, origin);
+    assert_eq!(
+        host.get("/background-jobs/linked-worker")["job"]["metadata"]["tool_use_id"],
+        "managed"
+    );
     let event_id = shown["job_id"].as_str().unwrap();
     wait_for(
         "the registration follows its superseded native event",
