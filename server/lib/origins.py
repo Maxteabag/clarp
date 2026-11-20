@@ -37,12 +37,6 @@ MARKER_ORIGIN = "system"
 # Axis A — our own scheduled automation, never a real external signal.
 ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming", "janitor"})
 
-# Visible conversation messages, including peer-delegated work whose replies
-# already appear in the chat overview, and an agent's note to the user
-# (POST /agent-notes). This is presentation only: scheduler quiet periods
-# still use strictly user-origin last_real_message_activity.
-CHAT_ACTIVITY_ORIGINS = frozenset({"user", "oracle", "agent", "note"})
-
 # Origins by which the user's own word reaches an agent: the user's send from
 # an app (and an HTML form they submit), and the Oracle carrying what they said.
 # A message with one of these is never coordination between agents
