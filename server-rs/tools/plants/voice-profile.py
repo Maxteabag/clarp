@@ -8,6 +8,7 @@ RUNS = {
     'routing': ['test', '-p', 'clarp-host', '--lib', 'the_owner_chooses_who_speaks'],
     'host': ['test', '--test', 'host', 'an_agents_voice_and_hearing_are_shown'],
     'hearing-route': ['test', '--test', 'host', 'a_clip_is_heard_by_an_engine_over_the_network'],
+    'native-fork': ['test', '--test', 'host', 'a_new_agent_begins_with_a_session_its_tool_kept'],
     'clip': ['test', '--test', 'host', 'what_an_agent_says_aloud_becomes_a_clip'],
     'contract': ['test', '--test', 'host', 'render_spec'],
 }
@@ -102,12 +103,14 @@ rules(EDGE, 'host', [
 rules(PROFILE, 'host', [
     ('The roster never includes a profile on creation', '    "created",', '    "no-created",'),
     ('The roster never includes a profile on relaunch', '    "relaunched",', '    "no-relaunched",'),
-    ('The roster never includes a profile on fork', '    "forked",', '    "no-forked",'),
     ('The roster never includes a profile on contact assignment', '    "contact-assigned",', '    "no-contact-assigned",'),
     ('The roster never includes a profile on rename', '    "agent-renamed",', '    "no-agent-renamed",'),
     ('The roster never includes a profile on a voice change', '    "voice-changed",', '    "no-voice-changed",'),
     ('A change is announced under another kind', '"kind": "voice-profile"', '"kind": "voice-settings"'),
     ('The version never changes', 'let digest = Sha256::digest(format!("{view:?}").as_bytes());', 'let digest = Sha256::digest([]);'),
+])
+rules(PROFILE, 'native-fork', [
+    ('The roster never includes a profile on a native fork', '    "forked",', '    "no-forked",'),
 ])
 rules(VOICE, 'host', [
     ('The profile never recognizes an available key', 'OwnerFile::key_from(Some(owners), key_of(provider, owners)).is_some()', 'false'),
