@@ -7,6 +7,7 @@ snapshot build opens no socket and adds no query, whether the file is missing, s
 from __future__ import annotations
 
 import json
+import pathlib
 import socket
 
 import pytest
@@ -22,7 +23,7 @@ NORSK = "c0000000-0000-4000-8000-00000000000b"
 @pytest.fixture
 def names_file(tmp_path, monkeypatch):
     path = tmp_path / "voice-names.json"
-    monkeypatch.setattr(voice_names, "PATH", path)
+    monkeypatch.setenv("CLARP_VOICE_NAMES", str(path))
     return path
 
 
@@ -99,6 +100,51 @@ def test_a_damaged_or_missing_file_is_no_names(names_file):
     assert voice_names.names("cartesia") == {}
     names_file.write_text("{not json")
     assert voice_names.names("cartesia") == {}
+
+
+def test_a_test_never_reads_the_live_hosts_names_file(tmp_path, monkeypatch):
+    """Review of 498 (a): the path is resolved per call; the session's own file, never the one
+    under the Host's cache dir, whatever HOME says."""
+    import os
+    home = tmp_path / "home"
+    live = home / ".cache" / "clarp" / "voice-names.json"
+    live.parent.mkdir(parents=True)
+    live.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Live Brooke"}}))
+    monkeypatch.setenv("HOME", str(home))
+    assert voice_names.names_path() == pathlib.Path(os.environ["CLARP_VOICE_NAMES"])
+    assert os.environ["CLARP_TEST_GUARD_DIR"] in str(voice_names.names_path())
+    speech = voice_profile.speech(_host(_cfg("cartesia")),
+                                  {"agent_id": "a", "persona": "Ada", "session": "ada", "voice_id": "{}"})
+    assert speech["voice_id"] == ADA_CARTESIA and speech["voice_label"] != "Live Brooke"
+
+
+def test_the_same_names_rewritten_leave_the_version_alone(names_file):
+    """Review of 498 (b1, b2): the version follows the content, and a refresh that finds the
+    same names does not rewrite the file."""
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
+    version = _host(_cfg("cartesia")).version
+    body = names_file.read_bytes()
+    names_file.write_bytes(body)                                   # same bytes, new mtime
+    assert _host(_cfg("cartesia")).version == version
+    done, _ = _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke"}])
+    assert done == ["cartesia"] and names_file.read_bytes() == body
+    assert _host(_cfg("cartesia")).version == version
+    _refresh(_cfg("cartesia"), names_file, pages=[{"id": ADA_CARTESIA, "name": "Brooke 2"}])
+    assert _host(_cfg("cartesia")).version != version             # a real change moves it
+
+
+def test_a_start_with_a_fresh_file_calls_no_provider_and_a_stale_one_refreshes_once(names_file):
+    """Review of 498 (b3)."""
+    import os
+    import time
+    calls = []
+    worker = voice_names.VoiceNamesWorker(first_after=0, refresh_fn=lambda: calls.append(1))
+    assert worker.start_pass() is True and calls == [1]            # no file yet: due
+    names_file.write_text(json.dumps({"cartesia": {ADA_CARTESIA: "Brooke"}}))
+    assert worker.start_pass() is False and calls == [1]           # fresh: no provider call
+    old = time.time() - voice_names.REFRESH_SECONDS - 60
+    os.utime(names_file, (old, old))
+    assert worker.start_pass() is True and calls == [1, 1]         # stale: one refresh
 
 
 # ---------------------------------------------------------------- the labels

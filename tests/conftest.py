@@ -304,6 +304,8 @@ def pytest_configure(config):
         "HOME": str(home),
         "CLARP_TTS_ADAPTERS_DIR": str(root / "tts-adapters.d"),
         "CLARP_STT_ADAPTERS_DIR": str(root / "stt-adapters.d"),
+        # The voice names file (voice_names): never the live Host's ~/.cache/clarp one.
+        "CLARP_VOICE_NAMES": str(root / "voice-names.json"),
         "CLARP_TOOLCHAIN_MODE": "none",
         "CLARP_TEST_BACKEND_CLI_LOG": str(session_log),
     })

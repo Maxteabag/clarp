@@ -873,7 +873,7 @@ client shows it and derives nothing from `voice_id`.
   language itself (a multilingual local model, or ElevenLabs Scribe given a set).
 - `hearing.engine_origin`, `hearing.language_origin`: `own` (this agent's setting) or
   `default` (the Host's).
-- `hearing.configured_languages` (Host contract 111, provisional): the language set chosen
+- `hearing.configured_languages` (Host contract: next free at merge): the language set chosen
   for this agent, else the Host's default set, as ISO codes, whatever the first engine is
   handed. Show it as "listens for": an agent on ElevenLabs Scribe with `no,en` reads
   `languages: []` (Scribe detects) but `configured_languages: ["no","en"]`. `language_origin`
