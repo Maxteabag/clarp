@@ -160,6 +160,37 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
         ("CLARP_PICTURE_ENDPOINT", url.as_str()),
     ];
     let launch = || place.start_in("fixture", &[], &env);
+    // A bare Host and a Host that has no image credential cannot spend from this route.
+    let bare = Place::new("portrait-bare");
+    let open = bare.start_in("", &[], &env);
+    assert_eq!(
+        open.ask("POST", "/agent-portrait-generation", Some(&json!({})))
+            .0,
+        401
+    );
+    open.kill();
+    let no_key = bare.start_without(
+        "fixture",
+        &[],
+        &[("CLARP_PICTURE_ENDPOINT", url.as_str())],
+        &["OPENAI_API_KEY"],
+    );
+    let absent = no_key.new_agent("No key");
+    assert_eq!(
+        no_key.get(&format!("/agent-portrait-generation?session={absent}"))["reason"],
+        "Configure an OpenAI API key on this Computer"
+    );
+    assert_eq!(
+        no_key
+            .ask(
+                "POST",
+                "/agent-portrait-generation",
+                Some(&json!({"session":absent}))
+            )
+            .0,
+        409
+    );
+    no_key.kill();
     let host = launch();
     let key = |host: &Host, s: &str| host.get(&format!("/agent-portrait-generation?session={s}"));
     let post = |host: &Host, s: &str| {
@@ -214,6 +245,18 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     let (status, first) = post(&host, sid);
     assert_eq!(status, 202, "{first}");
     let id = first["job"]["job_id"].as_str().unwrap();
+    assert_eq!(first["capability"]["job"], Value::Null);
+    assert_eq!(first["job"]["kind"], "portrait-generation");
+    assert_eq!(first["job"]["title"], "Generate portraits for Canvas");
+    assert_eq!(
+        first["job"]["detail"],
+        "Generating two character-consistent portrait alternatives"
+    );
+    assert_eq!(first["job"]["heartbeat_timeout_ms"], 300_000);
+    assert_eq!(
+        first["job"]["metadata"],
+        json!({"session":sid,"provider":"openai","model":"gpt-image-2","expire_queued":true})
+    );
     assert_eq!(first["job"]["owner_kind"], "computer");
     assert_eq!(first["job"]["generation"], 1);
     let receive = || {
@@ -222,6 +265,12 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
             .expect("a portrait edit")
     };
     let (body, finish) = receive();
+    assert!(
+        body.to_ascii_lowercase()
+            .contains("authorization: bearer made-up-key")
+    );
+    assert!(body.contains("name=\"quality\"\r\n\r\nmedium"));
+    assert!(body.contains("name=\"size\"\r\n\r\n1024x1024"));
     assert!(body.starts_with("POST /images/edits "));
     assert!(body.contains("a warm") || body.contains("warm close-up"));
     assert!(body.contains("name=\"image[]\"; filename=\"portrait.png\""));
@@ -243,6 +292,30 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
                 == 2
     });
     let kept = gallery(&host);
+    let images = host.get(&format!("/media?session={sid}"));
+    let mut captions = Vec::new();
+    for pic in images["assets"].as_array().unwrap() {
+        assert_eq!(pic["session"], sid);
+        assert_eq!(pic["mime_type"], "image/png");
+        assert_eq!(pic["created_by"], "portrait_generation:openai");
+        captions.push(pic["caption"].as_str().unwrap());
+        let id = pic["asset_id"].as_str().unwrap();
+        assert!(
+            kept["portraits"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|p| p["media_asset_id"] == id)
+        );
+    }
+    captions.sort_unstable();
+    assert_eq!(
+        captions,
+        [
+            "Generated portrait alternative 1",
+            "Generated portrait alternative 2"
+        ]
+    );
     assert_eq!(kept["primary_portrait_id"], original["primary_portrait_id"]);
     assert_eq!(job(&host, id)["status"], "succeeded");
     // A failed second edit and a cancellation with a request already in flight keep the earlier pair.
@@ -370,6 +443,10 @@ fn the_portrait_job_handles_each_recorded_provider_result() {
     let image = |n: u8| [b"\x89PNG\r\n\x1a\n".as_slice(), &[n]].concat();
     let made=host.post("/agents",json!({"name":"Canvas","backend":"scripted","avatar_base64":clarp_kernel::python::b64encode(&image(0))}));
     let session = made["session"].as_str().unwrap();
+    assert_eq!(
+        host.ask("POST", "/agent-portrait-generation", Some(&json!([]))),
+        (400, json!({"error":"bad json"}))
+    );
     let mut published = 0;
     for row in vectors["edits"].as_array().unwrap() {
         let (status, started) = host.ask(
@@ -386,6 +463,7 @@ fn the_portrait_job_handles_each_recorded_provider_result() {
             let (status, bytes) = match response.as_str().unwrap() {
                 "ok" => (200, image((idx + 1) as u8)),
                 "empty" => (200, Vec::new()),
+                "gif" => (200, b"GIF89afiction".to_vec()),
                 "invalid" => (200, b"not an image".to_vec()),
                 "duplicate" => (200, image(1)),
                 "raise" => (503, Vec::new()),
@@ -402,7 +480,9 @@ fn the_portrait_job_handles_each_recorded_provider_result() {
         wait_for("the recorded result to settle", || {
             host.get(&format!("/background-jobs/{job}"))["job"]["status"] == terminal
         });
-        published += row[2].as_array().unwrap().len();
+        if succeeds {
+            published += row[2].as_array().unwrap().len();
+        }
         wait_for("the recorded gallery size", || {
             host.get(&format!("/media?session={session}"))["assets"]
                 .as_array()
