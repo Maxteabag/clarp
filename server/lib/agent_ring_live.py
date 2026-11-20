@@ -107,18 +107,20 @@ def model_for_client(header: Any, cfg: Any = None) -> str:
     grant, the session frame and the upstream all name this one value.
     """
     from .oracle_live_wire import BASELINE_LIVE_MODEL, live_model
-    from .server_identity import parse_client_header
     if cfg is None:
         from . import config
         cfg = config.load()
     configured = live_model(cfg)
-    if configured == BASELINE_LIVE_MODEL or not isinstance(header, str) or not re.fullmatch(
-            r"[A-Za-z][A-Za-z0-9_-]{0,31}/[A-Za-z0-9._-]{1,80} contract=[0-9]{1,9}", header):
+    # The strict form only (that of render_spec_capable): one name, one build, one contract, nothing else.
+    # The name is compared as sent ("iOS" is not "ios"); the contract is read from the same match.
+    # TODO(rebase onto the render_spec switch-on): one strict reader in server_identity for both.
+    match = re.fullmatch(r"([A-Za-z][A-Za-z0-9_-]{0,31})/[A-Za-z0-9._-]{1,80} contract=([0-9]{1,9})", header) \
+        if isinstance(header, str) else None
+    if configured == BASELINE_LIVE_MODEL or match is None:
         return BASELINE_LIVE_MODEL
-    client = parse_client_header(header)
-    platform = header.split("/", 1)[0]       # the exact name: "IOS" is not "ios"
-    minimum = {**AGENT_LIVE_MODEL_MIN_CLIENT, **(getattr(cfg, "live_model_min_client", None) or {})}.get(platform)
-    if type(minimum) is not int or minimum < 1 or client["contract"] < minimum:
+    name, contract = match.group(1), int(match.group(2))
+    minimum = {**AGENT_LIVE_MODEL_MIN_CLIENT, **(getattr(cfg, "live_model_min_client", None) or {})}.get(name)
+    if type(minimum) is not int or minimum < 1 or contract < minimum:
         return BASELINE_LIVE_MODEL
     return configured
 
