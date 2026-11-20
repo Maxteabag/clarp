@@ -104,3 +104,55 @@ fn portrait_start_matches_the_reference_admission_after_the_http_guards() {
     }
     assert_eq!(counts, [36, 8, 4, 24]);
 }
+
+#[test]
+fn generated_portrait_bytes_include_the_last_allowed_byte_and_require_a_supported_signature() {
+    use clarp_kernel::portrait_generation::{MAX_IMAGE, generated_kind};
+    for (header, expected) in [
+        (b"GIF89a".as_slice(), Some("image/gif")),
+        (b"RIFFbad!", None),
+        (b"RIFF1234WEBP", Some("image/webp")),
+        (b"\xff\xd8\xff", Some("image/jpeg")),
+    ] {
+        assert_eq!(generated_kind(header).ok(), expected);
+    }
+    let mut image = b"\x89PNG\r\n\x1a\n".to_vec();
+    for (size, valid) in [
+        (MAX_IMAGE - 1, true),
+        (MAX_IMAGE, true),
+        (MAX_IMAGE + 1, false),
+    ] {
+        image.resize(size, 0);
+        assert_eq!(generated_kind(&image).is_ok(), valid);
+    }
+}
+
+#[test]
+fn portrait_edit_answers_are_bounded_and_require_a_decodable_image() {
+    use clarp_kernel::portrait_generation::{MAX_RESPONSE, edit_answer};
+    let image = b"\xff\xd8\xffedited";
+    let valid = serde_json::json!({"data":[{"b64_json":clarp_kernel::python::b64encode(image)}]});
+    let mut raw = serde_json::to_vec(&valid).unwrap();
+    for size in [MAX_RESPONSE - 1, MAX_RESPONSE, MAX_RESPONSE + 1] {
+        raw.resize(size, b' ');
+        if size <= MAX_RESPONSE {
+            assert_eq!(edit_answer(&raw).unwrap(), image);
+        } else {
+            assert_eq!(
+                edit_answer(&raw).unwrap_err(),
+                "OpenAI image response exceeded the safety limit"
+            );
+        }
+    }
+    for bad in [
+        b"not json".as_slice(),
+        b"{}",
+        br#"{"data":[{"b64_json":55}]}"#,
+        br#"{"data":[{"b64_json":"%%%"}]}"#,
+    ] {
+        assert_eq!(
+            edit_answer(bad).unwrap_err(),
+            "OpenAI image response was invalid"
+        );
+    }
+}
