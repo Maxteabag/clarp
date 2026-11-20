@@ -27,6 +27,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+# The per-client minimums of the model an agent Live call runs on (iOS 75, Android 29) live beside
+# their override table's reader. A header with a trailing blank names no client here.
+from .config import AGENT_LIVE_MODEL_MIN_CLIENT
 from .deployment import LAYOUT
 from .group_calls import CallError
 
@@ -35,14 +38,6 @@ MODE_CLASSIC = "classic"
 MODE_LIVE = "agent_live_v1"
 MODES = (MODE_CLASSIC, MODE_LIVE)
 VOICE = "marin"
-# An agent Live call runs on the Host's configured GPT-Live model only for a
-# client whose X-Clarp-Client contract is at least its platform's number here
-# (exact platform name; absent or 0 = never); every other client runs on
-# BASELINE_LIVE_MODEL, the one every older app accepts. `[openai]
-# live_model_min_client` overrides per platform (0 switches one off), as render_spec_min_client does.
-# The first builds that accept both names: iOS sends contract 75; Android 29
-# (0.1.0, build 993). A header with a trailing blank names no client here.
-AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75, "android": 29}
 PROVIDER = "openai"
 PROTOCOL = 1
 

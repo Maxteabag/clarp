@@ -145,7 +145,7 @@ A ring may instead be held as a live voice call on OpenAI GPT-Live
 fallback). The model is chosen when the grant is made, for the answering client:
 the Host's `[openai] live_model` (default `gpt-live-1.1`) when that client's
 `X-Clarp-Client` contract is at least its platform's number in
-`AGENT_LIVE_MODEL_MIN_CLIENT` (iOS 75, Android 29; exact platform name;
+`AGENT_LIVE_MODEL_MIN_CLIENT` in `config.py` (iOS 75, Android 29; exact platform name;
 overridable with `[openai] live_model_min_client`, which may also name any other client by its exact name as sent, capitals included; 0 means never for that name), otherwise `gpt-live-1`. The grant, the
 `agent_live.session` frame and the upstream session all name that one model;
 the owner's repeat of the answer keeps it. The wire is WIRE-v2; the compatibility row

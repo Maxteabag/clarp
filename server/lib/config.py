@@ -381,6 +381,14 @@ DEFAULT_CATALOG: list[dict[str, str]] = [
 LIVE_MODELS = ("gpt-live-1", "gpt-live-1.1")
 BASELINE_LIVE_MODEL = "gpt-live-1"
 DEFAULT_LIVE_MODEL = "gpt-live-1.1"
+# An agent Live call runs on the configured model only for a client whose
+# X-Clarp-Client contract reaches its number here (the name exactly as sent;
+# absent or 0 = never); every other client runs on BASELINE_LIVE_MODEL.
+# `[openai] live_model_min_client` overrides a number or names another client.
+# The first builds that accept both names: iOS sends contract 75 (TestFlight
+# 2986); Android 29 (0.1.0, build 993). Kept here, beside its override table's
+# reader; agent_ring_live uses it.
+AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75, "android": 29}
 
 
 @dataclass(frozen=True)
@@ -861,6 +869,15 @@ def _live_model_min_client(raw: Any) -> dict[str, int]:
     if len(kept) != len(raw):
         log("config.live_model_min_client", "refused entries: " + ", ".join(
             repr(key) for key in raw if key not in kept))
+    # A key that differs from a built-in name only in its case is well formed and is another client: said once
+    # per read, so a slip ('Ios' for 'ios') does not hide.
+    near = [(key, builtin) for key in kept for builtin in AGENT_LIVE_MODEL_MIN_CLIENT
+            if key != builtin and key.lower() == builtin.lower()]
+    if near:
+        log("config.live_model_min_client", "; ".join(
+            f"{key!r} is taken as its own client: it admits only a client that names itself exactly {key!r}; "
+            f"the built-in {builtin!r} keeps its own number ({AGENT_LIVE_MODEL_MIN_CLIENT[builtin]})"
+            for key, builtin in near))
     return kept
 
 
