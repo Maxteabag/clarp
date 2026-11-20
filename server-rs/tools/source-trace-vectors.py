@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Writes the vectors the Rust Host's naming of the turn that published an artifact is held to.
 
+It imports test code of the reference: the dispatcher's own test world, `Provider` and `World` of
+`tests/unit/test_drain_pause_parity.py` (loaded alone, by their definitions: this interpreter has no
+pytest), for a turn that waits for a retry after a dropped connection.
+
 An artifact published by `POST /artifacts` names the turn that published it (`source_trace_id`,
 R102): the trace of the turn whose Host-issued token the request presents (`X-Clarp-Turn`), only
 when that turn is the artifact's own agent's and is that agent's running turn now (the Python
@@ -18,6 +22,7 @@ Nothing of a Host is started; the library writes only in a scratch place of its 
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import pathlib
@@ -183,6 +188,12 @@ def generate(place: pathlib.Path) -> int:
             vectors.append({'case': case, 'how': how, 'kind': kind, 'shown': named(row['source_trace_id']),
                             'source_message_id': row['source_message_id']})
 
+    # A turn that waits for a retry after a dropped connection (the release owner's ruling at his
+    # merge of PR 470): the reference's own dispatcher in its test world, its real on_error with a
+    # dropped connection, the retry held and then run: a new process, a new token, the same trace.
+    for case, how, kind, shown in retried(agents_db, sessions, token_of, published, place):
+        vectors.append({'case': case, 'how': how, 'kind': kind, 'shown': shown, 'source_message_id': ''})
+
     # A later revision, by a later turn: what the first publication had stays.
     for kind in KINDS:
         agent, token = staged('the running turn')
@@ -250,6 +261,79 @@ def generate(place: pathlib.Path) -> int:
             thread.join(timeout=10)
     db.reset_for_tests()
     return 0
+
+
+def retried(agents_db, sessions, token_of, published, place: pathlib.Path) -> list[tuple[str, str, str, str]]:
+    """What a turn that waits for a retry after a dropped connection names, in the gap and after the
+    retry with its first token and with the new one, for each kind."""
+    from types import SimpleNamespace
+    from lib import db, error_classify, judgments, turn_queue
+    from lib import turn_dispatch as td
+    from lib.turn_dispatch import TurnDispatchService
+    source = REPO / 'tests' / 'unit' / 'test_drain_pause_parity.py'
+    tree = ast.parse(source.read_text())
+    tree.body = [node for node in tree.body
+                 if (isinstance(node, ast.ClassDef) and node.name in ('Provider', 'World'))
+                 or (isinstance(node, ast.Assign) and any(getattr(t, 'id', '') == '_SESSIONS' for t in node.targets))]
+    parity = {'SimpleNamespace': SimpleNamespace, 'agents_db': agents_db, 'td': td, 'turn_queue': turn_queue,
+              'TurnDispatchService': TurnDispatchService}
+    exec(compile(tree, str(source), 'exec'), parity)
+    # No judge is reached from here: each site that would ask one is answered that none is there
+    # (the send's routing asks one for a spoken name), and the words of the dropped connection
+    # are one by the classifier's own patterns, so the failure asks none.
+    dropped = 'API Error: socket hang up'
+    assert error_classify.classify_error(dropped) == error_classify.CONNECTION
+    asked: list[str] = []
+
+    def no_judge(site, *_args, **_kwargs):
+        asked.append(site)
+    judgments.judge = no_judge
+    td._RUNTIME_CLIENT = None
+    td.reset_for_tests()
+    room = place / 'retry'
+    room.mkdir()
+    world = parity['World'](room)
+    sessions[world.agent] = 'mike'
+    tokens: list[str] = []
+    spawn = world.provider.spawn_turn
+
+    def spawned(backend, **kwargs):
+        spawn(backend, **kwargs)
+        tokens.append(token_of(kwargs['agent_id'], kwargs['trace_id']))
+    world.provider.spawn_turn = spawned
+    held = []
+    world.service.retry_scheduler = lambda _delay, retry: held.append(retry)
+    world.send('alpha')
+    trace = 't-alpha'
+    call = [c for c in world.provider.spawned if c['agent_id'] in world.provider.live][-1]
+    world.provider.live.discard(call['agent_id'])
+    call['on_error'](dropped)
+    assert 'errors' not in asked, asked
+    assert len(held) == 1 and len(tokens) == 1, (held, tokens)
+    state = agents_db.latest_state(world.agent) or {}
+    detail = state.get('detail') if isinstance(state.get('detail'), dict) else {}
+    row = db.conn().execute('SELECT ended_at, settled_at FROM turns WHERE agent_id=? AND trace_id=?',
+                            (world.agent, trace)).fetchone()
+    assert 'account_recovery' not in detail and row['ended_at'] is None and row['settled_at'] is None, (detail, dict(row))
+
+    def named(token: str, kind: str) -> str:
+        shown = published(world.agent, token, kind)['source_trace_id']
+        return 'none' if shown == '' else ('the trace' if shown == trace else f'another: {shown}')
+    seen = []
+    gap = 'its own agent, its turn waits for a retry after a dropped connection (its row open, unsettled)'
+    for kind in KINDS:
+        seen.append(('the turn waits for a retry after a dropped connection', gap, kind, named(tokens[0], kind)))
+    held[0]()
+    assert len(tokens) == 2 and tokens[1] != tokens[0], tokens
+    for kind in KINDS:
+        seen.append(('the turn retried after a dropped connection: its first token',
+                     'its own agent, its turn run again after the retry; the token of its first attempt', kind,
+                     named(tokens[0], kind)))
+    for kind in KINDS:
+        seen.append(('the turn retried after a dropped connection: its new token',
+                     'its own agent, its turn run again after the retry; the token of the attempt that runs', kind,
+                     named(tokens[1], kind)))
+    return seen
 
 
 def main(argv: list[str]) -> int:
