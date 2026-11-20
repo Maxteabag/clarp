@@ -316,20 +316,47 @@ async fn an_agent_that_answers_after_the_bound_is_removed_when_asked_again_and_n
 }
 
 #[tokio::test]
-async fn a_change_between_the_asks_does_not_undo_the_deletion() {
-    let place = Place::new("close-changed");
+async fn an_agent_awaiting_removal_refuses_new_work_and_keeps_its_tombstone() {
+    let place = Place::new("close-admission");
     place.engine.hold(HELD);
     // Its goals cannot be retired: the tombstone alone keeps it deleted.
     place.engine.mark(HELD, |state| &mut state.cut);
     let fleet = place.start();
+    let old_handle = fleet.directory().by_session("held").unwrap().agent.clone();
     not_closed(fleet.remove("held".into()).await);
     let deleted_at = left_as_it_was(&place, &fleet).await;
-    // Meanwhile it is renamed: the fleet keeps the change at once (only who asked waits for
-    // its thread to take it), and the record it keeps names no deletion.
-    let renamed = fleet.amend("held".into(), Amend::Rename("Held Again".into()));
-    let renamed = tokio::time::timeout(Duration::from_millis(500), renamed).await;
-    assert!(renamed.is_err(), "its thread took the change");
-    assert_eq!(stored(&fleet, HELD).await.deleted_at_ms, None);
+    let words = "This agent is being removed. Ask to remove it again to finish removal.";
+    let sent = old_handle.send(
+        clarp_kernel::conversation::Message {
+            id: "msg-late".into(),
+            text: "a message sent after the tombstone".into(),
+            ..Default::default()
+        },
+        clarp_kernel::turn::Admission::Queue,
+    );
+    assert!(matches!(
+        tokio::time::timeout(Duration::from_secs(1), sent).await.unwrap(),
+        Err(Unavailable(why)) if why == words
+    ));
+    let made = fleet
+        .create(CreateAgentRequest {
+            name: "New Helper".into(),
+            parent: Some("held".into()),
+            role: Some("helper".into()),
+            backend: Some("scripted".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(made, Err(Told::new(503, "agent_removing", words).into()));
+    let rename = fleet.amend("held".into(), Amend::Rename("Held Again".into()));
+    let renamed = tokio::time::timeout(Duration::from_secs(1), rename)
+        .await
+        .unwrap();
+    assert!(matches!(renamed, Err(Unavailable(why)) if why == words));
+    assert_eq!(left_as_it_was(&place, &fleet).await, deleted_at);
+    assert_eq!(fleet.directory().members.len(), 3);
+    assert_eq!(stored(&fleet, HELD).await.persona, "held");
     place.engine.let_go(HELD);
     assert!(fleet.remove("held".into()).await.unwrap());
     assert!(fleet.directory().by_session("held").is_none());
@@ -369,9 +396,39 @@ async fn an_agent_that_never_answers_holds_no_other_request_and_is_never_half_re
     let place = Place::new("close-never");
     place.engine.hold(HELD);
     let fleet = place.start();
-    not_closed(fleet.remove("held".into()).await);
+    let removing = tokio::spawn({
+        let fleet = fleet.clone();
+        async move { fleet.remove("held".into()).await }
+    });
+    // The tombstone precedes the wait. Read the test store directly to submit the other
+    // request while the fleet is in that attempt, without asking the blocked worker.
+    tokio::time::timeout(Duration::from_secs(1), async {
+        let store = place.store();
+        loop {
+            let record = store.get(AGENTS, HELD).unwrap().unwrap();
+            if serde_json::from_slice::<AgentRecord>(&record)
+                .unwrap()
+                .deleted_at_ms
+                .is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(!removing.is_finished(), "the close must still be waiting");
+    let other = tokio::time::timeout(
+        agent::CLOSE_WITHIN + Duration::from_millis(250),
+        fleet.stored_agent(OTHER.into()),
+    )
+    .await
+    .expect("the other agent is served after at most the close wait");
+    assert_eq!(other.unwrap().unwrap().agent_id, OTHER);
+    not_closed(removing.await.unwrap());
     let deleted_at = left_as_it_was(&place, &fleet).await;
-    // The fleet serves every other request at once.
+    // Between attempts the fleet serves another request at once.
     let served = Instant::now();
     let other = fleet.select("other".into()).await.unwrap().unwrap();
     assert_eq!(other.agent_id, OTHER);

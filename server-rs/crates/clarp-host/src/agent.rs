@@ -8,8 +8,8 @@
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use clarp_actor::conversation::{Page, Versioned, Which};
@@ -139,7 +139,7 @@ pub struct DelegationState {
     pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
-pub enum Ask {
+enum Ask {
     Bookkeeping {
         cmd: crate::bookkeeping::Command,
         answer: Answer<ToolAnswer>,
@@ -452,7 +452,7 @@ pub enum Ask {
         fields: Value,
     },
     /// The agent was removed: the thread ends.
-    Close(mpsc::Sender<()>),
+    Close(CloseReply),
 }
 
 /// What an agent is doing, as anyone may read it at any time without asking the agent.
@@ -545,11 +545,46 @@ pub struct TerminalFacts {
 pub struct AgentHandle {
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
+    close: Arc<CloseState>,
+}
+
+#[derive(Default)]
+struct CloseState {
+    state: Mutex<Closing>,
+    changed: Condvar,
+}
+
+impl CloseState {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Closing> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Closing {
+    #[default]
+    Open,
+    Preparing,
+    Requested,
+    Closed,
+}
+
+/// Dropping the reply also covers a thread that exits without receiving the request.
+struct CloseReply(Arc<CloseState>);
+
+impl Drop for CloseReply {
+    fn drop(&mut self) {
+        *self.0.lock() = Closing::Closed;
+        self.0.changed.notify_all();
+    }
 }
 
 /// How long a caller waits for an agent's thread to close. The fleet is one worker, and a close
 /// is answered after the asks put before it: the same three seconds a delegation is given.
 pub const CLOSE_WITHIN: Duration = Duration::from_secs(3);
+pub(crate) const REMOVING: &str =
+    "This agent is being removed. Ask to remove it again to finish removal.";
+pub(crate) const REMOVING_CODE: &str = "agent_removing";
 
 impl AgentHandle {
     pub(crate) fn expire_provider_links(&self, native: &str) {
@@ -561,12 +596,43 @@ impl AgentHandle {
 
     async fn ask<T>(&self, make: impl FnOnce(Answer<T>) -> Ask) -> Result<T, Unavailable> {
         let (answer, reply) = oneshot::channel();
-        self.tx
-            .send(make(answer))
-            .map_err(|_| Unavailable("the agent is closed".to_string()))?;
+        self.enqueue(make(answer))?;
         reply
             .await
             .map_err(|_| Unavailable("the agent did not answer".to_string()))?
+    }
+
+    pub(crate) fn accepting_work(&self) -> Result<(), Unavailable> {
+        Self::check_open(*self.close.lock())
+    }
+
+    fn check_open(state: Closing) -> Result<(), Unavailable> {
+        if state != Closing::Open {
+            return Err(Unavailable(REMOVING.into()));
+        }
+        Ok(())
+    }
+
+    fn enqueue(&self, ask: Ask) -> Result<(), Unavailable> {
+        // An ask either enters before Close or is refused, even through an old handle.
+        let state = self.close.lock();
+        Self::check_open(*state)?;
+        self.tx
+            .send(ask)
+            .map_err(|_| Unavailable("the agent is closed".into()))
+    }
+
+    /// Fence admission before committing the tombstone. The fleet is the only caller.
+    pub(crate) fn keep_removal(
+        &self,
+        keep: impl FnOnce() -> Result<(), Unavailable>,
+    ) -> Result<(), Unavailable> {
+        *self.close.lock() = Closing::Preparing;
+        let kept = keep();
+        if kept.is_err() {
+            *self.close.lock() = Closing::Open;
+        }
+        kept
     }
 
     pub async fn send(&self, message: Message, admission: Admission) -> Result<Sent, Unavailable> {
@@ -1082,22 +1148,27 @@ impl AgentHandle {
         command: DelegationCommand,
     ) -> Result<mpsc::Receiver<Result<DelegationState, Unavailable>>, Unavailable> {
         let (answer, reply) = mpsc::channel();
-        self.tx
-            .send(Ask::Delegation { command, answer })
-            .map_err(|_| Unavailable("the agent is closed".into()))?;
+        self.enqueue(Ask::Delegation { command, answer })?;
         Ok(reply)
     }
 
     /// Ends the agent's thread, waiting for it no longer than `within`. Its turn, if one runs,
-    /// is not touched. Whether the thread is closed: it answered, or it is gone. A thread that
-    /// did not answer in time still has the close before it: asked again once it has handled
-    /// that, it is gone, and a close put after the first is never handled.
+    /// is not touched. Every attempt waits on the same reply, including after a timeout.
     pub fn close(&self, within: Duration) -> bool {
-        let (closed, wait) = mpsc::channel();
-        if self.tx.send(Ask::Close(closed)).is_err() {
-            return true;
+        let mut state = self.close.lock();
+        if matches!(*state, Closing::Open | Closing::Preparing) {
+            *state = Closing::Requested;
+            // A failed send drops the reply and takes the lock to mark the thread closed.
+            drop(state);
+            let _ = self.tx.send(Ask::Close(CloseReply(self.close.clone())));
+            state = self.close.lock();
         }
-        !matches!(wait.recv_timeout(within), Err(RecvTimeoutError::Timeout))
+        let (state, _) = self
+            .close
+            .changed
+            .wait_timeout_while(state, within, |state| *state == Closing::Requested)
+            .unwrap_or_else(PoisonError::into_inner);
+        *state == Closing::Closed
     }
 }
 
@@ -1185,7 +1256,11 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     if let Err(error) = spawned {
         eprintln!("clarp-host: an agent's thread could not be started: {error}");
     }
-    AgentHandle { tx, view }
+    AgentHandle {
+        tx,
+        view,
+        close: Arc::default(),
+    }
 }
 
 struct Worker {
@@ -1537,7 +1612,7 @@ impl Worker {
                     pool.disowned(&self.setup.record.agent_id);
                 }
                 self.actor = None;
-                let _ = closed.send(());
+                drop(closed);
                 return;
             }
             // Whatever happened may have left a goal's owner resting, or ended what a goal
@@ -3915,7 +3990,7 @@ fn refuse_for(
                 let _ = taken.send(());
             }
             Ok(Ask::Close(closed)) => {
-                let _ = closed.send(());
+                drop(closed);
                 return false;
             }
             Err(RecvTimeoutError::Disconnected) => return false,
@@ -3928,6 +4003,61 @@ fn refuse_for(
 #[allow(clippy::unwrap_used)]
 mod mailbox_tests {
     use super::*;
+
+    fn agent_mailbox() -> (AgentHandle, mpsc::Receiver<Ask>) {
+        let (tx, rx) = mpsc::channel();
+        let (_, view) = watch::channel(Arc::new(View {
+            latest_turn_start: 0,
+            status: never_ran(),
+            newest: None,
+            ended: None,
+            finished: None,
+            backend: "scripted",
+            jobs: Vec::new(),
+            provider_mirrors: BTreeMap::new(),
+            provider_bindings: Vec::new(),
+            books: Arc::default(),
+            speech: Arc::default(),
+            broken: None,
+        }));
+        (
+            AgentHandle {
+                tx,
+                view,
+                close: Arc::default(),
+            },
+            rx,
+        )
+    }
+
+    #[test]
+    fn a_later_close_waits_for_the_first_reply_without_sending_another_request() {
+        let (agent, rx) = agent_mailbox();
+        assert!(!agent.close(Duration::ZERO));
+        let Ask::Close(reply) = rx.try_recv().unwrap() else {
+            panic!("expected a close request");
+        };
+        let again = agent.clone();
+        assert!(!again.close(Duration::ZERO));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        drop(reply);
+        assert!(again.close(Duration::ZERO));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn admission_is_fenced_during_a_tombstone_write_and_restored_if_it_fails() {
+        let (agent, rx) = agent_mailbox();
+        let original = agent.clone();
+        let answer = agent.keep_removal(|| {
+            assert!(matches!(original.enqueue(Ask::LoginChanged), Err(Unavailable(why)) if why == REMOVING));
+            Err(Unavailable("storage failed".into()))
+        });
+        assert!(matches!(answer, Err(Unavailable(why)) if why == "storage failed"));
+        original.enqueue(Ask::LoginChanged).unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Ask::LoginChanged)));
+        assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
 
     #[test]
     fn a_ready_deadline_gets_a_turn_under_continuous_mail() {
