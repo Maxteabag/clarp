@@ -391,6 +391,44 @@ pub fn settings_voices(agents: &[Agent<'_>], current: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Google's voice for every agent without a Google voice of its own.
+pub const GOOGLE_DEFAULT_VOICE: &str = "nb-NO-Chirp3-HD-Kore";
+
+/// A provider of speech as the catalogue names it, and whether its first audio comes before
+/// the whole clip is made. `None`: the catalogue does not list it.
+pub fn provider_row(provider: &str) -> Option<(String, bool)> {
+    let rows = lists()["providers"].as_array().into_iter().flatten();
+    let mut rows = rows.filter(|row| row["id"] == provider);
+    let row = rows.next()?;
+    let name = row["name"].as_str().unwrap_or(provider).to_string();
+    Some((name, row["streaming"].as_bool().unwrap_or(false)))
+}
+
+/// The names of the voices the Host ships with, by provider and voice: ElevenLabs' (the
+/// label before its description), Deepgram's, and Google's (the last part of its id).
+pub fn shipped_labels() -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+    let lists = lists();
+    let mut named = std::collections::BTreeMap::new();
+    let eleven = lists["elevenlabs"].as_array().into_iter().flatten().filter_map(|row| {
+        let label = row["label"].as_str()?;
+        let name = label.split(" \u{2014} ").next().unwrap_or(label);
+        Some((row["id"].as_str()?.to_string(), name.to_string()))
+    });
+    named.insert(ELEVENLABS.to_string(), eleven.collect());
+    let deepgram = ["flux", "aura2"].into_iter().flat_map(|list| {
+        let rows = lists[list].as_array().into_iter().flatten();
+        rows.filter_map(|row| Some((row[0].as_str()?.to_string(), row[1].as_str()?.to_string())))
+    });
+    named.insert("deepgram".to_string(), deepgram.collect());
+    let google = lists["google"].as_array().into_iter().flatten().filter_map(Value::as_str);
+    let google = google.map(|voice| {
+        let name = voice.rsplit_once('-').map_or(voice, |(_, name)| name);
+        (voice.to_string(), name.to_string())
+    });
+    named.insert("google".to_string(), google.collect());
+    named
+}
+
 /// Whether an engine has a voice with this id for an agent to be given: for Google, whose
 /// voices are a closed list.
 pub fn google_has(voice: &str) -> bool {
