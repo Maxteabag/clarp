@@ -12,7 +12,6 @@
 //! workflow on 16 Nov 2026 (`screens.json`).
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, Uri};
@@ -21,12 +20,6 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 
 use crate::edge::{ApiError, App};
-
-fn kept(path: &str) -> Value {
-    static KEPT: LazyLock<Value> =
-        LazyLock::new(|| serde_json::from_str(include_str!("screens.json")).unwrap_or(Value::Null));
-    KEPT[path].clone()
-}
 
 type Asked = Query<HashMap<String, String>>;
 type Answered = Result<Json<Value>, ApiError>;

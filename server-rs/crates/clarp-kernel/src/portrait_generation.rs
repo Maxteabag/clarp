@@ -33,6 +33,36 @@ pub fn supported(mime: &str) -> bool {
     matches!(mime, "image/png" | "image/jpeg" | "image/webp")
 }
 
+/// The route checks eligibility before it coalesces a request with an existing job.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Start<'a> {
+    Begin,
+    Reuse,
+    Refused(&'a str),
+}
+
+pub fn start<'a>(known: bool, capability: &'a Value) -> Start<'a> {
+    if !known {
+        return Start::Refused("unknown Agent session");
+    }
+    if capability["available"] != true {
+        return Start::Refused(
+            capability["reason"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("portrait generation unavailable"),
+        );
+    }
+    if matches!(
+        capability["job"]["status"].as_str(),
+        Some("queued" | "running")
+    ) {
+        Start::Reuse
+    } else {
+        Start::Begin
+    }
+}
+
 pub fn capability(
     known: bool,
     key: bool,
