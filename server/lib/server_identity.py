@@ -314,7 +314,7 @@ FEATURE_CONTRACTS["goal_keeper_stalled"] = 98  # PROVISIONAL: next free above ma
 FEATURE_CONTRACTS["compaction_outcome"] = 107
 FEATURE_CONTRACTS["voice_profile"] = 109
 FEATURE_CONTRACTS["speech_outcome"] = 109
-FEATURE_CONTRACTS["media_manage"] = 109  # PROVISIONAL: the next free number on main at merge
+FEATURE_CONTRACTS["media_manage"] = 113
 
 
 # Features that exist only while live events actually flow: the hub runs in
