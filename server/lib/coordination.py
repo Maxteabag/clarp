@@ -177,6 +177,32 @@ TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
      THEN 'agents' WHEN ct.audience IS NULL THEN NULL ELSE 'mixed' END"""
 
 
+# A row the user does not see under 'hide' (alias m: messages): a row of a trace that is still
+# coordination, not a note, in a trace that holds no user row with the user's word. Applied
+# in SQL before the page limit, so a page of N is N visible rows. The caller applies it only
+# for an agent that can leave a note (can_leave_note): another agent is never hidden.
+HIDDEN_ROW_SQL = """(EXISTS (SELECT 1 FROM coordination_traces hc
+                            WHERE hc.agent_id = m.agent_id AND hc.trace_id = m.trace_id
+                              AND hc.audience = 'agents')
+      AND COALESCE(m.kind, '') != 'note'
+      AND NOT EXISTS (SELECT 1 FROM messages hu
+                       WHERE hu.trace_id = m.trace_id AND hu.agent_id = m.agent_id
+                         AND hu.role = 'user' AND COALESCE(hu.origin, 'user') IN ('user', 'oracle')))"""
+
+MODES = ("auto", "hide", "show")
+
+
+def read_policy(agent_id: str, mode: str) -> dict[str, Any]:
+    """The policy one /log answer is read under, as it echoes it: ``visibility`` (show | hide),
+    ``hidden`` (whether coordination is left out) and ``source`` (request | chat | global)."""
+    if mode in (HIDE, SHOW):
+        visibility, source = mode, "request"
+    else:
+        own = chat_visibility(agent_id)
+        visibility, source = (own, "chat") if own else (global_visibility(), "global")
+    return {"visibility": visibility, "hidden": visibility == HIDE, "source": source}
+
+
 def row_audience(*, kind: str | None, trace_audience: str | None) -> str:
     """A row's audience from its trace's (None: no mark). A note is always the user's."""
     if (kind or "") == NOTE_KIND:

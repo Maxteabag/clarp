@@ -318,6 +318,8 @@ GET /log?…&include_automated=0&include_tool_details=0
 | `before=<message_id>` | **Older history**: the `limit` messages older than that message. |
 | `include_automated=0` | Hide heartbeat, leader, dreaming, and watcher traffic. |
 | `include_tool_details=0` | Collapse tool cards to one summary card per message; fetch `/message-tool-details?session=&message_id=` on demand. |
+| `coordination=auto\|hide\|show` | Feature `hidden_coordination`: leave coordination between agents out (`hide`), keep it (`show`), or follow the chat's setting (`auto`). Absent: every row, as before. |
+| `coordination_read=show\|hide` | With `coordination` on a delta: the `visibility` the client's cache was read under. When it differs from the answer's, the answer says `replace_required: true`. |
 
 Response:
 
@@ -451,7 +453,27 @@ from then on: its rows get new revisions, so a delta carries them again, and it
 never goes back to `agents`. An agent's message steered into a turn the user
 started is a row of its own trace and is the only row marked. A turn that holds the user's own word is never `agents`, whatever arrives in it. `POST /send` refuses (409) a `trace_id` that already belongs to another message (an admission, a queued send, a turn or a row) unless the request is a retry of that very message: the same `client_msg_id`, sender and origin. Rows from before
 contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting. Until feature `hidden_coordination` is advertised
-nothing is filtered: `audience` only describes.
+
+**Hidden coordination (feature `hidden_coordination`).** Under `coordination=hide`, or `auto`
+on a chat whose effective setting is `hide`, the rows of a turn that is `agents` are left out
+before the page limit: a page of N is N rows the user sees, and older pages page past them.
+A note is never left out, and neither are the turns of an agent that cannot leave a note.
+Every answer to a request with `coordination` (the newest page, each older page, each delta)
+echoes the policy it was read under: `coordination: {hidden, source, visibility}`, with
+`source` one of `global`, `chat`, `request`. A visible row that follows rows left out carries
+`hidden_before: {messages, exchanges, agents: [{agent_id, name}]}`. The count runs from the
+previous visible row of the chat, not of the page, so a run is counted once, on the same row,
+however the pages fall. A tail page or a delta carries `hidden_after` for the rows left out
+after the newest visible row. Hidden rows still move the revision: a delta that holds only
+hidden rows answers no rows and the new `latest_revision`. To show a hidden run, read the chat
+again with `coordination=show` for that visit; its rows come with `audience: agents`.
+
+Client rules: keep a cached transcript with the echo it was read under, and send its
+`visibility` as `coordination_read` on deltas; `replace_required` then reloads it when the
+setting changed, here or on another device (a change writes nothing to the conversation).
+Start the same reload for an open chat when the agent's `coordination_visibility` in the
+snapshot or an `agent-roster` event differs from what it was read under. A page read with
+`coordination=show` for one visit is never written to the cache.
 
 A **note** is an agent's words to the user from its own turn:
 `role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
