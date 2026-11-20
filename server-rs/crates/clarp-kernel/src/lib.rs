@@ -51,6 +51,7 @@ pub mod live;
 pub mod live_call;
 pub mod live_session;
 pub mod located;
+pub mod managed_skills;
 pub mod media;
 pub mod notify;
 pub mod opencode;

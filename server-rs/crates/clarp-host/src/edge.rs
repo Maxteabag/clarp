@@ -75,11 +75,13 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
     let actions = app.config.accounts == clarp_kernel::recovery::Accounts::Select && seats;
     let chip = app.chip.pushes();
     let fcm = app.android.configured();
+    let skills = crate::managed_skills::keeps(&app.config);
     FEATURES.iter().filter(move |(feature, _)| {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)
             && (*feature != "hotseat_desk_actions" || actions)
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
+            && (*feature != "managed_skills" || skills)
     })
 }
 
@@ -272,6 +274,9 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("herald", 1),
     // How the agents speak: the owner's personalities and the humanness of a spoken reply.
     ("personalities", 1),
+    // The skills kept installed for the tools (`/managed-skills`): listed only by a Host that
+    // keeps them, one started with `--accounts select` and a tree of skills.
+    ("managed_skills", 1),
     ("agent_portraits", 1),
     ("voice_humanness", 46),
     // The router of spoken messages (`/orchestrator/*`).
@@ -309,6 +314,9 @@ pub struct App {
     pub capture: Arc<crate::diagnostics::Capture>,
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a change to the skills this Host keeps installed, from its reading of the
+    /// tools' folders to its keeping of the chosen list.
+    pub skill_links: Arc<tokio::sync::Mutex<()>>,
     pub config: Arc<Config>,
     /// What makes and reads the token each turn is given, which tells whose turn calls.
     pub turns: Arc<crate::turn_identity::Signer>,
@@ -600,6 +608,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
         .merge(crate::portrait_generation::routes())
+        .merge(crate::managed_skills::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())

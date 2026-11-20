@@ -37,6 +37,8 @@ mod installer;
 mod janitor_attention;
 #[path = "host/launch_directories.rs"]
 mod launch_directories;
+#[path = "host/managed_skills.rs"]
+mod managed_skills;
 #[path = "host/move_janitors.rs"]
 mod move_janitors;
 #[path = "host/pictures.rs"]
@@ -23450,10 +23452,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ),
         ("/agent-mcp", json!({ "session": echo, "mcp_servers": [] })),
         ("/team-nudging", json!({ "team_id": "t", "enabled": true })),
-        (
-            "/managed-skills",
-            json!({ "id": "clarp-media", "enabled": true }),
-        ),
         ("/backend-auth/logout", json!({ "backend": "claude" })),
     ] {
         let (status, said) = host.ask("POST", path, Some(&body));
