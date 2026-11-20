@@ -299,7 +299,8 @@ Response:
       "origin": "user | agent | heartbeat | leader_tick | dreaming | watcher | schedule",
       "sender_agent_id": null, "sender_name": null, "sender_session": null,
       "reply_to_agent_id": null, "reply_to_name": null, "reply_to_session": null,
-      "automation_kind": null
+      "automation_kind": null,
+      "audience": "user | agents"
     }
   ],
   "latest_revision": 812,
@@ -373,6 +374,31 @@ the assistant row that answers it keeps `sender_*` empty and carries the answere
 agent in `reply_to_*`. Render that as a compact "Replying to …" marker, never as
 the other agent's message: the current agent wrote it, and nothing forwarded it
 onward unless the agent itself sent a message.
+
+Coordination between agents (Host contract 110). `audience` says who a row is
+for: `agents` when the turn it belongs to was started by another agent's
+message, else `user`. Every row of that turn has it: the incoming prompt, the
+live and final rows, and the thinking, tool and reply rows the transcript
+import brings in. A message is another agent's when its sender is another agent
+of this Host, or when it arrived as an agent's (`origin: agent`) with no sender
+this Host knows (an agent of a peer Host); a message an agent sends itself is
+not. The mark is the flag, and the Host sets it: it reads it from the turn's
+trace, never from a row's `origin`, and no sender can set or clear it. An agent
+never hides anything by its own say-so. It can only show something, by an
+explicit act addressed to the user: a note (`POST /agent-notes`), a decision
+card or an artifact, each shown whatever turn made it. A coordination turn the
+user steps into (a message of theirs steered into it while it runs) is `user`
+from then on: its rows get new revisions, so a delta carries them again, and it
+never goes back to `agents`. An agent's message steered into a turn the user
+started is a row of its own trace and is the only row marked. Rows from before
+contract 110 are `user`. Until feature `hidden_coordination` is advertised
+nothing is filtered: `audience` only describes.
+
+A **note** is an agent's words to the user from its own turn:
+`role: assistant`, `kind: "note"`, `origin: "note"`, no `sender_*`,
+`audience: user`, carrying the calling turn's `trace_id`. Draw it as the
+agent's reply. It is always shown and notifies on its own (`user-notification`
+reason `agent-note`); it is not spoken.
 
 Display cells. `display_cells` are backend-neutral activity rows that the
 parser has already rendered:
@@ -471,13 +497,13 @@ Event types and payloads:
 | `type` | Fields | Client action |
 |---|---|---|
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
-| `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
+| `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 110) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
-| `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
+| `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 110). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
@@ -660,6 +686,15 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   parent; without it the mark is the user's. An agent-origin `/send` from a
   helper to its parent moves it to `reported` on its own, and one from the
   parent back to a reported helper returns it to `running`.
+- `POST /agent-notes` — `{"session", "text", "note_id"?}` (`clarp-admin
+  tell-user`): an agent's note to the user, written into its own chat as a
+  row of its running turn (see Provenance: a note). Accepted only from that
+  agent's own running turn: a turn token (`X-Clarp-Turn`) of another agent
+  answers 403, a call outside a running turn 409; without a token (the shared
+  Codex app-server) the agent's running turn is taken. `note_id` (up to 64 of
+  `a-z0-9-_`) makes a retry answer the same note. Answers `{"ok", "session",
+  "message_id", "trace_id", "created", "notified", "reason"}`. At most 8000
+  characters (413).
 - `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
   "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
   for one agent, so a watcher can poll without the snapshot.

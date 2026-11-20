@@ -121,7 +121,8 @@
         "started_at_ms": {"type": "integer"},
         "ended_at_ms": {"type": ["integer", "null"]},
         "worked_ms": {"type": ["integer", "null"]},
-        "tool_count": {"type": "integer"}
+        "tool_count": {"type": "integer"},
+        "audience": {"enum": ["user", "agents"], "description": "Host contract 110: 'agents' when another agent's message started the turn."}
       }
     },
     "snapshot": {

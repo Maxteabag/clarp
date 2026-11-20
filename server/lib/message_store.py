@@ -35,6 +35,7 @@ from .message_writes import (  # noqa: F401
     record_user_message,
     has_interruption_marker,
     record_interruption_marker,
+    record_note,
     record_dream_digest,
     record_call_notice,
     record_system_notice,

@@ -12,7 +12,8 @@ import re
 import time
 from typing import Any, Callable
 
-from . import agents as agents_db, artifacts, db, origins, quiet_agents, settings_store
+from . import agents as agents_db, artifacts, coordination, db, origins, quiet_agents, settings_store
+from .message_turns import iso_ms
 from .log import log
 from . import lifecycle
 from .policies import notifications as notification_policy
@@ -223,9 +224,12 @@ def _assistant_candidates(agent_id: str, backend_session_id: str, floor_ms: int,
         "AND TRIM(COALESCE(text, '')) != '' "
         # Server-written markers ("turn interrupted by restart") sit in the
         # assistant role so they render as a reply, but they are not one.
-        "AND COALESCE(origin, 'user') != ?"
+        "AND COALESCE(origin, 'user') != ? "
+        # A note (POST /agent-notes) notified the moment it was written; the
+        # turn it was written in is classified by its own reply.
+        "AND COALESCE(kind, '') != ?"
     )
-    params.append(origins.MARKER_ORIGIN)
+    params.extend((origins.MARKER_ORIGIN, coordination.NOTE_KIND))
     if backend_session_id:
         where += " AND backend_session_id = ?"
         params.append(backend_session_id)
@@ -550,6 +554,59 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     if not result["notify"]:
         log("userNotificationSuppressed",
             f"{persona or agent_id} session={session} reason={result['reason']}")
+    return result
+
+
+def classify_note(*, agent_id: str, session: str, persona: str, note: dict[str, Any],
+                  backend_session_id: str = "") -> dict[str, Any]:
+    """Persist the notification for an agent's note to the user (POST /agent-notes).
+
+    A note is for the user by the agent's explicit act, whatever turn wrote
+    it, so it notifies (reason ``agent-note``) even inside a turn that answers
+    another agent; the agent's mute and the helper rule only take its push,
+    and a quiet agent (a Janitor) stays quiet. A retried note is the same
+    notification: keyed by its row, never sent twice."""
+    database = db.conn()
+    message_id = str(note.get("id") or "")
+    existing = database.execute(
+        "SELECT * FROM user_notifications WHERE agent_id = ? AND source_message_id = ? LIMIT 1",
+        (agent_id, message_id)).fetchone()
+    if existing is not None:
+        return _nonpublishing(_row_payload(existing))
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    decision = notification_policy.note_decision(AgentCapabilities(
+        present=agent is not None,
+        can_chat=agents_db.interaction_capabilities(agent)["can_chat"] if agent else True,
+        muted=bool(agent and (agent.get("muted") or agent.get("role") == "helper")),
+        is_team_leader=False,
+        quiet=quiet_agents.is_quiet(agent),
+    ))
+    notify = isinstance(decision, Notify)
+    done_ts = int(iso_ms(note.get("timestamp")) or db.now_ms())
+    # One notification per agent and millisecond (UNIQUE(agent_id, done_ts)):
+    # a note never takes a turn's place, nor a turn a note's.
+    while database.execute("SELECT 1 FROM user_notifications WHERE agent_id = ? AND done_ts = ?",
+                           (agent_id, done_ts)).fetchone() is not None:
+        done_ts += 1
+    now = db.now_ms()
+    preview = _visible_text_preview(note.get("text"))
+    payload = {
+        "notification_id": _notification_id(agent_id, done_ts),
+        "agent_id": agent_id, "session": session, "persona": persona,
+        "backend_session_id": backend_session_id, "trace_id": str(note.get("trace_id") or ""),
+        "done_ts": done_ts, "source_message_id": message_id, "cause_message_id": "",
+        "origin": coordination.NOTE_ORIGIN,
+        "notify": notify, "push": notify and decision.push, "badge": notify, "unread": notify,
+        "muted": decision.muted if notify else False,
+        "preview": preview if notify else "", "reason": decision.reason,
+        "created_at": now, "updated_at": now,
+    }
+    result = _persist(payload)
+    result["needs_response"] = bool(result["notify"]) and artifacts.has_pending_decision(agent_id)
+    log("userNotificationClassified",
+        f"notification={result['notification_id']} agent={agent_id} session={session} "
+        f"done_ts={done_ts} source={message_id or '-'} reason={result['reason']} "
+        f"push={int(result['push'])} needs_response={int(result['needs_response'])}")
     return result
 
 

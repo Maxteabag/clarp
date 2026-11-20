@@ -203,6 +203,12 @@ reported there as `thinking` so older clients stay busy.
 `worked_ms = ended_at_ms - started_at_ms` once settled. Render a settled turn's
 work behind `Worked for 1m 12s · 6 tools`.
 
+`audience` (Host contract 110) is `agents` when another agent's message started
+the turn, else `user` (docs/protocol.md, Provenance: coordination between
+agents). When the user steps into such a turn while it runs, a `turn` op with
+the same `turn_id` and `audience: "user"` follows at once; `GET /live` answers
+the turn as it stands. It never goes from `user` back to `agents`.
+
 A `failed` turn adds `"error": {"reason": "account_plan", "message": "This
 account's plan does not include gpt-6-astra. …", "detail": "<the provider's own
 words>"}` (Host contract 54). Show `message` (and `detail` on demand) with the
@@ -493,7 +499,8 @@ history alone:
   `phase: null`.
 - Once the turn has ended, its last row carries `turn`, shaped like
   `GET /live`'s: `{turn_id, status: completed|failed|interrupted,
-  started_at_ms, ended_at_ms, worked_ms, tool_count}`. A running turn has no
+  started_at_ms, ended_at_ms, worked_ms, tool_count}`, plus `note_count` when the
+  turn wrote notes to the user (`POST /agent-notes`). A running turn has no
   `turn` on any row. The summary moves if later rows of the turn are imported.
 - Tools (`tools[].status`) and display cells an interrupted turn left
   `running` or `recorded` read `interrupted`.
