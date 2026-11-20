@@ -234,6 +234,49 @@ def effective_visibility(agent_id: str) -> str:
     return chat_visibility(agent_id) or global_visibility()
 
 
+ROSTER_KIND = "coordination-changed"
+DEFAULT_CHOICE = "default"   # POST /agent-coordination: follow the Host's setting again
+
+
+def set_global(value: Any) -> str:
+    """Store the Host's setting ('show' | 'hide'); ValueError for anything else."""
+    visibility = normalize_visibility(value)
+    if not visibility:
+        raise ValueError(f"coordination_visibility must be one of: {', '.join(VISIBILITIES)}")
+    settings_store.set_text(GLOBAL_KEY, visibility)
+    return visibility
+
+
+def set_chat(agent_id: str, value: Any) -> str:
+    """Store one chat's own choice ('show' | 'hide', or 'default' to follow the
+    Host); answers what is stored ('' for default). ValueError otherwise."""
+    text = str(value or "").strip().lower()
+    stored = "" if text == DEFAULT_CHOICE else normalize_visibility(text)
+    if not stored and text != DEFAULT_CHOICE:
+        raise ValueError(f"visibility must be one of: {', '.join(VISIBILITIES + (DEFAULT_CHOICE,))}")
+    from . import agents
+    agents.update_agent(agent_id, coordination_visibility=stored)
+    return stored
+
+
+def overrides(*, database=None) -> dict[str, str]:
+    """Every chat's own choice that is set: {agent_id: 'show' | 'hide'}."""
+    if database is None:
+        from .db import conn
+        database = conn()
+    return {row["agent_id"]: normalize_visibility(row["coordination_visibility"])
+            for row in database.execute(
+                "SELECT agent_id, coordination_visibility FROM agents"
+                " WHERE deleted_at IS NULL AND coordination_visibility != ''")
+            if normalize_visibility(row["coordination_visibility"])}
+
+
+def snapshot_fields(agent_id: str, chosen: dict[str, str], host: str) -> dict[str, Any]:
+    """What a snapshot agent row says: the effective visibility and the chat's own choice."""
+    own = chosen.get(agent_id) or ""
+    return {"coordination_visibility": own or host, "coordination_override": own or None}
+
+
 def reminder(agent: dict | None, *, origin: str | None, sender_agent_id: str | None) -> str:
     """The line a coordination turn's prompt carries when this chat hides
     coordination ('' otherwise): it must say the truth for the chat at the
