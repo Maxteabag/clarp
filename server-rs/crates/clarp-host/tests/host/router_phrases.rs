@@ -13,7 +13,10 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
     let bytes = vec![7; 2000];
     let primary = cartesia_stand_in(bytes.clone());
     let (fallback, fallback_calls) =
-        answers(vec![("/v2/speak?", "200 OK", "fallback audio".into())]);
+        answers(vec![
+            ("/v2/speak?model=flux-mike", "200 OK", "Mike speaks".into()),
+            ("/v2/speak?model=flux-anna", "200 OK", "Anna speaks".into()),
+        ]);
     let owners = place.root.join("synthetic-speech.toml");
     let configure = |voice: &str, model: &str| {
         std::fs::write(&owners,format!("[tts]\nprovider='cartesia'\nfallback='deepgram'\n[cartesia]\napi_key='fixture'\nmodel='{model}'\n[deepgram]\napi_key='fixture'\nmodel='flux-haley-en'\n[tts.agents.mike]\ncartesia_voice='{voice}'\n[tts.agents.anna]\ncartesia_voice='{voice}'\n[tts.agents.clarp]\ncartesia_voice='{voice}'\n")).unwrap();
@@ -167,17 +170,39 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
     assert_eq!(primary.asked().last().unwrap()["voice"]["id"], "voice-b");
     configure("voice-b", "model-b");
     primary.down.store(true, Ordering::SeqCst);
-    for id in ["fallback1", "fallback2"] {
-        press(&host, &mike, "fixed fallback", id);
+    let heard = host.listen();
+    for (session, voice) in [(&mike, "flux-mike"), (&anna, "flux-anna")] {
+        host.post(
+            "/agent-voice",
+            json!({"session":session, "provider":"deepgram", "voice_id":voice}),
+        );
     }
-    assert_eq!(fallback_calls.lock().unwrap().len(), 2);
+    std::thread::scope(|scope| {
+        scope.spawn(|| press(&host, &mike, "fixed fallback", "fallback1"));
+        scope.spawn(|| press(&host, &anna, "fixed fallback", "fallback2"));
+    });
+    for (session, expected) in [(&mike, "Mike speaks"), (&anna, "Anna speaks")] {
+        wait_for("the requester's own fallback voice", || {
+            let events = heard.lock().unwrap().clone();
+            events.iter().any(|e| {
+                e["type"] == "audio"
+                    && e["session"].as_str() == Some(session.as_str())
+                    && e["herald"] == true
+                    && fetch(&host, "", "GET", e["url"].as_str().unwrap(), &[], &[]).body
+                        == expected.as_bytes()
+            })
+        });
+    }
+    press(&host, &mike, "fixed fallback again", "fallback3");
+    assert_eq!(fallback_calls.lock().unwrap().len(), 3);
+    let before_recovery = primary.asked().len();
     primary.down.store(false, Ordering::SeqCst);
     press(&host, &mike, "fixed recovered", "p8");
     let requests = primary.asked();
-    assert_eq!(requests.len(), 10);
+    assert_eq!(requests.len(), before_recovery + 1);
     assert_eq!(requests.last().unwrap()["model_id"], "model-b");
     press(&host, &mike, "fixed recovered hit", "p9");
-    assert_eq!(primary.asked().len(), 10);
+    assert_eq!(primary.asked().len(), before_recovery + 1);
 }
 
 #[test]
