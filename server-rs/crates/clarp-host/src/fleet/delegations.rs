@@ -153,7 +153,7 @@ pub(super) fn active_for_agent(store: &dyn KeyValue, id: &str) -> Result<Vec<Res
 }
 
 use super::{AGENTS, AgentRecord, Fleet, Member};
-use crate::agent::{DelegationCommand, Unavailable};
+use crate::agent::{AgentHandle, DelegationCommand, Unavailable};
 use clarp_actor::delegation::Transition;
 use std::sync::Arc;
 
@@ -171,19 +171,31 @@ impl Fleet {
         &mut self,
         record: &AgentRecord,
         reason: &str,
+        removing: Option<&AgentHandle>,
     ) -> Result<(), Unavailable> {
         let rows = active_for_agent(self.store.as_ref(), &record.agent_id).map_err(Unavailable)?;
-        if rows.is_empty() {
-            return self.put(record).map_err(Unavailable);
-        }
-        let bytes = serde_json::to_vec(record).map_err(|e| Unavailable(e.to_string()))?;
-        let mut writes = vec![(AGENTS.into(), record.agent_id.clone(), Some(bytes))];
+        let mut writes = if rows.is_empty() {
+            Vec::new()
+        } else {
+            let bytes = serde_json::to_vec(record).map_err(|e| Unavailable(e.to_string()))?;
+            vec![(AGENTS.into(), record.agent_id.clone(), Some(bytes))]
+        };
         for row in &rows {
             self.stage_delegation_stop(row, reason, &mut writes)?;
         }
-        self.store
-            .put_together(&writes)
-            .map_err(|e| Unavailable(e.to_string()))?;
+        let mut keep = || {
+            if rows.is_empty() {
+                self.put(record).map_err(Unavailable)
+            } else {
+                self.store
+                    .put_together(&writes)
+                    .map_err(|e| Unavailable(e.to_string()))
+            }
+        };
+        match removing {
+            Some(agent) => agent.keep_removal(keep)?,
+            None => keep()?,
+        }
         for row in &rows {
             self.delegation_desk.forget(row);
         }
