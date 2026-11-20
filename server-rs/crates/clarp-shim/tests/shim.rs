@@ -669,6 +669,18 @@ while True: signal.pause()
 
 // A hold: the tool stands still, and the answer says how far the spool goes with all it printed.
 
+/// Waits for the shim to end, twenty seconds at most.
+fn ends(shim: &mut Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = shim.try_wait().unwrap() {
+            return status;
+        }
+        assert!(Instant::now() < deadline, "the shim did not end");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn hold(socket: &Path, ms: u64) -> Reply {
     ask(socket, &Request::Hold { ms })
 }
@@ -748,7 +760,7 @@ fn a_hold_counts_everything_printed_before_the_tool_stood_still() {
     });
     assert_ne!(state(pid), Some('T'));
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 1_000 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
     // What it printed after it was let go comes after the count, and the line it had begun is the
     // first of it, whole.
     let then = SpoolReader::new(&running.spool)
@@ -770,7 +782,8 @@ fn a_half_line_at_the_hold_is_said_and_whole_lines_are_counted() {
     let mut running = start(
         "hold-half",
         &format!(
-            "printf 'whole\\n'; printf 'half'; printf 'e' >&2; : > '{}'; exec sleep 300",
+            // A child that has ended and is never waited for stays in the group, as a zombie.
+            "(exit 0) & printf 'whole\\n'; printf 'half'; printf 'e' >&2; : > '{}'; exec sleep 300",
             marker.display()
         ),
     );
@@ -786,11 +799,32 @@ fn a_half_line_at_the_hold_is_said_and_whole_lines_are_counted() {
         .unwrap();
     assert_eq!(outs(&upto.records), ["whole"], "the whole line is counted");
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
     // The half line is recorded when the tool is gone, after the count.
     let then = after(&running.spool, held.spool);
     assert_eq!(outs(&then), ["half"]);
     assert!(then.iter().any(|r| r.entry == Entry::Err("e".to_string())));
+    std::fs::remove_dir_all(&running.dir).unwrap();
+
+    // A tool that closed its output after half a line: the half line is a record, and nothing
+    // is begun.
+    let marker = dir_of("hold-closed").join("closed");
+    let mut running = start(
+        "hold-closed",
+        &format!(
+            "printf 'half'; exec >&-; : > '{}'; exec sleep 300",
+            marker.display()
+        ),
+    );
+    wait_for("the output to be closed", || marker.exists());
+    wait_for("the half line", || {
+        outs(&records(&running.spool)).contains(&"half")
+    });
+    let held = hold(&running.socket, 2_000).held.unwrap();
+    assert_eq!(held.partial_out, 0);
+    assert_eq!(held.spool, spool_len(&running.spool));
+    assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
+    ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -824,7 +858,7 @@ fn a_child_of_the_tool_is_held_and_let_go_with_it() {
     assert_ne!(state(child), Some('T'));
     assert_ne!(state(leader), Some('T'));
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -837,6 +871,7 @@ fn the_bound_lets_the_tool_go_when_the_host_is_gone_and_the_turn_completes_whole
     wait_for("the counting", || {
         outs(&records(&running.spool)).contains(&"5")
     });
+    let pid = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
     // Sixty seconds are asked, and the connection goes with its answer: nobody lets it go.
     let requested_ms = request_time_ms();
     let reply = hold(&running.socket, 60_000);
@@ -847,7 +882,8 @@ fn the_bound_lets_the_tool_go_when_the_host_is_gone_and_the_turn_completes_whole
         "the bound is two seconds: {held:?}"
     );
     stays(&running.spool, held.spool, Duration::from_millis(1_400));
-    assert_eq!(running.shim.wait().unwrap().code(), Some(0));
+    assert_eq!(state(pid), Some('T'), "still held");
+    assert_eq!(ends(&mut running.shim).code(), Some(0));
     let all = records(&running.spool);
     let mut expected: Vec<String> = (0..200).map(|i| i.to_string()).collect();
     expected.push("done".to_string());
@@ -896,7 +932,7 @@ fn a_tool_ended_while_it_is_held_is_killed_without_running_again() {
             let shim = nix::unistd::Pid::from_raw(i32::try_from(running.shim.id()).unwrap());
             nix::sys::signal::kill(shim, nix::sys::signal::Signal::SIGTERM).unwrap();
         }
-        let status = running.shim.wait().unwrap();
+        let status = ends(&mut running.shim);
         assert!(
             began.elapsed() < Duration::from_secs(2),
             "no grace is waited for: {how}"
@@ -942,7 +978,7 @@ fn what_is_written_to_a_held_tool_is_read_when_it_is_let_go() {
         outs(&after(&running.spool, held.spool)).contains(&"got:while held")
     });
     assert!(ask(&running.socket, &Request::CloseStdin).ok);
-    assert_eq!(running.shim.wait().unwrap().code(), Some(0));
+    assert_eq!(ends(&mut running.shim).code(), Some(0));
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -983,7 +1019,7 @@ fn a_hold_once_held_is_refused_and_a_release_does_no_harm() {
     std::thread::sleep(Duration::from_millis(100));
     assert_ne!(state(pid), Some('T'), "a refused hold signals nothing");
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -1007,7 +1043,7 @@ fn a_hold_whose_bound_is_spent_lets_go_and_counts_as_the_one() {
         Some("the turn has been held once already")
     );
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -1030,7 +1066,105 @@ fn a_tool_that_is_gone_is_not_held() {
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(state(child), Some('S'), "nothing is signalled");
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
-    running.shim.wait().unwrap();
+    ends(&mut running.shim);
+    std::fs::remove_dir_all(&running.dir).unwrap();
+
+    // A tool that is being stopped, and takes its time, is not held either.
+    let mut running = start(
+        "hold-stopping",
+        "trap '' TERM; echo up; while :; do sleep 0.05; done",
+    );
+    wait_for("the tool", || outs(&records(&running.spool)).contains(&"up"));
+    let leader = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
+    assert!(ask(&running.socket, &Request::Stop { grace_ms: 3_000 }).ok);
+    wait_for("the polite signal", || {
+        records(&running.spool).iter().any(|r| {
+            matches!(&r.entry, Entry::Shim(ShimEvent::Stopping { signal }) if signal == "SIGTERM")
+        })
+    });
+    let reply = hold(&running.socket, 2_000);
+    assert!(!reply.ok);
+    assert_eq!(reply.error.as_deref(), Some("the tool is being stopped"));
+    std::thread::sleep(Duration::from_millis(100));
+    assert_ne!(state(leader), Some('T'), "nothing is signalled");
+    ends(&mut running.shim);
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
+#[test]
+fn a_tool_killed_from_outside_while_it_is_held_leaves_nothing_standing() {
+    // The child holds neither pipe: when the tool is killed, the shim's end does not wait for it.
+    let mut running = start(
+        "hold-outside",
+        "sh -c 'echo \"child $$\"; exec >/dev/null 2>&1; exec sleep 300' & \
+         echo \"leader $$\"; exec sleep 300",
+    );
+    wait_for("both", || {
+        printed_pid(&running.spool, "child ").is_some()
+            && printed_pid(&running.spool, "leader ").is_some()
+    });
+    let child = printed_pid(&running.spool, "child ").unwrap();
+    let leader = printed_pid(&running.spool, "leader ").unwrap();
+    wait_for("the child to hold neither pipe", || {
+        std::fs::read_link(format!("/proc/{child}/fd/1"))
+            .is_ok_and(|to| to == Path::new("/dev/null"))
+    });
+    assert!(hold(&running.socket, 2_000).ok);
+    assert_eq!(state(child), Some('T'));
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(leader),
+        nix::sys::signal::Signal::SIGKILL,
+    )
+    .unwrap();
+    let began = Instant::now();
+    ends(&mut running.shim);
+    assert!(
+        began.elapsed() < Duration::from_millis(1_500),
+        "the shim does not wait for the bound"
+    );
+    // The shim is gone, and its tool's child was let go before it went.
+    std::thread::sleep(Duration::from_millis(100));
+    assert_ne!(state(child), Some('T'), "a process left stopped forever");
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(child),
+        nix::sys::signal::Signal::SIGKILL,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&running.dir).unwrap();
+}
+
+#[test]
+fn a_hooks_report_under_way_at_the_hold_is_counted() {
+    // `yes` keeps the pipe busy, so a hook's report waits for the output before it (up to a
+    // quarter of a second): at the hold one is nearly always under way.
+    let hook = env!("CARGO_BIN_EXE_clarp-hook");
+    let script =
+        format!("yes abcdefgh & while :; do echo '{{\"n\":1}}' | {hook} Step; done");
+    let mut running = start("hold-hook", &script);
+    let hooks = |records: &[Record]| {
+        records
+            .iter()
+            .filter(|r| matches!(&r.entry, Entry::Hook { name, .. } if name == "Step"))
+            .count()
+    };
+    wait_for("some reports", || {
+        hooks(&after(&running.spool, 0)) >= 3
+    });
+    let reply = hold(&running.socket, 2_000);
+    assert!(reply.ok, "{reply:?}");
+    let held = reply.held.unwrap();
+    let counted = hooks(
+        &SpoolReader::new(&running.spool)
+            .read_window(0, held.spool, usize::MAX)
+            .unwrap()
+            .records,
+    );
+    assert!(counted >= 3);
+    // A report taken before the count and recorded after it would grow the spool here.
+    stays(&running.spool, held.spool, Duration::from_millis(300));
+    assert_eq!(release(&running.socket).let_go, Some(true));
+    assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
+    ends(&mut running.shim);
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
@@ -1076,6 +1210,6 @@ fn a_served_tool_is_not_held() {
     assert_ne!(state(driver), Some('T'), "nothing is signalled");
     assert_ne!(state(server_pid().unwrap()), Some('T'));
     assert!(ask(&socket, &Request::Stop { grace_ms: 500 }).ok);
-    shim.wait().unwrap();
+    ends(&mut shim);
     std::fs::remove_dir_all(&dir).unwrap();
 }
