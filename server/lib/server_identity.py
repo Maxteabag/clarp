@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 106  # An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
+HOST_CONTRACT = 107  # An agent's row says what the user's last compaction did, from numbers: last_compaction (feature compaction_outcome, R148). 106: An artifact names the turn that published it: source_trace_id (R102). 105: A debounced controller action repeated with its request_id answers duplicate (R132). 104: A limited device is refused GET /launch-directories and GET /favorite-paths (R123). 103: A user send's delivery may go back from handed_over to pending_launch (R120). 102: render_spec. 101: Paired-device ring push privacy. 100: Claude cost activation and nullable session delta. 99: A Host that is not the installed clarp.service saves /tts/providers but answers restart_scheduled false with restart_refusal {reason, message}; its /server-update answers 409. 98: The Goal keeper catches up goals older than its look-back once and marks stalled goals: receipt outcome 'stalled' (feature goal_keeper_stalled). 97: A receipt for every Goal keeper action: plan.updater.last_receipt, receipts in its runs (feature goal_keeper_receipts). 96: Goals kept current by the Goal keeper Janitor; paused steps; criterion waiver (feature goal_updater). 95: The agents-working summary by FCM (feature live_activity_fcm). 94: Live calls and Live rings for an Android phone (feature agent_live_fcm). 93: push tokens unregistered through the Host and stopped on revocation (feature push_unregister).
 MIN_IOS_CONTRACT = 1
 # F4 delivery state: read paths and committed-transition hints share the
 # advertised feature gate; an unavailable runtime still leaves delivery unknown.
@@ -174,6 +174,7 @@ FEATURES: tuple[str, ...] = (
     "goal_keeper_receipts",
     # Receipt outcome 'stalled' and the keeper's "Stalled since …" checkpoint.
     "goal_keeper_stalled",
+    "compaction_outcome",
 )
 
 
@@ -239,6 +240,7 @@ FEATURE_CONTRACTS["live_activity_fcm"] = 95  # booked by Arnold, 13 Nov 2026 (94
 FEATURE_CONTRACTS["goal_updater"] = 96  # PROVISIONAL: next free above main's 95 (13 Nov 2026)
 FEATURE_CONTRACTS["goal_keeper_receipts"] = 97  # PROVISIONAL: next free above main's 96 (14 Nov 2026)
 FEATURE_CONTRACTS["goal_keeper_stalled"] = 98  # PROVISIONAL: next free above main's 97 (14 Nov 2026)
+FEATURE_CONTRACTS["compaction_outcome"] = 107
 
 
 # Features that exist only while live events actually flow: the hub runs in
