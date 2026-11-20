@@ -273,7 +273,7 @@ async def walk(args, key, out):
         "session.resumed": bool(journal.seen("session.resumed", t)),
         "model_spoke": bool(journal.seen("session.output_transcript.delta", t))}
     # 2. Wake by speech.
-    t = journal.now()
+    t = woke = journal.now()
     mic.say(wakes[0])
     journal.record("client", {"type": "walk.speak", "note": "wake 1"})
     resumed = await wait(30, lambda: journal.seen("session.resumed", t))
@@ -281,9 +281,12 @@ async def walk(args, key, out):
     findings["2_wake_by_speech"] = {"session.resumed": resumed,
                                     "answer": "".join(e.get("delta", "") for e in journal.seen("session.output_transcript.delta", t))}
     # 3. Pause after the idle timeout.
-    t = journal.now()
-    paused = await wait(args.idle + 20, lambda: journal.seen("session.paused", t))
-    findings["3_paused"] = {"session.paused": paused, "after_s": round(journal.now() - t, 1)}
+    paused = await wait(args.idle + 20, lambda: journal.seen("session.paused", woke))   # counted from the wake
+    first = journal.seen("session.paused", woke)[:1]
+    talk = [e["t"] for e in journal.seen("session.output_transcript.delta", woke)
+            + journal.seen("session.input_transcript.delta", woke)]
+    findings["3_paused"] = {"session.paused": paused, "paused_at_s": first[0]["t"] if first else None,
+                            "last_transcript_at_s": max(talk) if talk else None}
     # 4. A result appended while paused.
     for name, event in (("commentary", {"type": "session.commentary.append", "content": RESULT_COMMENTARY,
                                         "delegation_id": None, "event_id": "walk-commentary"}),
