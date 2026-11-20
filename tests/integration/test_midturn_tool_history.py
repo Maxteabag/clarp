@@ -44,6 +44,21 @@ def _active_turn(running_server, monkeypatch, tmp_path, backend):
     return base, agent, transcript, source, spawned, steered, active_trace
 
 
+def _written_now(source):
+    """The corpus stamps its records on a fixed day in the past. A provider
+    writes its copy of a prompt after the prompt was sent, and the importer
+    links a copy only to a send it could be the copy of (a copy written
+    before a send is another message). Move the records to now, in order."""
+    stamps = [dt.datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+              for group in [source.header, *source.groups] for r in group if "timestamp" in r]
+    shift = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=1) - min(stamps)
+    for group in [source.header, *source.groups]:
+        for record in group:
+            if "timestamp" in record:
+                moved = dt.datetime.fromisoformat(record["timestamp"].replace("Z", "+00:00")) + shift
+                record["timestamp"] = moved.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _log(base, after=0):
     status, raw = _get(base + "/log?session=rachel&limit=100&include_automated=0"
                       + f"&after_revision={after}")
@@ -124,6 +139,7 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
         running_server, monkeypatch, tmp_path, backend, queue):
     base, agent, transcript, source, spawned, steered, trace = _active_turn(
         running_server, monkeypatch, tmp_path, backend)
+    _written_now(source)
     first = source.groups[0]
     if backend == "claude":
         commentary = json.loads(json.dumps(first[1]))
@@ -144,12 +160,18 @@ def test_replacement_after_send_keeps_live_tools_awaiting_import(
     assert before["turns"] and not any(r["tools"] or r["display_cells"] for r in before["turns"])
 
     # A streamed commentary row can overlap commentary already imported.
-    # The next real import retracts that duplicate and raises the replace
-    # watermark, even though this provider turn is still running.
+    # Once the provider has finished that message, the next real import
+    # retracts the duplicate and raises the replace watermark, even though
+    # this provider turn is still running. (Since #411 a row still streaming
+    # is kept while it may be a new reply that begins with the same words;
+    # test_live_import_identity covers that rule.)
     streamed = message_store.upsert_live_assistant_message(
         agent_id=agent["agent_id"], backend_session_id="synthetic-native",
         trace_id=trace, text="Looking at 0.", item_key="overlapping-commentary")
     assert streamed is not None
+    assert message_store.mark_live_message_final(
+        agent_id=agent["agent_id"], backend_session_id="synthetic-native",
+        trace_id=trace, item_key="overlapping-commentary")
     transcript_incremental.import_transcript(
         backend=backend, path=transcript, agent_id=agent["agent_id"],
         backend_session_id="synthetic-native")
