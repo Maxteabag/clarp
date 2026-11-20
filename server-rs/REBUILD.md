@@ -3292,6 +3292,24 @@ summary carries `note_count`. A caller that names a trace another message of the
 (409), but the same message sent again is that message: one look by key (`trace-<trace>`) in the agent's own
 log.
 
+**An agent's voice and hearing, shown as the Host does them** (20 Nov 2026; the Python Host's PR 485, contract 109,
+features `voice_profile` and `speech_outcome`). One resolver in the kernel (`clarp_kernel::voice_profile`) gives the
+voice each provider is handed for an agent and where it came from: the agent's own (its entry in the owner's file,
+what it stored, its persona's in the owner's lists) or a provider's one default, which every agent without its own
+shares (Deepgram's model, Google's `nb-NO-Chirp3-HD-Kore`, Gemini's voice for an agent moved to it on purpose). What
+each provider would then say, or why it is silent (`no_voice`, `not_configured`, `provider_off`), is made once, and
+both the speaker and the profile are made from it: the speaker tries those that can say it in the route's order
+(`speaking_order`), and the profile shows the first, or the fallback's when the first is silent and the fallback is
+not. ElevenLabs is handed only an id it can take; a JSON text, a uuid or nothing is silent and told so, where it was
+handed over and refused before. How an agent is heard is the plan of engines a recording for it is tried with and the
+languages the first is handed. A snapshot makes one view of the Host and resolves every agent from it, counting who
+shares a voice in one pass; the owner's file is read when the view is made. The roster's events about one agent get
+the agent's profile as the hub tells them (`profile::Profiles`), and a change of the speech providers or of the
+transcription settings tells open apps to re-read the agents (`voice-profile`). A reply not spoken is told once a turn
+and reason, with its reason, its provider and its turn, in words made from them, never from an engine's text; what
+was told is remembered in memory only, bounded, and pruned at every write. The vectors are
+`tools/voice-profile-vectors.py`, from `voice_profile.py` run as it is.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
