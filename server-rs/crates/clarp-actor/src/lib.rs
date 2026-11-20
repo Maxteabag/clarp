@@ -629,6 +629,7 @@ pub struct Actor {
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     delegation: Option<delegation::Binding>,
+    listener_heartbeat: Option<i64>,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
@@ -1106,6 +1107,7 @@ impl Actor {
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
             delegation,
+            listener_heartbeat: None,
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,

@@ -36,7 +36,7 @@ one of these:
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
-| `managed_skills`, `agent_portraits`, `backend_auth`, `goal_ledger`, `harness_model_providers` | to be built |
+| `managed_skills`, `agent_portraits`, `backend_auth`, `harness_model_providers` | to be built |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
@@ -432,7 +432,7 @@ with its port (19 Nov 2026).
 | Where a refused render spec is logged (`renderSpecRefused code=<code> path=<pointer>`) | the Host's log and its telemetry | the Host's standard error | This Host has no telemetry; both write the code and the pointer and nothing the caller wrote |
 | An agent with render specs that moves to this Host (`clarp-host import`) | (it is the Host moved from) | the agent moves with its other library items; the report names and counts the render specs left on the source | The ordinary item read depends on the source’s render-client setting and omits the submission’s audio preference. A source migration read is needed to move a complete spec |
 
-The bookkeeping delegation lifecycle is available through `/goal-ledger/delegations` and
-`clarp-admin bookkeeping`. Until the listener is ported, an enable response reports
-`listener.started: false` with the reason. The delegation itself is active from the principal's
-START entry. The delegate can observe and record batches. The feature flag also covers listener wakes.
+Bookkeeping listeners run under the Host and resume from the principal’s log at startup. The
+reference starts a service for each delegation. On both Hosts the delegate’s background job
+shows the listener and cancelling it stops the delegation. An internal listener has no separate
+worker PID or system service. Its job ID stays with the delegation across a Host restart.

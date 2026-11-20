@@ -1363,6 +1363,14 @@ is missing. A damaged reservation is left in the fleet store and counted in the 
 The principal serves ordinary work while the fleet repairs a mismatch. The fleet waits up to
 three seconds for each actor reply. History for either participant is read from the delegation rows.
 
+**Bookkeeping listener** (20 Nov 2026). The Host checks active grants every two seconds.
+Each delegate has a background job. A burst of principal activity gets eight seconds of quiet,
+with the first wake due after at most a minute. An outstanding wake waits for application; an
+unfinished or queued turn holds a retry even after fifteen minutes. A repeat after a failed send
+backs off. The principal keeps dispatch and application separately in its log. On restart the
+listener resumes from those cursors and checks the delegate’s queue before sending.
+The principal keeps the listener heartbeat in memory so a quiet grant does not grow its journal.
+
 **Delegate observation and recording** (20 Nov 2026). A verified delegate with the relationship
 credential can page its principal’s messages and goal events and see its ten most recently changed
 open goals. The reader excludes the delegate’s own messages and this delegation’s events before

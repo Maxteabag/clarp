@@ -115,6 +115,7 @@ impl Actor {
         }
         batch.commit()?;
         self.delegation = next;
+        self.listener_heartbeat = None;
         Ok(true)
     }
 

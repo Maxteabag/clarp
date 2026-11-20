@@ -4408,3 +4408,83 @@ fn a_bookkeeping_page_counts_only_eligible_rows_before_each_limit() {
         assert_eq!(got["has_more"], page["more"]);
     }
 }
+
+#[test]
+fn a_quiet_listener_keeps_its_heartbeat_without_growing_the_principals_ledger() {
+    use clarp_actor::bookkeeping::ListenerUpdate;
+    use clarp_actor::delegation::{Binding, Transition};
+    use clarp_kernel::goals::listener::{Decision, Pending};
+    use clarp_ports::log::Kinds;
+
+    let mut world = World::new("quiet-bookkeeping-listener");
+    let mut actor = world.open();
+    let id = "quiet";
+    let caller = "helper";
+    let start = world.now_ms;
+    assert!(
+        actor
+            .change_delegation(
+                Transition::Start {
+                    binding: Binding {
+                        delegation_id: id.into(),
+                        delegate_agent_id: caller.into()
+                    },
+                },
+                start
+            )
+            .unwrap()
+    );
+    let log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    let ledger_count = || {
+        log.read_after(0, Kinds::only(kind::GOAL_LEDGER), 1000)
+            .unwrap()
+            .len()
+    };
+    let mut pending = Pending::default();
+    let mut tick = |actor: &mut Actor, now| {
+        let progress = actor.applied_bookkeeping(id, 0).unwrap();
+        let activity = actor
+            .listener_activity(id, caller, &progress, bookkeeping_imported_row)
+            .unwrap();
+        let mut state = progress.listener;
+        assert!(matches!(
+            pending.decide(&mut state, id, (0, 0), &activity, "", now),
+            Decision::Idle
+        ));
+        actor
+            .keep_listener(
+                id,
+                0,
+                ListenerUpdate {
+                    state,
+                    applied: (0, 0),
+                    since: None,
+                    job_handle: "bg1:1:quiet".into(),
+                },
+                now,
+            )
+            .unwrap();
+    };
+    tick(&mut actor, start);
+    let before = ledger_count();
+    for elapsed in (2000..=60000).step_by(2000) {
+        tick(&mut actor, start + elapsed);
+    }
+    assert_eq!(ledger_count(), before);
+    let row = |actor: &Actor| {
+        let mut row = json!({});
+        actor
+            .applied_bookkeeping(id, 0)
+            .unwrap()
+            .show(&mut row, start + 60000);
+        row
+    };
+    assert_eq!(row(&actor)["last_heartbeat_at"], start + 60000);
+    drop(actor);
+    let reopened = world.open();
+    assert!(row(&reopened)["last_heartbeat_at"].is_null());
+    assert_eq!(row(&reopened)["job_handle"], "bg1:1:quiet");
+}

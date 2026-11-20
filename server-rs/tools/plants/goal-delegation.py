@@ -68,7 +68,7 @@ for why,old,new in [
     ('a never-started reservation stays in history','(ROWS.into(), self.delegation_id.clone(), None)','(ROWS.into(), self.delegation_id.clone(), Some(serde_json::to_vec(self).unwrap()))'),
     ('no cleanup of unstarted credential','remove_credential(root, id)?;','let _ = (root,id);'),
     ('orphan authority is left open','!= Some(&active)','== Some(&active)'),
-    ('a recovered start has a wrong map key','expected.insert(\n                    principal,','expected.insert(\n                    String::new(),'),
+    ('a recovered start has a wrong map key','expected.insert(principal, entry);','expected.insert(String::new(), entry);'),
 ]:
     put(F,'cuts',why,old,new)
 for why,old,new in [
@@ -80,7 +80,7 @@ for why,old,new in [
     ('a delegate credential is readable by other users','.mode(0o600)','.mode(0o644)'),
     ('history loses the principal session','session(&r.principal_agent_id)?','session(&r.delegate_agent_id)?'),
     ('history loses the helper session','session(&r.delegate_agent_id)?','session(&r.principal_agent_id)?'),
-    ('a new relationship claims the listener started','"started":false','"started":true'),
+    ('a new relationship reports its listener unavailable','"started":true','"started":false'),
     ('an archived principal may enable','if principal.record.archived_at_ms.is_some()','if false'),
 ]:
     put(F,'doors',why,old,new)
