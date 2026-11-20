@@ -1275,11 +1275,13 @@ mod tests {
         fn mark(&self, hold: Hold) {
             *lock(&self.control.hold) = hold;
         }
+    }
 
-        fn end(mut self) {
+    impl Drop for Rig {
+        fn drop(&mut self) {
             let _ = self.sleeper.kill();
             let _ = self.sleeper.wait();
-            std::fs::remove_dir_all(&self.dir).unwrap();
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -1407,6 +1409,24 @@ mod tests {
             "and counts what was carried out under it"
         );
 
+        // A pump may have taken its chunk out of the pipe without recording it yet.
+        for stream in [&rig.control.printed, &rig.control.errors] {
+            let turn = lock(&stream.as_ref().unwrap().turn);
+            let (control, own_too) = (rig.control.clone(), own.clone());
+            let counting = std::thread::spawn(move || {
+                control.count(&own_too, Instant::now() + Duration::from_secs(5))
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!counting.is_finished(), "the count waits for a pump");
+            rig.control
+                .to_spool
+                .send(ToSpool::Entry(Entry::Out("taken by the pump".into())))
+                .unwrap();
+            drop(turn);
+            let held = counting.join().unwrap().unwrap();
+            assert_eq!(held.spool, length(&rig));
+        }
+
         // What the pumps hold of a line that is not whole is said.
         rig.control
             .printed
@@ -1423,7 +1443,7 @@ mod tests {
         let held = count(&rig, &own).unwrap();
         assert_eq!((held.partial_out, held.partial_err), (3, 2));
         drop(client);
-        rig.end();
+        drop(rig);
     }
 
     #[test]
@@ -1437,7 +1457,7 @@ mod tests {
                 .count(&own, Instant::now() + Duration::from_secs(1))
                 .is_some()
         );
-        rig.end();
+        drop(rig);
     }
 
     #[test]
@@ -1448,7 +1468,7 @@ mod tests {
         Arc::get_mut(&mut rig.control).unwrap().to_spool = to_spool;
         assert_eq!(count(&rig, &connection(&own)), None);
         assert!(matches!(requests.try_recv(), Ok(ToSpool::End(_))));
-        rig.end();
+        drop(rig);
     }
 
     #[cfg(target_os = "linux")]
@@ -1512,8 +1532,8 @@ mod tests {
             Err(ENDED_WHILE_HELD)
         );
         assert!(matches!(*lock(&rig2.control.hold), Hold::Ended));
-        rig.end();
-        rig2.end();
+        drop(rig);
+        drop(rig2);
     }
 
     #[test]
@@ -1565,7 +1585,7 @@ mod tests {
                 signal: "SIGKILL".into()
             })]
         );
-        rig.end();
+        drop(rig);
     }
 
     #[test]
@@ -1586,7 +1606,7 @@ mod tests {
         assert!(matches!(*lock(&rig.control.hold), Hold::Released));
         std::thread::sleep(Duration::from_millis(50));
         assert_ne!(rig.state(), Some('T'), "it was let go");
-        rig.end();
+        drop(rig);
     }
 
     #[test]
@@ -1605,7 +1625,7 @@ mod tests {
         );
         std::thread::sleep(Duration::from_millis(50));
         assert_ne!(rig.state(), Some('T'));
-        rig.end();
+        drop(rig);
     }
 
     #[test]

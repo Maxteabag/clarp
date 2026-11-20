@@ -113,7 +113,7 @@ PLANTS = [
     (MAIN, 'unit-count', 'what waits in a connection is no request', '        !self.pending.load(Ordering::SeqCst) && !waits(self.socket.as_fd(), false)', '        !self.pending.load(Ordering::SeqCst)'),
     (MAIN, 'unit-count', 'what waits in standard output is not waited for', '                if !out.waits(false) && !err.waits(false) {', '                if !err.waits(false) {'),
     (MAIN, 'unit-count', 'what waits in standard error is not waited for', '                if !out.waits(false) && !err.waits(false) {', '                if !out.waits(false) {'),
-    (MAIN, 'count', 'the pumps are not waited for', '                let _out = lock(&out.turn);\n                let _err = lock(&err.turn);', '                let _out = ();\n                let _err = ();'),
+    (MAIN, 'unit-count', 'the pumps are not waited for', '                let _out = lock(&out.turn);\n                let _err = lock(&err.turn);', '                let _out = ();\n                let _err = ();'),
     (MAIN, 'unit-count', 'the spool is measured before what was sent to it is written', '                let _ = answer.send(end);', '                let _ = end; let _ = answer.send(Ok(0));'),
     (MAIN, 'unit-count', 'the count trusts a spool with an unwritten record', '                let end = if complete {', '                let end = if complete || !complete {'),
     (MAIN, 'unit-count', 'the spool writer can hold up the count past the bound', '                    let spool = end.recv_timeout(remaining).ok()?.ok()?;', '                    let _ = remaining; let spool = end.recv().ok()?.ok()?;'),
