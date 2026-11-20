@@ -38,7 +38,7 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::agent::View;
-use crate::edge::{ApiError, App, Principal};
+use crate::edge::{ApiError, App, Presented, Principal};
 use crate::fleet::{AgentRecord, Member};
 use crate::ids;
 use crate::pairing::Scope;
@@ -702,6 +702,7 @@ async fn get_artifact(
     Path(rest): Path<String>,
     Query(query): Params,
     Extension(principal): Extension<Principal>,
+    Extension(presented): Extension<Presented>,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let rest = rest.trim_matches('/');
@@ -750,7 +751,7 @@ async fn get_artifact(
         return revisions(&app, artifact_id.trim_matches('/'), &query).await;
     }
     if let Some(artifact_id) = rest.strip_suffix("/export") {
-        return export(&app, artifact_id.trim_matches('/'), &principal);
+        return export(&app, artifact_id.trim_matches('/'), &principal, presented);
     }
     let Some(row) = find(&app, rest) else {
         return Err(refused(StatusCode::NOT_FOUND, "artifact not found"));
@@ -779,8 +780,16 @@ async fn get_artifact(
 /// stored, submission}}`: the row as it is listed, the payload as it is kept, and the answer
 /// that was accepted with what became of it, or none (`render_spec_store.export`). Another kind
 /// is refused in words, its kind beside them, so that a kind can be added later.
-fn export(app: &App, artifact_id: &str, principal: &Principal) -> Result<Response, ApiError> {
-    if *principal != Principal::Administrator {
+fn export(
+    app: &App,
+    artifact_id: &str,
+    principal: &Principal,
+    presented: Presented,
+) -> Result<Response, ApiError> {
+    // The administrator's token from the Authorization header only: never one an address
+    // carries, nor a browser's cookie, for a route that hands out a user's answers.
+    let by_header = matches!(presented, Presented::Header | Presented::Nowhere);
+    if *principal != Principal::Administrator || !by_header {
         return Err(refused(StatusCode::FORBIDDEN, "administrator only"));
     }
     let Some(row) = find(app, artifact_id) else {
