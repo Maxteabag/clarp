@@ -67,6 +67,8 @@ mod stand_ins;
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_events.rs"]
+mod voice_events;
 #[path = "host/voice_timeline.rs"]
 mod voice_timeline;
 
@@ -35677,6 +35679,19 @@ fn stand_in_live_voice() -> LiveVoice {
                         "session.start" => {
                             noted.lock().unwrap().push(said);
                             says(&mut socket, json!({ "type": "session.started" }));
+                            // What a voice says that a Host does not read: a session's
+                            // standby (`session.paused`, `session.resumed`), and a kind to
+                            // come. A Host passes them over and says each kind once.
+                            for kind in [
+                                "session.paused",
+                                "session.resumed",
+                                "session.paused",
+                                "session.of_a_kind_to_come",
+                            ] {
+                                let what =
+                                    json!({ "type": kind, "said": "nothing a journal shows" });
+                                says(&mut socket, what);
+                            }
                         }
                         "session.instructions.append" => {
                             let named = said["event_id"].clone();
@@ -36031,7 +36046,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
             &json!(ring_id),
             &json!(1),
             &json!("openai"),
-            &json!("gpt-live-1"),
+            &json!(clarp_kernel::live_call::MODEL),
             &json!("marin"),
             &json!(false),
             &json!("live")
@@ -36140,7 +36155,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
         ("agent_id", json!(theo_id)),
         ("context_digest", grant["context_digest"].clone()),
         ("provider", json!("openai")),
-        ("model", json!("gpt-live-1")),
+        ("model", json!(clarp_kernel::live_call::MODEL)),
         ("voice", json!("marin")),
     ] {
         of_the_call[name] = value;
@@ -36181,7 +36196,7 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     assert_eq!(
         (&start["model"], &start["audio"], &start["delegation"]),
         (
-            &json!("gpt-live-1"),
+            &json!(clarp_kernel::live_call::MODEL),
             &json!({ "output": { "voice": "marin" }, "format": { "type": "audio/pcm", "rate": 24000 } }),
             &json!({ "type": "client" })
         )
@@ -36202,8 +36217,39 @@ fn a_ring_is_held_as_a_live_voice_call_between_a_phone_and_a_voice() {
     // What the voice is told is written as the Python Host writes it there: with a blank
     // after each colon and comma.
     let written = voice.written.lock().unwrap().clone();
-    let begins = "{\"type\": \"session.start\", \"session\": {\"model\": \"gpt-live-1\", ";
-    assert!(written[0].starts_with(begins), "{}", &written[0][..80]);
+    let begins = format!(
+        "{{\"type\": \"session.start\", \"session\": {{\"model\": \"{}\", ",
+        clarp_kernel::live_call::MODEL
+    );
+    assert!(written[0].starts_with(&begins), "{}", &written[0][..80]);
+    // What the voice said that this Host does not read went by: each kind said once in the
+    // journal, by its type alone, and the call goes on below.
+    let unread = |host: &Host| -> Vec<String> {
+        let heard = host.heard.lock().unwrap().clone();
+        heard
+            .lines()
+            .filter(|line| line.starts_with("agentLiveEventUnread"))
+            .map(str::to_string)
+            .collect()
+    };
+    wait_for("the voice's unread kinds to be said", || {
+        unread(&host).len() == 3
+    });
+    assert_eq!(
+        unread(&host),
+        [
+            "agentLiveEventUnread type=session.paused",
+            "agentLiveEventUnread type=session.resumed",
+            "agentLiveEventUnread type=session.of_a_kind_to_come",
+        ]
+    );
+    assert!(
+        !host
+            .heard
+            .lock()
+            .unwrap()
+            .contains("nothing a journal shows")
+    );
 
     // The user's sound goes to the voice; breaking in tells the voice to be still and the
     // phone to be quiet.
