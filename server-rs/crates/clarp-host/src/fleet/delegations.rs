@@ -232,6 +232,7 @@ use std::{
 };
 
 pub(crate) enum Request {
+    Listeners,
     Authorize {
         id: String,
         caller: String,
@@ -350,13 +351,18 @@ impl Fleet {
         } else {
             return Err(Unavailable("principal unavailable".into()));
         };
-        if progress.last_applied_at.is_some() {
-            progress.show(&mut shown, self.now_ms());
-        }
+        progress.show(&mut shown, self.now_ms());
         Ok(shown)
     }
     pub(super) fn delegation_request(&mut self, req: Request) -> Result<Value, ApiError> {
         match req {
+            Request::Listeners => {
+                let active = self.delegation_desk.reservations.borrow();
+                let ids:Vec<_>=active.iter().filter(|(_,e)|!e.starting).map(|(principal,e)|
+                    json!({"principal":principal,"delegate":e.binding.delegate_agent_id,"id":e.binding.delegation_id,"baseline":e.baseline,"created":e.created})
+                ).collect();
+                Ok(json!(ids))
+            }
             Request::Authorize {
                 id,
                 caller,
@@ -568,7 +574,8 @@ impl Fleet {
         let mut answer = self.public_delegation(&row)?;
         answer["baseline_message_revision"] = json!(baseline);
         answer["token_path"] = json!(path);
-        answer["listener"] = json!({"unit":format!("clarp-bookkeeping-{id}"),"started":false,"error":"bookkeeping listener unavailable"});
+        answer["listener"] =
+            json!({"unit":format!("clarp-bookkeeping-{id}"),"started":true,"error":""});
         Ok(answer)
     }
 }
@@ -588,6 +595,8 @@ use tokio::sync::watch;
 #[derive(Clone)]
 struct Expected {
     binding: Binding,
+    baseline: i64,
+    created: i64,
     starting: bool,
 }
 
@@ -750,6 +759,8 @@ impl Desk {
                 row.principal_agent_id.clone(),
                 Expected {
                     binding: row.binding(),
+                    baseline: row.message_through,
+                    created: row.created_at,
                     starting,
                 },
             );
@@ -919,7 +930,7 @@ fn recover(
                 continue;
             }
         };
-        let result = (|| -> Result<Option<Binding>, String> {
+        let result = (|| -> Result<Option<Expected>, String> {
             let row = find(store, id)?.ok_or("missing principal reservation")?;
             if row.principal_agent_id != principal || row.delegation_id != id {
                 return Err("misplaced principal reservation".into());
@@ -953,20 +964,19 @@ fn recover(
                             .as_ref()
                             == Some(&binding) =>
                 {
-                    Ok(Some(binding))
+                    Ok(Some(Expected {
+                        binding,
+                        baseline: row.message_through,
+                        created: row.created_at,
+                        starting: false,
+                    }))
                 }
                 Some(_) => Err("delegation reservation disagrees with its log".into()),
             }
         })();
         match result {
-            Ok(Some(binding)) => {
-                expected.insert(
-                    principal,
-                    Expected {
-                        binding,
-                        starting: false,
-                    },
-                );
+            Ok(Some(entry)) => {
+                expected.insert(principal, entry);
             }
             Ok(None) => {}
             Err(why) => skipped(id, &why),

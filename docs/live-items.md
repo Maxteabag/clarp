@@ -203,7 +203,7 @@ reported there as `thinking` so older clients stay busy.
 `worked_ms = ended_at_ms - started_at_ms` once settled. Render a settled turn's
 work behind `Worked for 1m 12s · 6 tools`.
 
-`audience` (Host contract 110) is `agents` when another agent's message started
+`audience` (Host contract 108) is `agents` when another agent's message started
 the turn, else `user` (docs/protocol.md, Provenance: coordination between
 agents). When the user steps into such a turn while it runs, a `turn` op with
 the same `turn_id` and `audience: "user"` follows at once; `GET /live` answers

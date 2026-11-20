@@ -40,11 +40,12 @@ class SendRoutes:
         return replace(req, session=result["session"], force_session=True), result
 
     def _handle_compact(self):
-        """Compact a conversation on demand (from the app). Drives the backend
-        CLI's interactive /compact (claude/codex) or /compress (agy) in a
-        throwaway tmux session resumed on the same session id, keeping the id.
-        Body: {"session": "..."}. Returns immediately; the app watches the
-        snapshot's `compacting` flag + `context_tokens` for progress."""
+        """Compact a conversation on demand (from the app), the only way the
+        Host ever compacts one (lib/compaction.py says how per backend).
+        Body: {"session": "..."}. Answers at once: started, already
+        compacting, or refused in words. The app watches the snapshot's
+        `compacting` flag; when it ends, the agent's `last_compaction` says
+        what happened, from numbers (docs/protocol.md)."""
         from lib import compaction
         data = self._read_json()
         if self._reject_janitor_control(data):
@@ -54,7 +55,9 @@ class SendRoutes:
         session = (data.get("session") or "").strip()
         if not session:
             return self._json_error(400, "session required")
-        result = compaction.compact_session(session)
+        from lib.turn_dispatch import TurnDispatchService
+        result = compaction.compact_session(
+            session, dispatch=TurnDispatchService(self.ctx))
         status = 200 if result.get("ok") else 409
         return self._json(status, result)
 

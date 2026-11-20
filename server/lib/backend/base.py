@@ -46,11 +46,14 @@ class CompactionStrategy:
     ``launch`` is the interactive argv prefix (the backend session id is
     appended), ``command`` the slash command typed into it, and
     ``watches_transcript`` says whether the host can watch the transcript
-    settle instead of waiting a fixed window.
+    settle instead of waiting a fixed window. ``in_process`` means the Host
+    compacts through the process that already holds the conversation (Codex's
+    shared app-server) instead of a terminal: ``launch`` is then empty.
     """
     launch: tuple[str, ...]
     command: str
     watches_transcript: bool = False
+    in_process: bool = False
 
 
 def _mod(name: str):

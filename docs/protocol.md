@@ -91,6 +91,7 @@ event arrives.
       "turn_started_at": 0, "last_activity": 1756800000, "last_turn_end": 1756799000,
       "status_text": null, "activity": { "…": "see agent-activity" },
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
+      "last_compaction": null,
       "queued_turn_count": 0, "queued_turn_revision": 0, "queue_paused": false,
       "backend_quota": null,
       "background_jobs": {"count": 0, "sub_agents": 0},
@@ -109,6 +110,31 @@ event arrives.
 
 Rules:
 
+- **Compaction says what it did (`compaction_outcome`, R148).** `POST /compact
+  {"session": …}` is the only way the Host compacts an agent: it never does so
+  by itself, on a timer, at a threshold or at launch. It answers at once
+  (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
+  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  runs, and a send that arrives meanwhile waits and runs after it, in order.
+  When it ends, `last_compaction` is `{"outcome", "before_tokens",
+  "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
+  ms; `null` until the agent's first compaction). `outcome` is decided from
+  sizes, never from how long it took:
+  - Codex: `compacted` needs both sizes, with `after_tokens` <
+    `before_tokens`. `before_tokens` is the size Codex last reported for the
+    thread (after a runtime restart: the newest token count in the last 64 KB
+    of its rollout); `after_tokens` is Codex's own estimate of the new history
+    (`after_is_estimate: true`). The compaction runs in the Host's app-server,
+    the process that holds the thread.
+  - Claude Code: `compacted` on Claude Code's own record of it, the
+    `compact_boundary` it writes after `/compact`; `before_tokens` is that
+    record's `preTokens`, and `after_tokens` stays `null` (the new size is
+    known at the agent's next call, when `context_tokens` shows it; until
+    then `context_tokens` is `null`). No record: `not_compacted`.
+  - `not_compacted`: refused, failed, stopped, finished without replacing the
+    history (Codex), or the conversation did not shrink. `unknown`: a size is missing or it did not finish in time;
+    always for a backend that gives the Host no size (Antigravity, Grok).
+    `detail` says why in words.
 - **Archived agents are optional.** A plain `GET /agents/snapshot` carries
   every agent, archived ones too (`archived_at` set). On a Host that has run
   for a while most agents are archived helpers, and a client pays for them on
@@ -375,7 +401,7 @@ agent in `reply_to_*`. Render that as a compact "Replying to …" marker, never 
 the other agent's message: the current agent wrote it, and nothing forwarded it
 onward unless the agent itself sent a message.
 
-Coordination between agents (Host contract 110). `audience` says who a row is
+Coordination between agents (Host contract 108). `audience` says who a row is
 for: `agents` when the turn it belongs to was started by another agent's
 message, else `user`. Every row of that turn has it: the incoming prompt, the
 live and final rows, and the thinking, tool and reply rows the transcript
@@ -393,7 +419,7 @@ user steps into (a message of theirs steered into it while it runs) is `user`
 from then on: its rows get new revisions, so a delta carries them again, and it
 never goes back to `agents`. An agent's message steered into a turn the user
 started is a row of its own trace and is the only row marked. A turn that holds the user's own word is never `agents`, whatever arrives in it. `POST /send` refuses (409) a `trace_id` that already belongs to another message (an admission, a queued send, a turn or a row) unless the request is a retry of that very message: the same `client_msg_id`, sender and origin. Rows from before
-contract 110 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting. Until feature `hidden_coordination` is advertised
+contract 108 are `user`. An agent that cannot leave a note (its backend gives its turns no turn token) is never hidden: its coordination turns read `user`, whatever the setting. Until feature `hidden_coordination` is advertised
 nothing is filtered: `audience` only describes.
 
 A **note** is an agent's words to the user from its own turn:
@@ -499,13 +525,13 @@ Event types and payloads:
 | `type` | Fields | Client action |
 |---|---|---|
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
-| `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 110) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
+| `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`, and `audience` ("agents" for a turn another agent's message started, else "user"; contract 108) with `sender_agent_id` and `sender_name` for such a turn when the sender is an agent of this Host, so an app can say whom the agent is working with; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
-| `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 110). |
+| `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. An agent's note (`POST /agent-notes`) notifies with `reason` `agent-note` (`agent-note-muted` when muted), `origin: note`, `source_message_id` the note's row, empty `cause_message_id` (contract 108). |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
