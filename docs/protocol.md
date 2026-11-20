@@ -892,6 +892,9 @@ client shows it and derives nothing from `voice_id`.
   an empty string; a client shows its own words for null.
 - `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
   provider's one default voice, the same for every agent without its own).
+- The rule both Hosts hold (vectors in `tests/unit/test_voice_v2a.py`): no voice of its own =
+  the provider's default voice where the provider has exactly one, silence (`no_voice`) where
+  it has none; a migrated agent must not fall silent where it spoke before.
 - `speech.shared_with`: how many other active agents speak with the same provider and
   voice (0: its own). Say it when it is not 0.
 - `speech.streaming`: whether audio begins before the whole clip is made.
