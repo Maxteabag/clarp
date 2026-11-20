@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, NamedTuple
 
 from .clock import now_ms
-from .message_text import (_related, _strip_voice_markup, live_message_id, strip_injected_blocks,
+from .message_text import (LIVE_KEYLESS_KEYS, _related, _strip_voice_markup, live_message_id, strip_injected_blocks,
                            strip_delivery_context, CALL_OPENING_OPEN)  # noqa: F401 - _related is used from here too
 from .message_turns import _START_SLACK_MS, iso_ms
 from .message_import_common import (
@@ -19,6 +20,8 @@ from .message_import_common import (
     _is_retry_echo,
     _sqlite_order,
     _PARKED_SEQ_BASE,
+    _PARKED_POSITIONAL_SEQ_BASE,
+    IDENTITY_BLOCK_PREFIX,
     _client_provenance,
     _client_provenance_rows,
     _message_id,
@@ -48,6 +51,58 @@ def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
     return True
 
 
+def _park_positional_occupant(database, agent_id: str, backend_session_id: str,
+                              source_file: str, seq: int) -> bool:
+    """Move the slot's positional row aside into its own parked band (R108): an identity row
+    moves into its slot in a full read, and the occupant's line writes its row again later in
+    the same pass, at its new seq. Until then it is still a row, so no message is ever missing;
+    the stale cleanup at the end of the pass removes the copy. Its band cannot collide: a row
+    left there from slot ``seq`` would carry this occupant's own id."""
+    positional = _message_id(agent_id, backend_session_id, source_file, seq)
+    return database.execute(
+        """UPDATE messages SET seq = ?, revision = ?
+            WHERE message_id = ? AND agent_id = ? AND backend_session_id = ? AND seq = ?""",
+        (_PARKED_POSITIONAL_SEQ_BASE + seq, _next_revision(database), positional, agent_id,
+         backend_session_id, seq)).rowcount > 0
+
+
+# A live row's id as live_message_id makes it ("live-" and twenty hex digits); a key-less
+# stream rolls its rows over to these keys (message_live._live_target).
+_LIVE_ID = re.compile(r"live-[0-9a-f]{20}")
+# How far around a row's time a turn that streamed it may have begun or ended.
+_STREAMED_SLACK_MS = 10 * 60 * 1000
+
+
+def _identity_row(database, agent_id: str, backend_session_id: str, message_id: str,
+                  trace: str, timestamp: Any) -> bool:
+    """Whether a parked row is an identity row (R108), certainly: the transcript held its line,
+    so when the line has left, the row goes as a positional row does. A later block says so by
+    its prefix. Block 0 is a keyed live id, told from a key-less one (a stream without a provider
+    id, its rows rolled over to seg keys: RM-N1b keeps that reply) only by exclusion, so on any
+    doubt the answer is no: an id not of the live form, the row's trace unknown or no turn row
+    of it, a turn that could have streamed it missing (the agent's turns begin after the row:
+    they did not come with it), or the key-less id, under any key, of a turn that could have
+    been running when the row was written."""
+    if message_id.startswith(IDENTITY_BLOCK_PREFIX):
+        return True
+    if not _LIVE_ID.fullmatch(message_id) or not trace:
+        return False
+    at = iso_ms(timestamp)
+    first = database.execute("SELECT MIN(started_at) FROM turns WHERE agent_id = ?",
+                             (agent_id,)).fetchone()[0]
+    if at is None or first is None or int(first) > at:
+        return False
+    if database.execute("SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ? LIMIT 1",
+                        (agent_id, trace)).fetchone() is None:
+        return False
+    traces = {trace, ""} | {str(row["trace_id"]) for row in database.execute(
+        """SELECT trace_id FROM turns WHERE agent_id = ? AND started_at <= ?
+             AND (ended_at IS NULL OR ended_at >= ?)""",
+        (agent_id, at + _STREAMED_SLACK_MS, at - _STREAMED_SLACK_MS))}
+    return all(live_message_id(agent_id, backend_session_id, keyless, key) != message_id
+               for keyless in traces for key in LIVE_KEYLESS_KEYS)
+
+
 def _seq_taken(database, agent_id: str, backend_session_id: str, seq: int) -> bool:
     return database.execute(
         "SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ? AND seq = ?",
@@ -61,15 +116,22 @@ def _restore_unadopted_parked(database, agent_id: str, backend_session_id: str,
     leave it, instead of the stale cleanup deleting a reply the user saw
     (RM-N1c). Its seq is the one a live final row takes (-800000 + the turn's
     id), or the next free one below everything the conversation holds. Without a trace it cannot be named, and the
-    stale cleanup takes it as before."""
+    stale cleanup takes it as before; so it takes an identity row (R108) and a parked positional
+    row, which this never reads."""
     restored = 0
     for row in database.execute(
-            """SELECT message_id, seq, trace_id FROM messages
+            """SELECT message_id, seq, trace_id, timestamp FROM messages
                 WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
-                  AND seq >= ?""",
-            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE)).fetchall():
+                  AND seq >= ? AND seq < ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE,
+             _PARKED_POSITIONAL_SEQ_BASE)).fetchall():
         trace = row["trace_id"] or ""
         if not trace:
+            continue
+        if _identity_row(database, agent_id, backend_session_id, row["message_id"], trace,
+                         row["timestamp"]):
+            # The transcript owned it (R108): its line left, so it goes with the stale
+            # cleanup, with replace_revision, and comes back under the same id if the line does.
             continue
         turn = database.execute(
             """SELECT turn_id FROM turns WHERE agent_id = ? AND trace_id = ?
@@ -98,8 +160,9 @@ def _parked_twin(database, agent_id: str, backend_session_id: str,
         (row["message_id"], int(row["seq"])) for row in database.execute(
             """SELECT message_id, seq, text FROM messages
                 WHERE agent_id = ? AND backend_session_id = ? AND source_file = ?
-                  AND role = 'assistant' AND seq >= ?""",
-            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE))
+                  AND role = 'assistant' AND seq >= ? AND seq < ?""",
+            (agent_id, backend_session_id, source_file, _PARKED_SEQ_BASE,
+             _PARKED_POSITIONAL_SEQ_BASE))
         if row["message_id"] not in exclude
         and _strip_voice_markup(row["text"]) == visible]
     return found[0] if len(found) == 1 else None
@@ -118,8 +181,9 @@ def _shifted_twin(database, agent_id: str, backend_session_id: str,
             # range reads every later transcript row once per assistant turn.
             """SELECT message_id, seq, text FROM messages INDEXED BY idx_messages_trace
                 WHERE trace_id = ? AND agent_id = ? AND backend_session_id = ?
-                  AND source_file = ? AND role = 'assistant' AND seq > ?""",
-            (request_trace, agent_id, backend_session_id, source_file, seq))
+                  AND source_file = ? AND role = 'assistant' AND seq > ? AND seq < ?""",
+            (request_trace, agent_id, backend_session_id, source_file, seq,
+             _PARKED_POSITIONAL_SEQ_BASE))
         if row["message_id"] not in exclude
         and row["message_id"] != _message_id(agent_id, backend_session_id,
                                              source_file, row["seq"])

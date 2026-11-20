@@ -134,6 +134,11 @@ def _held_import(monkeypatch, transcript):
 @pytest.mark.parametrize("backend,queue", [("claude", True), ("codex", True), ("codex", False)])
 def test_replacement_after_send_keeps_live_tools_awaiting_import(
         running_server, monkeypatch, tmp_path, backend, queue):
+    # The streamed commentary overlaps commentary already imported: under R108 the import took the
+    # stream's id and that write is refused, so the overlap arises only for a row stored before
+    # R108. This pins R107's retraction as that fallback.
+    from lib import message_writes
+    monkeypatch.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
     base, agent, transcript, source, spawned, steered, trace = _active_turn(
         running_server, monkeypatch, tmp_path, backend)
     first = source.groups[0]

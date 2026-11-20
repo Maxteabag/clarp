@@ -39,6 +39,16 @@ def _replace_revision(aid):
     return row[0] if row else 0
 
 
+def _import_before_the_rule(aid, path, monkeypatch):
+    """An import that stores the line under its slot's positional id, as every import did before
+    R108 (the import takes the stream's id). Under R108 a stream write after the import is refused,
+    so these tests pin R107's retraction as the fallback for rows stored before it."""
+    from lib import message_writes
+    with monkeypatch.context() as before_the_rule:
+        before_the_rule.setattr(message_writes, "_keyed_line_id", lambda *a, **k: "")
+        _import(aid, path)
+
+
 def _stream(aid, key, text):
     return message_store.upsert_live_assistant_message(
         agent_id=aid, backend_session_id="native-session", trace_id="turn-1", item_key=key, text=text)
@@ -51,7 +61,7 @@ def test_a_live_row_with_the_same_words_is_retracted_by_its_own_id_and_kept_unde
     aid, path, now = _opened_case(tmp_path, monkeypatch, "defaults")
     words = "Synthetic words of one message."
     _line(path, words, 200, message_id="msg_A", tool=message == "commentary")
-    _import(aid, path)                                          # the message's row holds its slot
+    _import_before_the_rule(aid, path, monkeypatch)                                          # the message's row holds its slot
     now[0] = BASE + 300
     live = _stream(aid, "msg_A" if key == "the same id" else "msg_B", words)
     held = _replace_revision(aid)
@@ -72,7 +82,7 @@ def test_a_live_row_of_the_same_id_that_goes_beyond_the_imported_words_is_retrac
     stream: retracted with the revision; the stream's next write starts its row again."""
     aid, path, now = _opened_case(tmp_path, monkeypatch, "defaults")
     _line(path, "First block of the message.", 200, message_id="msg_A")
-    _import(aid, path)
+    _import_before_the_rule(aid, path, monkeypatch)
     now[0] = BASE + 300
     live = _stream(aid, "msg_A", "First block of the message. Second block, still streaming")
     held = _replace_revision(aid)
@@ -117,7 +127,7 @@ def test_each_retraction_of_its_own_stream_is_one_line_without_ids(tmp_path, mon
         lines.append((event, detail)), real(event, detail, *a, **k)))
     aid, path, now = _opened_case(tmp_path, monkeypatch, "defaults")
     _line(path, "Synthetic words of one message.", 200, message_id="msg_A")
-    _import(aid, path)
+    _import_before_the_rule(aid, path, monkeypatch)
     now[0] = BASE + 300
     _stream(aid, "msg_A", "Synthetic words of one message.")
     _import(aid, path)

@@ -12,19 +12,27 @@ from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_text import live_message_id
+from .message_text import LIVE_KEYLESS_KEYS, live_message_id
 from .message_writes import _facade, _latest_user_provenance, _next_revision, _row_with_its_head
 
 
 _live_message_id = live_message_id      # message_text: the importer reads the same id (R107)
 
 
-# How many un-keyed segments one turn may roll over to (see _live_target).
-_MAX_SEGMENTS = 64
+def _live_row_id(agent_id: str, backend_session_id: str, trace_id: str, item_key: str,
+                 block: int = 0) -> str:
+    """The live row of text block ``block`` of a keyed provider message (R108): the id the
+    import stores that block under, so the stream and the import name one row per block. Block 0
+    is the keyed live id; a key-less stream has one row (block is then ignored)."""
+    if item_key and block:
+        from .message_import_common import _identity_id
+        return _identity_id(agent_id, backend_session_id, trace_id, item_key, block)
+    return _live_message_id(agent_id, backend_session_id, trace_id, item_key)
+
 
 
 def _live_target(database, agent_id: str, backend_session_id: str,
-                 trace_id: str, item_key: str) -> str | None:
+                 trace_id: str, item_key: str, block: int = 0) -> str | None:
     """The row this live text belongs in, or None when it must not be written.
 
     A row stays the live row of its provider message until the message is
@@ -33,9 +41,9 @@ def _live_target(database, agent_id: str, backend_session_id: str,
     over to the next segment, so the next message of the turn gets a row of
     its own instead of rewriting the settled one.
     """
-    keys = [item_key] if item_key else [""] + [f"seg{n}" for n in range(1, _MAX_SEGMENTS)]
+    keys = [item_key] if item_key else list(LIVE_KEYLESS_KEYS)
     for key in keys:
-        msg_id = _live_message_id(agent_id, backend_session_id, trace_id, key)
+        msg_id = _live_row_id(agent_id, backend_session_id, trace_id, key, block)
         row = database.execute(
             "SELECT kind, source_file FROM messages WHERE message_id = ?",
             (msg_id,)).fetchone()
@@ -52,13 +60,14 @@ CLAUDE_META_REPLY = "No response requested."
 
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "", text: str,
-                                  item_key: str = "",
+                                  item_key: str = "", block: int = 0,
                                   _provider_genuine: bool = False,
                                   ) -> dict[str, Any] | None:
     """Store the current streamed assistant text of one provider message.
 
     One mutable row per message of the turn (``item_key``: Claude
-    ``message.id``, Codex item id), not one row per token. The row keeps its
+    ``message.id``, Codex item id), not one row per token; for a keyed message
+    streamed block by block, one row per text block (``block``, R108). The row keeps its
     id for good: ``mark_live_message_final`` settles it, and the transcript
     import adopts it in place (store_transcript_turns) instead of deleting it.
     """
@@ -98,7 +107,7 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         ).fetchone()
         if active is None or (active["trace_id"] or "") != trace_id:
             return None
-    msg_id = _live_target(database, agent_id, backend_session_id, trace_id, item_key)
+    msg_id = _live_target(database, agent_id, backend_session_id, trace_id, item_key, block)
     if msg_id is None:
         return None
     if skip:
@@ -182,6 +191,12 @@ def _insert_live_message_atomic(
             if active is None or (active["trace_id"] or "") != trace_id:
                 database.execute("ROLLBACK")
                 return False, 0, False
+        if database.execute("SELECT 1 FROM messages WHERE message_id=?", (msg_id,)).fetchone():
+            # The row came to be after _live_target looked (R108): the import stored the
+            # message's first block under this id, so the message is settled and this write is
+            # refused; or another write of the stream made it first. Either way, nothing here.
+            database.execute("ROLLBACK")
+            return False, 0, False
         revision = _next_revision(database)
         # A row an earlier turn left unfinished (still live, its turn
         # interrupted or failed before the transcript landed) goes; this turn's
@@ -290,14 +305,14 @@ def _update_live_message_atomic(
 
 
 def mark_live_message_final(*, agent_id: str, backend_session_id: str,
-                            trace_id: str = "", item_key: str = "") -> bool:
+                            trace_id: str = "", item_key: str = "", block: int = 0) -> bool:
     """The provider message finished: the row stops being live, in place.
 
     It keeps its id and position; the transcript import later fills in the
     durable copy under the same id.
     """
     database = conn()
-    msg_id = _live_message_id(agent_id, backend_session_id, trace_id, item_key)
+    msg_id = _live_row_id(agent_id, backend_session_id, trace_id, item_key, block)
     database.execute("BEGIN IMMEDIATE")
     try:
         revision = _next_revision(database)
