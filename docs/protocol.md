@@ -608,7 +608,8 @@ The response then adds `engine_fallback`:
 handed, or `"detected"`). Otherwise it answers `422`
 `{"error": "language_set_unsupported", "message", "engine", "languages", "engines", "reasons"}`,
 where `engines` are the engines that can take a set and `reasons` says in words why none of the
-owner's engines could take over: show `message`, it says what to change. A
+owner's engines could take over (the Host's own engine being off or unavailable is one such
+reason, never a 500): show `message`, it says what to change. A
 recording is never sent to a provider the owner did not choose for transcription.
 
 In a group call (feature `call_transcription_policy`), a clip captured for a

@@ -397,8 +397,19 @@ def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: byte
         own_refusal = "the Host's own engine already failed for this recording"
     if not own_refusal:
         log("sttLanguageSetFallback", f"session={focus or '-'} {engine} -> server-default")
-        text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
-        return text, ends_terminal, dur, "server-default", "detected"
+        loaded = getattr(stt, "load_done", None)
+        if loaded is not None and not loaded.is_set():
+            raise STTModelLoadingError("transcription model loading")
+        try:
+            text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
+            return text, ends_terminal, dur, "server-default", "detected"
+        except (STTBusyError, STTModelLoadingError):
+            raise                                   # already typed: 429, 503
+        except Exception as e:  # noqa: BLE001 - off, not installed, not loaded, failing
+            # The own engine is off or unavailable: the recording cannot be heard as
+            # configured, which is the typed refusal with words, never a bare 500.
+            log_exception("sttLanguageSetOwnEngineFail", e, detail=engine)
+            own_refusal = f"the Host's own engine could not hear it: {str(e)[:200]}"
     log("sttLanguageSetRefused", f"session={focus or '-'} {engine} languages={','.join(languages)}"
         f" own={own_refusal}")
     raise stt_providers.LanguageSetRefused(engine=engine, languages=languages,
