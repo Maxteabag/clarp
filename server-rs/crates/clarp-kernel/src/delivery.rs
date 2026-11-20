@@ -623,6 +623,7 @@ mod tests {
             origin,
             admission,
             at_ms: 1_000,
+            coordination: None,
         }
     }
 

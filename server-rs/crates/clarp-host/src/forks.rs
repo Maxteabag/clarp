@@ -378,6 +378,7 @@ mod tests {
             turn: None,
             tools,
             commentary: false,
+            coordination: None,
         }
     }
 

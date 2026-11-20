@@ -1132,6 +1132,7 @@ pub fn previewed(version: &Versioned) -> bool {
         Entry::Message(message) => by_hand && !message.text.is_empty(),
         Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
         Entry::Notice(notice) => !notice.text.is_empty(),
+        Entry::Note(note) => !note.text.is_empty(),
         Entry::Imported(imported) => {
             let row = &imported.row;
             let said = row["text"].as_str().is_some_and(|text| !text.is_empty());
@@ -1313,6 +1314,13 @@ pub fn row(version: &Versioned) -> Value {
             row["text"] = json!(notice.text);
             row["trace_id"] = json!(notice.trace_id.clone().unwrap_or_default());
         }
+        // What the agent left for its user: an ordinary reply to every app, kind `note`.
+        Entry::Note(note) => {
+            row["kind"] = json!(clarp_kernel::coordination::NOTE_KIND);
+            row["origin"] = json!(clarp_kernel::coordination::NOTE_ORIGIN);
+            row["text"] = json!(note.text);
+            row["trace_id"] = json!(note.trace_id.clone().unwrap_or_default());
+        }
         // Served as it came, above.
         Entry::Imported(_) => {}
         // Never rows of their own: they are told on the row they belong to.
@@ -1489,6 +1497,7 @@ fn preview(version: &Versioned) -> String {
         Entry::Message(message) => (true, message.text.as_str()),
         Entry::Reply(reply) => (false, reply.text.as_str()),
         Entry::Notice(notice) => (false, notice.text.as_str()),
+        Entry::Note(note) => (false, note.text.as_str()),
         Entry::Tool(call) => (false, call.name.as_str()),
         Entry::Imported(imported) => (
             imported.row["role"] == "user",
@@ -1883,6 +1892,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         };
         let listed = ToolCall {
             id: "toolu_1".to_string(),
@@ -2164,6 +2174,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         }
     }
 
@@ -2717,6 +2728,7 @@ mod tests {
             cost_so_far: None,
             total: None,
             limits: None,
+            note_count: 0,
         };
         let asked = |origin: Origin| {
             let message = Message {

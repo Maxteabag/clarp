@@ -225,6 +225,13 @@ pub enum TurnEvent {
         #[serde(default, skip_serializing_if = "Admission::is_queue")]
         admission: Admission,
         at_ms: i64,
+        /// The message is another agent addressing this one (coordination between agents): the
+        /// sender's agent id, empty for an agent of a peer Host. Absent: the user's, as every
+        /// acceptance written before the mark was kept reads. Decided once, at the send, and
+        /// written in the same item as the acceptance, which is then found by its key
+        /// (`c-<turn>`): no restart falls between the two, and nothing loosens it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        coordination: Option<String>,
     },
     Started {
         at_ms: i64,
@@ -422,6 +429,7 @@ impl Queued {
             origin: origin.clone(),
             admission,
             at_ms,
+            coordination: None,
         };
         (
             Self {
@@ -752,6 +760,7 @@ impl Turn {
                 origin,
                 admission,
                 at_ms,
+                ..
             } => Ok(Self::Queued(
                 Queued::accept(*turn, *message_seq, origin.clone(), *admission, *at_ms).0,
             )),

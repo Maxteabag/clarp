@@ -36,7 +36,7 @@ use clarp_kernel::agent::{Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{
-    Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Notice, Reply, ToolCall,
+    Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Note, Notice, Reply, ToolCall,
     ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
@@ -48,7 +48,7 @@ use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
-use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind};
+use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind, trace_key};
 use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
 use clarp_kernel::recovery;
@@ -598,6 +598,7 @@ impl LiveTurn {
             per_turn_cost: self.per_turn_cost,
             cost: self.cost,
             cost_before: self.cost_before,
+            notes: 0,
         }
     }
 }
@@ -680,6 +681,69 @@ pub struct Actor {
     shown_turn: Option<(TurnId, String)>,
     /// The events of it that nobody has taken yet.
     shown_events: Vec<serde_json::Value>,
+    /// How many notes for the user the newest turn that left one has left: its number and the
+    /// count, kept as they are written, for its end ([`TurnEnd::note_count`]).
+    turn_notes: (u64, u32),
+}
+
+/// Which message a trace is of: its id, sender and origin.
+fn trace_owner_of(message: &Message) -> TraceOwner {
+    TraceOwner {
+        id: message.id.clone(),
+        sender: message
+            .sender
+            .as_ref()
+            .map(|sender| sender.agent_id.clone())
+            .unwrap_or_default(),
+        origin: message.origin.name().to_string(),
+    }
+}
+
+/// How many notes a turn has left, as `turn_notes` keeps them.
+fn notes_of(kept: (u64, u32), turn: TurnId) -> u32 {
+    if kept.0 == turn.0 { kept.1 } else { 0 }
+}
+
+/// How a send stands, as the Host decided at the send: whether it is another agent addressing
+/// this one, and whether its caller named its trace.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Marks {
+    /// Another agent's message: its id, empty for an agent of a peer Host. `None`: the user's.
+    pub coordination: Option<String>,
+    /// The caller named the trace (else the Host minted it): a trace another message of this
+    /// agent has is refused.
+    pub trace_named: bool,
+}
+
+/// A send refused: the trace it names belongs to another message of the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceTaken;
+
+/// The words a send is refused with whose trace another message has (409), as the Python Host
+/// says them.
+pub const TRACE_TAKEN: &str = "trace_id already belongs to another message; send without \
+                               trace_id (the Host names one) or with a new one";
+
+/// Which message a trace belongs to, as [`kind::TRACE`] keeps it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct TraceOwner {
+    id: String,
+    #[serde(default)]
+    sender: String,
+    origin: String,
+}
+
+/// What became of a note.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Noted {
+    /// Written now, as the row with this id, in the turn's trace.
+    Written { id: String, trace_id: String },
+    /// The agent had it already, with the same words: nothing is written or told again.
+    Again { id: String, trace_id: String },
+    /// The agent has a note under this id with other words.
+    OtherWords,
+    /// The turn does not run (any more).
+    NotRunning,
 }
 
 /// What a turn that waits for an account says of itself to those who watch.
@@ -958,6 +1022,8 @@ struct Facts {
     per_turn_cost: Option<u64>,
     cost: Option<u64>,
     cost_before: Option<u64>,
+    /// How many notes the turn left for its user.
+    notes: u32,
 }
 
 /// What the user's compaction whose turn ended in this batch did, in the same write: from the
@@ -994,6 +1060,7 @@ fn closing(batch: &mut Batch<'_>, turn: TurnId, closes: &str, facts: Facts) -> O
     compaction_said(batch, turn, &facts);
     let ended = batch.agent().last().filter(|last| last.id == turn)?;
     let mut end = TurnEnd::of(ended, closes)?;
+    end.note_count = facts.notes;
     end.trace_id = facts.trace_id;
     end.model = facts.model;
     end.tokens_in = facts.tokens.map(|(tokens_in, _)| tokens_in);
@@ -1252,6 +1319,7 @@ impl Actor {
             unstored_changes: 0,
             shown_revision: 0,
             remembered: Remembered::default(),
+            turn_notes: (0, 0),
         };
         actor.open_goal_ledger(now_ms)?;
         actor.recover_imported_accounts(older_imports, now_ms)?;
@@ -1276,6 +1344,17 @@ impl Actor {
         actor.write_lines(&cut_off, now_ms)?;
         let mut out = Outputs::default();
         out.changed.speech = actor.speech.next().is_some();
+        // The notes the live turn has left so far, for its end: read from its own items, never
+        // from the conversation before it.
+        let noting = match actor.recorder.agent().live() {
+            Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq)),
+            Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq)),
+            Some(Turn::Parked(turn)) => Some((turn.id, turn.message_seq)),
+            _ => None,
+        };
+        if let Some((turn, message_seq)) = noting {
+            actor.turn_notes = (turn.0, actor.notes_since(turn, message_seq)?);
+        }
         let live = match actor.recorder.agent().live() {
             Some(Turn::Starting(turn)) => Some((turn.id, turn.message_seq, turn.attempt, true)),
             Some(Turn::Running(turn)) => Some((turn.id, turn.message_seq, turn.attempt, false)),
@@ -1787,6 +1866,30 @@ impl Actor {
             },
             None => Standing::Unknown,
         })
+    }
+
+    /// Whether the turn answers another agent: that agent's id, empty for a peer Host's.
+    /// `None`: the user's turn. One look by key.
+    pub fn mark(&self, turn: u64) -> Result<Option<String>, ActorError> {
+        conversation::mark_of(self.recorder.log(), turn)
+    }
+
+    /// How many notes the turn left after its message, read from the notes alone.
+    fn notes_since(&self, turn: TurnId, message_seq: Seq) -> Result<u32, ActorError> {
+        let mut after = message_seq;
+        let mut count = 0;
+        loop {
+            let items = self
+                .recorder
+                .log()
+                .read_after(after, Kinds::only(kind::AGENT_NOTE), 256)?;
+            let Some(last) = items.last() else {
+                return Ok(count);
+            };
+            after = last.seq;
+            let ours = items.iter().filter(|item| item.turn == Some(turn.0)).count();
+            count += u32::try_from(ours).unwrap_or(u32::MAX);
+        }
     }
 
     /// The trace of this turn, as its rows carry it, when it is the agent's running turn now
@@ -2607,7 +2710,41 @@ impl Actor {
         admission: Admission,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        self.take(message, admission, Vec::new(), None, now_ms)
+        self.take(message, admission, Vec::new(), None, &Marks::default(), now_ms)
+    }
+
+    /// Takes a message for the agent as the Host decided it at the send: another agent's
+    /// (its turn is marked so, in the same item as its acceptance) or the user's, and with a
+    /// trace its caller named, which must be no other message's. A send again of the same
+    /// message (the same id, sender and origin) is the same message.
+    pub fn send_marked(
+        &mut self,
+        message: &Message,
+        admission: Admission,
+        marks: &Marks,
+        now_ms: i64,
+    ) -> Result<Result<(Sent, Outputs), TraceTaken>, ActorError> {
+        if marks.trace_named
+            && let Some(owner) = self.trace_owner(message.trace_id.as_deref())?
+            && owner != trace_owner_of(message)
+        {
+            return Ok(Err(TraceTaken));
+        }
+        self.take(message, admission, Vec::new(), None, marks, now_ms)
+            .map(Ok)
+    }
+
+    /// The message a trace belongs to, by one look by key.
+    fn trace_owner(&self, trace: Option<&str>) -> Result<Option<TraceOwner>, ActorError> {
+        let Some(trace) = trace.filter(|trace| !trace.is_empty()) else {
+            return Ok(None);
+        };
+        let Some(stored) = self.recorder.log().find(&trace_key(trace))? else {
+            return Ok(None);
+        };
+        serde_json::from_slice(&stored.body)
+            .map(Some)
+            .map_err(|error| ActorError::Corrupt(format!("log item {}: {error}", stored.seq)))
     }
 
     /// File the Host's opening reservation in the same message as the
@@ -2619,7 +2756,14 @@ impl Actor {
         reservation: serde_json::Value,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        self.take(message, admission, Vec::new(), Some(reservation), now_ms)
+        self.take(
+            message,
+            admission,
+            Vec::new(),
+            Some(reservation),
+            &Marks::default(),
+            now_ms,
+        )
     }
 
     /// Tells the agent something of the Host's own, and writes what belongs with it in the
@@ -2635,7 +2779,8 @@ impl Actor {
     ) -> Result<(Sent, Outputs), ActorError> {
         let mut written = self.written(kept, now_ms)?;
         let items = std::mem::take(&mut written.items);
-        let (sent, mut out) = self.take(message, admission, items, None, now_ms)?;
+        let (sent, mut out) =
+            self.take(message, admission, items, None, &Marks::default(), now_ms)?;
         if sent.duplicate {
             // The message is there already; what belongs with it has still to be written.
             return Ok((sent, self.keep(kept, now_ms)?));
@@ -2649,10 +2794,21 @@ impl Actor {
         &mut self,
         message: &Message,
         admission: Admission,
-        with: Vec<NewItem>,
+        mut with: Vec<NewItem>,
         reservation: Option<serde_json::Value>,
+        marks: &Marks,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
+        // The first message of a trace owns it: a send that names it later is found by key.
+        if let Some(trace) = message.trace_id.as_deref().filter(|trace| !trace.is_empty())
+            && self.recorder.log().find(&message.id)?.is_none()
+            && self.trace_owner(Some(trace))?.is_none()
+        {
+            let owner = serde_json::to_vec(&trace_owner_of(message)).map_err(|error| {
+                ActorError::Corrupt(format!("a trace could not be written: {error}"))
+            })?;
+            with.push(NewItem::new(kind::TRACE, now_ms, owner).keyed(&trace_key(trace)));
+        }
         let encoded = if let Some(reservation) = reservation {
             serde_json::to_value(message).and_then(|mut row| {
                 row["_call_opening"] = reservation;
@@ -2670,6 +2826,7 @@ impl Actor {
                 body,
                 origin: message.origin.clone(),
                 admission,
+                coordination: marks.coordination.clone(),
             },
             with,
             now_ms,
@@ -2851,6 +3008,60 @@ impl Actor {
             ..Outputs::default()
         };
         Ok((true, out))
+    }
+
+    /// Leaves a note for the user from the turn `turn` of the agent, under the row id `id`
+    /// (`note-<agent>-<note id>`): a row of the conversation in the turn's trace, always shown.
+    /// Only while that turn runs ([`Actor::running_trace`]). A note the agent has under the id
+    /// already is the same note when its words are the same, and refused otherwise. Nothing
+    /// of the conversation is read but by key: the turn's state, and the id.
+    pub fn leave_note(
+        &mut self,
+        turn: u64,
+        id: &str,
+        text: &str,
+        now_ms: i64,
+    ) -> Result<(Noted, Outputs), ActorError> {
+        let Some(trace) = self.running_trace(turn)? else {
+            return Ok((Noted::NotRunning, Outputs::default()));
+        };
+        if let Some(stored) = self.recorder.log().find(id)? {
+            let again = match Entry::from_item(&stored).map_err(|error| {
+                ActorError::Corrupt(format!("log item {}: {error}", stored.seq))
+            })? {
+                Some(Entry::Note(note)) if note.text == text => Noted::Again {
+                    id: id.to_string(),
+                    trace_id: note.trace_id.unwrap_or_default(),
+                },
+                _ => Noted::OtherWords,
+            };
+            return Ok((again, Outputs::default()));
+        }
+        let note = Entry::Note(Note {
+            id: id.to_string(),
+            turn,
+            text: text.to_string(),
+            trace_id: Some(trace.clone()).filter(|trace| !trace.is_empty()),
+        });
+        let mut batch = self.recorder.batch();
+        batch.item(written(&note, now_ms)?);
+        batch.commit()?;
+        self.unstored_changes = 0;
+        self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)) + 1);
+        let out = Outputs {
+            changed: Changed {
+                conversation: true,
+                ..Changed::default()
+            },
+            ..Outputs::default()
+        };
+        Ok((
+            Noted::Written {
+                id: id.to_string(),
+                trace_id: trace,
+            },
+            out,
+        ))
     }
 
     /// Ends the live turn and holds the mailbox, as this actor's claim and for no reason given.
@@ -3204,7 +3415,8 @@ impl Actor {
         }
         // What the agent had written and nobody stored is kept: the user saw it.
         let unfinished = self.drafts().to_vec();
-        let facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
+        let mut facts = self.live.as_ref().map(LiveTurn::facts).unwrap_or_default();
+        facts.notes = notes_of(self.turn_notes, turn);
         let (message_id, origin) = self
             .live
             .as_ref()
@@ -3583,6 +3795,7 @@ impl Actor {
                 trace_id: message.trace_id,
                 gauge: self.remembered.context_tokens,
                 backend: self.backend.id(),
+                notes: notes_of(self.turn_notes, turn),
                 ..Facts::default()
             };
             let mut batch = self.recorder.batch();
@@ -3935,7 +4148,7 @@ impl Actor {
             }
             batch.item(written(&notice, now_ms)?);
         }
-        if let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts()) {
+        if let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() }) {
             cut_off(
                 &mut batch,
                 &mut live.calls,
@@ -4092,8 +4305,7 @@ impl Actor {
                             batch.item(written(&marker, t)?);
                         }
                         if failed
-                            && let Some(end) =
-                                closing(&mut batch, turn, &live.last_row, live.facts())
+                            && let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() })
                         {
                             batch.item(written(&end, t)?);
                         }
@@ -4242,7 +4454,7 @@ impl Actor {
                             }
                             if ended
                                 && let Some(end) =
-                                    closing(&mut batch, turn, &live.last_row, live.facts())
+                                    closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() })
                             {
                                 cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
                                 batch.item(written(&end, t)?);
@@ -4396,8 +4608,7 @@ impl Actor {
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
-                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
-                {
+                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() }) {
                     cut_off(
                         &mut batch,
                         &mut live.calls,

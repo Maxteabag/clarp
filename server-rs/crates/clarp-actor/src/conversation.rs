@@ -15,8 +15,9 @@
 use std::collections::HashMap;
 
 use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
-use clarp_kernel::journal::kind;
-use clarp_kernel::turn::{Origin, left_out_of_chats};
+use clarp_kernel::agent::AgentEvent;
+use clarp_kernel::journal::{coordination_key, kind};
+use clarp_kernel::turn::{Origin, TurnEvent, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, Seq};
 
 use crate::ActorError;
@@ -71,6 +72,9 @@ pub struct Versioned {
     pub tools: Vec<ToolCall>,
     /// Tool work came after this reply in the same turn: it was said along the way.
     pub commentary: bool,
+    /// The turn it belongs to answers another agent: that agent's id, empty for an agent of a
+    /// peer Host. `None`: the user's turn, or no turn.
+    pub coordination: Option<String>,
 }
 
 impl Versioned {
@@ -85,6 +89,7 @@ impl Versioned {
             turn: None,
             tools: Vec::new(),
             commentary: false,
+            coordination: None,
         }
     }
 }
@@ -163,11 +168,29 @@ fn corrupt(item: &Item, error: serde_json::Error) -> ActorError {
     ))
 }
 
+/// Whether a turn answers another agent: its acceptance, found by its key when it was marked
+/// so. One look by key, whatever the size of the conversation.
+pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorError> {
+    let Some(stored) = log.find(&coordination_key(turn))? else {
+        return Ok(None);
+    };
+    let event: AgentEvent = serde_json::from_slice(&stored.body).map_err(|error| corrupt(&stored, error))?;
+    Ok(match event {
+        AgentEvent::Turn {
+            change: TurnEvent::Accepted { coordination, .. },
+            ..
+        } => coordination,
+        _ => None,
+    })
+}
+
 /// Reads rows as they are now: each with the parts that name it.
 struct Reader<'a> {
     log: &'a dyn AgentLog,
     /// How the turns asked about ended, and where in the log that is said.
     ends: HashMap<u64, Option<(TurnEnd, Seq)>>,
+    /// Whether the turns asked about answer another agent ([`mark_of`]).
+    marks: HashMap<u64, Option<String>>,
 }
 
 impl<'a> Reader<'a> {
@@ -175,7 +198,18 @@ impl<'a> Reader<'a> {
         Self {
             log,
             ends: HashMap::new(),
+            marks: HashMap::new(),
         }
+    }
+
+    /// Whether this turn answers another agent: looked up once per turn.
+    fn mark(&mut self, turn: u64) -> Result<Option<String>, ActorError> {
+        if let Some(known) = self.marks.get(&turn) {
+            return Ok(known.clone());
+        }
+        let found = mark_of(self.log, turn)?;
+        self.marks.insert(turn, found.clone());
+        Ok(found)
     }
 
     /// How this turn ended, when it has.
@@ -248,6 +282,9 @@ impl<'a> Reader<'a> {
                 newest = newest.max(stored.seq);
                 row.commentary = true;
             }
+        }
+        if let Some(turn) = row.turn_number {
+            row.coordination = self.mark(turn)?;
         }
         if let Some(turn) = row.turn_number
             && let Some((end, seq)) = self.end(turn)?
@@ -415,8 +452,9 @@ pub(crate) fn older(
     let mut entries = rows(log, &items, Place::First, which)?;
     // A reply being written is shown where its finished version will be: at the end.
     for draft in drafts {
-        let shown = draft.versioned();
+        let mut shown = draft.versioned();
         if which.keeps(&shown.entry) && !entries.iter().any(|known| known.entry.id() == draft.id) {
+            shown.coordination = mark_of(log, draft.turn)?;
             entries.push(shown);
         }
     }
@@ -498,8 +536,9 @@ pub(crate) fn after(
         let mut entries = rows(log, &items, Place::Newest, which)?;
         if !has_more {
             for draft in drafts {
-                let shown = draft.versioned();
+                let mut shown = draft.versioned();
                 if draft.revision > revision && which.keeps(&shown.entry) {
+                    shown.coordination = mark_of(log, draft.turn)?;
                     entries.push(shown);
                 }
             }

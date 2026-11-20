@@ -45,6 +45,9 @@ pub enum Command {
         message_seq: u64,
         origin: Origin,
         admission: Admission,
+        /// Another agent addresses this one: its id ("" for a peer Host's agent). `None`: the
+        /// user's ([`TurnEvent::Accepted`]).
+        coordination: Option<String>,
     },
     /// Take a waiting message back.
     Withdraw { turn: TurnId, by: String },
@@ -540,9 +543,17 @@ impl Agent {
                 message_seq,
                 origin,
                 admission,
+                coordination,
             } => {
                 let turn = TurnId(work.agent.next_turn);
-                let (_, accepted) = Queued::accept(turn, message_seq, origin, admission, now_ms);
+                let (_, mut accepted) =
+                    Queued::accept(turn, message_seq, origin, admission, now_ms);
+                if let TurnEvent::Accepted {
+                    coordination: mark, ..
+                } = &mut accepted
+                {
+                    *mark = coordination;
+                }
                 work.record(AgentEvent::Turn {
                     turn,
                     change: accepted,
@@ -1289,6 +1300,7 @@ mod tests {
                 message_seq,
                 origin: Origin::User,
                 admission: Admission::Queue,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1301,6 +1313,7 @@ mod tests {
                     name: "schedule".to_string(),
                 },
                 admission: Admission::Background,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1311,6 +1324,7 @@ mod tests {
                 message_seq,
                 origin: Origin::User,
                 admission: Admission::Direct,
+                coordination: None,
             })
             .unwrap()
         }
@@ -1929,6 +1943,7 @@ mod tests {
             message_seq: 12,
             origin: Origin::User,
             admission: Admission::Later,
+            coordination: None,
         };
         assert_eq!(
             a.send(later).unwrap(),
@@ -2427,6 +2442,7 @@ mod tests {
                             message_seq: 100 + step,
                             origin,
                             admission,
+                            coordination: None,
                         }
                     }
                     3 => Command::Stop {
