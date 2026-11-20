@@ -6,7 +6,7 @@
 //! on this machine instead (`CLARP_PICTURE_ENDPOINT`), whose picture is made up. Nothing here
 //! is run unless the owner turned the making of pictures on: it spends.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use clarp_kernel::python;
@@ -165,7 +165,7 @@ fn scaled(raw: &[u8], scaler: &str, place: &std::path::Path) -> Option<Vec<u8>> 
         if std::fs::write(&from, raw).is_ok() {
             for quality in ["3", "6", "10"] {
                 let _ = std::fs::remove_file(&to);
-                let scaled = Command::new(scaler)
+                let scaled = crate::child::command(scaler)
                     .args(["-y", "-loglevel", "error", "-i"])
                     .arg(&from)
                     .args([
