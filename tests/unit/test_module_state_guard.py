@@ -205,6 +205,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcription_models.py", "_activation_retry_after"): THROTTLE,
     ("lib/transcription_models.py", "_tasks"): JOBS,
     ("lib/transcription_results.py", "_locks"): LOCKS,
+    ("lib/turn_queue.py", "_DEFERRED_LOGGED"): THROTTLE,
     ("lib/turn_dispatch.py", "_JANITOR_SPAWN_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_REQUEST_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_RUNTIME_CLIENT"): CLIENT,
