@@ -27,10 +27,13 @@ fn vectors() -> Vec<Value> {
 fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names_it() {
     let place = Place::new("source-trace");
     let (tokens, release) = (place.root.join("tokens"), place.root.join("release"));
-    std::fs::create_dir_all(&tokens).unwrap();
-    std::fs::create_dir_all(&release).unwrap();
+    let holds = place.root.join("holds");
+    for dir in [&tokens, &release, &holds] {
+        std::fs::create_dir_all(dir).unwrap();
+    }
     // A stand-in for Claude Code that writes down the token of the turn it runs in, under its
-    // agent's session. Told to hold, its turn runs until the test lets it go.
+    // agent's session. Where the test marked its session to hold (each tool words what it is
+    // given its own way), its turn runs until the test lets it go.
     let script = [
         "#!/bin/sh\nread -r message\n",
         &format!(
@@ -38,9 +41,11 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             tokens.display()
         ),
         &format!(
-            "case \"$message $*\" in *hold*) n=0; while [ ! -e \"{0}/$CLARP_SESSION\" ] && [ -d \"{0}\" ] \
-             && [ $n -lt 600 ]; do sleep 0.2; n=$((n+1)); done; rm -f \"{0}/$CLARP_SESSION\";; esac\n",
-            release.display()
+            "if [ -e \"{1}/$CLARP_SESSION\" ]; then n=0; while [ ! -e \"{0}/$CLARP_SESSION\" ] \
+             && [ -d \"{0}\" ] && [ $n -lt 600 ]; do sleep 0.2; n=$((n+1)); done; \
+             rm -f \"{0}/$CLARP_SESSION\"; fi\n",
+            release.display(),
+            holds.display()
         ),
         STAND_IN_ANSWERS,
     ]
@@ -71,6 +76,12 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
     // its rows carry.
     let turn = |session: &str, id: &str, hold: bool| -> (String, String) {
         let before = token_of(session);
+        let marked = holds.join(session);
+        if hold {
+            std::fs::write(&marked, "").unwrap();
+        } else if marked.exists() {
+            std::fs::remove_file(&marked).unwrap();
+        }
         let text = if hold { "hold on" } else { "done soon" };
         host.send(session, text, id);
         wait_for("the turn's token", || {
