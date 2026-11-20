@@ -332,6 +332,22 @@ async fn serve(config: Config) -> Result<(), String> {
     app.calls.recover_bindings(&app).await.map_err(|e| e.0)?;
     app.mouth.bindings_ready.notify_one();
     clarp_host::calls::resume(&app);
+    let staging = app.clone();
+    tokio::spawn(async move {
+        let hour = std::time::Duration::from_secs(3600);
+        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + hour, hour);
+        loop {
+            tick.tick().await;
+            if staging
+                .ears
+                .sweep_model_staging(&staging.fleet)
+                .await
+                .is_err()
+            {
+                eprintln!("clarp-host: could not sweep orphaned transcription staging");
+            }
+        }
+    });
     let pruning = app.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));

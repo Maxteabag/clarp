@@ -36,7 +36,14 @@ fn resolve(
         directory.setting(languages::LANGUAGE_KEY),
         &app.ears.language,
     );
-    policy.resolve(languages::of_agent(&langs, who), &own, &global, requested)
+    let mut resolved = policy.resolve(languages::of_agent(&langs, who), &own, &global, requested);
+    if resolved.fields["engines"]["source"] == "global"
+        && app.ears.inventory.path(&policy.global).is_some()
+    {
+        resolved.order = vec![policy.global.clone()];
+        resolved.fields["engines"]["value"] = json!([policy.global]);
+    }
+    resolved
 }
 pub(crate) fn project(app: &App, calls: &clarp_kernel::calls::Calls, mut answer: Value) -> Value {
     let call = &answer["call"];

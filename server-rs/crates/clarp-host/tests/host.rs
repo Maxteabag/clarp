@@ -22997,10 +22997,6 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
     // What the Python Host registers and this Host has not built: refused in words.
     for (path, what) in [
         (
-            "/transcription-models/install",
-            "Installing a transcription model from an app is",
-        ),
-        (
             "/backend-auth/login",
             "Signing a tool in or out from an app is",
         ),

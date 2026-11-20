@@ -15,5 +15,6 @@ pub mod diagnostics;
 pub mod fcm;
 pub mod kv;
 pub mod log;
+pub mod model_download;
 pub mod testkit;
 pub mod usage;

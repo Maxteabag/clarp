@@ -2748,10 +2748,7 @@ async fn cancel_background_job(
             if app.fleet.computer_job(job_id).await?.is_none() {
                 return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
             }
-            app.fleet
-                .change_computer_job(command)
-                .await?
-                .map_err(|refusal| ApiError::new(StatusCode::BAD_REQUEST, refusal.to_string()))?
+            app.ears.installs.cancel(&app.fleet, command).await?
         }
     };
     let Some(job) = change.job else {

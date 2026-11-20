@@ -2296,7 +2296,7 @@ request: once nothing, twice an item, the chip counts it while Mike works, a thi
 closes it; failing again, archived, failing once more, discarded; a restart keeps them) and the wrong rules
 `tools/plants/janitor-attention.py`.
 
-**Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn. The install route answers 501 until installation from an app is built.
+**Installed transcription models.** The Linux catalog lists the five faster-whisper models and the two macOS rows. The Host checks its own registered paths for the configuration, tokenizer and model files. A regular clip or a call can select an installed variant by name. The default stays warm. One additional worker loads on demand and stays resident until a different variant replaces it, the model is removed or the Host stops. Default and variant share an inference turn. A request with a fallback gives another variant ten seconds to finish selection and inference. The final choice waits for that turn.
 
 The Host marks a managed model before deleting its folder. While marked it is hidden. A restart finishes pending deletions and clears the mark on a newly configured default. A stored inventory that cannot be parsed is preserved byte for byte under `records.unreadable` before the Host logs a single diagnostic and opens with an empty inventory. Store read or backup failures stop startup.
 
@@ -2322,6 +2322,25 @@ counts unreadable job records, logs one line, and preserves their bytes and thei
 computer registration under the same id replaces the unreadable record and logs the repair. The reference cases for
 generation receipts are in `computer-jobs.json`, and the wrong rules in
 `tools/plants/computer-jobs.py`.
+
+**Installing transcription models on Linux.** An explicit full-access POST to
+`/transcription-models/install` registers a computer-owned job and answers 202 with its generation
+and handle. Repeated requests join that job. Each supported catalog row fixes a repository and
+revision. The speech environment streams the snapshot into checked private staging; the child
+receives an open directory and verifies file lengths and digests. Partial files survive an
+interruption and may be resumed only by another Install. Admission reserves the unfilled part of
+each active download's limit and 256 MiB of disk headroom. The per-model limit is 125% of the
+catalog estimate.
+
+The Host owns the downloader process group. Cancellation closes its generation and stops that
+group. An interrupted installation becomes failed on reopening the Host; startup performs only
+local recovery. Publication records the staging directory identity before a no-replace rename.
+The generation's success, its inventory row and removal of its publication intent are one store
+transaction. If the Host stopped after rename but before commit, recovery restores the same inode
+to staging. Stale intent cannot move a replacement's files. Staging is cleaned on cancellation,
+removal and publication, and an orphan older than seven days is swept. The install changes the
+available models. The warm default remains the model named at Host installation. A newly installed
+variant is selectable by name or as the configured engine for clips.
 
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes

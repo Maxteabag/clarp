@@ -25,7 +25,7 @@ h2.workspace = true
 url.workspace = true
 http.workspace = true
 jiff.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["fs"] }
 pty-process.workspace = true
 ring.workspace = true
 rustls.workspace = true

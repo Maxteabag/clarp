@@ -591,6 +591,7 @@ enum Ask {
     },
     ChangeComputerJob {
         command: JobCommand,
+        writes: Vec<clarp_ports::kv::Write>,
         answer: Answer<Result<JobChange, ComputerJobRefusal>>,
     },
     ClaimJob {
@@ -1163,8 +1164,38 @@ impl FleetHandle {
         &self,
         command: JobCommand,
     ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
-        self.ask(|answer| Ask::ChangeComputerJob { command, answer })
-            .await
+        self.ask(|answer| Ask::ChangeComputerJob {
+            command,
+            writes: Vec::new(),
+            answer,
+        })
+        .await
+    }
+
+    /// Commit a successful generation together with its results. A cancelled, ended or
+    /// superseded generation cannot publish any of these records.
+    pub(crate) async fn finish_computer_job_with(
+        &self,
+        id: String,
+        generation: u64,
+        rows: Vec<(&'static str, String, Option<Vec<u8>>)>,
+    ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
+        let command = JobCommand::Finish {
+            id,
+            generation,
+            worker: clarp_kernel::jobs::Worker::none(),
+            failed: None,
+        };
+        let writes = rows
+            .into_iter()
+            .map(|(kind, key, value)| (shelf(kind), key, value))
+            .collect();
+        self.ask(|answer| Ask::ChangeComputerJob {
+            command,
+            writes,
+            answer,
+        })
+        .await
     }
 
     /// Gives a background job's id to an agent. A job's id is one name on the whole Host:
@@ -1568,8 +1599,12 @@ impl Fleet {
                 } => {
                     let _ = answer.send(Ok(self.computer_jobs.subscribe(id, generation)));
                 }
-                Ask::ChangeComputerJob { command, answer } => {
-                    let _ = answer.send(self.change_computer_job(command));
+                Ask::ChangeComputerJob {
+                    command,
+                    writes,
+                    answer,
+                } => {
+                    let _ = answer.send(self.change_computer_job(command, writes));
                 }
                 Ask::ClaimJob {
                     job_id,
