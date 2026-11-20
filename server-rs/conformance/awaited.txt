@@ -10,3 +10,4 @@
 # One line a difference: its id from the report, the reference's PR (a number), the branch that owes
 # the port (or its owner, until the branch is made), and what it is: the scenario first, as the
 # report names it.
+7ccd9f41b9e2  483  rebuild/compaction-outcome  who-is-there / http / [0].body.contract.host / changed: 107 -> 106: the Host's contract number, 107 on the Python Host with its PR 483, 106 here until the port
