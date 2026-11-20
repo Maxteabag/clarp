@@ -346,6 +346,63 @@ mod tests {
     use crate::unkept::at_the_port::place;
     use clarp_ports::blobs::BlobEngine as _;
 
+    // The message delegator admits one decision at a time. Enter at its speech
+    // effect to exercise two announcements that actually overlap.
+    #[tokio::test]
+    async fn concurrent_router_phrases_share_the_primary_and_choose_their_own_fallbacks() {
+        use axum::{Router, extract::OriginalUri, routing::post};
+        use std::sync::{Arc, Mutex as StdMutex};
+
+        let place = place("phrase-flight");
+        let mut app = place.app().await;
+        let mut config = (*app.config).clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        config.cartesia_endpoint = format!("{base}/primary");
+        config.deepgram_voice_endpoint = base;
+        std::fs::write(config.speech_keys.as_ref().unwrap(),
+            "[tts]\nprovider='cartesia'\nfallback='deepgram'\n[cartesia]\napi_key='fixture'\n[deepgram]\napi_key='fixture'\n").unwrap();
+        let calls = Arc::new(StdMutex::new(Vec::new()));
+        let seen = calls.clone();
+        let routes = Router::new().fallback(post(move |OriginalUri(uri): OriginalUri| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(uri.to_string());
+                if uri.path() == "/primary" {
+                    (axum::http::StatusCode::SERVICE_UNAVAILABLE, "declined")
+                } else {
+                    (axum::http::StatusCode::OK, "fallback audio")
+                }
+            }
+        }));
+        let serving = tokio::spawn(async move { axum::serve(listener, routes).await.unwrap() });
+        app.mouth = crate::voice::mouth().1.run(crate::voice::Works {
+            config: Arc::new(config),
+            fleet: app.fleet.clone(),
+            hub: app.hub.clone(),
+            clock: app.clock.clone(),
+        });
+        let press = |fallback: &str| clarp_kernel::router::flow::Say {
+            text: "Was that for me?".into(),
+            session: None,
+            phrase_key: String::new(),
+            voice_id: serde_json::json!({"cartesia":"same-primary","deepgram":fallback})
+                .to_string(),
+        };
+        let (one, two) = (press("flux-one"), press("flux-two"));
+        tokio::join!(
+            crate::router::say(&app, &one),
+            crate::router::say(&app, &two)
+        );
+        serving.abort();
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 3);
+        assert_eq!(calls[0], "/primary");
+        for voice in ["flux-one", "flux-two"] {
+            assert!(calls[1..].iter().any(|url| url.contains(voice)));
+        }
+    }
+
     #[tokio::test]
     async fn a_failed_phrase_record_never_commits_audio_or_evicts_a_kept_clip() {
         let place = place("router-phrase-keeps");
@@ -369,16 +426,16 @@ mod tests {
         let orphan = name(b"orphan");
         blobs.put(&orphan, b"orphan").unwrap();
         blobs.put("phrase-not-a-digest.mp3", b"other file").unwrap();
-        *place.refused.lock().unwrap() = Some(format!("read:{}", crate::fleet::shelf(KIND)));
+        place.refuse_reads(KIND);
         assert!(desk.lookup(store, &key("first"), text).await.is_none());
         assert_eq!(blobs.len(&orphan).unwrap(), Some(6));
         assert_eq!(place.said.lock().unwrap().len(), 1);
-        *place.refused.lock().unwrap() = None;
+        place.allow_reads();
         place.said.lock().unwrap().clear();
         desk.keep(store, key("first"), text.into(), b"kept").await;
         assert_eq!(blobs.len(&orphan).unwrap(), None);
         assert_eq!(blobs.len("phrase-not-a-digest.mp3").unwrap(), Some(10));
-        *place.refused.lock().unwrap() = Some(crate::fleet::shelf(KIND));
+        place.refuse_writes(Some(KIND));
         let mut announced = 0;
         desk.deliver(
             store,
@@ -407,7 +464,7 @@ mod tests {
         assert_eq!(desk.lookup(store, &key("third"), text).await, None);
         assert_eq!(place.said.lock().unwrap().len(), 1);
         assert!(place.said.lock().unwrap()[0].contains("router-phrase"));
-        *place.refused.lock().unwrap() = None;
+        place.refuse_writes(None);
         desk.keep(store, key("second"), text.into(), b"valid").await;
         assert_eq!(
             Desk::default().lookup(store, &key("second"), text).await,
