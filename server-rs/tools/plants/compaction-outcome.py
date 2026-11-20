@@ -51,6 +51,8 @@ PLANTS = [
     (K, 'vectors', 'a stopped compaction is said in the words of one that ended', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "stopped"),', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "settled"),'),
     (K, 'vectors', 'one taken back is said in other words', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped before it began";', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped";'),
     (K, 'vectors', 'a failure is told in the tool\'s raw words', '            outcome(NOT_COMPACTED, gauge, None, false, &told.row)', '            outcome(NOT_COMPACTED, gauge, None, false, reason)'),
+    (K, 'vectors', 'a failure without the tool\'s word did not compact', '            if !concluded && kind != failures::NOT_STARTED {', '            if concluded && kind != failures::NOT_STARTED {'),
+    (K, 'vectors', 'a tool the Host never started may have compacted', '            if !concluded && kind != failures::NOT_STARTED {', '            if !concluded {'),
     (K, 'vectors', 'a tool that ended without a word did not compact', '        Outcome::Interrupted { .. } => outcome(UNKNOWN,', '        Outcome::Interrupted { .. } => outcome(NOT_COMPACTED,'),
     # The agent's state: one outcome owed for the user's compaction, the last kept.
     (A, 'agent', 'every turn owes an outcome', '        if matches!(&ended.origin, Origin::Trigger { name } if name == COMPACTION) {', '        if !ended.origin.name().is_empty() {'),
@@ -60,6 +62,8 @@ PLANTS = [
     (A, 'agent', 'an outcome nothing owes is in the log', '                if self.compaction_owed.as_ref().map(|owed| owed.id) != Some(*turn) {\n                    return Err(IllegalTransition {', '                if self.compaction_owed.is_some() && self.compaction_owed.is_none() {\n                    return Err(IllegalTransition {'),
     # What the tool's output says, and what the actor keeps of it.
     (B, 'host', "the tool's record is not told", '                if let Some(record) = clarp_kernel::compaction::boundary(event) {', '                if let Some(record) = clarp_kernel::compaction::boundary(&Value::Null) {'),
+    (B, 'host', "the tool's own result is not told", '                out.push(Signal::Concluded);\n', ''),
+    (R, 'host', "the tool's own result is not kept", '                            live.concluded = true;', '                            live.concluded = false;'),
     (R, 'host', "the turn's record is not kept", '            compacted: self.compacted,', '            compacted: None,'),
     (R, 'host', 'how full the conversation was is not kept', '            gauge: self.gauge,', '            gauge: None,'),
     (R, 'host', 'a Host that comes back does not read the record again', '                            compacted = compaction::newest(compacted, Some(record));', '                            let _ = record;'),

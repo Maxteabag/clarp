@@ -688,6 +688,7 @@ impl ClaudeInterpreter {
                     is_error: event["is_error"].as_bool().unwrap_or(false),
                     text: text_of(&event["result"]).to_string(),
                 });
+                out.push(Signal::Concluded);
             }
             "rate_limit_event" => {
                 let info = &event["rate_limit_info"];
@@ -1092,6 +1093,7 @@ mod tests {
                         | Signal::Usage { .. }
                         | Signal::Context { .. }
                         | Signal::Compacted(_)
+                        | Signal::Concluded
                         | Signal::Cost { .. }
                 )
             })
