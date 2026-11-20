@@ -165,6 +165,12 @@ fn computer_jobs_can_be_seen_and_cancelled_without_an_agent_across_restart() {
         );
     }
     let host = place.start_with_token("admin");
+    for unknown in ["claude-task:missing", "ordinary-missing"] {
+        assert_eq!(
+            host.ask("DELETE", &format!("/background-jobs/{unknown}"), None),
+            (404, json!({"error":"job not found"}))
+        );
+    }
     let path = format!("/background-jobs/{id}");
     let list = host.get("/background-jobs");
     let detail = host.get(&path);

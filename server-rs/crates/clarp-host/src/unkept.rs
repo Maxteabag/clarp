@@ -441,6 +441,7 @@ mod at_the_port {
             .change_computer_job(register("picture"))
             .await
             .unwrap()
+            .unwrap()
             .job
             .unwrap();
         let event: serde_json::Value =
@@ -450,19 +451,56 @@ mod at_the_port {
         assert_eq!(event["job"]["computer_id"], "fixture-computer");
         assert_eq!(event["change_revision"], registered.revision);
         let claim = |id: &str| fleet.claim_job(id.into(), "agent-fixture".into());
-        assert_eq!(claim("picture").await.unwrap(), Err("Computer".into()));
+        assert_eq!(
+            claim("picture").await.unwrap(),
+            Err(fleet::JobOwner::Computer)
+        );
         assert!(claim("agent-work").await.unwrap().is_ok());
-        assert!(
+        assert_eq!(
             fleet
                 .change_computer_job(register("agent-work"))
                 .await
-                .is_err()
+                .unwrap(),
+            Err(fleet::ComputerJobRefusal::AgentOwned {
+                id: "agent-work".into(),
+                agent_id: "agent-fixture".into()
+            })
+        );
+        assert_eq!(
+            fleet
+                .claim_job("agent-work".into(), "other".into())
+                .await
+                .unwrap(),
+            Err(fleet::JobOwner::Agent("agent-fixture".into()))
+        );
+        assert_eq!(
+            fleet
+                .change_computer_job(register("claude-task:missing"))
+                .await
+                .unwrap(),
+            Err(fleet::ComputerJobRefusal::Kernel(
+                clarp_kernel::jobs::JobRefusal::ReservedId
+            ))
+        );
+        assert_eq!(
+            fleet
+                .change_computer_job(JobCommand::SetLog {
+                    id: "picture".into(),
+                    generation: 1,
+                    path: "relative.log".into(),
+                    worker_cwd: String::new()
+                })
+                .await
+                .unwrap(),
+            Err(fleet::ComputerJobRefusal::Kernel(
+                clarp_kernel::jobs::JobRefusal::LogPathNotAbsolute("relative.log".into())
+            ))
         );
         let (agent, computer) = tokio::join!(
             claim("simultaneous"),
             fleet.change_computer_job(register("simultaneous"))
         );
-        assert_ne!(agent.unwrap().is_ok(), computer.is_ok());
+        assert_ne!(agent.unwrap().is_ok(), computer.unwrap().is_ok());
         *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
         let cancel = JobCommand::Cancel {
             id: "picture".into(),
@@ -478,12 +516,14 @@ mod at_the_port {
             .change_computer_job(cancel)
             .await
             .unwrap()
+            .unwrap()
             .job
             .unwrap();
         assert!(ended.status.is_terminal());
         let restarted = fleet
             .change_computer_job(register("picture"))
             .await
+            .unwrap()
             .unwrap()
             .job
             .unwrap();
@@ -552,7 +592,7 @@ mod at_the_port {
             b"private-corrupt-bytes"
         );
         *place.refused.lock().unwrap() = None;
-        fleet.change_computer_job(register).await.unwrap();
+        fleet.change_computer_job(register).await.unwrap().unwrap();
         assert_eq!(
             place.said.lock().unwrap()[1],
             "clarp-host: registration replaced an unreadable computer job record"
@@ -594,7 +634,11 @@ mod at_the_port {
         let wait = |generation| fleet.wait_computer_job_end(id.into(), generation);
         let limit = std::time::Duration::from_secs(2);
         tokio::time::timeout(limit, wait(1)).await.unwrap().unwrap(); // no such id
-        fleet.change_computer_job(register("first")).await.unwrap();
+        fleet
+            .change_computer_job(register("first"))
+            .await
+            .unwrap()
+            .unwrap();
         let mut old = Box::pin(wait(1));
         let mut another = Box::pin(wait(1));
         assert!(old.as_mut().now_or_never().is_none());
@@ -606,27 +650,36 @@ mod at_the_port {
                 text: "working".into(),
             })
             .await
+            .unwrap()
             .unwrap();
         let cancel = |generation| JobCommand::Cancel {
             id: id.into(),
             expected_generation: Some(generation),
             reason: "user_cancelled".into(),
         };
-        fleet.change_computer_job(cancel(2)).await.unwrap();
+        fleet.change_computer_job(cancel(2)).await.unwrap().unwrap();
         *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
         assert!(fleet.change_computer_job(cancel(1)).await.is_err());
         assert!(old.as_mut().now_or_never().is_none());
         *place.refused.lock().unwrap() = None;
-        fleet.change_computer_job(register("second")).await.unwrap();
+        fleet
+            .change_computer_job(register("second"))
+            .await
+            .unwrap()
+            .unwrap();
         tokio::time::timeout(limit, old).await.unwrap().unwrap();
         tokio::time::timeout(limit, another).await.unwrap().unwrap();
         tokio::time::timeout(limit, wait(1)).await.unwrap().unwrap(); // already superseded
         let mut current = Box::pin(wait(2));
         assert!(current.as_mut().now_or_never().is_none());
-        fleet.change_computer_job(cancel(2)).await.unwrap();
+        fleet.change_computer_job(cancel(2)).await.unwrap().unwrap();
         tokio::time::timeout(limit, current).await.unwrap().unwrap();
         tokio::time::timeout(limit, wait(2)).await.unwrap().unwrap(); // already terminal
-        fleet.change_computer_job(register("third")).await.unwrap();
+        fleet
+            .change_computer_job(register("third"))
+            .await
+            .unwrap()
+            .unwrap();
         let mut finished = Box::pin(wait(3));
         assert!(finished.as_mut().now_or_never().is_none());
         fleet
@@ -640,6 +693,7 @@ mod at_the_port {
                 failed: None,
             })
             .await
+            .unwrap()
             .unwrap();
         tokio::time::timeout(limit, finished)
             .await

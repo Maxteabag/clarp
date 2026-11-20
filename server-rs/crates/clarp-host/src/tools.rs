@@ -281,10 +281,9 @@ async fn agent_bg(app: &App, call: &ToolCall) -> ToolAnswer {
             {
                 Err(error) => return could_not(&error),
                 Ok(Err(owner)) => {
-                    let what = if owner == "Computer" {
-                        "owner"
-                    } else {
-                        "agent"
+                    let what = match owner {
+                        crate::fleet::JobOwner::Computer => "owner",
+                        crate::fleet::JobOwner::Agent(_) => "agent",
                     };
                     return ToolAnswer::said(
                         1,

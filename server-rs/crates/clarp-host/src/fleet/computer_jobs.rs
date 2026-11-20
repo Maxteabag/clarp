@@ -5,6 +5,31 @@ use clarp_kernel::jobs::{Job, JobBook, JobChange, JobCommand, JobRecord};
 
 const TABLE: &str = "kept.computer-jobs";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobOwner {
+    Agent(String),
+    Computer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComputerJobRefusal {
+    Kernel(clarp_kernel::jobs::JobRefusal),
+    AgentOwned { id: String, agent_id: String },
+}
+
+impl std::fmt::Display for ComputerJobRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Kernel(why) => std::fmt::Display::fmt(why, f),
+            Self::AgentOwned { id, .. } => {
+                write!(f, "job id already belongs to another owner: {id}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ComputerJobRefusal {}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct ComputerJob {
     pub job: Job,
@@ -100,31 +125,29 @@ impl Fleet {
     pub(super) fn change_computer_job(
         &mut self,
         command: JobCommand,
-    ) -> Result<JobChange, Unavailable> {
-        if matches!(command, JobCommand::Register { .. })
-            && self.jobs.contains_key(command.id().trim())
-        {
-            return Err(Unavailable(format!(
-                "job id already belongs to another owner: {}",
-                command.id()
-            )));
+    ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
+        let id = command.id().trim();
+        if let Some(agent_id) = self.jobs.get(id) {
+            return Ok(Err(ComputerJobRefusal::AgentOwned {
+                id: id.to_owned(),
+                agent_id: agent_id.clone(),
+            }));
         }
         let now = self.now_ms();
-        let mut change = self
-            .computer_jobs
-            .book
-            .decide(command, now, 0)
-            .map_err(|e| Unavailable(e.to_string()))?;
+        let mut change = match self.computer_jobs.book.decide(command, now, 0) {
+            Ok(change) => change,
+            Err(why) => return Ok(Err(ComputerJobRefusal::Kernel(why))),
+        };
         if let (Some(record), Some(job)) = (&mut change.record, &mut change.job) {
             let revision = self.works.revisions.next(now);
             record.job.revision = revision;
             job.revision = revision;
         }
         let Some(job) = &change.job else {
-            return Ok(change);
+            return Ok(Ok(change));
         };
         if change.record.is_none() && change.beat.is_none() {
-            return Ok(change);
+            return Ok(Ok(change));
         }
         let mut timeline = self
             .computer_jobs
@@ -169,6 +192,6 @@ impl Fleet {
         if let Some(beat) = &change.beat {
             self.computer_jobs.book.beat(beat);
         }
-        Ok(change)
+        Ok(Ok(change))
     }
 }

@@ -32,7 +32,7 @@ change(F, "http", [
 ])
 change(F, "store", [
     ('self.book.get(id).is_some()', 'self.book.get(id).is_none()'),
-    ('self.jobs.contains_key(command.id().trim())', '!self.jobs.contains_key(command.id().trim())'),
+    ('self.jobs.get(id)', 'self.jobs.get(id).filter(|_| false)'),
     ('self.computer_jobs.book.apply(record);', 'let _ = record;'),
     ('"background-job-updated"', '"job-updated"'),
     ('"change_revision":job.revision', '"change_revision":0'),
@@ -43,7 +43,7 @@ change(F, "store", [
 change("clarp-host/src/fleet.rs", "store", [
     ('if key == "server_id"', 'if key == "computer_id"'),
     ('if self.computer_jobs.contains(&job_id)', 'if !self.computer_jobs.contains(&job_id)'),
-    ('Ok(Err("Computer".into()))','Ok(Ok(()))'),
+    ('Ok(Err(JobOwner::Computer))','Ok(Ok(()))'),
 ])
 change(H, "http", [
     ('job.status.is_active() || job.updated_at_ms', 'job.status.is_terminal() || job.updated_at_ms'),
@@ -87,6 +87,12 @@ change(F, "wait", [
     ('*generation != job.generation || job.status.is_terminal()', '*generation != job.generation'),
     ('self.computer_jobs.notify_producers(job);', 'let _ = job;'),
     ('sender.send_replace(true)', 'sender.send_replace(false)'),
+])
+change(H, "http", [
+    ('app.fleet.computer_job(job_id).await?.is_none()', 'app.fleet.computer_job(job_id).await?.is_none() && false'),
+])
+change(F, "store", [
+    ('Ok(Err(ComputerJobRefusal::Kernel(why)))', 'Err(Unavailable(why.to_string()))'),
 ])
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
