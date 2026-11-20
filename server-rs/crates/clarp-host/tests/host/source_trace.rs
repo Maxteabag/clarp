@@ -62,6 +62,7 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         ("Ivy", "ivy", "claude"),
         ("Oak", "oak", "claude"),
         ("Gone", "gone", "claude"),
+        ("Stu", "stu", "claude"),
         ("Cody", "cody", "codex"),
     ] {
         let made = host.post(
@@ -215,15 +216,48 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         );
     }
     let_go("oak");
-    // Ivy's turn ends: its token names nothing any more (a job it started, publishing later).
+    // Ivy's turn completed normally and no newer turn has started: the empty text (a job it
+    // started, publishing later, names no turn). It is settled, not running.
     let_go("ivy");
+    assert_eq!(
+        host.state("ivy"),
+        "done",
+        "completed normally, and nothing newer runs"
+    );
     for kind in kinds {
-        note(
-            "the turn ended",
-            kind,
-            named(&publish(kind, Some(&ivy), None, first(kind)), &ivy_trace),
+        let shown = named(&publish(kind, Some(&ivy), None, first(kind)), &ivy_trace);
+        assert_eq!(
+            shown, "none",
+            "its turn completed normally and no newer turn has started"
         );
+        note("the turn ended", kind, shown);
     }
+    // Beside it, a turn the user stopped: the empty text too.
+    let (stu, _) = turn("stu", "s-1", true);
+    let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": "stu" })));
+    assert_eq!(status, 200);
+    wait_for("the stopped turn to end", || {
+        host.state("stu") == "interrupted"
+    });
+    let stopped = json!({ "session": "stu", "type": "document", "title": "Stu's card",
+                          "payload": { "content": "words" } });
+    let headers = [
+        ("Content-Type", "application/json"),
+        ("X-Clarp-Turn", stu.as_str()),
+    ];
+    let got = fetch(
+        &host,
+        &host.token,
+        "POST",
+        "/artifacts",
+        &headers,
+        stopped.to_string().as_bytes(),
+    );
+    let got: Value = serde_json::from_slice(&got.body).unwrap();
+    assert_eq!(
+        got["artifact"]["source_trace_id"], "",
+        "a stopped turn names nothing: {got}"
+    );
     // A newer turn of Ivy's runs: the older turn's token names nothing; what was published in
     // the older turn and is revised now keeps its trace.
     let (later, later_trace) = turn("ivy", "i-2", true);
