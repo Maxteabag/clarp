@@ -70,6 +70,21 @@ def test_the_per_client_minimum_keeps_a_platform_and_a_contract_or_0_for_never(m
     assert config._live_model_min_client("ios=75") == {} and len(lines) == 2
 
 
+@pytest.mark.parametrize("header, expected", [
+    ("desktop/1 contract=5", "gpt-live-1.1"),     # a name in the table and not in the constants: its number
+    ("desktop/1 contract=4", "gpt-live-1"),       # below that number
+    ("watch/1 contract=999", "gpt-live-1"),       # a name in neither: never
+    ("tv/1 contract=999", "gpt-live-1"),          # 0 in the table: never
+    ("ios/2986 contract=75", "gpt-live-1.1"),     # the constants still stand beside the table
+])
+def test_the_table_may_name_any_client(tmp_path, header, expected):
+    path = tmp_path / "config.toml"
+    path.write_text('[openai]\nlive_model = "gpt-live-1.1"\n[openai.live_model_min_client]\ndesktop = 5\ntv = 0\n')
+    cfg = config.load(path)
+    assert cfg.live_model_min_client == {"desktop": 5, "tv": 0}
+    assert live.model_for_client(header, cfg) == expected
+
+
 @pytest.mark.parametrize("header", ["ios/2986 contract=75", "ios/9999 contract=999999999"])
 def test_0_in_the_table_switches_that_client_off_and_no_other(tmp_path, header):
     path = tmp_path / "config.toml"
