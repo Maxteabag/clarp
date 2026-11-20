@@ -1693,6 +1693,26 @@ with a stand-in that does what the recording shows, and tried on the Host instal
 real tool on Sonnet (17 Nov, 16:37: from 31,381 tokens to 8,878, the row compacting meanwhile, the third
 turn knowing what the first two said; `docs/battle-test.md`).
 
+**What a compaction did** (20 Nov 2026). The Python Host's PR 483 (R148, contract 107, the feature
+`compaction_outcome`): an agent's row says what the user's last compaction of it did, from numbers
+(`last_compaction`: `null` until the first, then the outcome `compacted`, `not_compacted` or `unknown`,
+the sizes before and after, whether the size after is an estimate, why in words, the tool, and when).
+The rule is in the kernel (`clarp_kernel::compaction`): the Python Host's `decide_claude`, `outcome` and
+its reading of Claude Code's record (`compact_boundary`), held to their answers by vectors its own functions
+wrote (`tools/compaction-outcome-vectors.py`), and what a turn's end means for it here: the tool's record
+of the turn (its newest, where there were more) says it compacted, whatever ended the turn; without one, a
+turn that ended well or was stopped did not compact, one taken back before it began did not, one whose tool
+said it failed did not (in the words the chat shows of the failure), and one whose tool ended without a word
+may have, and is `unknown`. The size after is the tool's own number where its record says one, and no
+estimate; the Python Host says none until the next call. The agent's state owes one outcome when the turn
+of the user's compaction ends, and no other turn owes one, so a compaction the tool makes by itself within
+a turn says nothing of it; the actor writes the outcome in the same write as the turn's end (`Compacted`,
+an event of its own, never written again), and the state keeps the newest, through every later turn and
+every restart. A Host that comes back while the tool compacts reads the tool's output again from its
+beginning and says what it did. A compaction asked for while messages wait is refused in the Python Host's
+new words. Held by the kernel's tests, the Host's test of every ending (`tests/host/compaction_outcome.rs`,
+a restart in the middle of one included) and a list of wrong rules (`tools/plants/compaction-outcome.py`).
+
 **An agent whose user is with another raises its hand** (16 Nov 2026). The third thing found by reading
 what is on by default on the Python Host, and the one a user with several agents would have heard first:
 until this build every agent's spoken reply was announced to the apps the moment it was begun, whoever the
