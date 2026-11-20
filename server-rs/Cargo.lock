@@ -223,6 +223,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "toml",
+ "toml_edit",
  "tower",
  "ureq",
  "url",

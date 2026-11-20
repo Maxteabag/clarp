@@ -282,8 +282,11 @@ impl OwnerFile {
     /// The file as it is now. `None`: no file was named, it is not there, or what is in it
     /// is no TOML.
     pub fn read(&self) -> Option<Table> {
-        let text = std::fs::read_to_string(self.path.as_ref()?).ok()?;
-        text.parse::<Table>().ok()
+        self.read_text()?.parse::<Table>().ok()
+    }
+
+    pub(crate) fn read_text(&self) -> Option<String> {
+        std::fs::read_to_string(self.path.as_ref()?).ok()
     }
 
     /// The key of a provider of speech: what the owner's file has for it, else what this
