@@ -31,6 +31,12 @@ struct Tier {
     id: String,
     minted_names: Vec<String>,
     personalities: Vec<String>,
+    /// What the provider of pictures is asked for a contact's picture, with `{name}` and
+    /// `{detail}` in it, and the kinds of face that fill `{detail}`.
+    #[serde(default)]
+    portrait_template: String,
+    #[serde(default)]
+    portrait_varieties: Vec<String>,
 }
 
 fn tiers() -> &'static [Tier] {
@@ -143,6 +149,109 @@ pub fn personality(name: &str, tier: &str) -> &'static str {
     let digest = Sha256::digest(folded(name.trim()).as_bytes());
     let index = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) as usize;
     &spec.personalities[index % spec.personalities.len()]
+}
+
+/// The bounds of the making of a contact's picture, the Python Host's own numbers
+/// (`persona_avatar_generation.py`); nothing configures them here.
+pub mod picture {
+    /// At most this many pictures are begun in a rolling day on one computer, tries counted.
+    pub const DAILY_LIMIT: u32 = 20;
+    pub const DAILY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
+    /// A contact's picture is tried at most this many times.
+    pub const MAX_ATTEMPTS: u32 = 3;
+    /// How long a failed try waits before its contact's next launch may begin another: after
+    /// the first, then after every later one.
+    pub const RETRY_BACKOFF_MS: [i64; 2] = [5 * 60 * 1000, 30 * 60 * 1000];
+    /// A try that says nothing for this long is over.
+    pub const HEARTBEAT_TIMEOUT_MS: i64 = 5 * 60 * 1000;
+    /// What the provider's answer may be at most, the picture in it, and the picture kept.
+    pub const ANSWER_MOST: u64 = 32 * 1024 * 1024;
+    pub const MADE_MOST: usize = 20 * 1024 * 1024;
+    pub const KEPT_MOST: usize = 512_000;
+    /// The model a picture is asked of.
+    pub const MODEL: &str = "gpt-image-2";
+
+    /// A contact's picture as it was last tried, as the admission reads it: what its job
+    /// became (`queued`, `running`, `succeeded`, `failed`, `cancelled`), how many times it was
+    /// begun, and how long ago it ended where it ended.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Tried<'a> {
+        pub status: &'a str,
+        pub generation: u64,
+        pub ended_ago_ms: Option<i64>,
+    }
+
+    /// Whether a picture's job is begun now (`background_jobs.enqueue_computer_capped` as
+    /// `persona_avatar_generation` asks it), and as which try: one under way is not begun
+    /// again, nor one that was made; one that failed or was cancelled only while it was tried
+    /// fewer than [`MAX_ATTEMPTS`] times and its wait is over ([`RETRY_BACKOFF_MS`]); and none
+    /// where [`DAILY_LIMIT`] were begun in the last day on this computer (`begun_today`).
+    pub fn admitted(before: Option<Tried<'_>>, begun_today: u32) -> Option<u64> {
+        if let Some(tried) = before {
+            match tried.status {
+                "queued" | "running" | "succeeded" => return None,
+                _ => {}
+            }
+            if tried.generation >= u64::from(MAX_ATTEMPTS) {
+                return None;
+            }
+            let at = usize::try_from(tried.generation.max(1) - 1).unwrap_or(usize::MAX);
+            let wait = RETRY_BACKOFF_MS[at.min(RETRY_BACKOFF_MS.len() - 1)];
+            if tried.ended_ago_ms.is_some_and(|ago| ago < wait) {
+                return None;
+            }
+        }
+        if begun_today >= DAILY_LIMIT {
+            return None;
+        }
+        Some(before.map_or(1, |tried| tried.generation + 1))
+    }
+}
+
+/// What the provider of pictures is asked for a contact's picture
+/// (`persona_avatar_generation.prompt_for_persona`): the words of its tier (the one given,
+/// else its name's, else its tool's) with its name and one of the tier's kinds of face, by the
+/// first four bytes of the SHA-256 of its name without the letters' case. Nothing in it is the
+/// owner's but the name.
+pub fn portrait_prompt(name: &str, tier: &str, backend: &str) -> String {
+    let given = folded(tier.trim());
+    let tier = if !given.is_empty() {
+        given
+    } else if !personas::tier(name).is_empty() {
+        personas::tier(name).to_string()
+    } else {
+        tier_of_tool(backend).to_string()
+    };
+    let Some(spec) = tier_spec(&tier) else {
+        return String::new();
+    };
+    let detail = if spec.portrait_varieties.is_empty() {
+        ""
+    } else {
+        let digest = Sha256::digest(folded(name.trim()).as_bytes());
+        let index = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]) as usize;
+        spec.portrait_varieties[index % spec.portrait_varieties.len()].as_str()
+    };
+    // `{name}` and `{detail}` filled in one pass, as Python's `format` fills them: what is
+    // put in is not read again.
+    let mut filled = String::new();
+    let mut rest = spec.portrait_template.as_str();
+    while let Some(at) = rest.find('{') {
+        filled.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if let Some(after) = rest.strip_prefix("{name}") {
+            filled.push_str(name.trim());
+            rest = after;
+        } else if let Some(after) = rest.strip_prefix("{detail}") {
+            filled.push_str(detail);
+            rest = after;
+        } else {
+            filled.push('{');
+            rest = &rest[1..];
+        }
+    }
+    filled.push_str(rest);
+    filled
 }
 
 /// A persona as the pool reads it: its name, its voices as they are stored, and the tier its

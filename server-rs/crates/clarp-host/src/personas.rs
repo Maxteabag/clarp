@@ -74,6 +74,18 @@ async fn create(State(app): State<App>, body: Bytes) -> Result<Response, ApiErro
     let fetched = app.mouth.cartesia_known();
     let made = app.fleet.persona_write(None, said(&asked, voice), fetched);
     let persona = made.await?.map_err(refused)?;
+    // A persona made without a picture and without a symbol is asked one, unless the request
+    // says not to (`generate_avatar: false`); nothing waits for it.
+    let drawn = asked.get("generate_avatar") != Some(&Value::Bool(false));
+    let bare = persona["avatar_url"].as_str().unwrap_or("").is_empty()
+        && persona["avatar_symbol"].as_str().unwrap_or("").is_empty();
+    if drawn && bare {
+        let name = persona["name"].as_str().unwrap_or("").to_string();
+        let tier = text(&asked, "tier");
+        let backend = text(&asked, "backend");
+        let app = app.clone();
+        tokio::spawn(async move { crate::pictures::ask(&app, &name, &tier, &backend).await });
+    }
     Ok((StatusCode::CREATED, Json(json!({ "persona": persona }))).into_response())
 }
 
