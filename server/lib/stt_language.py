@@ -135,11 +135,12 @@ def agent_engines() -> dict[str, str]:
 
 
 def match(overrides: dict[str, str], agent: dict | None) -> str | None:
-    """The override for this agent row: by name, then persona, then session.
+    """The override for this agent row: by its id, then name, persona and session.
     The hearing path and the profile (voice_profile) both use this."""
     if not overrides or not agent:
         return None
-    for key in (agent.get("name"), agent.get("persona"), agent.get("session")):
+    # By the agent's id first (issue 476: settings keyed by agent_id), then as before.
+    for key in (agent.get("agent_id"), agent.get("name"), agent.get("persona"), agent.get("session")):
         if key and str(key).strip().lower() in overrides:
             return overrides[str(key).strip().lower()]
     return None
@@ -198,6 +199,21 @@ def validate_agent(value) -> str:
     return ",".join(codes)
 
 
+def _agent_ids_for(key: str) -> list[str]:
+    """The ids of the agents a written key names (persona or session), so a value saved
+    under a name also lands under each agent's id and is never shadowed by an older one."""
+    try:
+        from . import agents as agents_db
+        return [str(a["agent_id"]).lower() for a in agents_db.list_agents()
+                if key in {str(a.get("persona") or "").strip().lower(),
+                           str(a.get("session") or "").strip().lower(),
+                           str(a.get("agent_id") or "").strip().lower()}]
+    except Exception as exc:  # noqa: BLE001 - a save never fails on the lookup
+        from .log import log_exception
+        log_exception("sttAgentIdLookupFail", exc, detail=key)
+        return []
+
+
 def merge_agent_engines(value, *, is_valid) -> str:
     """Apply `{agent: engine id}` changes (empty or null removes one)."""
     if not isinstance(value, dict):
@@ -209,12 +225,16 @@ def merge_agent_engines(value, *, is_valid) -> str:
             raise ValueError("agent_engines keys must be agent names")
         if engine in (None, ""):
             merged.pop(key, None)
+            for agent_id in _agent_ids_for(key):
+                merged.pop(agent_id, None)
         elif not isinstance(engine, str) or not all(
                 is_valid(e.strip()) for e in engine.split(",") if e.strip()) \
                 or not engine.strip(" ,"):
             raise ValueError(f"unknown transcription engine: {engine}")
         else:
             merged[key] = ",".join(e.strip() for e in engine.split(",") if e.strip())
+            for agent_id in _agent_ids_for(key):
+                merged[agent_id] = merged[key]
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 
@@ -229,6 +249,10 @@ def merge_agent_languages(value) -> str:
             raise ValueError("agent_languages keys must be agent names")
         if code in (None, ""):
             merged.pop(key, None)
+            for agent_id in _agent_ids_for(key):
+                merged.pop(agent_id, None)
         else:
             merged[key] = validate_agent(code)
+            for agent_id in _agent_ids_for(key):
+                merged[agent_id] = merged[key]
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
