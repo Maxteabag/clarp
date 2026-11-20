@@ -10,7 +10,7 @@ RUNS = {
     'hearing-route': ['test', '--test', 'host', 'a_clip_is_heard_by_an_engine_over_the_network'],
     'native-fork': ['test', '--test', 'host', 'a_new_agent_begins_with_a_session_its_tool_kept'],
     'clip': ['test', '--test', 'host', 'what_an_agent_says_aloud_becomes_a_clip'],
-    'contract': ['test', '--test', 'host', 'render_spec'],
+    'contract': ['test', '--test', 'host', 'a_message_is_answered_and_the_apps_are_told'],
 }
 
 KERNEL = 'clarp-kernel/src/voice_profile.rs'
@@ -129,6 +129,11 @@ rules('clarp-host/src/wire.rs', 'clip', [
     ('The speech error reports only a generic reason', '"reason": reason,\n    });\n    if !provider.is_empty()', '"reason": "unknown",\n    });\n    if !provider.is_empty()'),
     ('The speech error loses its provider', 'told["provider"] = json!(provider);', 'told["provider"] = Value::Null;'),
     ('The speech error loses its turn trace', 'told["trace_id"] = json!(trace);', 'told["trace_id"] = Value::Null;'),
+])
+
+rules(EDGE, 'contract', [
+    ('The voice profile is advertised at the previous contract', '("voice_profile", 109)', '("voice_profile", 108)'),
+    ('Speech outcomes are advertised at the previous contract', '("speech_outcome", 109)', '("speech_outcome", 108)'),
 ])
 
 # Gemini's surface translation belongs to its provider adapter: the profile and resolver
