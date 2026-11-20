@@ -40,8 +40,9 @@ VOICE = "marin"
 # (exact platform name; absent = never); every other client runs on
 # BASELINE_LIVE_MODEL, the one every older app accepts. `[openai]
 # live_model_min_client` overrides per platform, as render_spec_min_client does.
-# iOS: the first build that accepts both names sends contract 75.
-AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75}
+# The first builds that accept both names: iOS sends contract 75; Android 29
+# (0.1.0, build 993). A header with a trailing blank names no client here.
+AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75, "android": 29}
 PROVIDER = "openai"
 PROTOCOL = 1
 

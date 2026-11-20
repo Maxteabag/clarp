@@ -130,17 +130,21 @@ CASES = [  # header, configured minimum override, the model the call runs on
     ("ios/2985 contract=74", {}, "gpt-live-1"),            # iOS below its minimum
     ("ios/2986 contract=75", {}, "gpt-live-1.1"),          # iOS at it
     ("ios/3001 contract=80", {}, "gpt-live-1.1"),          # and above
-    ("android/412 contract=28", {}, "gpt-live-1"),         # Android: unset = never
-    ("android/412 contract=28", {"android": 28}, "gpt-live-1.1"),   # until its owner names a number
+    ("android/992 contract=28", {}, "gpt-live-1"),         # Android below its minimum
+    ("android/993 contract=29", {}, "gpt-live-1.1"),       # Android at it (0.1.0, build 993)
+    ("android/992 contract=28", {"android": 28}, "gpt-live-1.1"),   # the configuration lowers a platform's number
+    ("ios/2986 contract=75", {"ios": 76}, "gpt-live-1"),   # or raises it
     ("desktop/9 contract=999", {}, "gpt-live-1"),          # another client name
     ("IOS/2986 contract=75", {}, "gpt-live-1"),            # the name is exact
     (None, {}, "gpt-live-1"),                              # no client name at all
     ("ios/2986", {}, "gpt-live-1"),                        # no contract
+    ("ios/2986 contract=75 ", {}, "gpt-live-1"),           # a trailing blank names no client here (the Rust
+    ("android/993 contract=29 ", {}, "gpt-live-1"),        # Host's door strips it: a registered difference)
 ]
 
 
-def test_ios_ships_its_number_and_android_none():
-    assert live.AGENT_LIVE_MODEL_MIN_CLIENT == {"ios": 75}
+def test_the_first_builds_that_accept_both_names():
+    assert live.AGENT_LIVE_MODEL_MIN_CLIENT == {"ios": 75, "android": 29}
 
 
 @pytest.mark.parametrize("header, minimum, expected", CASES)
@@ -151,7 +155,7 @@ def test_the_model_for_a_client(header, minimum, expected):
 
 @pytest.mark.parametrize("header", [h for h, _m, _e in CASES])
 def test_a_host_configured_back_to_gpt_live_1_runs_it_for_everyone(header):
-    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1", live_model_min_client={"android": 1})
+    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1", live_model_min_client={"desktop": 1})
     assert live.model_for_client(header, cfg) == "gpt-live-1"
 
 
@@ -214,6 +218,67 @@ def test_the_grant_for_1_1_differs_from_the_grant_for_1_in_the_model_only(sander
         {k: v for k, v in new.items() if k not in per_call | {"model"}}
     assert (new["provider"], new["voice"], new["opening_owner"]) == ("openai", "marin", "live")
     _reset()
+
+
+def _as_stored_before_the_upgrade(ring_id, *, answered):
+    """Make a ring look as the previous Host saved it: its snapshot names the model and its stored digest is that
+    snapshot's; answered before the upgrade, it also has no chosen model."""
+    from lib.agent_rings import _lock
+    with _lock:
+        records = rings._load()
+        ring = next(r for r in records if r["ring_id"] == ring_id)
+        ring["_live_snapshot"] = {**ring["_live_snapshot"], "model": "gpt-live-1"}
+        ring["_live_context_digest"] = live.digest(ring["_live_snapshot"])
+        if answered:
+            ring.pop("_live_model", None)
+        rings._save(records)
+        return ring["_live_context_digest"]
+
+
+def _run(grant, monkeypatch):
+    up = Upstream()
+    monkeypatch.setattr(sock, "_connect", lambda key: up)
+    monkeypatch.setattr(live, "device_ok", lambda principal: True)
+    h = Handler()
+    _serve(h)
+    h.send(_join(grant))
+    _wait(lambda: "agent_live.session" in _types(h) and up.of("session.start"))
+    frame = next(f for f in h.wfile.frames() if f["type"] == "agent_live.session")
+    [start] = up.of("session.start")
+    return frame, start
+
+
+@pytest.mark.parametrize("answered_before, header, expected", [
+    (True, "ios/2986 contract=75", "gpt-live-1"),      # answered before the upgrade: the baseline, whoever joins
+    (False, "ios/2986 contract=75", "gpt-live-1.1"),   # ringing at the upgrade, answered after: the client's choice
+    (False, "ios/2985 contract=74", "gpt-live-1"),
+])
+def test_a_stored_ring_keeps_its_snapshot_and_digest_and_runs_on_what_model_of_gives(
+        sander, monkeypatch, _live_lifecycle, answered_before, header, expected):
+    _reset()
+    monkeypatch.setattr(config, "load", lambda *a, **k: config.Config(openai_api_key="sk-test", live_model="gpt-live-1.1"))
+    ring_id = _live_ring()["ring"]["ring_id"]
+    if answered_before:
+        rings.answer(PHONE, ring_id, conversation_mode="agent_live_v1", request_id="r1", client_nonce="n-r1", client=header)
+    stored = _as_stored_before_the_upgrade(ring_id, answered=answered_before)
+    grant = rings.answer(PHONE, ring_id, conversation_mode="agent_live_v1", request_id="r1", client_nonce="n-r1",
+                         client=header)["live"]
+    frame, start = _run(grant, monkeypatch)
+    ring = next(r for r in rings._load() if r["ring_id"] == ring_id)
+    assert grant["context_digest"] == frame["context_digest"] == ring["_live_context_digest"] == stored
+    assert ring["_live_snapshot"]["model"] == "gpt-live-1"           # the stored snapshot is never rewritten
+    assert grant["model"] == frame["model"] == start["session"]["model"] == live.model_of(ring) == expected
+    assert _live_lifecycle() == []
+    _reset()
+
+
+def test_nothing_reads_a_model_from_the_snapshot():
+    import pathlib
+    import re
+    lib = pathlib.Path(live.__file__).parent
+    readers = [f"{path.name}:{n}" for path in lib.rglob("*.py") for n, line in enumerate(path.read_text().splitlines(), 1)
+               if re.search(r"snapshot[^\n]*\[\s*[\"']model[\"']\s*\]|snapshot[^\n]*\.get\(\s*[\"']model", line)]
+    assert readers == []
 
 
 def test_a_ring_saved_before_the_model_was_chosen_runs_on_the_baseline():
