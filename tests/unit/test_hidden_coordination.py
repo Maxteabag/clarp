@@ -929,9 +929,35 @@ def test_the_hide_filter_looks_each_judged_row_up_by_its_trace(world):
                                                    include_automated=True, contiguous=False, tail=False),
     )
     for read in reads:
-        judged = [sql for sql in _statements(read) if " hu " in sql]
+        judged = [sql for sql in _statements(read) if "messages hu" in sql]
         assert judged, "the read ran no statement that judges rows by the filter"
         for sql in judged:
-            wall = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql) if " hu " in f" {row[3]} "]
+            wall = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql)
+                    if row[3].split()[:2] in (["SEARCH", "hu"], ["SCAN", "hu"])]
             assert wall and set(wall) == {"SEARCH hu USING INDEX idx_messages_trace (trace_id=?)"}, wall
+    db.close_local()
+
+
+
+@pytest.mark.parametrize("read", ["audience_of", "sender_of"])
+def test_the_working_state_reads_a_turn_by_its_trace(world, read):
+    """audience_of and sender_of (agent-state, the live turn) look a turn's rows and admissions up by
+    trace (idx_messages_trace, idx_prompt_admissions_trace), never by agent: they run on every turn
+    start and live op, on conversations of any length."""
+    _marked_conversation(world, marked=2, filler=3)
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        getattr(coordination, read)(world.id, "t-agent-0")
+    finally:
+        con.set_trace_callback(None)
+    lookups = [sql for sql in seen if sql.lstrip().upper().startswith("SELECT")
+               and ("FROM messages" in sql or "FROM prompt_admissions" in sql)]
+    assert lookups, "no lookup of the turn's rows ran"
+    for sql in lookups:
+        plan = [row[3] for row in con.execute("EXPLAIN QUERY PLAN " + sql)]
+        table = "messages" if "FROM messages" in sql else "prompt_admissions"
+        want = "idx_messages_trace" if table == "messages" else "idx_prompt_admissions_trace"
+        assert any(f"SEARCH {table} USING INDEX {want} (trace_id=?)" in step for step in plan), plan
     db.close_local()
