@@ -82,7 +82,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "released_trace",
     ),
     SSEType.AGENT_ROSTER: (
-        "kind", "session", "persona", "voice_id", "backend", "name",
+        "kind", "session", "persona", "voice_id", "backend", "name", "voice_profile",
     ),
     SSEType.AGENT_FOCUS: ("session", "agent_id"),
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
@@ -277,8 +277,11 @@ def heartbeat(*, ts: int) -> Event:
 
 def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
                  persona: Any = OMIT, voice_id: Any = OMIT,
-                 backend: Any = OMIT, name: Any = OMIT) -> Event:
-    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge."""
+                 backend: Any = OMIT, name: Any = OMIT,
+                 voice_profile: Any = OMIT) -> Event:
+    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge.
+    ``voice_profile`` is the agent's resolved voice and hearing (feature
+    voice_profile) when the event is about one agent's voice."""
     return _build(SSEType.AGENT_ROSTER, [
         ("kind", kind),
         ("session", session),
@@ -286,6 +289,7 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
         ("voice_id", voice_id),
         ("backend", backend),
         ("name", name),
+        ("voice_profile", voice_profile),
     ])
 
 

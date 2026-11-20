@@ -84,6 +84,11 @@ class VoiceRoutes:
             if provider else voice_id)
         # This agent only: the roster read above may be stale for others (TP-03).
         save_agent(session, agents[session])
+        # Open apps show the voice the agent now speaks with (feature voice_profile).
+        from lib import events, voice_profile
+        events.broadcast(self.ctx.stream, events.agent_roster(
+            "voice-changed", session=session,
+            voice_profile=voice_profile.for_session(session)))
         return self._json_ok({"ok": True})
 
     def _handle_agent_voice_verbosity(self):

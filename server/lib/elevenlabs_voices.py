@@ -30,6 +30,12 @@ def _describe(voice: dict) -> str:
     return ", ".join(part for part in parts if part)[:120]
 
 
+def cached_names() -> dict[str, str]:
+    """voice id -> name of the voices already fetched; never a fetch (voice_profile)."""
+    with _lock:
+        return {vid: name for vid, name, _ in (_cache[1] if _cache else ())}
+
+
 def english_voices(*, force: bool = False) -> list[tuple[str, str, str]]:
     """Live account voices, or [] when no key is configured.
 

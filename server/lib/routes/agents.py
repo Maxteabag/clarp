@@ -48,8 +48,10 @@ class AgentRoutes:
         except ValueError as exc:
             return self._json_error(409, str(exc))
         if data.get("mode") != "options":
+            from lib import voice_profile
             events.broadcast(self.ctx.stream, events.agent_roster(
-                "contact-assigned", session=result["session"], name=result["name"]))
+                "contact-assigned", session=result["session"], name=result["name"],
+                voice_profile=voice_profile.for_session(result["session"])))
         return self._json_ok(result)
 
     def _handle_agent_avatar(self, agent_id: str):
@@ -291,8 +293,10 @@ class AgentRoutes:
  })
         if str(agent.get("persona") or "") != name:
             agents_db.update_agent(agent["agent_id"], persona=name)
+            from lib import voice_profile
             events.broadcast(self.ctx.stream, events.agent_roster(
-                "agent-renamed", session=session, name=name))
+                "agent-renamed", session=session, name=name,
+                voice_profile=voice_profile.for_session(session)))
         return self._json_ok({
             "ok": True, "session": session, "name": name,
         })
@@ -333,6 +337,10 @@ class AgentRoutes:
                 static_root=static_root,
             )
         )
+        from lib import events as events_module, voice_profile
+        profile = voice_profile.for_session(result.session)
+        if profile is not events_module.OMIT:
+            agent["voice_profile"] = profile
         agent.update(
             alive=True,
             latest_state=state.get("kind") or "idle",

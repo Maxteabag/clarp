@@ -63,6 +63,7 @@ def _compacting_check() -> Any:
 
 
 from . import tool_explanation_settings  # noqa: E402
+from . import voice_profile  # noqa: E402
 
 
 def _live_activities() -> dict[str, Any]:
@@ -400,6 +401,13 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         for row in persona_rows if str(row.get("name") or "").strip()
     }
     selected = agent_rows if select is None else select(agent_rows)
+    # One settings read for the whole build; voice profiles resolve from it and
+    # from the configuration, with no query per agent (voice_profile).
+    from . import settings_store
+    projected_settings = settings_store.get_many(
+        [avatar_settings.KEY, *tool_explanation_settings.KEYS, *voice_profile.TRANSCRIPTION_KEYS])
+    voice_host = voice_profile.HostView.build(cfg, stored=projected_settings)
+    voices = voice_profile.Projection(voice_host, agent_rows)
     if messages is None:
         messages = message_store.dashboard_messages(agent_ids={a["agent_id"] for a in selected})
     tree = helper_tree(agent_rows, states, visible_labels)
@@ -596,6 +604,11 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # hub has seen this agent since it started.
             "live_activity":  live_activities.get(agent_id),
         })
+        if not a.get("archived_at"):
+            # What it sounds like and how it is heard, as the Host resolves it.
+            # An archived agent speaks to nobody: it has none, here and in the
+            # archived listing alike (a listed row is the full snapshot's row).
+            rows[-1]["voice_profile"] = voices.for_row(a)
     roster = []
     roster_keys = set()
     for name in [
@@ -612,8 +625,6 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         if key and key not in roster_keys:
             roster.append(name.strip())
             roster_keys.add(key)
-    from . import settings_store
-    projected_settings = settings_store.get_many([avatar_settings.KEY, *tool_explanation_settings.KEYS])
     return {
         "agents": rows,
         "focus": focus,
@@ -628,6 +639,10 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
         # Whether tool rows carry plain-language explanations (Host setting).
         "tool_explanations": tool_explanation_settings.get(stored=projected_settings),
+        # What a new agent gets, and a version of every Host-wide input of the
+        # agents' voice_profile: a different version means re-read the agents.
+        "voice_defaults": voice_profile.defaults(voice_host),
+        "voice_profile_version": voice_host.version,
     }, agent_rows
 
 

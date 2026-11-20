@@ -28,7 +28,7 @@ from .clip_delivery.chunked_file import ChunkedFileDelivery
 from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
-from .tts_registry import _gemini_voice, _google_voice
+from .voice_profile import provider_voice
 from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
@@ -202,30 +202,22 @@ def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool
     and has a key and a voice for it (as ``_synthesize`` resolves them)."""
     if clip_route.provider != CARTESIA or not cfg.cartesia_key():
         return False
-    voice = clip_route.voice or resolve_voice(row["voice_id"], CARTESIA)
-    return bool(voice or cfg.cartesia_voice_for((agent or {}).get("persona", "")))
+    return bool(provider_voice(cfg, row["voice_id"], agent or {}, clip_route, CARTESIA).voice)
 
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
-    fallback could speak instead (Cartesia and Gemini; others decide later)."""
+    fallback could speak instead (Cartesia and Gemini; others decide later).
+    The voice comes from the resolver the profile shows (voice_profile)."""
     if clip_route.fallback:
         return True
-    raw_voice = row.get("voice_id")
-    persona = (agent or {}).get("persona", "")
-    route_voice = clip_route.voice
-    cartesia_voice = ((route_voice if clip_route.provider == CARTESIA else None)
-                      or resolve_voice(raw_voice, CARTESIA)
-                      or cfg.cartesia_voice_for(persona))
-    if clip_route.provider == CARTESIA:
-        return bool(cartesia_voice)
-    if clip_route.provider == GEMINI:
-        return bool(_gemini_voice(cfg, raw_voice, persona, agent,
-                                  route_voice, cartesia_voice))
+    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE):
+        return True
+    voice = provider_voice(cfg, row.get("voice_id"), agent, clip_route, clip_route.provider).voice
     if clip_route.provider == GOOGLE:
         from . import google_tts
-        return _google_voice(raw_voice, route_voice) in google_tts.VOICES
-    return True
+        return voice in google_tts.VOICES
+    return bool(voice)
 
 
 def _synthesize(*, cfg, row: dict, agent: dict,
