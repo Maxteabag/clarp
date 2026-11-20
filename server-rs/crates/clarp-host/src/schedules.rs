@@ -56,11 +56,12 @@ impl Desk {
         let Some(schedules) = held.as_mut() else {
             return Err(Unavailable("the schedules could not be read".to_string()));
         };
-        let before = schedules.clone();
-        let answer = ask(schedules, app.clock.now_ms());
-        if *schedules != before {
-            let kept = serde_json::to_vec(schedules.rows()).unwrap_or_default();
+        let mut next = schedules.clone();
+        let answer = ask(&mut next, app.clock.now_ms());
+        if next != *schedules {
+            let kept = serde_json::to_vec(next.rows()).unwrap_or_default();
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            *schedules = next;
         }
         Ok(answer)
     }
@@ -341,4 +342,43 @@ pub fn routes() -> Router<App> {
             "/schedules/{*schedule_id}",
             delete(remove_named).patch(change_named),
         )
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_cached_book_matches_what_the_store_accepted() {
+        let place = crate::unkept::at_the_port::place("schedules-kept");
+        let app = place.app();
+        let desk = &app.schedules;
+        let made = Made {
+            agent: Some(("agent-id", "agent")),
+            named: "agent",
+            name: "weekly",
+            cron: "0 12 * * 1",
+            prompt: "weekly report",
+            enabled: true,
+        };
+        let id = desk
+            .ask(&app, |rows, now| {
+                rows.create(&made, "schedule-id", now)
+                    .map(|row| row.schedule_id.clone())
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let read = |rows: &mut Schedules, _now| rows.get(&id).is_some();
+        place.refuse_writes(Some(KIND));
+        let refused = desk.ask(&app, |rows, _| rows.delete(&id)).await;
+        assert!(refused.unwrap_err().0.contains("refused here"));
+        assert!(desk.ask(&app, read).await.unwrap());
+        assert!(Desk::default().ask(&app, read).await.unwrap());
+        place.refuse_writes(None);
+        assert!(desk.ask(&app, |rows, _| rows.delete(&id)).await.unwrap());
+        assert!(!desk.ask(&app, read).await.unwrap());
+        assert!(!Desk::default().ask(&app, read).await.unwrap());
+    }
 }
