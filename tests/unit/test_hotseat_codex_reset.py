@@ -326,3 +326,28 @@ def test_an_account_the_host_cannot_read_authorises_nothing(switcher, tmp_path, 
     else:
         usage["windows"] = [{"label": "codex primary 5-hour", "used": 1.0}]
     assert _keeper(switcher, tmp_path, monkeypatch, reading) == []
+
+
+# ---- the cap's value (F3) -------------------------------------------------------------------------
+
+@pytest.mark.parametrize("line,cap,refused", [
+    ("", 1, False),                                   # unset: one a day
+    ("codex_reset_max_per_day = 0", 0, False),        # off
+    ("codex_reset_max_per_day = 3", 3, False),
+    ("codex_reset_max_per_day = true", 0, True),
+    ("codex_reset_max_per_day = false", 0, True),
+    ("codex_reset_max_per_day = 1.5", 0, True),
+    ("codex_reset_max_per_day = 0.0", 0, True),
+    ("codex_reset_max_per_day = -1", 0, True),
+    ('codex_reset_max_per_day = "2"', 0, True),
+])
+def test_the_cap_is_parsed_and_a_value_that_is_not_a_whole_number_is_off(tmp_path, monkeypatch, line, cap, refused):
+    """A redemption cannot be undone: a cap the Host cannot read is 0 (off) with a log line, never 1."""
+    logged = []
+    from lib import log
+    monkeypatch.setattr(log, "log", lambda tag, message="", *a, **k: logged.append((tag, message)))
+    path = tmp_path / "config.toml"
+    path.write_text('[agents]\ncodex_reset_command = ["broker"]\n' + line + "\n")
+    loaded = config.load(path)
+    assert loaded.codex_reset_max_per_day == cap and loaded.codex_reset_command == ("broker",)
+    assert bool([t for t, _ in logged if t == "config.codex_reset_max_per_day"]) is refused

@@ -520,8 +520,8 @@ class Config:
     # Opt-in banked-reset adapter; empty means no automated redemption.
     claude_reset_command: tuple[str, ...] = ()
     codex_reset_command: tuple[str, ...] = ()
-    # At most this many verified automatic Codex reset redemptions in a rolling 24 hours (R145);
-    # 0 switches the Codex reset step off.
+    # At most this many automatic Codex reset redemptions in a rolling 24 hours (R145); unset is
+    # 1, 0 switches the Codex reset step off, and a value that is not a whole number is refused as 0.
     codex_reset_max_per_day: int = 1
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
@@ -836,6 +836,20 @@ def _resolve_config_path() -> pathlib.Path:
     ))
 
 
+def _reset_cap(section: dict, key: str) -> int:
+    """A cap on automatic banked-reset redemptions (R145): unset is 1. A value that is not a whole
+    number of 0 or more (true, 1.5, 0.0, -1, "2") is refused with a log line and becomes 0, the
+    step off: a redemption cannot be undone, and off loses only a convenience."""
+    if key not in section:
+        return 1
+    raw = section[key]
+    if type(raw) is int and raw >= 0:
+        return raw
+    from .log import log
+    log(f"config.{key}", f"refused {raw!r}: not a whole number of 0 or more; the automatic reset is off")
+    return 0
+
+
 def _non_negative_float(raw: Any, default: float) -> float:
     try:
         value = float(raw)
@@ -1123,8 +1137,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         codex_reset_command = tuple(agents.get("codex_reset_command", ()))
             if isinstance(agents.get("codex_reset_command", ()), (list, tuple))
             and all(isinstance(arg, str) and arg for arg in agents.get("codex_reset_command", ())) else (),
-        codex_reset_max_per_day = agents.get("codex_reset_max_per_day")
-            if type(agents.get("codex_reset_max_per_day")) is int and agents.get("codex_reset_max_per_day") >= 0 else 1,
+        codex_reset_max_per_day = _reset_cap(agents, "codex_reset_max_per_day"),
         claude_effort   = str(agents.get("claude_effort", "high")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),
