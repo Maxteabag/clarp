@@ -291,7 +291,9 @@ def speech(host: HostView, agent: Mapping) -> dict:
     worker routes it (tts_mode.route, then the configured fallback before any
     audio), or the reason nothing is heard."""
     route = tts_mode.route(host.cfg, dict(agent))
-    if route.provider == "none":
+    # The worker ends every clip when the Host's provider is "none", before it reads
+    # any per-agent override (tts_worker.synth_one): the override is never heard.
+    if host.cfg.tts_provider == "none" or route.provider == "none":
         return {"provider": "none", "provider_label": _provider_label(host, "none"),
                 "voice_id": None, "voice_label": None, "origin": None,
                 "streaming": False, "silent_reason": PROVIDER_OFF}
@@ -461,12 +463,20 @@ GOOGLE_REASONS = {
 }
 
 
-def not_spoken_words(reason: str, *, provider_label: str = "", name: str = "") -> str:
+PARTLY_SPOKEN_PREFIX = "Part of this reply was not spoken: "
+
+
+def not_spoken_words(reason: str, *, provider_label: str = "", name: str = "",
+                     partly: bool = False) -> str:
+    """The words for a clip that was not spoken; ``partly`` when an earlier clip of the
+    same reply was spoken, so the reply is not shown as wholly silent."""
     template = NOT_SPOKEN_WORDS.get(reason)
-    if template is None:
-        return "Not spoken."
-    return template.format(provider=provider_label or "The voice provider",
-                           name=name or "this agent")
+    words = template.format(provider=provider_label or "The voice provider",
+                            name=name or "this agent") if template else "Not spoken."
+    if partly:
+        rest = words.removeprefix("Not spoken: ").removeprefix("Not spoken.").strip()
+        words = PARTLY_SPOKEN_PREFIX + rest if rest else PARTLY_SPOKEN_PREFIX.rstrip(": ") + "."
+    return words
 
 
 def clip_failure(cfg, agent: Mapping | None, *, google_code: str | None = None) -> tuple[str, str]:
