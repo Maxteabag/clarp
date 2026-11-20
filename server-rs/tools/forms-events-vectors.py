@@ -5,8 +5,10 @@ from pathlib import Path
 import runpy
 import sqlite3
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/forms-events.json'
@@ -162,7 +164,7 @@ def countdown_cases():
 
 
 if __name__ == '__main__':
-    with tempfile.TemporaryDirectory() as root:
+    with tool_scratch.directory() as root:
         writer = 'server-rs/tools/forms-events-vectors.py with Python ' + sys.version.split()[0]
         for name, fields in [
             (OUT.name, {'cases': reference(Path(root))}),

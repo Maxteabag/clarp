@@ -5,7 +5,9 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/transcription-guidance-vectors.json'
@@ -15,7 +17,7 @@ def record():
     spec = importlib.util.spec_from_file_location('host', ROOT / 'tests/replay/host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    with tempfile.TemporaryDirectory() as tmp:
+    with tool_scratch.directory() as tmp:
         host.isolate(Path(tmp))
         host.loopback_only()
         sys.path.insert(0, str(ROOT / 'server'))
@@ -91,4 +93,4 @@ if __name__=='__main__':
         print(json.dumps(record(),ensure_ascii=True,separators=(',',':')))
     else:
         OUT.write_bytes(subprocess.check_output([sys.executable,'-IB',__file__,'--record'],
-                                                env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}))
+                                                env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'})))

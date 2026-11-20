@@ -20,7 +20,9 @@ import importlib.util
 import json
 import pathlib
 import sys
-import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -132,11 +134,11 @@ PAYLOADS = [
 ]
 
 
-def run() -> dict:
+@tool_scratch.case('clarp-codex-limits-vectors-')
+def run(root) -> dict:
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-codex-limits-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text('')
     host.isolate(root)
     host.loopback_only()

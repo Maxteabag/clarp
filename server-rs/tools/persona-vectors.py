@@ -26,8 +26,10 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -99,12 +101,12 @@ NAMES = ['Mike', 'mike', ' MIKE ', 'Rachel', 'Codex', 'codex default', 'Claude',
          'Valve', 'Zoë', 'Koko', 'Claire']
 
 
-def one(case: dict) -> dict:
+@tool_scratch.case('clarp-persona-vectors-')
+def one(root, case: dict) -> dict:
     """Runs in a process of its own: what the Python Host lists for one case."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-persona-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text(case['config'])
     host.isolate(root)
     host.loopback_only()
@@ -127,12 +129,12 @@ def one(case: dict) -> dict:
     return {'personas': listed, 'lists': lists, 'asked': asked}
 
 
-def own(room: dict) -> dict:
+@tool_scratch.case('clarp-persona-vectors-')
+def own(root, room: dict) -> dict:
     """Runs in a process of its own: what an owner does with personas of his own."""
     spec = importlib.util.spec_from_file_location('replay_host', REPO / 'tests' / 'replay' / 'host.py')
     host = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(host)
-    root = pathlib.Path(tempfile.mkdtemp(prefix='clarp-persona-vectors-', dir='/var/tmp'))
     (root / 'scenario-config.toml').write_text(room['config'])
     host.isolate(root)
     host.loopback_only()
@@ -186,7 +188,7 @@ def main() -> int:
     cases, lists, asked = [], None, None
     for index, case in enumerate(CASES):
         ran = subprocess.run([sys.executable, '-I', __file__, '--case', str(index)], capture_output=True, text=True,
-                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                             env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
         if ran.returncode != 0:
             print(ran.stderr[-2000:], file=sys.stderr)
             return 1
@@ -197,7 +199,7 @@ def main() -> int:
     rooms = []
     for index, room in enumerate(OWN):
         ran = subprocess.run([sys.executable, '-I', __file__, '--own', str(index)], capture_output=True, text=True,
-                             env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                             env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
         if ran.returncode != 0:
             print(ran.stderr[-2000:], file=sys.stderr)
             return 1

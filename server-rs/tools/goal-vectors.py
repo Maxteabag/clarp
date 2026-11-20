@@ -21,25 +21,24 @@ import io
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-host' / 'tests' / 'fixtures' / 'goal-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-goal-vectors')
 T0 = 1_794_700_000_000
 STEP_MS = 1_000
 
 
-def isolate() -> None:
+def isolate(root) -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     for name in ('CLAUDE_PWA_SESSION', 'CLARP_PROVIDER_TURN', 'CLARP_BACKGROUND_ORIGIN', 'CLARP_HEARTBEATS_DISABLED',
@@ -52,7 +51,7 @@ def isolate() -> None:
 class World:
     """One scenario's clock, ids and agent."""
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, root: pathlib.Path):
         import secrets
         from lib import agents, clock, db
         self.now = T0 + number * 10_000_000
@@ -61,7 +60,7 @@ class World:
             module.now_ms = lambda: self.now
         secrets.token_hex = self.token_hex
         # A database of its own for every scenario: none sees what another left.
-        db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
+        db.reset_for_tests(root / f'scenario-{number}.sqlite')
         # The agent's own id is made before the ids are counted: it is given to the replay.
         self.session = f'vera{number}'
         self.agent_id = f'{number:04x}aaaabbbbcccc'
@@ -421,10 +420,15 @@ def main(argv: list[str]) -> int:
         # is another one in every process. With the seed fixed, the vectors are the same file
         # every time they are written.
         os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
-    isolate()
+    with tool_scratch.directory('clarp-goal-vectors-') as name:
+        return generate(pathlib.Path(name), argv)
+
+
+def generate(root, argv):
+    isolate(root)
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):
-        world = World(number)
+        world = World(number, root)
         scenario(world)
         scenarios.append({'name': scenario.__name__, 'session': world.session, 'agent_id': world.agent_id,
                           'steps': world.steps})

@@ -5,7 +5,10 @@ import importlib.util
 import io
 import json
 from pathlib import Path
-import tempfile
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -208,6 +211,6 @@ def cases(place):
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory() as root, contextlib.redirect_stdout(io.StringIO()):
+    with tool_scratch.directory() as root, contextlib.redirect_stdout(io.StringIO()):
         result = cases(Path(root))
     OUT.write_text(json.dumps(result, sort_keys=True, indent=1) + "\n", encoding="ascii")

@@ -21,13 +21,14 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'device-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-device-vectors')
 T0 = 1_794_900_000_000
 STEP_MS = 1_000
 
@@ -44,14 +45,12 @@ PHONE = 'device_phone'
 TABLET = 'device_tablet'
 
 
-def isolate() -> None:
+def isolate(root) -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
         'CLARP_CODE_ROOT': str(REPO / 'server'),
     })
     sys.path.insert(0, str(REPO / 'server'))
@@ -60,13 +59,13 @@ def isolate() -> None:
 class World:
     """One scenario's clock, register and paired devices."""
 
-    def __init__(self, number: int):
+    def __init__(self, number: int, root: pathlib.Path):
         from lib import apns, clock, db
         self.apns = apns
         self.now = T0 + number * 86_400_000
         for module in (clock, db):
             module.now_ms = lambda: self.now
-        db.reset_for_tests(SCRATCH / f'scenario-{number}.sqlite')
+        db.reset_for_tests(root / f'scenario-{number}.sqlite')
         # The devices that are paired with full scope and not revoked. Anything that is not
         # a device (the administrator, nobody) may always receive, as on the Python Host.
         self.paired = {PHONE, TABLET}
@@ -187,10 +186,15 @@ SCENARIOS = [a_phone_registers_and_its_token_rotates, tokens_have_owners, regist
 
 
 def main(argv: list[str]) -> int:
-    isolate()
+    with tool_scratch.directory('clarp-device-vectors-') as name:
+        return generate(pathlib.Path(name), argv)
+
+
+def generate(root, argv):
+    isolate(root)
     scenarios = []
     for number, scenario in enumerate(SCENARIOS, start=1):
-        world = World(number)
+        world = World(number, root)
         scenario(world)
         scenarios.append({'name': scenario.__name__, 'calls': world.calls})
     if len(argv) == 3 and argv[1] == '--show':

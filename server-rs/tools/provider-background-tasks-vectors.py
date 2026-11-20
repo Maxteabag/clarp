@@ -7,7 +7,9 @@ from datetime import datetime,timezone
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'server-rs/crates/clarp-kernel/tests/fixtures/provider-background-tasks.json'
@@ -148,8 +150,8 @@ def generate(root):
     return json.loads(json.dumps(dict(parser=cases,ids=[[s,bool(p._ID.fullmatch(s)),p.job_id('agent',NATIVE,s)] for s in ids],redaction=[[v,p.safe_text(v)] for v in texts],stories=stories,snapshots=snapshots,mirrors=mirrors,cancel=cancel,retention=cutoff)).replace(ident,'native-fixture').replace(aid,'agent'))
 if __name__=='__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as td:print(json.dumps(generate(Path(td))))
+        with tool_scratch.directory() as td:print(json.dumps(generate(Path(td))))
     else:
-        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'}))
+        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'})))
         OUT.write_text('{\n'+',\n'.join(json.dumps(k)+':['+',\n'.join(json.dumps(row) for row in rows)+']' for k,rows in data.items())+'\n}\n',encoding='ascii')
         print({k:len(v) for k,v in data.items()})

@@ -5,7 +5,9 @@ import itertools
 import json
 from pathlib import Path
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parents[1]
@@ -105,6 +107,6 @@ def capture(place):
 
 
 if __name__ == "__main__":
-    with tempfile.TemporaryDirectory() as directory:
+    with tool_scratch.directory() as directory:
         result=capture(Path(directory))
     OUT.write_text(json.dumps(result,sort_keys=True,separators=(",",":"))+"\n",encoding="ascii")
