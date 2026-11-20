@@ -2052,13 +2052,22 @@
   ],
   "gemini_voice": [
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {},
     "persona": "Maximus",
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2077,33 +2086,6 @@
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -2113,6 +2095,15 @@
     "raw": null,
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2136,28 +2127,10 @@
     "cartesia_voice": null,
     "default": "",
     "overrides": {},
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -2165,8 +2138,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": null,
-    "route_voice": null,
-    "voice": null
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2187,40 +2160,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": null,
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2241,40 +2196,22 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {},
     "persona": "Maximus",
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2293,33 +2230,6 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -2329,6 +2239,15 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2352,28 +2271,10 @@
     "cartesia_voice": null,
     "default": "",
     "overrides": {},
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -2381,8 +2282,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "el-1",
-    "route_voice": null,
-    "voice": null
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2403,40 +2304,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "el-1",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2457,40 +2340,22 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {},
     "persona": "Maximus",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2514,28 +2379,10 @@
     "cartesia_voice": null,
     "default": "",
     "overrides": {},
-    "persona": "Maximus",
+    "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": null,
@@ -2543,8 +2390,8 @@
     "overrides": {},
     "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2568,51 +2415,6 @@
     "cartesia_voice": null,
     "default": "",
     "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
@@ -2633,8 +2435,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -2642,17 +2444,26 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2673,40 +2484,22 @@
     "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {},
     "persona": "Maximus",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2727,40 +2520,22 @@
     "voice": "Charon"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {},
     "persona": "Nobody",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2781,40 +2556,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2835,40 +2592,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -2889,11 +2628,128 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
@@ -2902,21 +2758,165 @@
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
    },
    {
     "cartesia_voice": "ca-lonely",
     "default": "",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {
      "Mover": {
@@ -2929,6 +2929,19 @@
     "voice": "Charon"
    },
    {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
     "cartesia_voice": "ca-ingrid",
     "default": "",
     "overrides": {
@@ -2953,45 +2966,6 @@
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -3005,6 +2979,19 @@
     "raw": null,
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3040,36 +3027,10 @@
       "provider": "gemini"
      }
     },
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -3081,8 +3042,8 @@
     },
     "persona": "Mover",
     "raw": null,
-    "route_voice": null,
-    "voice": ""
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3108,49 +3069,10 @@
     "persona": "Mover",
     "raw": null,
     "route_voice": null,
-    "voice": ""
+    "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3161,6 +3083,19 @@
     "raw": null,
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3189,46 +3124,7 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3239,6 +3135,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3265,45 +3174,6 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -3317,6 +3187,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3352,36 +3235,10 @@
       "provider": "gemini"
      }
     },
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -3393,8 +3250,8 @@
     },
     "persona": "Mover",
     "raw": "el-1",
-    "route_voice": null,
-    "voice": ""
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3420,49 +3277,10 @@
     "persona": "Mover",
     "raw": "el-1",
     "route_voice": null,
-    "voice": ""
+    "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3473,6 +3291,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3501,46 +3332,7 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3551,6 +3343,19 @@
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3586,36 +3391,10 @@
       "provider": "gemini"
      }
     },
-    "persona": "Maximus",
+    "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": null,
@@ -3627,8 +3406,8 @@
     },
     "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3664,71 +3443,6 @@
       "provider": "gemini"
      }
     },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
@@ -3757,8 +3471,8 @@
     },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -3770,11 +3484,11 @@
     },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3785,6 +3499,19 @@
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3813,46 +3540,7 @@
     "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3863,6 +3551,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3891,46 +3592,7 @@
     "voice": "Charon"
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {
      "Mover": {
@@ -3941,6 +3603,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -3969,46 +3644,7 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {
      "Mover": {
@@ -4018,7 +3654,20 @@
     "persona": "Mover",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
-    "voice": ""
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4044,49 +3693,10 @@
     "persona": "Mover",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
-    "voice": ""
+    "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "",
     "overrides": {
      "Mover": {
@@ -4097,6 +3707,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4125,7 +3748,163 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
     "default": "",
     "overrides": {
      "Mover": {
@@ -4133,7 +3912,20 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
@@ -4146,9 +3938,9 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -4159,18 +3951,235 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Maximus",
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4189,33 +4198,6 @@
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -4225,6 +4207,15 @@
     "raw": null,
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4248,28 +4239,10 @@
     "cartesia_voice": null,
     "default": "Zephyr",
     "overrides": {},
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -4277,8 +4250,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": null,
-    "route_voice": null,
-    "voice": null
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4299,40 +4272,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": null,
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4353,40 +4308,22 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Maximus",
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4405,33 +4342,6 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -4441,6 +4351,15 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4464,28 +4383,10 @@
     "cartesia_voice": null,
     "default": "Zephyr",
     "overrides": {},
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": null
    },
    {
     "cartesia_voice": null,
@@ -4493,8 +4394,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "el-1",
-    "route_voice": null,
-    "voice": null
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4515,40 +4416,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "el-1",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4569,40 +4452,22 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Maximus",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4626,28 +4491,10 @@
     "cartesia_voice": null,
     "default": "Zephyr",
     "overrides": {},
-    "persona": "Maximus",
+    "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": null,
@@ -4655,8 +4502,8 @@
     "overrides": {},
     "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4680,51 +4527,6 @@
     "cartesia_voice": null,
     "default": "Zephyr",
     "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
@@ -4745,8 +4547,8 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -4754,17 +4556,26 @@
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4785,40 +4596,22 @@
     "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Maximus",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4839,40 +4632,22 @@
     "voice": "Charon"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Nobody",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4893,40 +4668,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Mover",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -4947,40 +4704,22 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {},
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5001,11 +4740,128 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
@@ -5014,21 +4870,165 @@
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
    },
    {
     "cartesia_voice": "ca-lonely",
     "default": "Zephyr",
     "overrides": {},
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {},
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5041,6 +5041,19 @@
     "voice": "Charon"
    },
    {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
     "cartesia_voice": "ca-ingrid",
     "default": "Zephyr",
     "overrides": {
@@ -5065,45 +5078,6 @@
     "raw": null,
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -5117,6 +5091,19 @@
     "raw": null,
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5146,71 +5133,6 @@
    },
    {
     "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": null,
-    "voice": "Zephyr"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": null,
-    "route_voice": null,
-    "voice": "Kore"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5245,8 +5167,8 @@
     },
     "persona": "Mover",
     "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Kore"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -5258,11 +5180,11 @@
     },
     "persona": "Mover",
     "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Zephyr"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5273,6 +5195,19 @@
     "raw": null,
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": null,
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5301,46 +5236,7 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": null,
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5351,6 +5247,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5377,45 +5286,6 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Charon"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
    },
    {
     "cartesia_voice": null,
@@ -5429,6 +5299,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": null,
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5464,36 +5347,10 @@
       "provider": "gemini"
      }
     },
-    "persona": "Nobody",
+    "persona": "Mover",
     "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Zephyr"
    },
    {
     "cartesia_voice": null,
@@ -5505,8 +5362,8 @@
     },
     "persona": "Mover",
     "raw": "el-1",
-    "route_voice": null,
-    "voice": "Zephyr"
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5535,46 +5392,7 @@
     "voice": "Zephyr"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5585,6 +5403,19 @@
     "raw": "el-1",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "el-1",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5613,46 +5444,7 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "el-1",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-max",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5663,6 +5455,19 @@
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-max",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5698,36 +5503,10 @@
       "provider": "gemini"
      }
     },
-    "persona": "Maximus",
+    "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": null,
@@ -5739,8 +5518,8 @@
     },
     "persona": "Nobody",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5776,71 +5555,6 @@
       "provider": "gemini"
      }
     },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": null,
-    "voice": "Fenrir"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
@@ -5869,8 +5583,8 @@
     },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -5882,11 +5596,11 @@
     },
     "persona": "Mover",
     "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "route_voice": null,
+    "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-claude",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5897,6 +5611,19 @@
     "raw": "{\"gemini\": \"Fenrir\"}",
     "route_voice": null,
     "voice": "Fenrir"
+   },
+   {
+    "cartesia_voice": "ca-claude",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"gemini\": \"Fenrir\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -5925,46 +5652,7 @@
     "voice": "Fenrir"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Claude-5628",
-    "raw": "{\"gemini\": \"Fenrir\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -5975,6 +5663,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -6003,46 +5704,7 @@
     "voice": "Charon"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Maximus",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -6053,6 +5715,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": null
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -6081,46 +5756,7 @@
     "voice": null
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Nobody",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -6131,6 +5767,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Zephyr"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -6159,46 +5808,7 @@
     "voice": "Zephyr"
    },
    {
-    "cartesia_voice": null,
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-ingrid",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": "ca-lonely",
-    "default": "Zephyr",
-    "overrides": {
-     "Mover": {
-      "provider": "gemini"
-     }
-    },
-    "persona": "Mover",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
-   },
-   {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-x",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -6209,6 +5819,19 @@
     "raw": "{\"cartesia\": \"ca-x\"}",
     "route_voice": null,
     "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-x",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-x\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
    },
    {
     "cartesia_voice": "ca-ingrid",
@@ -6237,7 +5860,163 @@
     "voice": "Puck"
    },
    {
-    "cartesia_voice": null,
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Zephyr"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
     "default": "Zephyr",
     "overrides": {
      "Mover": {
@@ -6245,7 +6024,20 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
     "route_voice": "Leda",
     "voice": "Leda"
    },
@@ -6258,9 +6050,9 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
-    "route_voice": "Leda",
-    "voice": "Leda"
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
    },
    {
     "cartesia_voice": "ca-lonely",
@@ -6271,9 +6063,217 @@
      }
     },
     "persona": "Claude-5628",
-    "raw": "{\"cartesia\": \"ca-x\"}",
+    "raw": "{\"cartesia\": \"ca-ingrid\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
     "route_voice": "Leda",
     "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Maximus",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Charon"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Nobody",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": null
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Zephyr"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Kore"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Mover",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Zephyr"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": "Leda",
+    "voice": "Leda"
+   },
+   {
+    "cartesia_voice": "ca-ingrid",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
+   },
+   {
+    "cartesia_voice": "ca-lonely",
+    "default": "Zephyr",
+    "overrides": {
+     "Mover": {
+      "provider": "gemini"
+     }
+    },
+    "persona": "Claude-5628",
+    "raw": "{\"cartesia\": \"ca-lonely\"}",
+    "route_voice": null,
+    "voice": "Puck"
    }
   ],
   "gemini_voices": {
