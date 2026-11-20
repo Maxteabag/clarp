@@ -466,10 +466,9 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             self._steered_into(spec, active_trace)
             if spec.queue_id:
                 # Delivered into the running turn: the visible user row is due
-                # now, written with the item shown in one transaction (the
-                # words the backend was given), then its receipt is spent.
-                self._start_queued_row(spec, steered=True)
-                turn_queue.mark_started(spec.queue_id)
+                # now, written with the item shown and its receipt started in
+                # one transaction (the words the backend was given).
+                self._start_queued_row(spec, steered=True, start_item=True)
                 self._broadcast_queue_state(spec, started=True)
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
             eventlog.emit("server", "turnSteered", context=spec.context,
