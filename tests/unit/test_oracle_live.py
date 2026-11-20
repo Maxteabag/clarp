@@ -114,7 +114,7 @@ def test_completed_work_facts_reach_voice_while_audible_delivery_is_held(monkeyp
 
 def test_fixed_config_uses_live_client_delegation():
     cfg=oracle_live.live_config()
-    assert cfg['model']=='gpt-live-1'
+    assert cfg['model']=='gpt-live-1.1'  # the configured default
     assert cfg['delegation']=={'type':'client'}
     assert cfg['audio']['format']=={'type':'audio/pcm','rate':24000}
 

@@ -6,8 +6,10 @@ Realtime/WebRTC endpoints are unchanged.
 
 Oracle v2 requires an updated HTTPS Host and its existing OpenAI API key. The
 additive `v2` object in `/oracle/status` advertises availability, model and voice.
-`/oracle/v2` is a full-device-authenticated WebSocket endpoint. It pins
-`gpt-live-1`, Marin and the Host-owned Luna router. Client commands are limited to
+`/oracle/v2` is a full-device-authenticated WebSocket endpoint. It runs the
+Host's configured GPT-Live model (`[openai] live_model`: `gpt-live-1.1` by
+default, or `gpt-live-1`; the one `v2.model` advertises), Marin and the
+Host-owned Luna router. Client commands are limited to
 bounded PCM16 audio, interruption and close; the client cannot change prompts,
 models, tools or inject arbitrary results.
 

@@ -1,8 +1,8 @@
 """Agent-live rings (feature ``agent_ring_live``): a ring held as a live voice call.
 
 A ring may ask for ``conversation_mode: agent_live_v1``. Answered by a phone
-that asks for it, the call runs on OpenAI GPT-Live (``gpt-live-1``, voice
-``marin``) instead of the classic group call with a pre-voiced opening line.
+that asks for it, the call runs on OpenAI GPT-Live (voice ``marin``; the model
+is chosen per answering client, see ``model_for_client``) instead of the classic group call with a pre-voiced opening line.
 The wire is WIRE-v2 (decisions, schema) with the event context of CONTEXT-v1.
 
 Everything the voice model is told is built here, on the Host, when the ring
@@ -34,8 +34,14 @@ FEATURE = "agent_ring_live"
 MODE_CLASSIC = "classic"
 MODE_LIVE = "agent_live_v1"
 MODES = (MODE_CLASSIC, MODE_LIVE)
-MODEL = "gpt-live-1"
 VOICE = "marin"
+# An agent Live call runs on the Host's configured GPT-Live model only for a
+# client whose X-Clarp-Client contract is at least its platform's number here
+# (exact platform name; absent = never); every other client runs on
+# BASELINE_LIVE_MODEL, the one every older app accepts. `[openai]
+# live_model_min_client` overrides per platform, as render_spec_min_client does.
+# iOS: the first build that accepts both names sends contract 75.
+AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75}
 PROVIDER = "openai"
 PROTOCOL = 1
 
@@ -93,10 +99,41 @@ def mode_of(value: Any, *, default: str | None = MODE_CLASSIC) -> str | None:
     return value
 
 
+def model_for_client(header: Any, cfg: Any = None) -> str:
+    """The GPT-Live model an agent Live call runs on for the client that sent ``header``.
+
+    Chosen when the grant is made, by the answering client's own request; the
+    grant, the session frame and the upstream all name this one value.
+    """
+    from .oracle_live_wire import BASELINE_LIVE_MODEL, live_model
+    from .server_identity import parse_client_header
+    if cfg is None:
+        from . import config
+        cfg = config.load()
+    configured = live_model(cfg)
+    if configured == BASELINE_LIVE_MODEL or not isinstance(header, str) or not re.fullmatch(
+            r"[A-Za-z][A-Za-z0-9_-]{0,31}/[A-Za-z0-9._-]{1,80} contract=[0-9]{1,9}", header):
+        return BASELINE_LIVE_MODEL
+    client = parse_client_header(header)
+    platform = header.split("/", 1)[0]       # the exact name: "IOS" is not "ios"
+    minimum = {**AGENT_LIVE_MODEL_MIN_CLIENT, **(getattr(cfg, "live_model_min_client", None) or {})}.get(platform)
+    if type(minimum) is not int or minimum < 1 or client["contract"] < minimum:
+        return BASELINE_LIVE_MODEL
+    return configured
+
+
+def model_of(ring: dict) -> str:
+    """The model a Live-answered ring runs on: the one its grant named (a ring
+    saved before the model was chosen per client ran, and runs, on the baseline)."""
+    from .oracle_live_wire import BASELINE_LIVE_MODEL, LIVE_MODELS
+    model = ring.get("_live_model")
+    return model if model in LIVE_MODELS else BASELINE_LIVE_MODEL
+
+
 def provider_problem() -> str | None:
     """Why the fixed Live provider cannot be used on this Host, or None.
 
-    Only the public OpenAI wire gives gpt-live-1 with marin; the subscription
+    Only the public OpenAI wire gives GPT-Live with marin; the subscription
     wire is a different model and voice, so it is refused, never substituted.
     """
     from . import config
@@ -240,7 +277,8 @@ def build_snapshot(agent: dict, context: dict) -> dict:
         "agent": {"agent_id": str(agent.get("agent_id") or ""), "session": str(agent.get("session") or "")},
         "story": context["story"], "texts": texts, "event_context": context,
         "opening_text": context["opening_text"], "language": "nb-NO",
-        "provider": PROVIDER, "model": MODEL, "voice": VOICE,
+        # No model here: it is chosen when the grant is made, for the answering client.
+        "provider": PROVIDER, "voice": VOICE,
     }
     from . import agent_live_tools
     tools = agent_live_tools.frozen_config(profile, context["story"])
