@@ -285,7 +285,7 @@ pub struct Agent {
     /// later, even when nothing is in its way and it leaves in the same breath.
     waited: BTreeSet<TurnId>,
     /// The live turn came through the queue.
-    live_from_queue: bool,
+    live_queue_admission: Option<Admission>,
     /// The waiting turns a hold does not hold: they came after it was placed. The next stop
     /// holds them with the rest.
     unheld: BTreeSet<TurnId>,
@@ -353,7 +353,7 @@ impl Default for Agent {
             queue_revision: 0,
             stop_generation: 0,
             waited: BTreeSet::new(),
-            live_from_queue: false,
+            live_queue_admission: None,
             unheld: BTreeSet::new(),
             last: None,
             compaction_owed: None,
@@ -430,7 +430,12 @@ impl Agent {
 
     /// Whether the live turn came through the queue: it had to wait, or it was left for later.
     pub fn live_from_queue(&self) -> bool {
-        self.live.is_some() && self.live_from_queue
+        self.live_queue_admission().is_some()
+    }
+
+    /// How the live turn was admitted, when it came through the queue.
+    pub fn live_queue_admission(&self) -> Option<Admission> {
+        self.live.as_ref().and(self.live_queue_admission)
     }
 
     /// The last turn that held the agent and ended. A message that was taken back never did.
@@ -1054,7 +1059,7 @@ impl Agent {
                 Turn::Settled(ended) => {
                     self.settled += 1;
                     self.stopping = None;
-                    self.live_from_queue = false;
+                    self.live_queue_admission = None;
                     self.owe_compaction(&ended);
                     self.last = Some(ended);
                 }
@@ -1087,6 +1092,7 @@ impl Agent {
             self.queue_revision += 1;
         }
         self.unheld.remove(&turn);
+        let admission = queued.admission;
         match Turn::Queued(queued).apply(change)? {
             Turn::Settled(ended) => {
                 self.settled += 1;
@@ -1098,7 +1104,7 @@ impl Agent {
                         Some(self.latest_turn_start.map_or(*at_ms, |old| old.max(*at_ms)));
                 }
                 self.live = Some(next);
-                self.live_from_queue = waited;
+                self.live_queue_admission = waited.then_some(admission);
                 // A turn runs: what the agent rested in before is over.
                 self.resting = None;
             }
@@ -1230,7 +1236,7 @@ impl Work {
         self.decision
             .effects
             .push(Effect::StartTurn { turn, message_seq });
-        if self.agent.live_from_queue {
+        if self.agent.live_from_queue() {
             self.let_go_of_nothing(DRAINED, now_ms);
         }
     }
