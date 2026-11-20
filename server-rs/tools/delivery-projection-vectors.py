@@ -17,19 +17,19 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'delivery-projection-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-delivery-projection-vectors')
+SCRATCH = pathlib.Path()  # the scratch place main takes from tools/scratch.py
 
 
 def isolate() -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
         'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
         'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
@@ -68,6 +68,13 @@ def receipts() -> list:
 
 
 def main() -> int:
+    global SCRATCH
+    with tool_scratch.directory('clarp-delivery-projection-') as place:
+        SCRATCH = pathlib.Path(place)
+        return generate()
+
+
+def generate() -> int:
     isolate()
     from lib import launch_receipts as lr
     vectors = []
