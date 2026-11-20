@@ -880,6 +880,16 @@ pub enum Principal {
     Tools,
 }
 
+/// Where the token a request was let in by was found (the Python Host's
+/// `_request_auth_source`): nowhere on a Host that has none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presented {
+    Nowhere,
+    Header,
+    Cookie,
+    Address,
+}
+
 /// Who a request comes from, as the chat a client last opened is kept under: a device by
 /// its id, the administrator by that word on a Host that has a token; nobody else (the
 /// Python Host's `_request_principal`).
@@ -1008,11 +1018,11 @@ fn asked(request: &Request) -> (bool, String) {
 
 /// Who is asking, by the token the request carries: in its header, in its cookie, or, from
 /// this machine, in its address.
-fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
+fn who(app: &App, request: &Request, local: bool) -> Option<(Principal, Presented)> {
     let expected = &app.config.auth_token;
     if expected.is_empty() {
         // A Host without a token is open to this machine, and to nobody else.
-        return local.then_some(Principal::Administrator);
+        return local.then_some((Principal::Administrator, Presented::Nowhere));
     }
     let known = |token: &str| -> Option<Principal> {
         // The administrator's token opens the Host only from the machine it runs on, and so
@@ -1034,10 +1044,10 @@ fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
     let headers = request.headers();
     let text = |name| headers.get(name).and_then(|value| value.to_str().ok());
     if let Some(principal) = text(header::AUTHORIZATION).and_then(bearer).and_then(known) {
-        return Some(principal);
+        return Some((principal, Presented::Header));
     }
     if let Some(principal) = text(header::COOKIE).and_then(cookie).and_then(known) {
-        return Some(principal);
+        return Some((principal, Presented::Cookie));
     }
     // A token in an address is written into logs and histories on its way: it is taken
     // only where there is no way.
@@ -1045,7 +1055,8 @@ fn who(app: &App, request: &Request, local: bool) -> Option<Principal> {
         return None;
     }
     let mut pairs = request.uri().query()?.split('&');
-    pairs.find_map(|pair| known(pair.strip_prefix("token=")?.trim()))
+    let principal = pairs.find_map(|pair| known(pair.strip_prefix("token=")?.trim()))?;
+    Some((principal, Presented::Address))
 }
 
 async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> Response {
@@ -1073,7 +1084,7 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 let why = "Oracle requires authenticated full-device access";
                 ApiError::new(StatusCode::UNAUTHORIZED, why).into_response()
             }
-            Some(principal) if out_of_scope(&principal, request.method(), &path) => {
+            Some((principal, _)) if out_of_scope(&principal, request.method(), &path) => {
                 let why = if matches!(principal, Principal::Tools) {
                     "an agent's tools may ask for tools only"
                 } else {
@@ -1081,12 +1092,13 @@ async fn authorize(State(app): State<App>, mut request: Request, next: Next) -> 
                 };
                 ApiError::new(StatusCode::FORBIDDEN, why).into_response()
             }
-            Some(principal) => {
+            Some((principal, presented)) => {
                 if let Principal::Device { device_id, .. } = &principal {
                     device = Some(device_id.clone());
                 }
                 request.extensions_mut().insert(Asker { source });
                 request.extensions_mut().insert(principal);
+                request.extensions_mut().insert(presented);
                 next.run(request).await
             }
         }

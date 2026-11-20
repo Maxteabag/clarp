@@ -38,8 +38,9 @@ const CLIENT_HEADER: &str = "x-clarp-client";
 
 /// The lowest client contract that is shown a spec and may answer one, per client name, as the
 /// owner set it over the default (`config._render_spec_minimums`): the old single number as
-/// iOS's minimum, then each entry of his table whose name is a client's name and whose number
-/// is whole and not below 0. What is not so is passed over, and said once.
+/// iOS's minimum, then each entry of his table whose name is a client's name as clients send it
+/// (lower case) and whose number is whole and not below 0; where the table names iOS, it wins
+/// over the old number. What is not so is passed over, and said once.
 fn threshold(app: &App) -> Option<BTreeMap<String, i64>> {
     let file = OwnerFile::new(app.config.speech_keys.clone()).read()?;
     let artifacts = file.get("artifacts")?.as_table()?;
@@ -55,50 +56,62 @@ fn minimums(artifacts: &toml::Table) -> BTreeMap<String, i64> {
             set.insert("ios".to_string(), *minimum);
             said_once(
                 &SINGLE,
+                SINGLE_KEY,
                 "applies to iOS only; name other clients in [artifacts] render_spec_min_contract",
             );
         }
-        Some(_) => said_once(&SINGLE, "ignored: not a whole number"),
+        Some(_) => said_once(&SINGLE, SINGLE_KEY, "ignored: not a whole number"),
     }
     match artifacts.get("render_spec_min_contract") {
         None => {}
         Some(toml::Value::Table(table)) => {
+            if table.contains_key("ios") && set.contains_key("ios") {
+                let line = "ignored: render_spec_min_contract names ios";
+                said_once(&NAMES_IOS, SINGLE_KEY, line);
+            }
             for (name, value) in table {
                 match value {
                     toml::Value::Integer(minimum) if *minimum >= 0 && client_name(name) => {
                         set.insert(name.clone(), *minimum);
                     }
-                    _ => said_once(&TABLE, "ignored an entry: a client name and a whole number"),
+                    _ => said_once(
+                        &TABLE,
+                        TABLE_KEY,
+                        "ignored an entry: a client name and a whole number",
+                    ),
                 }
             }
         }
-        Some(_) => said_once(&TABLE, "ignored: expected a table of client = number"),
+        Some(_) => said_once(
+            &TABLE,
+            TABLE_KEY,
+            "ignored: expected a table of client = number",
+        ),
     }
     set
 }
 
-/// A client's name as a minimum may be set for: `[A-Za-z][A-Za-z0-9_-]{0,31}`.
+/// A client's name as clients send it, in lower case and matched exactly, as a minimum may be
+/// set for: `[a-z][a-z0-9_-]{0,31}` (an `IOS` key would switch nothing on: it is refused).
 fn client_name(name: &str) -> bool {
     let mut signs = name.chars();
-    signs
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
+    signs.next().is_some_and(|first| first.is_ascii_lowercase())
         && name.len() <= 32
-        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-')
+        && signs.all(|sign| {
+            sign.is_ascii_lowercase() || sign.is_ascii_digit() || sign == '_' || sign == '-'
+        })
 }
 
-/// Whether each key's word was said: once in the life of the Host, where the Python Host says
-/// it when it reads its file, since this one reads the owner's file at every request.
+/// Whether each word was said: once in the life of the Host, where the Python Host says it
+/// when it reads its file, since this one reads the owner's file at every request.
 static SINGLE: AtomicBool = AtomicBool::new(false);
+static NAMES_IOS: AtomicBool = AtomicBool::new(false);
 static TABLE: AtomicBool = AtomicBool::new(false);
+const SINGLE_KEY: &str = "render_spec_min_client";
+const TABLE_KEY: &str = "render_spec_min_contract";
 
-fn said_once(said: &AtomicBool, line: &str) {
+fn said_once(said: &AtomicBool, key: &str, line: &str) {
     if !said.swap(true, Ordering::Relaxed) {
-        let key = if std::ptr::eq(said, &SINGLE) {
-            "render_spec_min_client"
-        } else {
-            "render_spec_min_contract"
-        };
         eprintln!("clarp-host: config.{key}: {line}");
     }
 }

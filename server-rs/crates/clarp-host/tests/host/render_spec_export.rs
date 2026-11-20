@@ -20,8 +20,9 @@ fn keys(value: &Value) -> Vec<String> {
 
 /// A spec's export gives the administrator what a move to another Host needs, as the Python
 /// Host gives it: the row as it is listed, the payload as kept, and the accepted answer or none,
-/// whatever the caller says it can draw. Every device is refused, limited or full; another kind
-/// is refused with its kind; an id nobody has is not found.
+/// whatever the caller says it can draw. Every device is refused, limited or full, and the
+/// administrator's token anywhere but in the Authorization header; another kind is refused with
+/// its kind; an id nobody has is not found.
 #[test]
 fn the_administrator_exports_a_render_spec_with_its_accepted_answer_as_the_python_host_does() {
     let vectors = vectors();
@@ -146,6 +147,44 @@ fn the_administrator_exports_a_render_spec_with_its_accepted_answer_as_the_pytho
         assert_eq!(
             (status, said),
             (403, json!({ "error": "administrator only" }))
+        );
+    }
+    // The administrator's token from the Authorization header only: not in a browser's
+    // cookie, nor in the address, though this Host takes it there for other routes (the
+    // Python Host's PR 474 at 01ceed2d).
+    let cookie = format!("claude_pwa_token={}", host.token);
+    let by_cookie = [("Cookie", cookie.as_str())];
+    let in_address = format!("/artifacts/spec-1/export?token={}", host.token);
+    let read = fetch(&host, "", "GET", "/artifacts/spec-1", &by_cookie, b"");
+    assert_eq!(read.status, 200, "a cookie lets the administrator read");
+    let read = fetch(
+        &host,
+        "",
+        "GET",
+        &format!("/artifacts/spec-1?token={}", host.token),
+        &[],
+        b"",
+    );
+    assert_eq!(read.status, 200, "so does the address, from this machine");
+    for (how, got) in [
+        (
+            "cookie",
+            fetch(
+                &host,
+                "",
+                "GET",
+                "/artifacts/spec-1/export",
+                &by_cookie,
+                b"",
+            ),
+        ),
+        ("address", fetch(&host, "", "GET", &in_address, &[], b"")),
+    ] {
+        let said: Value = serde_json::from_slice(&got.body).unwrap_or(Value::Null);
+        assert_eq!(
+            (got.status, said),
+            (403, json!({ "error": "administrator only" })),
+            "the token in the {how}"
         );
     }
     // Another kind, with its kind; an id nobody has.
