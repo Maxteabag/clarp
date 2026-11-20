@@ -295,6 +295,8 @@ def _migrate(con: sqlite3.Connection, *, upgrade: bool = True) -> None:
 
         if version < 128:
             _migrate_to_v128(con)
+        if version < 129:
+            _migrate_to_v129(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -1095,6 +1097,16 @@ def _migrate_to_v125(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
     if "supported_conversation_modes" not in columns:
         con.execute("ALTER TABLE device_tokens ADD COLUMN supported_conversation_modes TEXT NOT NULL DEFAULT ''")
+
+def _migrate_to_v129(con: sqlite3.Connection) -> None:
+    """``provider_turns.trace_id``: the trace of the turn a turn token was issued to, so an
+    artifact a turn publishes can name it (R102). Additive with an empty default: a token
+    issued before knows no trace, older code ignores the column and rolling back needs no
+    down-migration; guarded, so a rerun is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(provider_turns)")}
+    if columns and "trace_id" not in columns:
+        con.execute("ALTER TABLE provider_turns ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''")
+
 
 def _migrate_to_v128(con: sqlite3.Connection) -> None:
     """Start Claude delta accounting at installation. Preserve historical charges."""
