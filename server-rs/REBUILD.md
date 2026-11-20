@@ -2274,7 +2274,10 @@ closes it; failing again, archived, failing once more, discarded; a restart keep
 the fleet and use its generation to start, report progress, finish or cancel it. The computer owns
 these jobs even when the fleet has no agents. Each registration names the kind. A second caller,
 such as portrait generation, uses the same registration and transition API with its own kind and
-stable job ID. The fleet arbitrates agent and computer claims within one actor turn. The storage
+stable job ID. The fleet arbitrates agent and computer claims within one actor turn.
+A computer producer receives a typed refusal for an invalid command or an agent-owned ID.
+A storage or actor failure returns `Unavailable`. Cancelling an unknown ID returns 404,
+including IDs in the provider-task namespace. The storage
 port writes a single record with the current job and up to 200 timeline entries before the fleet
 publishes a change. The regular list, detail, event and cancellation routes show the computer as
 owner; cancelling a computer job sends no cleanup prompt to an agent. A producer waits on
@@ -2283,7 +2286,7 @@ turn that checks the generation. A durable cancellation, finish or replacement w
 waiting on the old generation; a failed store write leaves the wait pending. At open the fleet
 counts unreadable job records, logs one line, and preserves their bytes and their ids. A successful
 computer registration under the same id replaces the unreadable record and logs the repair. The reference cases for
-generation receipts are in `computer-jobs-vectors.json`, and the wrong rules in
+generation receipts are in `computer-jobs.json`, and the wrong rules in
 `tools/plants/computer-jobs.py`.
 
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every

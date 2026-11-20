@@ -36,7 +36,7 @@ use crate::revisions::Revisions;
 use crate::wire;
 mod computer_jobs;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
-pub use computer_jobs::ComputerJob;
+pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
@@ -548,7 +548,7 @@ enum Ask {
         answer: Answer<bool>,
     },
     /// An agent registers a background job under an id. The inner error is the agent that
-    /// has the id already.
+    /// or computer that has the id already.
     ComputerJobs {
         answer: Answer<Vec<Job>>,
     },
@@ -563,12 +563,12 @@ enum Ask {
     },
     ChangeComputerJob {
         command: JobCommand,
-        answer: Answer<JobChange>,
+        answer: Answer<Result<JobChange, ComputerJobRefusal>>,
     },
     ClaimJob {
         job_id: String,
         agent_id: String,
-        answer: Answer<Result<(), String>>,
+        answer: Answer<Result<(), JobOwner>>,
     },
     JobOwner {
         job_id: String,
@@ -1095,18 +1095,21 @@ impl FleetHandle {
 
     /// An internal caller registers its kind, then uses the same generation-fenced
     /// commands as an agent worker. There is no public route to manufacture jobs.
-    pub async fn change_computer_job(&self, command: JobCommand) -> Result<JobChange, Unavailable> {
+    pub async fn change_computer_job(
+        &self,
+        command: JobCommand,
+    ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
         self.ask(|answer| Ask::ChangeComputerJob { command, answer })
             .await
     }
 
     /// Gives a background job's id to an agent. A job's id is one name on the whole Host:
-    /// the inner error is the agent that has it already.
+    /// the inner error identifies its existing owner.
     pub async fn claim_job(
         &self,
         job_id: String,
         agent_id: String,
-    ) -> Result<Result<(), String>, Unavailable> {
+    ) -> Result<Result<(), JobOwner>, Unavailable> {
         self.ask(|answer| Ask::ClaimJob {
             job_id,
             agent_id,
@@ -1603,12 +1606,12 @@ impl Fleet {
         &mut self,
         job_id: String,
         agent_id: String,
-    ) -> Result<Result<(), String>, Unavailable> {
+    ) -> Result<Result<(), JobOwner>, Unavailable> {
         if self.computer_jobs.contains(&job_id) {
-            return Ok(Err("Computer".into()));
+            return Ok(Err(JobOwner::Computer));
         }
         match self.jobs.get(&job_id) {
-            Some(owner) if *owner != agent_id => Ok(Err(owner.clone())),
+            Some(owner) if *owner != agent_id => Ok(Err(JobOwner::Agent(owner.clone()))),
             Some(_) => Ok(Ok(())),
             None => {
                 self.store
