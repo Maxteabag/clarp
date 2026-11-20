@@ -284,7 +284,7 @@ async fn an_agent_that_answers_at_once_is_removed_whole() {
     removed_whole(&place, &fleet).await;
     // Asked again, there is no such agent.
     assert!(!fleet.remove("held".into()).await.unwrap());
-    assert_eq!(place.told_deleted("held"), 3);
+    assert_eq!(place.told_deleted("held"), 2);
 }
 
 #[tokio::test]
