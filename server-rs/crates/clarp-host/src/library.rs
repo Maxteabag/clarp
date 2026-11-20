@@ -908,31 +908,43 @@ async fn create_artifact(
 ) -> Result<Response, ApiError> {
     let validate_only = render_spec::validate_only(query.as_deref());
     let capable = render_spec::capable(&app, &headers);
-    let (status, answer) = posted(&app, &body, validate_only, capable).await?;
+    // The turn that publishes it, by the token its Host gave it (`X-Clarp-Turn`).
+    let turn = headers
+        .get(crate::turn_identity::HEADER)
+        .and_then(|value| value.to_str().ok());
+    let (status, answer) = posted(&app, &body, validate_only, capable, turn).await?;
     Ok((status, Json(answer)).into_response())
 }
 
 /// What `POST /artifacts` answers for this body: the status and the body of the answer.
+/// `turn`: the token the request presents as its turn's, which names the turn a new artifact
+/// was published in ([`crate::turn_identity::publishing_trace`]).
 pub(crate) async fn posted(
     app: &App,
     body: &[u8],
     validate_only: bool,
     capable: bool,
+    turn: Option<&str>,
 ) -> Result<(StatusCode, Value), ApiError> {
     // A render spec is read as the Python Host reads it: the rules see what that reader
     // sees (a key twice, a number's spelling).
     if let Some(J::Object(data)) = render_spec::body(body)
         && render_spec::is_spec(&data)
     {
-        return render_spec::publish(app, &data, validate_only, capable).await;
+        return render_spec::publish(app, &data, validate_only, capable, turn).await;
     }
-    let artifact = made(app, &object(body)?, validate_only, capable).await?;
+    let artifact = made(app, &object(body)?, validate_only, capable, turn).await?;
     Ok((StatusCode::CREATED, json!({ "artifact": artifact })))
 }
 
-/// Makes an artifact from what a request says. Answers the artifact as it is shown.
-pub(crate) async fn create(app: &App, data: &Map<String, Value>) -> Result<Value, ApiError> {
-    made(app, data, false, false).await
+/// Makes an artifact from what a request says, in the turn whose token `turn` is. Answers the
+/// artifact as it is shown.
+pub(crate) async fn create(
+    app: &App,
+    data: &Map<String, Value>,
+    turn: Option<&str>,
+) -> Result<Value, ApiError> {
+    made(app, data, false, false, turn).await
 }
 
 /// Internal publication to the claimed checker. Public artifact POSTs cannot select a Janitor.
@@ -954,6 +966,8 @@ pub(crate) async fn label_document(member: &Member, row: &Value) -> Result<(), A
         artifact_id: id,
         expected_version: None,
         validate_only: false,
+        // The Host's own: published in no turn.
+        source_trace_id: String::new(),
     };
     ask_agent(
         member,
@@ -974,11 +988,12 @@ async fn made(
     data: &Map<String, Value>,
     validate_only: bool,
     capable: bool,
+    turn: Option<&str>,
 ) -> Result<Value, ApiError> {
     if let J::Object(fields) = J::of(&Value::Object(data.clone()))
         && render_spec::is_spec(&fields)
     {
-        let (_, answer) = render_spec::publish(app, &fields, validate_only, capable).await?;
+        let (_, answer) = render_spec::publish(app, &fields, validate_only, capable, turn).await?;
         return Ok(answer.get("artifact").cloned().unwrap_or(answer));
     }
     let kind = said(data, "type", "");
@@ -988,7 +1003,7 @@ async fn made(
     ) {
         return Err(refused(StatusCode::CONFLICT, "reserved artifact type"));
     }
-    let new = New {
+    let mut new = New {
         kind,
         title: said(data, "title", ""),
         summary: said(data, "summary", ""),
@@ -998,12 +1013,15 @@ async fn made(
         artifact_id: said(data, "artifact_id", ""),
         expected_version: data.get("expected_version").cloned(),
         validate_only,
+        source_trace_id: String::new(),
     };
     let fleet = Fleet::of(app);
     let session = said(data, "session", "");
     let Some(member) = app.member(session.trim()) else {
         return Err(conflict(artifacts::create_of_nobody(&new)));
     };
+    new.source_trace_id =
+        crate::turn_identity::publishing_trace(app, turn, &member.record.agent_id).await?;
     let id = new.artifact_id.trim();
     let elsewhere = |has: &dyn Fn(&ArtifactBook) -> bool| {
         !id.is_empty()

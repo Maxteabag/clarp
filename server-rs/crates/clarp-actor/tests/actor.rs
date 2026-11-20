@@ -3850,3 +3850,34 @@ mod follow_by_revision {
         found.none();
     }
 }
+
+// ---- the turn an artifact names (R102) -------------------------------------------------------
+
+/// The trace of the agent's running turn, as its rows carry it, is what an artifact published in
+/// it names: the empty text for a running turn whose message came without one (the Python
+/// Host's vectors, `a running turn without a trace`), and none for a turn that does not run.
+#[test]
+fn source_trace_a_turn_names_its_trace_only_while_it_runs() {
+    let mut world = World::new("source-trace");
+    let mut actor = world.open();
+    world.send(&mut actor, "u-1", "go", Admission::Queue);
+    assert_eq!(actor.running_trace(1).unwrap(), Some(String::new()));
+    assert_eq!(
+        actor.running_trace(2).unwrap(),
+        None,
+        "a turn that is not there"
+    );
+    world.says(1, "done");
+    world.exits(1, Some(0), None);
+    world.hint(&mut actor);
+    assert_eq!(actor.running_trace(1).unwrap(), None, "a turn that ended");
+    let now = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-b".to_string()),
+        ..message("u-2", "go on")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, now).unwrap();
+    world.carry_out(&mut actor, out);
+    assert_eq!(actor.running_trace(2).unwrap(), Some("trace-b".to_string()));
+    assert_eq!(actor.running_trace(1).unwrap(), None, "an older turn");
+}

@@ -300,6 +300,7 @@ impl Book {
                     page: None,
                     revisions: Vec::new(),
                     submissions: Vec::new(),
+                    source_trace_id: String::new(),
                 };
                 self.alerts.insert(artifact_id, alert);
                 changed += 1;

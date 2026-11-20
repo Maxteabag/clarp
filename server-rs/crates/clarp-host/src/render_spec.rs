@@ -180,6 +180,7 @@ pub(crate) async fn publish(
     data: &Obj,
     validate_only: bool,
     capable: bool,
+    turn: Option<&str>,
 ) -> Result<(StatusCode, Value), ApiError> {
     let catalog = Catalog::embedded();
     if data.duplicate {
@@ -204,7 +205,7 @@ pub(crate) async fn publish(
         payload: data.get("payload").cloned().unwrap_or(J::Null),
         expected: data.get("expected_version").cloned(),
     };
-    let row = published(app, envelope, validate_only, capable).await?;
+    let row = published(app, envelope, validate_only, capable, turn).await?;
     Ok(match row {
         None => (StatusCode::OK, json!({ "valid": true })),
         Some(row) => (StatusCode::CREATED, json!({ "artifact": row })),
@@ -250,7 +251,8 @@ pub(crate) async fn update(
         payload: payload.clone(),
         expected: data.get("expected_version").cloned(),
     };
-    let row = published(app, envelope, false, capable).await?;
+    // A revision: the trace stays the one the spec was first published under.
+    let row = published(app, envelope, false, capable, None).await?;
     Ok(json!({ "artifact": row.unwrap_or(Value::Null) }))
 }
 
@@ -261,6 +263,7 @@ async fn published(
     envelope: Envelope,
     validate_only: bool,
     capable: bool,
+    turn: Option<&str>,
 ) -> Result<Option<Value>, ApiError> {
     let catalog = Catalog::embedded();
     let known = catalog.as_ref().map_err(|e| *e);
@@ -303,6 +306,9 @@ async fn published(
         expected: envelope.expected.filter(|expected| *expected != J::Null),
         validate_only,
         elsewhere,
+        // Kept by a new spec only: a revision keeps the one it has.
+        source_trace_id: crate::turn_identity::publishing_trace(app, turn, &member.record.agent_id)
+            .await?,
     };
     if validate_only {
         checked(app, &member, &asked).map_err(|why| refused(why, Ok(catalog)))?;

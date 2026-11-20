@@ -262,6 +262,11 @@ pub struct Artifact {
     /// The answers users gave to a form.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submissions: Vec<forms::Submission>,
+    /// The trace of the turn that published it, where the Host proved that turn by its token
+    /// and it was the agent's running turn then: the same text as `trace_id` on that turn's
+    /// rows. Set when it is made, and never after; empty otherwise, and for one kept before.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_trace_id: String,
 }
 
 /// An artifact hidden from the inbox, or shown there again, as the owner asks: with whether
@@ -380,6 +385,9 @@ pub struct New {
     pub expected_version: Option<Value>,
     /// Only check it: what only a render spec can be (`?validate_only=1`).
     pub validate_only: bool,
+    /// The trace of the turn that publishes it, as the Host proved it from the turn's token:
+    /// never anything the caller wrote. Kept on a new artifact only.
+    pub source_trace_id: String,
 }
 
 /// Which artifacts are listed.
@@ -904,7 +912,7 @@ impl Artifact {
             "reference_id": self.reference_id,
             "payload_version": 1,
             "source_message_id": "",
-            "source_trace_id": "",
+            "source_trace_id": self.source_trace_id,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "completed_at": self.completed_at,
@@ -1119,6 +1127,7 @@ impl ArtifactBook {
             page: None,
             revisions: Vec::new(),
             submissions: Vec::new(),
+            source_trace_id: new.source_trace_id.clone(),
         })
     }
 

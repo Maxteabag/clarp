@@ -361,6 +361,7 @@ impl Fleet {
                     artifact_id: text(args, "artifact_id"),
                     expected_version: args.get("expected_version").cloned(),
                     validate_only: false,
+                    source_trace_id: String::new(),
                 };
                 let nobody = || artifacts::create_of_nobody(&new);
                 self.make(&text(args, "session"), now, nobody, |book, maker, ctx| {

@@ -326,7 +326,7 @@ PLANTS = [
     (H, 'host', 'a kind with blanks is another', '    kind.is_some_and(|kind| python::strip(&python_str(kind)).to_lowercase() == KIND)', '    kind.is_some_and(|kind| python_str(kind).to_lowercase() == KIND)'),
     (H, 'host', 'a key twice in a publication is taken', '    if data.duplicate {\n        return Err(no("invalid_object", "", catalog.as_ref().map_err(|e| *e)));\n    }', ''),
     (H, 'host', 'a spec is published as a draft unless it says', '        status: field(data, "status", "ready"),', '        status: field(data, "status", "draft"),'),
-    (H, 'host', 'a publication follows no version', '        expected: data.get("expected_version").cloned(),\n    };\n    let row = published(app, envelope, validate_only, capable).await?;\n    Ok(match row {', '        expected: None,\n    };\n    let row = published(app, envelope, validate_only, capable).await?;\n    Ok(match row {'),
+    (H, 'host', 'a publication follows no version', '        expected: data.get("expected_version").cloned(),\n    };\n    let row = published(app, envelope, validate_only, capable, turn).await?;\n    Ok(match row {', '        expected: None,\n    };\n    let row = published(app, envelope, validate_only, capable, turn).await?;\n    Ok(match row {'),
     (H, 'host', 'a key twice in a revision is taken', '    if data.duplicate {\n        return Err(no("invalid_object", "", catalog));\n    }', ''),
     (H, 'host', 'a revision may be a patch', '    if data.contains("payload_patch") {', '    if data.contains("payload_patches") {'),
     (H, 'host', 'a revision keeps its title', '        title: or("title", &current.title),', '        title: current.title.clone(),'),
@@ -388,7 +388,7 @@ PLANTS = [
     # The agent's tool.
     (T, 'host', 'a conflict is printed as a failure', '            let told = matches!(error.status().as_u16(), 400 | 403 | 409);', '            let told = matches!(error.status().as_u16(), 400 | 403);'),
     (T, 'host', 'a refusal is printed as it is not given', '                Some(detail) => ToolAnswer::said(1, json!({ "error": detail }).to_string()),', '                Some(detail) => ToolAnswer::said(1, detail.to_string()),'),
-    (T, 'host', 'the tool is an app that can see', '    match library::posted(app, &bytes, validate_only, false).await {', '    match library::posted(app, &bytes, validate_only, true).await {'),
+    (T, 'host', 'the tool is an app that can see', '    match library::posted(app, &bytes, validate_only, false, turn(call)).await {', '    match library::posted(app, &bytes, validate_only, true, turn(call)).await {'),
     (T, 'host', 'the tool never only checks', '    let validate_only = parsed.flags.contains("--validate-only");', '    let validate_only = parsed.flags.contains("--validate");'),
 ]
 

@@ -1,0 +1,208 @@
+{
+ "about": "Written by server-rs/tools/source-trace-vectors.py from server/lib/routes/artifacts.py (_publishing_trace), server/lib/turn_identity.py and server/lib/artifacts.py. Do not edit by hand.",
+ "vectors": [
+  {
+   "case": "the running turn",
+   "how": "its own agent, in its turn that runs",
+   "kind": "document",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the running turn",
+   "how": "its own agent, in its turn that runs",
+   "kind": "render_spec",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "the running turn",
+   "how": "its own agent, in its turn that runs",
+   "kind": "report",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "no token",
+   "how": "the request presents none",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "no token",
+   "how": "the request presents none",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "no token",
+   "how": "the request presents none",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token that is none",
+   "how": "a text that is no token of this Host",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token that is none",
+   "how": "a text that is no token of this Host",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token that is none",
+   "how": "a text that is no token of this Host",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token of a turn nobody has",
+   "how": "a token of the Host's own form whose turn no agent has",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token of a turn nobody has",
+   "how": "a token of the Host's own form whose turn no agent has",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a token of a turn nobody has",
+   "how": "a token of the Host's own form whose turn no agent has",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "another agent's token",
+   "how": "the token of a turn of another agent, which runs",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "another agent's token",
+   "how": "the token of a turn of another agent, which runs",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "another agent's token",
+   "how": "the token of a turn of another agent, which runs",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn ended",
+   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn ended",
+   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "the turn ended",
+   "how": "its own agent, in a turn that ended (a job it started that publishes later)",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "an older turn",
+   "how": "its own agent, in a turn that ended while a newer one runs",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "an older turn",
+   "how": "its own agent, in a turn that ended while a newer one runs",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "an older turn",
+   "how": "its own agent, in a turn that ended while a newer one runs",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a running turn without a trace",
+   "how": "its own agent, in its turn that runs, which has no trace",
+   "kind": "document",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a running turn without a trace",
+   "how": "its own agent, in its turn that runs, which has no trace",
+   "kind": "render_spec",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a running turn without a trace",
+   "how": "its own agent, in its turn that runs, which has no trace",
+   "kind": "report",
+   "shown": "none",
+   "source_message_id": ""
+  },
+  {
+   "case": "a revision by a later turn",
+   "how": "published in its turn that runs, then revised in a later turn",
+   "kind": "document",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "a revision by a later turn",
+   "how": "published in its turn that runs, then revised in a later turn",
+   "kind": "render_spec",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "a revision by a later turn",
+   "how": "published in its turn that runs, then revised in a later turn",
+   "kind": "report",
+   "shown": "the trace",
+   "source_message_id": ""
+  },
+  {
+   "case": "a lookup that fails",
+   "how": "the turn cannot be read",
+   "kind": "document",
+   "shown": "unavailable",
+   "source_message_id": ""
+  },
+  {
+   "case": "a request to the user",
+   "how": "a decision, made by its own route in a running turn",
+   "kind": "decision",
+   "shown": "none",
+   "source_message_id": ""
+  }
+ ]
+}

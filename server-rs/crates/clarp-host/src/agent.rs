@@ -187,6 +187,11 @@ pub enum Ask {
         turn: u64,
         answer: Answer<Standing>,
     },
+    /// The trace of one of the agent's turns, when it is the running one now.
+    RunningTrace {
+        turn: u64,
+        answer: Answer<Option<String>>,
+    },
     /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
     Shown {
         answer: Answer<Value>,
@@ -606,6 +611,11 @@ impl AgentHandle {
     /// as its log says.
     pub async fn standing(&self, turn: u64) -> Result<Standing, Unavailable> {
         self.ask(|answer| Ask::Standing { turn, answer }).await
+    }
+
+    /// The trace of this turn when it is the agent's running turn now (`Actor::running_trace`).
+    pub async fn running_trace(&self, turn: u64) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::RunningTrace { turn, answer }).await
     }
 
     /// Everything that is shown of the agent's turn as it runs.
@@ -2410,6 +2420,7 @@ impl Worker {
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
+            Ask::RunningTrace { turn, answer } => return read(actor.running_trace(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
@@ -3760,6 +3771,7 @@ fn refuse_for(
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::RunningTrace { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
