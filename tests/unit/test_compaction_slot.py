@@ -169,7 +169,9 @@ def test_a_send_waits_until_the_interrupted_compaction_has_ended(tmp_path, monke
     time.sleep(0.1)
     world._collect()
     assert world.started == [] and run.is_alive()
-    assert td.compaction_holds_slot(world.agent) and compaction.is_compacting("mike")
+    # The outcome is recorded: the agent no longer reads as compacting, but
+    # the slot is kept while Codex still works on the thread.
+    assert td.compaction_holds_slot(world.agent) and not compaction.is_compacting("mike")
     handle.alive = False                 # Codex ended it
     run.join(5)
     assert not run.is_alive()
@@ -190,7 +192,7 @@ def test_when_the_bounded_wait_runs_out_the_send_waits_for_the_stuck_process(tmp
     world._collect()
     assert world.started == []
     assert _waiting(world) == ["u1"]
-    assert compaction.is_compacting("mike")
+    assert not compaction.is_compacting("mike")      # an ordinary queued send now
     told = compaction.last_outcomes([world.agent])[world.agent]
     assert told["outcome"] == "unknown"
     assert "messages wait until that Codex process is restarted" in told["detail"]
@@ -258,14 +260,117 @@ def test_the_codex_client_waits_bounded_for_the_interrupted_compaction(monkeypat
         codex_app_server.admit_turn(client, "agent-c")
 
 
-def test_a_terminal_compactions_cli_is_gone_before_the_slot_is_given_back(monkeypatch):
-    """The Claude path's hard cap (and every other end): after the tmux kill
-    the CLI must exit; one that does not is SIGKILLed, and while it lives the
-    slot is kept."""
-    monkeypatch.setattr(compaction, "_REAP_SEC", 0.2)
+def _orphan_ignoring_hup_and_term() -> int:
+    """A process that is not our child and ignores HUP and TERM, like a CLI
+    that does not die with its tmux session."""
     out = subprocess.run(["sh", "-c", "trap '' HUP TERM; sleep 30 >/dev/null 2>&1 & echo $!"],
                          capture_output=True, text=True, check=True)
-    pid = int(out.stdout.strip())
-    assert compaction._pid_alive(pid)
-    assert compaction._reap(pid) is True
-    assert _wait_for(lambda: not compaction._pid_alive(pid))
+    return int(out.stdout.strip())
+
+
+def _open_fds() -> int:
+    import os
+    return len(os.listdir("/proc/self/fd"))
+
+
+def test_a_terminal_compactions_cli_is_killed_through_its_pidfd(monkeypatch):
+    """The Claude path's hard cap (and every other end): after the tmux kill
+    the CLI must exit; one that does not is SIGKILLed through its pidfd."""
+    import os
+    monkeypatch.setattr(compaction, "_REAP_SEC", 0.2)
+    pid = _orphan_ignoring_hup_and_term()
+    proc = compaction._Process(pid, os.pidfd_open(pid))
+    assert not proc.exited()
+    assert compaction._reap(proc) is True
+    assert proc.exited()
+    proc.close()
+    assert proc.fd is None
+
+
+def test_a_reused_pid_is_never_signalled(monkeypatch):
+    """The pidfd belongs to a CLI that has exited; its pid now names another
+    process (this test's own, the worst case). Nothing is signalled."""
+    import os
+    child = subprocess.Popen(["true"])
+    fd = os.pidfd_open(child.pid)
+    child.wait()
+    proc = compaction._Process(os.getpid(), fd)      # the pid "reused" by us
+    sent = []
+    monkeypatch.setattr(compaction.os, "kill", lambda *a: sent.append(a))
+    assert proc.exited()
+    assert compaction._reap(proc) is True
+    assert proc.kill() is True                       # through the dead pidfd: reaches no one
+    assert sent == []
+    proc.close()
+
+
+def test_an_unreaped_zombie_counts_as_gone():
+    import os
+    child = subprocess.Popen(["true"])
+    proc = compaction._Process(child.pid, os.pidfd_open(child.pid))
+    assert _wait_for(proc.exited)
+    assert compaction._pid_alive(child.pid)          # kill(pid, 0) still says alive
+    proc.close()
+    child.wait()
+
+
+def test_without_a_pidfd_nothing_is_signalled_and_the_wait_is_bounded(monkeypatch):
+    monkeypatch.setattr(compaction, "_REAP_SEC", 0.2)
+    pid = _orphan_ignoring_hup_and_term()
+    sent = []
+    real_kill = compaction.os.kill
+
+    def kill(target, sig):
+        sent.append(sig)
+        return real_kill(target, sig)
+    monkeypatch.setattr(compaction.os, "kill", kill)
+    proc = compaction._Process(pid, None)
+    started = time.time()
+    assert compaction._reap(proc) is True            # released after the bound
+    assert time.time() - started < 2.0
+    assert set(sent) <= {0}                          # only liveness probes
+    assert compaction._pid_alive(pid)                # not signalled
+    real_kill(pid, 9)
+    # The pane process without a pidfd API: no descriptor, no signal.
+    monkeypatch.delattr(compaction.os, "pidfd_open")
+    monkeypatch.setattr(compaction, "_pane_state", lambda _t: (pid, False))
+    unwatched = compaction._pane_process("pwa-compact-x")
+    assert unwatched is not None and unwatched.fd is None and unwatched.kill() is False
+
+
+def test_pidfds_do_not_leak(monkeypatch):
+    import os
+    monkeypatch.setattr(compaction, "_REAP_SEC", 0.2)
+    before = _open_fds()
+    # The pane's pid changed between the two looks: the pidfd is closed at once.
+    pid = _orphan_ignoring_hup_and_term()
+    looks = iter([(pid, False), (pid + 1, False)])
+    monkeypatch.setattr(compaction, "_pane_state", lambda _t: next(looks))
+    assert compaction._pane_process("pwa-compact-x") is None
+    assert _open_fds() == before
+    # The normal path: opened, reaped, closed.
+    monkeypatch.setattr(compaction, "_pane_state", lambda _t: (pid, False))
+    proc = compaction._pane_process("pwa-compact-x")
+    assert proc is not None and proc.fd is not None
+    assert compaction._reap(proc) is True
+    proc.close()
+    assert _open_fds() == before
+    # One that lingers is kept for the hold and closed when the run ends.
+    lingering = compaction._Process(os.getpid(), os.pidfd_open(os.getpid()))
+    compaction._lingering["s-x"] = lingering
+    assert compaction._still_held("s-x", "agent-x", "claude") is True
+    compaction._lingering.pop("s-x").close()
+    assert _open_fds() == before
+
+
+def test_a_second_request_while_the_last_compactions_process_ends_is_refused_in_words(
+        tmp_path, monkeypatch):
+    world = World(tmp_path)
+    stuck = _Live()
+    run = _run_compaction(world, monkeypatch, result=_TIMED_OUT, handles=[], holders=[stuck])
+    monkeypatch.setattr(compaction.shutil, "which", lambda x: "/usr/bin/" + x)
+    monkeypatch.setattr(compaction.agents_db, "live_backend_session", lambda _a: "bs-x")
+    answer = compaction.compact_session("mike")
+    assert answer == {"ok": False, "error": "the last compaction is still ending — try again shortly"}
+    stuck.alive = False
+    run.join(5)
