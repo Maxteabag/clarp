@@ -466,8 +466,16 @@ class AdmissionMixin:
         queued_admission = queue_if_busy or waits
         if spec.arrived_waiting:
             spec = replace(spec, arrived_waiting=False)
-        if self._enqueue_if_busy(spec, queue_if_busy=queued_admission,
-                                 wait_for_start=wait_for_start):
+        took_over = False
+        if waits and not wait_for_start:
+            # The running Claude turn has printed nothing: end it and give both
+            # messages to one turn, which starts here (issue 491, part B).
+            from . import turn_takeover
+            taken = turn_takeover.take_over_if_silent(self, spec)
+            if taken is not None:
+                spec, took_over = taken, True
+        if not took_over and self._enqueue_if_busy(spec, queue_if_busy=queued_admission,
+                                                   wait_for_start=wait_for_start):
             if queued_admission:
                 self._broadcast_queue_state(spec, started=False)
             queue_state = turn_queue.state(spec.agent_id)

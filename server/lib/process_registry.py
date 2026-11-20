@@ -24,6 +24,14 @@ class TurnHandle:
     # Set only by runners that used start_new_session=True. Never infer ownership
     # from getpgid(): a caller-supplied process may share the runtime's group.
     process_group: int | None = None
+    # What a takeover judges (issue 491, part B; set by the Claude runner): the
+    # lines its drain has read, whether any was output (a word or a tool call),
+    # whether it may be frozen and judged at all, and whether it is itself a
+    # takeover (never taken over again).
+    lines_read: int = 0
+    output_seen: bool = False
+    takeover_capable: bool = False
+    takeover_of: bool = False
 
     @property
     def pid(self) -> int:
