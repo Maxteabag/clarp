@@ -35,7 +35,7 @@ def test_validate_only_has_no_persistent_or_published_effects(host, envelope):
 @pytest.mark.parametrize("header,capable", [(v["header"], v["capable"]) for v in WIRE["clients"]])
 def test_client_contract_gates_spec_and_submission(host, envelope, monkeypatch, header, capable):
     from lib import server_identity
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", WIRE["development_minimum"])
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": WIRE["development_minimum"]})
     headers = {"X-Clarp-Client":header} if header else {}
     assert _request(host, "/artifacts", envelope)[0] == 201
     for rep in ("", "?representation=flat-v1", "?representation=summary-v1"):
@@ -63,7 +63,7 @@ def test_catalog_bytes_and_hash(host, envelope, monkeypatch):
     from tests.integration.test_attention_questions_http import TOKEN
     from lib import server_identity
 
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     request = urllib.request.Request(host.base + "/artifact-catalogs/clarp.form/1",
                                      headers={"Authorization":"Bearer " + TOKEN})
     with urllib.request.urlopen(request, timeout=5) as response:
@@ -74,7 +74,9 @@ def test_catalog_bytes_and_hash(host, envelope, monkeypatch):
     assert code == 201 and published["artifact"]["catalog_sha256"] == "c1:"+hashlib.sha256(raw).hexdigest()
 
 
-def test_unset_threshold_ships_generic_even_for_high_contract(host, envelope):
+def test_a_host_that_switches_the_kind_off_ships_generic_even_for_a_high_contract(host, envelope, monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 0})
     headers = {"X-Clarp-Client":"ios/12 contract=999"}
     _, result = _request(host, "/artifacts", envelope, headers=headers)
     row = result["artifact"]
@@ -88,7 +90,7 @@ def test_unset_threshold_ships_generic_even_for_high_contract(host, envelope):
 def test_first_submission_announces_completion_and_worker_retries_same_prompt(host, envelope, monkeypatch):
     from lib import html_forms, server_identity
 
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     headers = {"X-Clarp-Client": "ios/12 contract=74"}
     ident = envelope["artifact_id"]
     status, _ = _request(host, "/artifacts", envelope, headers=headers)
@@ -170,7 +172,7 @@ def test_section_eight_wire_vectors(host, monkeypatch):
     from lib import server_identity
     from tests.fixtures.render_spec.scenarios import scenarios
 
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     headers = {"X-Clarp-Client": "ios/12 contract=74"}
     for case in scenarios():
         ident = case["artifact_id"]
@@ -236,7 +238,7 @@ def test_section_eight_wire_vectors(host, monkeypatch):
 def test_mutations_search_pins_and_inbox_share_the_negotiated_row(host, envelope, monkeypatch, capable):
     from lib import server_identity
 
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     headers = {"X-Clarp-Client": f"ios/12 contract={74 if capable else 73}"}
     ident = envelope["artifact_id"]
     path = "/artifacts/" + ident
@@ -318,7 +320,7 @@ def test_render_publish_and_validate_return_the_same_metadata_refusal(host, enve
 
 def test_update_requires_whole_fresh_revision_and_preserves_prior_row_on_refusal(host, envelope, monkeypatch):
     from lib import server_identity
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     headers = {"X-Clarp-Client": "ios/1 contract=74"}
     path = "/artifacts/" + envelope["artifact_id"]
     assert _request(host, "/artifacts", envelope, headers=headers)[0] == 201
@@ -382,7 +384,7 @@ def html_form_route_answers(host, prefix):
 def test_a_missing_catalog_changes_no_html_form_route_and_refuses_render_spec(host, envelope, monkeypatch,
                                                                             tmp_path, capfd):
     from lib import server_identity
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     capable = {"X-Clarp-Client": "ios/12 contract=74"}
     assert _request(host, "/artifacts", envelope, headers=capable)[0] == 201
     present = html_form_route_answers(host, "aaa")
@@ -415,7 +417,7 @@ def test_a_missing_catalog_changes_no_html_form_route_and_refuses_render_spec(ho
 def test_invalid_keys_reach_no_response_log_or_telemetry(host, envelope, monkeypatch, capfd):
     """A caller's key that fails the identifier rule is never named: not in the pointer, on stderr or in telemetry."""
     from lib import log as log_module, server_identity
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     rows = []
     monkeypatch.setattr(log_module, "_eventlog_emit", lambda event, level, detail: rows.append([event, detail]))
     capable = {"X-Clarp-Client": "ios/12 contract=74"}
@@ -451,7 +453,7 @@ def test_invalid_keys_reach_no_response_log_or_telemetry(host, envelope, monkeyp
 def test_an_agent_withdraws_an_unanswered_spec_by_discarding_it(host, envelope, monkeypatch):
     """Archive only files it away: it can still be answered. Discard withdraws it."""
     from lib import server_identity
-    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CLIENT", 74)
+    monkeypatch.setattr(server_identity, "RENDER_SPEC_MIN_CONTRACT", {"ios": 74})
     capable = {"X-Clarp-Client": "ios/12 contract=74"}
     answer = {"version": "build-1", "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
     for ident, action in (("kept", "archive"), ("gone", "discard")):
@@ -462,3 +464,44 @@ def test_an_agent_withdraws_an_unanswered_spec_by_discarding_it(host, envelope, 
                     headers=capable)[0] == 200
     assert _request(host, "/artifacts/gone/submit", {**answer, "submission_id": "sub-gone-000000000001"},
                     headers=capable) == (409, {"error": render_spec.Refusal("not_open", "").triple()})
+
+
+def test_the_administrator_exports_a_spec_with_its_accepted_submission(host, envelope):
+    """R137: what a move to another Host needs, whatever the caller's display negotiation."""
+    headers = {"X-Clarp-Client": "ios/12 contract=74"}
+    ident = envelope["artifact_id"]
+    assert _request(host, "/artifacts", envelope, headers=headers)[0] == 201
+    assert _request(host, f"/artifacts/{ident}/export")[1]["render_spec"]["submission"] is None
+    submission = {"submission_id": "export-answer-01", "version": "build-1", "synthesize_audio": False,
+                  "answers": {"intent": "submit_decision", "state": {"choice": "send"}}}
+    assert _request(host, f"/artifacts/{ident}/submit", submission, headers=headers)[0] == 200
+    status, exported = _request(host, f"/artifacts/{ident}/export")             # no client header at all
+    assert status == 200 and exported["kind"] == "render_spec" and set(exported) == {"kind", "render_spec"}
+    body = exported["render_spec"]
+    assert body["artifact"]["artifact_id"] == ident and body["stored"]["spec"] == envelope["payload"]["spec"]
+    assert {"catalog", "catalog_version", "content_identity"} <= body["stored"].keys()
+    answer = body["submission"]
+    assert answer["submission_id"] == "export-answer-01" and answer["answers"] == submission["answers"]
+    assert answer["synthesize_audio"] is False and answer["payload_hash"] and answer["accepted_at"]
+    assert answer["delivery_status"] == "pending" and answer["delivered_at"] is None
+
+
+def test_another_kind_is_refused_in_words_and_a_missing_one_is_404(host):
+    status, created = _request(host, "/artifacts", {"session": "theo", "type": "document", "title": "Notes",
+                                                     "payload": {"content": "words"}})
+    assert status == 201
+    ident = created["artifact"]["artifact_id"]
+    status, refused = _request(host, f"/artifacts/{ident}/export")
+    assert status == 409 and refused["kind"] == "document" and "document" in refused["error"]
+    assert _request(host, "/artifacts/no-such-artifact/export")[0] == 404
+
+
+@pytest.mark.parametrize("principal,local,token,allowed", [
+    ("administrator", False, "secret", True), ("device-1", True, "secret", False),
+    ("device-1", False, "secret", False), ("", True, "", True), ("", False, "", False)])
+def test_only_the_administrator_may_export(principal, local, token, allowed):
+    from types import SimpleNamespace
+    from lib.routes.artifacts import _administrator
+    handler = SimpleNamespace(_request_principal=principal, _request_is_local=local,
+                              ctx=SimpleNamespace(auth_token=token))
+    assert _administrator(handler) is allowed
