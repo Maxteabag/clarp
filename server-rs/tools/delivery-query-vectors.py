@@ -13,7 +13,8 @@ store the answer was made from, the query and what the method answered and added
 
     python3 server-rs/tools/delivery-query-vectors.py
 
-Nothing of a Host is started; the library writes only under /var/tmp.
+Nothing of a Host is started; the library writes only in a scratch place of its own
+(`tools/scratch.py`), which is gone when it ends.
 """
 from __future__ import annotations
 
@@ -21,22 +22,22 @@ import copy
 import json
 import os
 import pathlib
-import shutil
 import sys
 import types
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch  # noqa: E402
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'delivery-query-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-delivery-query-vectors')
+SCRATCH = pathlib.Path()  # the scratch place main takes from tools/scratch.py
 T0 = 1_794_700_000_000
 SERVER_ID, INSTANCE = 'host-1', 'instance-1'
 
 
 def isolate() -> None:
     """Points the library at a place of its own before it is imported."""
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
     os.environ.update({
         'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
         'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
@@ -87,6 +88,13 @@ def queries() -> list[dict]:
 def main(argv: list[str]) -> int:
     if os.environ.get('PYTHONHASHSEED') != '0':
         os.execve(sys.executable, [sys.executable, *argv], {**os.environ, 'PYTHONHASHSEED': '0'})
+    global SCRATCH
+    with tool_scratch.directory('clarp-delivery-query-') as place:
+        SCRATCH = pathlib.Path(place)
+        return generate(argv)
+
+
+def generate(argv: list[str]) -> int:
     isolate()
     import server
     from lib import clock, db, launch_receipts as lr, server_identity, settings_store as store, turn_queue
