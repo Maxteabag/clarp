@@ -313,3 +313,16 @@ def test_the_weekly_reading_is_the_accounts_own_window():
     spent = janitor_hotseat.codex_weekly_spent
     assert spent([{"weekly_used": 0.99}, {"weekly_used": 1.0}]) is True    # 99 % used is spent
     assert spent([{"weekly_used": 0.98}, {"weekly_used": 1.0}]) is False
+
+
+@pytest.mark.parametrize("unread", ["errored", "no weekly window"])
+def test_an_account_the_host_cannot_read_authorises_nothing(switcher, tmp_path, monkeypatch, unread):  # noqa: F811
+    """(F2) One account spent, the other's weekly reading missing: the Host does not know that no
+    account has weekly room, so it asks for nothing."""
+    reading = _codex(("work", True, 0.0), ("home", False, 0.0))
+    usage = reading["accounts"][1]["usage"]
+    if unread == "errored":
+        usage.update(error="unreadable", usable=False, worst_used=None)
+    else:
+        usage["windows"] = [{"label": "codex primary 5-hour", "used": 1.0}]
+    assert _keeper(switcher, tmp_path, monkeypatch, reading) == []
