@@ -191,6 +191,11 @@ fn the_bounds_of_a_session_are_the_python_hosts() {
 
 #[test]
 fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
+    // The Python Host's own minimums, as a Host whose owner names none has them.
+    let minimums: Vec<(String, i64)> = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT
+        .iter()
+        .map(|(name, minimum)| (name.to_string(), *minimum))
+        .collect();
     let vectors = vectors();
     let phone = vectors["phone"].as_str().unwrap();
     let host_id = vectors["host_id"].as_str().unwrap();
@@ -296,7 +301,7 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
                 has_key: true,
                 runs_tools: true,
                 live_model: clarp_kernel::live_call::LIVE_MODEL_DEFAULT,
-                live_model_min_client: &[],
+                live_model_min_client: &minimums,
             };
             let call = (call_id.as_str(), epoch);
             let mut out = Effects::default();
@@ -449,6 +454,6 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
         };
         *ended.entry(reason.to_string()).or_default() += 1;
     }
-    assert_eq!((steps, to_phone, to_voice), (410, 267, 485));
+    assert_eq!((steps, to_phone, to_voice), (422, 276, 496));
     assert_eq!(ended.len(), 20, "{ended:?}");
 }

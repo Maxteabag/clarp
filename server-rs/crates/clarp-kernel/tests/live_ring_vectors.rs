@@ -259,6 +259,11 @@ fn delivery(rings: &Rings, ring: &Ring, world: &World, calls: &CallPushes) -> Va
 
 #[test]
 fn live_rings_go_as_the_python_hosts_go_step_by_step() {
+    // The Python Host's own minimums, as a Host whose owner names none has them.
+    let minimums: Vec<(String, i64)> = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT
+        .iter()
+        .map(|(name, minimum)| (name.to_string(), *minimum))
+        .collect();
     let vectors = vectors();
     assert_eq!(vectors["join_ms"], json!(JOIN_MS));
     assert_eq!(
@@ -354,7 +359,7 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
                 has_key,
                 runs_tools: true,
                 live_model: clarp_kernel::live_call::LIVE_MODEL_DEFAULT,
-                live_model_min_client: &[],
+                live_model_min_client: &minimums,
             };
             let ring_id = text(step, "ring_id");
             let principal = text(step, "principal");
@@ -765,9 +770,9 @@ fn live_rings_go_as_the_python_hosts_go_step_by_step() {
             );
         }
     }
-    assert_eq!((steps, refusals, placed, joined), (743, 196, 72, 20));
-    assert_eq!((closes_between, call_pushes_sent), (3, 92));
-    assert_eq!(foreign_nonces, 48);
+    assert_eq!((steps, refusals, placed, joined), (801, 196, 85, 22));
+    assert_eq!((closes_between, call_pushes_sent), (3, 108));
+    assert_eq!(foreign_nonces, 61);
 }
 
 /// A control of a call as it was sent, with a nonce that has a sign outside ASCII.
