@@ -13,13 +13,17 @@ import runner
 RUNS = {
     'kept': ['test', '-p', 'clarp-host', '--lib', 'kept::tests'],
     'fleet': ['test', '-p', 'clarp-host', '--lib', 'fleet::tolerance_tests'],
+    'opening': ['test', '-p', 'clarp-host', '--lib', 'calls::opening::tests'],
 }
+O = 'clarp-host/src/calls/opening.rs'
 K = 'clarp-host/src/kept.rs'
 F = 'clarp-host/src/fleet.rs'
 # NOT PLANTED, each with its reason:
 #   the Host's own door (`edge.rs`, `GET /host/start`): held by the Host's test in tests/host/start_tolerance.rs,
 #     which this branch takes up once it stands on the main that registers that file.
 #   the start line (`main.rs`): what it says is `LeftOut::line`, planted here; that it is said is the Host's test's.
+#   the calls' recovery record by record (`recover_bindings`: an opening that cannot be read left out, a ring whose
+#     agent does not answer counted): held by the Host's test in tests/host/start_tolerance.rs, as the door is.
 PLANTS = [
     # The loader.
     (K, 'kept', 'a row that cannot be read is not counted', '                left.left_out(table, &key, log);\n', ''),
@@ -35,6 +39,9 @@ PLANTS = [
     (F, 'fleet', 'a name held by an agent the Host does not run is free', '            let mut held = held.filter(|kept| roster::same_name(&kept.persona, name));', '            let mut held = held.filter(|_| false);'),
     (F, 'fleet', "a deleted agent's goals that cannot be retired stop the start", '                if retire_goals(&works, &record, at).is_err() {\n', '                if let Err(why) = retire_goals(&works, &record, at) {\n                    return Err(why);\n                }\n                if false {\n'),
     (F, 'fleet', "the fleet's writes are not watched", '    let store: Box<dyn KeyValue> = Box::new(crate::kept::Watched::new(\n        store,\n        left_out.clone(),\n        log.clone(),\n    ));', '    let store: Box<dyn KeyValue> = store;\n    let _ = &left_out;'),
+    # The calls' recovery: a store that does not answer is asked again, a few times, no more.
+    (O, 'opening', 'the store is asked once', 'const TRIES: u32 = 3;', 'const TRIES: u32 = 1;'),
+    (O, 'opening', 'the store is asked once too often', '                tried += 1;\n                if tried >= TRIES {\n', '                tried += 1;\n                if tried > TRIES {\n'),
 ]
 
 if __name__ == '__main__':
