@@ -746,3 +746,42 @@ fn installer_restart_reconciles_published_files_without_starting_a_download() {
         );
     }
 }
+
+#[test]
+fn the_host_lists_transcription_with_its_reference_contract() {
+    let reference: Value = serde_json::from_str(include_str!(
+        "../../../../conformance/golden/who-is-there.json"
+    ))
+    .unwrap();
+    let reference = reference["http"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|step| step["path"] == "/server-info")
+        .unwrap();
+    let place = Place::new("transcription-feature");
+    let host = place.start_with_token("admin");
+    let info = host.get("/server-info");
+    let names = |info: &Value| {
+        info["capabilities"]["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|name| *name == "transcription" || name.starts_with("transcription_"))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let mut expected = names(&reference["body"]);
+    let mut listed = names(&info);
+    expected.sort();
+    listed.sort();
+    assert_eq!(listed, expected);
+    assert_eq!(listed.len(), 8);
+    for name in listed {
+        assert_eq!(
+            info["contract"]["features"][&name], reference["body"]["contract"]["features"][&name],
+            "{name}"
+        );
+    }
+}
