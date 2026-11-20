@@ -357,7 +357,8 @@ def test_a_note_is_refused_outside_the_agents_own_running_turn(world, pushes):
     turn_lifecycle.close_turns_for_trace(world.id, "t-boss")
     idle = _note("Hello")
     assert idle.answer[0] == 409 and "works only inside a running turn of worker" in idle.answer[1]["error"]
-    assert _note("", token="").answer[0] == 400
+    empty = _note("   ")
+    assert empty.answer[0] == 400 and "a note needs words: clarp-admin tell-user" in empty.answer[1]["error"]
     assert _note("x" * (agent_notes.MAX_TEXT + 1)).answer[0] == 413
     assert _note("Hello", session="nobody").answer[0] == 404
 
@@ -370,3 +371,29 @@ def test_a_muted_agents_note_badges_without_a_push_and_a_quiet_agents_stays_quie
     assert pushes[-1]["push"] is False and pushes[-1]["badge"] is True
     quiet = notification_policy.note_decision(notification_policy.AgentCapabilities(present=True, quiet=True))
     assert isinstance(quiet, notification_policy.Suppress) and quiet.reason == "janitor-maintenance"
+
+
+def test_a_notes_row_is_exactly_what_every_app_draws_as_an_ordinary_reply(world, pushes):
+    """iOS, Android, desktop and the web app draw this row as the agent's reply: role assistant,
+    kind and origin 'note' (a word none of them treats specially), no sender fields, not automated,
+    no automation category, words in it. Pinned field by field, stored and on /log."""
+    from lib import origins
+    world.turn("t-boss", "Report please", "Done.", origin="agent", sender=world.boss, settle=False)
+    body = _note("  The release is out.  ", token=_token(world.id, "t-boss"), note_id="n-exact").answer[1]
+    stored = dict(db.conn().execute(
+        "SELECT role, kind, origin, sender_agent_id, source_file, seq < 0 AS negative, trace_id, tool_name,"
+        " tools_json, display_cells_json, text FROM messages WHERE message_id=?", (body["message_id"],)).fetchone())
+    assert stored == {"role": "assistant", "kind": "note", "origin": "note", "sender_agent_id": None,
+                      "source_file": "note:n-exact", "negative": 1, "trace_id": "t-boss", "tool_name": None,
+                      "tools_json": "[]", "display_cells_json": "[]", "text": "The release is out."}
+    row = next(row for row in world.log() if row["id"] == "note-n-exact")
+    assert {key: row[key] for key in (
+        "role", "kind", "origin", "text", "tool_name", "tools", "display_cells", "trace_id",
+        "sender_agent_id", "sender_name", "sender_session", "reply_to_agent_id", "reply_to_name",
+        "reply_to_session", "audience", "automated", "automation_kind", "phase")} == {
+        "role": "assistant", "kind": "note", "origin": "note", "text": "The release is out.",
+        "tool_name": None, "tools": [], "display_cells": [], "trace_id": "t-boss",
+        "sender_agent_id": "", "sender_name": "", "sender_session": "", "reply_to_agent_id": "",
+        "reply_to_name": "", "reply_to_session": "", "audience": "user", "automated": False,
+        "automation_kind": "", "phase": None}
+    assert "note" in origins.CHAT_ACTIVITY_ORIGINS

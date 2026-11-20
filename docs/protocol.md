@@ -694,7 +694,7 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   Codex app-server) the agent's running turn is taken. `note_id` (up to 64 of
   `a-z0-9-_`) makes a retry answer the same note. Answers `{"ok", "session",
   "message_id", "trace_id", "created", "notified", "reason"}`. At most 8000
-  characters (413).
+  characters (413); a note with no words answers 400.
 - `GET /agent-helper-state?session=` — `{"agent_id", "session", "role",
   "parent_agent_id", "helper_state", "helper_completed_at", "archived_at"}`
   for one agent, so a watcher can poll without the snapshot.

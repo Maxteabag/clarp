@@ -71,8 +71,10 @@ def post(data: Any, *, caller_agent_id: str, caller_trace: str) -> Posted:
         raise NoteRefused(400, "bad json")
     session = str(data.get("session") or "").strip()
     text = str(data.get("text") or "").strip()
-    if not session or not text:
-        raise NoteRefused(400, "session and text required")
+    if not session:
+        raise NoteRefused(400, "session required")
+    if not text:
+        raise NoteRefused(400, f"a note needs words: {COMMAND} --from {session} --text '...'")
     if len(text) > MAX_TEXT:
         raise NoteRefused(413, f"a note is at most {MAX_TEXT} characters")
     note_id = _note_id(data.get("note_id"))
