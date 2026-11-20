@@ -93,7 +93,7 @@ changes("clarp-host/src/kept.rs", "port", [
     ('store.put_together(&moved)?;', 'let _ = store.put_together(&moved);'),
 ])
 changes("clarp-host/src/heard/inventory.rs", "port", [
-    ('.await\n            .map_err(|e| e.0)?;', '.await.unwrap_or(None);'),
+    ('.await\n            .map_err(|e| e.0)?;', '.await.unwrap_or(crate::kept::Found::Unfit);'),
 ])
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
