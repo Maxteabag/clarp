@@ -503,6 +503,16 @@ fn bring_hearing(way: &Way<'_>, agent: &Value) -> String {
     }
 }
 
+/// The snapshot names Janitors explicitly. Older snapshots may omit the flag.
+pub(crate) fn movable(agent: &Value) -> Result<(), &'static str> {
+    if agent["is_janitor"] == true {
+        return Err(
+            "A Janitor cannot be moved. Use this Host's own built-in Janitors, or create a custom Janitor here from its definition.",
+        );
+    }
+    Ok(())
+}
+
 pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
@@ -536,6 +546,7 @@ pub fn import(
         })
         .ok_or(format!("the Host at {from} has no agent called {session}"))?
         .clone();
+    movable(&agent)?;
     if agent["busy"] == true && !only_files {
         return Err(format!(
             "{session} is in the middle of a turn on the Host at {from}: let it end first"

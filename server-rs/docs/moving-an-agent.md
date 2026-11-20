@@ -21,6 +21,8 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 
 ## What does not move yet
 
+- Janitors. Use the destination Host’s own built-in Janitors, or create a custom Janitor there from its definition.
+
 - How much it says while it works and how human it sounds: neither is in what a Host shows of an agent.
 - What it threw away: an artifact that was discarded stays where it was.
 - What users answered to a form before the move: it is in the conversation, where the agent
