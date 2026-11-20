@@ -7,7 +7,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "server-rs/crates/clarp-kernel/tests/fixtures/transcription-inventory.json"
@@ -72,6 +74,6 @@ if __name__ == "__main__":
     if "--isolated" in sys.argv:
         print(json.dumps(record(Path(sys.argv[-1])), ensure_ascii=True, separators=(",", ":")))
     else:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tool_scratch.directory() as tmp:
             data = subprocess.check_output([sys.executable, __file__, "--isolated", tmp])
         OUT.write_bytes(data)

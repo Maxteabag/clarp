@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 DEST = ROOT/"server-rs/crates/clarp-kernel/tests/fixtures/launch-directories.json"
@@ -143,7 +145,7 @@ def capture(place):
 if __name__=="__main__":
     spec=importlib.util.spec_from_file_location("replay",ROOT/"tests/replay/host.py")
     replay=importlib.util.module_from_spec(spec);spec.loader.exec_module(replay)
-    with tempfile.TemporaryDirectory() as tmp:
+    with tool_scratch.directory() as tmp:
         place=Path(tmp)
         (place/"scenario-config.toml").write_text("")
         replay.isolate(place)

@@ -24,7 +24,7 @@ fail by themselves show nothing.
 
 Where it compiles: through `server-rs/tools/build` on the build machine, or with `cargo` itself where `PLANTS_CARGO`
 is set, which is how the workflow "Planted rules (Rust)" runs it on GitHub's machines. What it writes down goes to
-`PLANTS_OUT` (`/var/tmp/clarp-plants` where that is not set): `<list>.result`, and the tests' own words for every
+`PLANTS_OUT` (a temporary directory removed on return when unset): `<list>.result`, and the tests' own words for every
 rule in `<list>.<number>.log`.
 
 No wrong rule may make a test reach beyond the machine it runs on: where the rule would be one, it is not planted,
@@ -40,6 +40,10 @@ import sys
 VERDICTS = ('CAUGHT', 'MISSED', 'DID NOT COMPILE', 'HUNG')
 # How long the tests of one rule may take, compiling included.
 ENDS_WITHIN = 1500
+
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+import scratch as tool_scratch
 
 
 def main(list_file: str, runs: dict, plants: list) -> int:
@@ -70,8 +74,15 @@ def main(list_file: str, runs: dict, plants: list) -> int:
     only = [int(arg) for arg in args if arg.isdigit()]
     chosen = [number for number in range(len(plants))
               if (not only or number in only) and (shard is None or number % shard[1] == shard[0])]
-    out = pathlib.Path(os.environ.get('PLANTS_OUT', '/var/tmp/clarp-plants'))
-    out.mkdir(parents=True, exist_ok=True)
+    if 'PLANTS_OUT' in os.environ:
+        out = pathlib.Path(os.environ['PLANTS_OUT'])
+        out.mkdir(parents=True, exist_ok=True)
+        return run(out, root, crates, kept, runs, plants, chosen, shard, name, not only)
+    with tool_scratch.directory('clarp-plants-') as folder:
+        return run(pathlib.Path(folder), root, crates, kept, runs, plants, chosen, shard, name, not only)
+
+
+def run(out, root, crates, kept, runs, plants, chosen, shard, name, check_baseline):
     tag = name if shard is None else f'{name}.shard-{shard[0]}'
 
     def tested(run: str, number: str) -> tuple[str, str]:
@@ -101,7 +112,7 @@ def main(list_file: str, runs: dict, plants: list) -> int:
         print(line, flush=True)
         (out / f'{tag}.result').write_text('\n'.join(lines) + '\n')
 
-    if not only:
+    if check_baseline:
         for run in sorted({plants[number][1] for number in chosen}):
             ended, told = tested(run, f'as-it-is-{run}')
             write(f'as it is ({run}): {ended} {told}'.rstrip())
