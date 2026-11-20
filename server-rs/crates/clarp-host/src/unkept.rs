@@ -481,6 +481,7 @@ pub(crate) mod at_the_port {
                 pusher: crate::pusher::pusher().0,
                 blobs: MemBlobs::new().open(&self.dir).unwrap(),
                 form_event_writer: Arc::default(),
+                skill_links: Arc::default(),
                 turns: Arc::default(),
                 server_id: "test-host".into(),
                 revisions: Arc::default(),
