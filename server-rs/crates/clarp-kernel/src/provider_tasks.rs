@@ -460,14 +460,14 @@ impl RegistrationOrigin {
             return None;
         }
         let origin: Self = serde_json::from_str(raw).ok()?;
-        [
+        let valid = [
             &origin.provider,
             &origin.native_session_id,
             &origin.tool_use_id,
         ]
         .into_iter()
-        .all(|id| !id.is_empty() && id.chars().take(161).count() <= 160)
-        .then_some(origin)
+        .all(|id| !id.is_empty() && id.chars().take(161).count() <= 160);
+        valid.then_some(origin)
     }
     pub fn metadata(&self, agent: &str, backend: &str, bound: Option<&str>) -> Option<Value> {
         (agent==self.agent_id && backend==self.provider && bound==Some(self.native_session_id.as_str())).then(||
