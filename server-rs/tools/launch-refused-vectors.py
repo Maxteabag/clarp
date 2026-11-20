@@ -88,9 +88,11 @@ def run(root) -> dict:
         steps = []
         now = 1000.0
         for kind, text in errors:
-            state = backoff.failed('agent', 'q-1', refusal(kind, text), now)
+            state = backoff.failed('agent', 'q-1', refusal(kind, text), now, refused=True)
+            ends = state.parked or state.refusals >= recovery_backoff.REFUSED_IN_ALL
             steps.append({'kind': kind, 'text': text, 'failures': state.failures, 'identical': state.identical,
-                          'wait_s': state.retry_at - now, 'parked': state.parked, 'error': state.error})
+                          'refusals': state.refusals, 'wait_s': state.retry_at - now, 'parked': state.parked,
+                          'ends': ends, 'error': state.error})
             now = state.retry_at
         return steps
 
@@ -105,6 +107,8 @@ def run(root) -> dict:
         {'what': 'a long refusal is kept by both its ends',
          'steps': counted([('CodexSessionStuck', 'failed to resume: ' + 'x' * 300 + f' rollout {n} is empty')
                            for n in range(9)])},
+        {'what': 'two kinds that alternate end the row at its twentieth refusal in all',
+         'steps': counted([('CodexSessionStuck', STUCK), ('CliMissing', '`codex` not on PATH')] * 13)},
         {'what': 'another kind with the same words is another refusal',
          'steps': counted([('CodexSessionStuck', STUCK), ('AgyOwnershipLost', STUCK)] * 6)},
     ]
@@ -207,6 +211,11 @@ def run(root) -> dict:
     def stuck(_trace, _tries):
         return refusal('CodexSessionStuck', STUCK)
 
+    def alternating(_trace, tries):
+        if len(tries) % 2:
+            return refusal('CliMissing', '`codex` not on PATH')
+        return refusal('CodexSessionStuck', STUCK)
+
     def stuck_three_times(_trace, tries):
         return refusal('CodexSessionStuck', STUCK) if len(tries) < 3 else None
 
@@ -216,9 +225,12 @@ def run(root) -> dict:
         story('pia', "a user's send while the first waits asks for the agent again",
               [(0, 'pia-1', 'user'), (10, 'pia-2', 'user')], stuck),
         story('quin', 'a send refused three times and then started', [(0, 'quin-1', 'user')], stuck_three_times),
+        story('olga', 'a send refused by two kinds in turn ends at the twentieth counted refusal',
+              [(0, 'olga-1', 'user')], alternating),
     ]
     return {'signatures': signatures, 'briefs': briefs, 'runs': runs, 'waits': waits, 'notices': notices,
-            'stories': stories, 'park_after': recovery_backoff.PARK_AFTER}
+            'stories': stories, 'park_after': recovery_backoff.PARK_AFTER,
+            'refused_in_all': recovery_backoff.REFUSED_IN_ALL}
 
 
 def main() -> int:
