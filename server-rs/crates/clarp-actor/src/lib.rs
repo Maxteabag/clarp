@@ -36,8 +36,8 @@ use clarp_kernel::agent::{Command, Effect, Note, Refusal, Rest};
 use clarp_kernel::artifacts::{Artifact, ArtifactBook, ArtifactRecord};
 use clarp_kernel::control::Control;
 use clarp_kernel::conversation::{
-    Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Note, Notice, Reply, ToolCall,
-    ToolStatus, Total, TurnEnd,
+    Commentary, CostSoFar, Entry, Imported, LimitsSaid, Message, Note as AgentNote, Notice, Reply,
+    ToolCall, ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
 pub mod bookkeeping;
@@ -1879,15 +1879,18 @@ impl Actor {
         let mut after = message_seq;
         let mut count = 0;
         loop {
-            let items = self
-                .recorder
-                .log()
-                .read_after(after, Kinds::only(kind::AGENT_NOTE), 256)?;
+            let items =
+                self.recorder
+                    .log()
+                    .read_after(after, Kinds::only(kind::AGENT_NOTE), 256)?;
             let Some(last) = items.last() else {
                 return Ok(count);
             };
             after = last.seq;
-            let ours = items.iter().filter(|item| item.turn == Some(turn.0)).count();
+            let ours = items
+                .iter()
+                .filter(|item| item.turn == Some(turn.0))
+                .count();
             count += u32::try_from(ours).unwrap_or(u32::MAX);
         }
     }
@@ -2710,7 +2713,14 @@ impl Actor {
         admission: Admission,
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
-        self.take(message, admission, Vec::new(), None, &Marks::default(), now_ms)
+        self.take(
+            message,
+            admission,
+            Vec::new(),
+            None,
+            &Marks::default(),
+            now_ms,
+        )
     }
 
     /// Takes a message for the agent as the Host decided it at the send: another agent's
@@ -2800,7 +2810,10 @@ impl Actor {
         now_ms: i64,
     ) -> Result<(Sent, Outputs), ActorError> {
         // The first message of a trace owns it: a send that names it later is found by key.
-        if let Some(trace) = message.trace_id.as_deref().filter(|trace| !trace.is_empty())
+        if let Some(trace) = message
+            .trace_id
+            .as_deref()
+            .filter(|trace| !trace.is_empty())
             && self.recorder.log().find(&message.id)?.is_none()
             && self.trace_owner(Some(trace))?.is_none()
         {
@@ -3026,9 +3039,9 @@ impl Actor {
             return Ok((Noted::NotRunning, Outputs::default()));
         };
         if let Some(stored) = self.recorder.log().find(id)? {
-            let again = match Entry::from_item(&stored).map_err(|error| {
-                ActorError::Corrupt(format!("log item {}: {error}", stored.seq))
-            })? {
+            let again = match Entry::from_item(&stored)
+                .map_err(|error| ActorError::Corrupt(format!("log item {}: {error}", stored.seq)))?
+            {
                 Some(Entry::Note(note)) if note.text == text => Noted::Again {
                     id: id.to_string(),
                     trace_id: note.trace_id.unwrap_or_default(),
@@ -3037,7 +3050,7 @@ impl Actor {
             };
             return Ok((again, Outputs::default()));
         }
-        let note = Entry::Note(Note {
+        let note = Entry::Note(AgentNote {
             id: id.to_string(),
             turn,
             text: text.to_string(),
@@ -4148,7 +4161,15 @@ impl Actor {
             }
             batch.item(written(&notice, now_ms)?);
         }
-        if let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() }) {
+        if let Some(end) = closing(
+            &mut batch,
+            turn,
+            &live.last_row,
+            Facts {
+                notes: notes_of(self.turn_notes, turn),
+                ..live.facts()
+            },
+        ) {
             cut_off(
                 &mut batch,
                 &mut live.calls,
@@ -4305,7 +4326,15 @@ impl Actor {
                             batch.item(written(&marker, t)?);
                         }
                         if failed
-                            && let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() })
+                            && let Some(end) = closing(
+                                &mut batch,
+                                turn,
+                                &live.last_row,
+                                Facts {
+                                    notes: notes_of(self.turn_notes, turn),
+                                    ..live.facts()
+                                },
+                            )
                         {
                             batch.item(written(&end, t)?);
                         }
@@ -4453,8 +4482,15 @@ impl Actor {
                                 batch.item(written(&notice, t)?);
                             }
                             if ended
-                                && let Some(end) =
-                                    closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() })
+                                && let Some(end) = closing(
+                                    &mut batch,
+                                    turn,
+                                    &live.last_row,
+                                    Facts {
+                                        notes: notes_of(self.turn_notes, turn),
+                                        ..live.facts()
+                                    },
+                                )
                             {
                                 cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
                                 batch.item(written(&end, t)?);
@@ -4608,7 +4644,17 @@ impl Actor {
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
-                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, Facts { notes: notes_of(self.turn_notes, turn), ..live.facts() }) {
+                if ended
+                    && let Some(end) = closing(
+                        &mut batch,
+                        turn,
+                        &live.last_row,
+                        Facts {
+                            notes: notes_of(self.turn_notes, turn),
+                            ..live.facts()
+                        },
+                    )
+                {
                     cut_off(
                         &mut batch,
                         &mut live.calls,

@@ -4887,7 +4887,8 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
 }
 
 #[test]
-fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_are_counted_into_its_end() {
+fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_are_counted_into_its_end()
+ {
     let mut world = World::new("coordination");
     let mut actor = world.open();
     let (asked, marks) = from_an_agent("u-a1", "tr-1");
@@ -5027,7 +5028,10 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
         None,
         "an unmarked turn's acceptance has no key"
     );
-    assert_eq!(found(&world, "trace-tr-1").map(|(kind, _)| kind), Some(kind::TRACE));
+    assert_eq!(
+        found(&world, "trace-tr-1").map(|(kind, _)| kind),
+        Some(kind::TRACE)
+    );
 }
 
 /// Fills an agent's log with `turns` turns that are over, as a long conversation's log holds them:
@@ -5230,12 +5234,19 @@ fn coordination_costs_the_same_in_a_conversation_of_300_000_rows_as_in_one_of_3_
     let bound = |small: u128| (small * 2).max(small + 1_000);
     for (what, small, big) in [
         ("a page of marked rows", small.tail_marked, big.tail_marked),
-        ("a page of unmarked rows", small.before_unmarked, big.before_unmarked),
+        (
+            "a page of unmarked rows",
+            small.before_unmarked,
+            big.before_unmarked,
+        ),
         ("a send's acceptance", small.send, big.send),
         ("a note", small.note, big.note),
         ("a turn's end", small.settle, big.settle),
     ] {
-        assert!(big <= bound(small), "{what}: {small} us -> {big} us\n{said}");
+        assert!(
+            big <= bound(small),
+            "{what}: {small} us -> {big} us\n{said}"
+        );
     }
     // And a page of marked rows costs no more than twice one of unmarked rows.
     assert!(

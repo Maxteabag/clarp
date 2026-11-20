@@ -57,7 +57,9 @@ pub const CLIENT_SETTABLE_ORIGINS: [&str; 8] = [
 const NOTE_BACKENDS: [&str; 6] = ["claude", "agy", "grok", "opencode", "deepseek", "codex"];
 /// The backends a record can name, and the one any other word means
 /// (`backend_catalogue.normalize`).
-const BACKENDS: [&str; 7] = ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"];
+const BACKENDS: [&str; 7] = [
+    "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
+];
 const DEFAULT_BACKEND: &str = "claude";
 
 /// Whether a message to `agent_id` is another agent addressing it.
@@ -65,7 +67,11 @@ const DEFAULT_BACKEND: &str = "claude";
 /// The user's own word never is, whatever sender it names. Otherwise a resolved sender that
 /// is another agent is coordination whatever the origin, and so is origin `agent` with no
 /// sender this Host knows. An agent addressing itself is not.
-pub fn is_coordination(agent_id: &str, origin: Option<&str>, sender_agent_id: Option<&str>) -> bool {
+pub fn is_coordination(
+    agent_id: &str,
+    origin: Option<&str>,
+    sender_agent_id: Option<&str>,
+) -> bool {
     let origin = python::strip(origin.unwrap_or(""));
     if USER_WORD_ORIGINS.contains(&origin) {
         return false;
@@ -164,9 +170,7 @@ pub fn principal(
         let own = if own.is_empty() { caller_agent_id } else { own };
         return Err(refused(
             403,
-            format!(
-                "this turn belongs to {own}, not to the sender it named; send as --from {own}"
-            ),
+            format!("this turn belongs to {own}, not to the sender it named; send as --from {own}"),
         ));
     }
     let mut made = Principal {
