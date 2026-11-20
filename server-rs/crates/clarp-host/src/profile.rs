@@ -8,14 +8,14 @@
 //! for it. The owner's file is read when a view is made: a snapshot asked after the file
 //! changed shows the new profile and a new `voice_profile_version` at once.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 
 use clarp_kernel::languages;
 use clarp_kernel::voice_profile::{self, HostView, Row};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::fleet::{Directory, FleetHandle, Member};
+use crate::fleet::{Directory, Member};
 use crate::heard::Ears;
 use crate::voice::{Mouth, speaker};
 
@@ -31,9 +31,8 @@ pub const CARRIED_BY: [&str; 6] = [
 
 /// The view of the Host every agent's profile is resolved from, as it is now: the speaker's
 /// view, the names of voices in memory, and how the Host hears.
-pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory) -> HostView {
-    let owners = mouth.owners();
-    let mut view = mouth.speech_view(&owners);
+pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory, owners: &toml::Table) -> HostView {
+    let mut view = mouth.speech_view(owners);
     let mut labels = voice_profile::shipped_labels();
     labels.insert(clarp_kernel::said::CARTESIA.into(), mouth.cartesia_names());
     view.labels = labels;
@@ -105,7 +104,7 @@ pub fn of_session(
         .iter()
         .find(|member| member.record.session == session)?;
     let rows: Vec<Row<'_>> = members.iter().map(|member| row(member)).collect();
-    let view = view(mouth, ears, directory);
+    let view = view(mouth, ears, directory, &mouth.owners_from(directory));
     Some(voice_profile::profile_among(
         &view,
         row(member).agent,
@@ -115,14 +114,17 @@ pub fn of_session(
 
 /// What adds an agent's profile to the roster's events about it, wherever they are told from.
 pub struct Profiles {
-    mouth: Arc<Mouth>,
-    ears: Arc<Ears>,
-    fleet: FleetHandle,
+    // The mouth already owns the hub. Neither component is kept alive by the subscription.
+    mouth: Weak<Mouth>,
+    ears: Weak<Ears>,
 }
 
 impl Profiles {
-    pub fn new(mouth: Arc<Mouth>, ears: Arc<Ears>, fleet: FleetHandle) -> Self {
-        Self { mouth, ears, fleet }
+    pub fn new(mouth: &Arc<Mouth>, ears: &Arc<Ears>) -> Self {
+        Self {
+            mouth: Arc::downgrade(mouth),
+            ears: Arc::downgrade(ears),
+        }
     }
 
     /// The event with the agent's profile, when it is an event of the roster about one agent
@@ -135,23 +137,21 @@ impl Profiles {
         {
             return;
         }
-        let Some(session) = event["session"].as_str().map(str::to_string) else {
+        let (Some(session), Some(mouth), Some(ears)) = (
+            event["session"].as_str(),
+            self.mouth.upgrade(),
+            self.ears.upgrade(),
+        ) else {
             return;
         };
-        let directory = self.fleet.directory();
-        if let Some(profile) = of_session(&self.mouth, &self.ears, &directory, &session) {
+        if let Some(profile) = of_session(&mouth, &ears, &mouth.directory(), session) {
             event["voice_profile"] = profile;
         }
-    }
-
-    /// The agent's profile, by its session.
-    pub fn of(&self, session: &str) -> Option<Value> {
-        of_session(&self.mouth, &self.ears, &self.fleet.directory(), session)
     }
 }
 
 /// Where the Host's [`Profiles`] are found once it has them.
-pub type Slot = OnceLock<Arc<Profiles>>;
+pub type Slot = OnceLock<Profiles>;
 
 /// An event of the roster that tells open apps every agent's voice or hearing may have
 /// changed: re-read the agents.
