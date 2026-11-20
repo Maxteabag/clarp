@@ -697,13 +697,20 @@ async fn look(app: &App) -> Result<(), Unavailable> {
             take_back(app, &hand.session, &hand.run_id).await;
         }
     }
+    Ok(())
+}
+
+/// Each keeper gets its look even when another could not read its records.
+async fn tick(app: &App) {
+    if let Err(why) = look(app).await {
+        app.fleet.unkept(KIND, &why.0);
+    }
     // After every look, what was seen of clips is written down: the bookkeeper asks no
     // model and has no turn of its own.
     crate::audio::keep(app).await;
     // And the Quota keeper looks where its look is due, beside the runner.
     crate::quota_keeper::look(app);
     crate::label_checker::look(app);
-    Ok(())
 }
 
 /// Only bound runtimes enter the rotation. A live turn shares its own
@@ -767,9 +774,7 @@ pub fn run(app: &App) {
         loop {
             tokio::time::sleep(every).await;
             visit_idle_bindings(&app, &mut after);
-            if let Err(why) = look(&app).await {
-                eprintln!("clarp-host: the janitors were not looked at: {}", why.0);
-            }
+            tick(&app).await;
         }
     });
 }
@@ -1529,6 +1534,41 @@ pub fn routes() -> Router<App> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_refused_janitor_book_still_gives_each_keeper_its_pass() {
+        let place = crate::unkept::at_the_port::place("janitor-passes");
+        let app = place.app();
+        place.refuse_reads("janitors");
+        tick(&app).await;
+        // Quota and labels do their work beside the tick. Wait for their actual reports.
+        let lines = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let lines = place.said.lock().unwrap().clone();
+                if lines.len() >= 4 {
+                    break lines;
+                }
+                place.notice.notified().await;
+            }
+        })
+        .await
+        .expect("each obligation reports the refusal");
+        let mut kinds = Vec::new();
+        for line in &lines {
+            let (kind, why) = line
+                .strip_prefix("clarp-host: a record of the kind ")
+                .unwrap()
+                .split_once(" was not kept: ")
+                .unwrap();
+            assert!(why.ends_with("storage failed: read refused here"));
+            kinds.push(kind);
+        }
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            ["audio-facts", "janitors", "label-auditor", "quota-monitor"]
+        );
+    }
 
     #[test]
     fn a_revision_is_read_as_the_python_host_reads_it() {
