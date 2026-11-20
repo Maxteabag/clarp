@@ -16,13 +16,18 @@ fn vectors() -> Vec<Value> {
 /// An artifact published by `POST /artifacts` names the turn that published it: the trace its
 /// rows carry, when the request presents that turn's token and the turn is the artifact's own
 /// agent's running turn; nothing otherwise (no token, a text that is no token, another agent's,
-/// a turn that ended, an older turn while a newer one runs). A later revision keeps what the
-/// first had; a request to the user does not pass that route and names none. Each case, for a
-/// document, a render spec and a read-only report, as the Python Host answers it.
+/// a turn that completed normally, one the user stopped, an older turn while a newer one runs).
+/// A later revision keeps what the first had; a request to the user does not pass that route
+/// and names none. Each case, for a document, a render spec and a read-only report, as the
+/// Python Host answers it. A case of the Python Host's that is neither staged here nor named
+/// below fails the test.
 ///
 /// Not staged here: a running turn without a trace (this Host gives every message one; the
-/// actor's own answer for such a turn is held in the actor's tests), and a lookup that fails
-/// (the 503 every reader of a turn's token answers when its key cannot be read).
+/// actor's own answer for such a turn is held in the actor's tests), a lookup that fails (the
+/// 503 every reader of a turn's token answers when its key cannot be read), and a turn parked
+/// for its account (a Host test cannot make an account run out; the Python Host's answer must
+/// be `none`, and the actor's test `source_trace_a_turn_names_its_trace_only_while_it_runs`
+/// holds that a parked turn names nothing, which is what the Host asks the actor).
 #[test]
 fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names_it() {
     let place = Place::new("source-trace");
@@ -113,19 +118,24 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         std::fs::write(release.join(session), "").unwrap();
         wait_for("the turn to end", || host.state(session) == "done");
     };
-    // An artifact of a kind, published for Ivy with a token or none; its row.
+    // An artifact of a kind, published for an agent with a token or none; its row.
     let ids = std::cell::Cell::new(0);
-    let publish = |kind: &str, token: Option<&str>, id: Option<&str>, version: &str| -> Value {
+    let publish_for = |session: &str,
+                       kind: &str,
+                       token: Option<&str>,
+                       id: Option<&str>,
+                       version: &str|
+     -> Value {
         ids.set(ids.get() + 1);
         let id = id.map_or_else(|| format!("card-{}", ids.get()), str::to_string);
         let body = match kind {
-            "document" => json!({ "session": "ivy", "type": "document", "title": "A card",
+            "document" => json!({ "session": session, "type": "document", "title": "A card",
                                   "artifact_id": id, "payload": { "content": "words" } }),
-            "render_spec" => json!({ "session": "ivy", "type": "render_spec", "title": "Build",
+            "render_spec" => json!({ "session": session, "type": "render_spec", "title": "Build",
                                      "artifact_id": id, "payload": build_form(version),
                                      "expected_version": (version != "build-1").then_some("build-1") }),
             _ => {
-                json!({ "session": "ivy", "type": "html_form", "title": "A report", "artifact_id": id,
+                json!({ "session": session, "type": "html_form", "title": "A report", "artifact_id": id,
                          "payload": { "content": format!("<p>{version}</p>"), "version": version,
                                       "read_only": true },
                          "expected_version": (version != "1").then_some("1") })
@@ -159,6 +169,10 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             got.status
         );
         answer["artifact"].clone()
+    };
+    // Ivy's.
+    let publish = |kind: &str, token: Option<&str>, id: Option<&str>, version: &str| {
+        publish_for("ivy", kind, token, id, version)
     };
     let named = |row: &Value, trace: &str| match row["source_trace_id"].as_str().unwrap_or("?") {
         "" => "none".to_string(),
@@ -230,34 +244,24 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             shown, "none",
             "its turn completed normally and no newer turn has started"
         );
-        note("the turn ended", kind, shown);
+        note("the turn completed normally", kind, shown);
     }
-    // Beside it, a turn the user stopped: the empty text too.
-    let (stu, _) = turn("stu", "s-1", true);
+    // Beside it, a turn the user stopped (its row closed, as the Python Host's Stop, drain,
+    // cancel and hand-over close it): the empty text too.
+    let (stu, stu_trace) = turn("stu", "s-1", true);
     let (status, _) = host.ask("POST", "/stop", Some(&json!({ "session": "stu" })));
     assert_eq!(status, 200);
     wait_for("the stopped turn to end", || {
         host.state("stu") == "interrupted"
     });
-    let stopped = json!({ "session": "stu", "type": "document", "title": "Stu's card",
-                          "payload": { "content": "words" } });
-    let headers = [
-        ("Content-Type", "application/json"),
-        ("X-Clarp-Turn", stu.as_str()),
-    ];
-    let got = fetch(
-        &host,
-        &host.token,
-        "POST",
-        "/artifacts",
-        &headers,
-        stopped.to_string().as_bytes(),
-    );
-    let got: Value = serde_json::from_slice(&got.body).unwrap();
-    assert_eq!(
-        got["artifact"]["source_trace_id"], "",
-        "a stopped turn names nothing: {got}"
-    );
+    for kind in kinds {
+        let shown = named(
+            &publish_for("stu", kind, Some(&stu), None, first(kind)),
+            &stu_trace,
+        );
+        assert_eq!(shown, "none", "a stopped turn names nothing");
+        note("the turn ended", kind, shown);
+    }
     // A newer turn of Ivy's runs: the older turn's token names nothing; what was published in
     // the older turn and is revised now keeps its trace.
     let (later, later_trace) = turn("ivy", "i-2", true);
@@ -373,6 +377,15 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             vector["kind"].as_str().unwrap(),
         );
         let Some((_, _, shown)) = staged.iter().find(|(c, k, _)| c == case && k == kind) else {
+            if case == "the turn is parked for its account" {
+                // Held at the actor: source_trace_a_turn_names_its_trace_only_while_it_runs.
+                assert_eq!(
+                    vector["shown"], "none",
+                    "the Python Host's parked turn ({kind}); this Host's is held by the actor's \
+                     test source_trace_a_turn_names_its_trace_only_while_it_runs"
+                );
+                continue;
+            }
             assert!(
                 ["a running turn without a trace", "a lookup that fails"].contains(&case),
                 "a case of the Python Host's that is not staged here: {case} ({kind})"
