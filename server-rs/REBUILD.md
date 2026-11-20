@@ -1532,6 +1532,11 @@ changing it. The status records each provider's most recent action. Exhaustion
 leaves waiting work in the pool. Banked resets belong to a separate decision
 of the owner. The other account modes leave the login where it is.
 
+The Codex reading also carries the account-wide weekly usage (21 Nov 2026, PR 484).
+A failed or missing weekly reading stays unknown. The vectors hold the inclusive 99%
+threshold across the saved accounts and require a readable redemption count below the
+daily cap. Switch decisions still use the existing quota fields.
+
 **Launch directories** (19 Nov 2026). The new-agent dialog combines recent launches,
 zoxide results and explicit directory completions. The Host finds `zoxide` on PATH
 and starts it without a shell. Each invocation has half a second. If it is absent,
