@@ -22,6 +22,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -150,17 +151,22 @@ def run(root) -> dict:
     def note_rows(agent):
         conv = agents.live_backend_session(agent)
         rows = agents.list_messages(agent_id=agent, backend_session_id=conv, limit=500) if conv else []
-        # A text of thousands of the same letter is written as its length and letter.
-        return [{**row, 'text': f"<{len(row['text'])} x {row['text'][0]}>"} if len(row.get('text') or '') > 400
-                else row for row in rows if row.get('kind') == 'note']
+        return [{**row, 'text': short(row.get('text'))} for row in rows if row.get('kind') == 'note']
+
+    def short(text):
+        """A run of hundreds of the same letter written as the letter and its length (`<w x 8000>`), the rest
+        of the text as it is: the Rust test makes the text again from it."""
+        if not isinstance(text, str):
+            return text
+        return re.sub(r'(.)\1{399,}', lambda run: f'<{run.group(1)} x {len(run.group(0))}>', text)
 
     def ask(agent, body, token, *, step):
         del pushed[:]
         clock['ms'] += 1000
         request = Request(body, token)
         request._handle_agent_note()
-        return {'step': step, 'body': body if not isinstance(body, dict) or len(json.dumps(body)) < 400
-                else {**body, 'text': f"<{len(body.get('text') or '')} characters>"},
+        return {'step': step, 'body': {**body, 'text': short(body['text'])} if isinstance(body, dict)
+                and 'text' in body else body,
                 'at': clock['ms'], 'answer': request.answer, 'told': request.ctx.stream.told,
                 'pushed': list(pushed), 'notes': note_rows(agent) if agent else []}
 
