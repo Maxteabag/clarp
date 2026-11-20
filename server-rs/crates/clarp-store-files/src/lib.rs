@@ -114,6 +114,37 @@ impl Directory {
 }
 
 impl Blobs for Directory {
+    fn names_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+        if prefix.len() < 2 || !is_name(prefix) {
+            return Err(not_a_name(prefix));
+        }
+        let dir = self.root.join(&prefix[..2]);
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(failed(&dir, &e)),
+        };
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| failed(&dir, &e))?;
+            if let Some(name) = entry.file_name().to_str()
+                && name.starts_with(prefix) && is_name(name) {
+                names.push(name.to_owned());
+            }
+        }
+        Ok(names)
+    }
+
+    fn remove(&self, name: &str) -> Result<(), StoreError> {
+        if !is_name(name) { return Err(not_a_name(name)); }
+        let file = self.place(name);
+        match fs::remove_file(&file) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(failed(&file, &e)),
+        }
+    }
+
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), StoreError> {
         if !is_name(name) {
             return Err(not_a_name(name));
