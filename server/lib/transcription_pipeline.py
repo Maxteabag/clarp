@@ -329,7 +329,7 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                      detail={"message": "language_set_unsupported", "stage": "stt"})
         return TranscriptionOutcome(status=422, trace_id=trace_id, payload={
             "error": "language_set_unsupported", "message": str(e), "engine": e.engine,
-            "languages": e.languages, "engines": e.engines})
+            "languages": e.languages, "engines": e.engines, "reasons": e.reasons})
     except STTModelLoadingError as e:
         return TranscriptionOutcome.error(503, str(e), trace_id)
     except STTBusyError:
@@ -378,14 +378,18 @@ def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: byte
         language = handed.get("language")
         return text, ends_terminal, dur, target, (
             "detected" if language in (None, "auto") else language.split(","))
-    if stt_providers.own_engine_detects_language(load()):
+    languages = (stt_language.current_language() or stt_language.language_for(focus)).split(",")
+    # Whether the own engine hears it is read from its model's declared languages.
+    own_refusal = stt_providers.own_engine_refusal(load(), languages)
+    if not own_refusal:
         log("sttLanguageSetFallback", f"session={focus or '-'} {engine} -> server-default")
         text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
         return text, ends_terminal, dur, "server-default", "detected"
-    languages = (stt_language.current_language() or stt_language.language_for(focus)).split(",")
-    log("sttLanguageSetRefused", f"session={focus or '-'} {engine} languages={','.join(languages)}")
+    log("sttLanguageSetRefused", f"session={focus or '-'} {engine} languages={','.join(languages)}"
+        f" own={own_refusal}")
     raise stt_providers.LanguageSetRefused(engine=engine, languages=languages,
-                                           engines=stt_providers.language_set_engines())
+                                           engines=stt_providers.language_set_engines(),
+                                           reasons=[own_refusal])
 
 
 def _after_transcript(ctx, *, text: str, ends_terminal: bool, dur, requested_model: str,

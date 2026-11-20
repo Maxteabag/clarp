@@ -483,3 +483,57 @@ def test_no_provider_outside_the_owners_choice_ever_receives_audio(monkeypatch, 
     assert out.status in (200, 422)
     if out.status == 422:
         assert own_model == "small.en" and received == []      # refused, not English nonsense
+
+
+# F1: whether the Host's own engine can hear the recording is read from its model's declared
+# languages (the adapter's model list, the curated catalogue), never from its name.
+def _own_adapter(monkeypatch, languages, *, model="fast"):
+    from lib import config, custom_stt_adapters
+    manifest = SimpleNamespace(id="myasr", default_model=model)
+    monkeypatch.setattr(custom_stt_adapters, "get",
+                        lambda provider: manifest if provider == "myasr" else None)
+    monkeypatch.setattr(custom_stt_adapters, "models", lambda m, force=False: [
+        {"id": f"myasr:{model}", "languages": list(languages)}])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_provider="myasr", whisper_model=model))
+
+
+def test_an_own_adapter_model_that_declares_only_english_is_never_used(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["en"])                    # its name has no ".en"
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == ["the Host's own model myasr:fast hears only en"]
+    assert [c for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_an_own_adapter_model_that_declares_the_agents_languages_hears_it(monkeypatch):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_adapter(monkeypatch, ["nb-NO", "en"], model="tiny.en")    # the name says nothing
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
+
+
+def test_the_own_engine_is_judged_by_its_declared_languages(monkeypatch):
+    from lib import config, custom_stt_adapters
+    cfg = lambda **kw: config.Config(**kw)
+    refusal = stt_providers.own_engine_refusal
+    # The curated catalogue decides a built-in model.
+    assert refusal(cfg(whisper_model="small"), ["no", "en"]) == ""
+    assert "hears only en" in refusal(cfg(whisper_model="small.en"), ["no", "en"])
+    # A model declaring nothing (registered by hand) is judged as the engine runs it.
+    assert refusal(cfg(whisper_model="distil-large-v3"), ["no", "en"]) == ""
+    assert "hears only en" in refusal(cfg(whisper_model="tiny.en"), ["no", "en"])
+    assert refusal(cfg(whisper_enabled=False, whisper_model="small"), ["no", "en"])
+    # An adapter that cannot answer is not used.
+    _own_adapter(monkeypatch, ["multilingual"])
+    def down(manifest, force=False):
+        raise custom_stt_adapters.AdapterError("adapter gone")
+    monkeypatch.setattr(custom_stt_adapters, "models", down)
+    assert "unavailable: adapter gone" in refusal(config.load(), ["no", "en"])
