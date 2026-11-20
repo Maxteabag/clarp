@@ -3265,6 +3265,33 @@ to the blob store. A hit still names the speaker of the current request. Factori
 two agents using the same engine voice can share one fill. No operator script or scheduled operation
 asks for audio. The first use after eviction follows the ordinary speech path.
 
+**Coordination between agents** (20 Nov 2026; the Python Host's PR 482, contract 108). A turn that another
+agent's message began is for the agents: every row of it in `GET /log`, its `GET /live` turn and the
+dispatch's `agent-state` say `audience: agents`, and the working state names that agent where this Host has
+it. The Host decides it at the send from what it can check: the origin the send claimed, the sender it named
+as this Host knows it, the turn whose token it presents (`X-Clarp-Turn`, or the token an agent's tool was
+given) and a peer Host's word (`X-Clarp-Peer`). The user's own word (`user`, `oracle`) never is, whatever
+sender it names. A send from an agent's own turn is that agent's: its sender where it names none, never the
+user's word, refused when it names another agent as its sender, and automation when the agent wakes itself.
+The kernel's rules (`clarp-kernel/src/coordination.rs`) are held to the Python Host's own functions by
+`tools/coordination-vectors.py` and `tools/agent-note-vectors.py`.
+
+The mark is written once, in the item that accepts the turn (`TurnEvent::Accepted.coordination`, keyed
+`coordination-<turn>`), so no restart falls between the mark and the turn's rows. A page of the log finds it
+by key once per turn on the page, as it finds the turn's end: its cost does not grow with the conversation.
+Nothing loosens a mark here, because this Host steers no message into a running turn. Only an agent that can
+leave a note is hidden (`coordination::can_leave_note`): the Host can read its key, and its tool's turns carry
+the token. Every tool's turns carry it here, Codex's too.
+
+An agent leaves its user a note with `POST /agent-notes` or with `clarp-admin tell-user`, its own tool on this
+Host, only from its own running turn. The note is a row of its own in the agent's log (kind 105, keyed by its
+row id `note-<agent>-<note id>`), always the user's, in the turn's trace. It tells the user at once whatever
+turn wrote it; a muted agent's or a helper's note pages nobody. The same note asked again is the same note,
+and other words under its id are refused. The actor counts a turn's notes as they are written, and the turn's
+summary carries `note_count`. A caller that names a trace another message of the agent already has is refused
+(409), but the same message sent again is that message: one look by key (`trace-<trace>`) in the agent's own
+log.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
