@@ -85,6 +85,20 @@ impl ComputerJobs {
     pub(super) fn list(&self) -> Vec<Job> {
         self.book.jobs().cloned().collect()
     }
+    pub(super) fn begun_since(&self, kind: &str, since: i64) -> u32 {
+        let count = self
+            .timelines
+            .values()
+            .flatten()
+            .filter(|r| {
+                r.job.kind == kind
+                    && r.job.status == clarp_kernel::jobs::JobStatus::Queued
+                    && r.at_ms >= since
+            })
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
     pub(super) fn contains(&self, id: &str) -> bool {
         self.book.get(id).is_some() || self.unreadable.contains(id)
     }
