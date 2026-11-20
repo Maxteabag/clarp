@@ -572,7 +572,8 @@ fn literals(text: &str) -> Vec<String> {
             let mut end = open + 1;
             let mut text = String::new();
             while end < chars.len() {
-                if chars[end] == '"' && chars[end + 1..].iter().take(hashes).all(|c| *c == '#')
+                if chars[end] == '"'
+                    && chars[end + 1..].iter().take(hashes).all(|c| *c == '#')
                     && chars.len() >= end + 1 + hashes
                 {
                     break;
@@ -622,8 +623,5 @@ fn the_scans_reader_of_literals_reads_past_what_is_no_literal() {
     let source = r##"let a = "ONE"; // "NOT_IN_A_COMMENT"
 let b = '"'; let c = "TWO_\"X"; /* "NOR_HERE" */ fn f<'a>(x: &'a str) {}
 let d = r#"RAW_"ONE"#; let e = '\''; let g = "THREE";"##;
-    assert_eq!(
-        literals(source),
-        ["ONE", "TWO_\"X", "RAW_\"ONE", "THREE"]
-    );
+    assert_eq!(literals(source), ["ONE", "TWO_\"X", "RAW_\"ONE", "THREE"]);
 }

@@ -28831,7 +28831,8 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
         assert_eq!(card["state"], "signed_out");
         assert_eq!(card["credential_present"], false);
         assert!(
-            Command::new(&binary)
+            place
+                .command(&binary)
                 .arg("seed-history")
                 .env("FAKE_ROOT", root)
                 .status()
@@ -29075,7 +29076,8 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
             effort: Some("high".into()),
         };
         let launch = adapter.once(&q).unwrap();
-        let done = Command::new(launch.program)
+        let done = place
+            .command(launch.program)
             .args(launch.args)
             .envs(launch.env)
             .env("FAKE_ROOT", root)
