@@ -536,7 +536,10 @@ def test_a_note_from_a_stopped_turn_is_refused(tmp_path, pushes):
 
 def test_a_note_from_a_turn_parked_for_a_retry_is_its_turns(tmp_path, pushes):
     """A turn waiting to be delivered again (a dropped connection) has neither ended nor
-    settled: it is still the agent's turn, and a note is a row of it."""
+    settled: it is still the agent's turn, and a note is a row of it.
+
+    Decided by PR 470's turn_identity.running_trace at the rebase: the note follows that one
+    function, whatever it says of a turn parked for a retry; this test may flip then."""
     parked = []
     service, backends, agent_id = _dispatched(tmp_path, retry_scheduler=lambda d, fn: parked.append(fn))
     _start(service, "t-park")
