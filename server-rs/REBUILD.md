@@ -3364,6 +3364,48 @@ come ("We will wait with reviewers", 16 Nov 2026).
   gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
   twenty minutes, both times by a hook of Claude Code and its tests).
 
+**The reference** (20 Nov 2026). The Python Host is merged into main several times a day, and it does not
+wait for this Host. A gate taken against main's tip was voided by every such merge in its middle. So this Host
+is held to one named commit of main, the reference: the Python Host as it is at that commit.
+`server-rs/REFERENCE` names it, the full commit on its first line. The fixtures are generated from it, and the
+conformance run compares with it. Where the paragraph above says main, read the reference.
+
+A candidate is gated on its gate tree: the reference's tree with `server-rs/` replaced by the candidate's.
+`Server (Rust)`, the planted lists, the conformance run and the regeneration of every fixture are taken there.
+The build machine's Rust tests and the repository's own gates are taken on the commit that lands. What lands is
+main of that minute with the piece's commits on top. That is sound while the candidate's `server-rs/` is byte
+for byte the gate tree's. It holds because the piece touches nothing outside `server-rs/` and only the lead's
+trains write under it.
+
+The debt is what main has outside `server-rs/` beyond the reference: the merges of the Python Host not yet
+ported. A catch-up piece moves the reference forward, and only a catch-up piece does; the lead lands it. It
+first registers what the new reference changes: a new name in `NOT_YET` or `NOT_BUILT` of
+`conformance/conform.py`, a changed value by its id in `conformance/awaited.txt`, a new key a generator leaves
+out. Then it ports, and the port takes those registrations out again.
+
+`server-rs/tools/reference` is the tool for it, git alone and no network. `show` names the reference and the
+debt: the first-parent commits of the fetched `origin/main` beyond it that touch anything outside
+`server-rs/`, and how long ago it was fetched. `commit [REV]` writes the gate commit of REV (HEAD by default)
+and prints its id, without touching a checkout: the reference's tree with REV's `server-rs/`, the reference as
+its one parent. It refuses, in words, a `REFERENCE` that names no commit, a REV whose history lacks the
+reference, and a REV that changes anything outside `server-rs/` against its merge base with main. A helper
+runs a generator with `reference run <generator> [args]`, never by hand: the tool stands up the gate tree of
+the working tree in scratch (uncommitted changes of `server-rs/` included), runs the generator there with the
+Python Host's interpreter, copies back exactly the files under `server-rs/` it changed, names them, and
+removes its scratch. `reference run --all` does so for every generator. A generator that fails has nothing
+copied back.
+
+`reference check` runs every generator the same way and writes nothing back: it names each fixture that would
+change and leaves the working tree as it was. It ends 0 only when none fails and no fixture would change. It is
+what a piece runs before it reports, and what a catch-up piece reads to see what the new reference moved.
+
+Every generator the tool runs gets a scratch place of its own, whatever the generator sets itself:
+`CLAUDE_PWA_DB` names a fresh database inside it, and `HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
+`XDG_CACHE_HOME` and `XDG_STATE_HOME` point inside it too; nothing else of the runner's environment passes. A
+generator of ours read the default database of whoever ran it once the Python code under it began to ask its
+store (20 Nov 2026). The interpreter is read before the home is changed. `reference selftest` holds each of
+these by example in a repository it builds in scratch, the refusals included.
+
 **Model portraits and the avatar display preference.** The Host keeps the owner's
 choice from `POST /avatar-settings` and returns it to the settings screen and in
 the agents' snapshot. For bundled model art the Host tries the agent's model,

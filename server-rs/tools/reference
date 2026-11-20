@@ -1,0 +1,650 @@
+#!/usr/bin/env python3
+"""The reference: the one commit of main the Rust Host is held to, and the gate tree made from it.
+
+    server-rs/tools/reference show                    the reference, and the debt beyond it on origin/main
+    server-rs/tools/reference commit [REV]            the gate commit of REV (default HEAD); prints its id
+    server-rs/tools/reference run GENERATOR [ARGS]    one generator, run against the reference's Python;
+                                                      copies back what it changed
+    server-rs/tools/reference run --all               every generator so
+    server-rs/tools/reference check                   every generator so, writing nothing back; 0 only when
+                                                      none fails and no fixture would change
+    server-rs/tools/reference selftest                holds each of the above by example, in scratch
+
+server-rs/REFERENCE names the reference (line 1, the full commit). The gate tree of a candidate is the
+reference's tree with server-rs/ replaced by the candidate's. The debt is what main has outside server-rs/
+beyond the reference. Uses git alone; reaches no network; writes scratch only through tools/scratch.py.
+"""
+import argparse
+import contextlib
+import io
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch
+
+TOOLS = Path(__file__).resolve().parent
+REPO = TOOLS.parents[1]
+PART = 'server-rs'
+FILE = f'{PART}/REFERENCE'
+MAIN = 'origin/main'
+STALE_AFTER = 3600
+SERVICE_PYTHON = Path.home() / '.local/share/clarp/current/SERVICE_PYTHON'
+FULL = re.compile(r'[0-9a-f]{40}')
+
+
+class Refused(Exception):
+    """What the tool will not do, said in words."""
+
+
+def git(repo, *args, env=None, data=None, check=True):
+    result = subprocess.run(['git', *args], cwd=repo, input=data, capture_output=True,
+                            env={**os.environ, **(env or {})})
+    if check and result.returncode:
+        raise Refused(f"git {' '.join(args)} failed: {result.stderr.decode(errors='replace').strip()}")
+    return result
+
+
+def out(repo, *args, **kwargs):
+    return git(repo, *args, **kwargs).stdout.decode().strip()
+
+
+def named(repo, text, where):
+    """The commit a REFERENCE text names; refused when it names none of this repository."""
+    first = text.splitlines()[0].strip() if text.strip() else ''
+    if not FULL.fullmatch(first):
+        raise Refused(f'{where} does not name a commit on its first line (40 hex): {first[:60]!r}')
+    if git(repo, 'cat-file', '-e', f'{first}^{{commit}}', check=False).returncode:
+        raise Refused(f'{where} names {first}, which is no commit of this repository (fetch origin?)')
+    return first
+
+
+def worktree_reference(repo):
+    path = Path(repo) / FILE
+    if not path.is_file():
+        raise Refused(f'{FILE} is not in the working tree')
+    return named(repo, path.read_text(), f'{FILE} of the working tree')
+
+
+def short(repo, sha):
+    return out(repo, 'log', '-1', '--format=%h %cs %s', sha)
+
+
+def outside(repo, old, new):
+    """The paths outside server-rs/ that differ between two commits."""
+    listed = out(repo, 'diff', '--name-only', '--no-renames', old, new, '--', '.', f':(exclude){PART}')
+    return [line for line in listed.splitlines() if line]
+
+
+# --- show -------------------------------------------------------------------------------------
+
+def fetched_age(repo):
+    """Since the newest fetch from any worktree of this repository: FETCH_HEAD is kept per worktree, origin/main
+    is shared by all of them."""
+    common = Path(repo, out(repo, 'rev-parse', '--git-common-dir'))
+    heads = [common / 'FETCH_HEAD', Path(repo, out(repo, 'rev-parse', '--git-path', 'FETCH_HEAD')),
+             *common.glob('worktrees/*/FETCH_HEAD')]
+    times = [head.stat().st_mtime for head in heads if head.is_file()]
+    return time.time() - max(times) if times else None
+
+
+def show(repo, main=MAIN):
+    ref = worktree_reference(repo)
+    print(f'reference  {ref}')
+    print(f'           {short(repo, ref)}')
+    if git(repo, 'rev-parse', '--verify', '--quiet', f'{main}^{{commit}}', check=False).returncode:
+        raise Refused(f'{main} is not in this repository; fetch origin first')
+    tip = out(repo, 'rev-parse', f'{main}^{{commit}}')
+    age = fetched_age(repo)
+    if age is None:
+        print(f'{main} {tip[:12]}, never fetched here: STALE, run git fetch origin')
+    elif age > STALE_AFTER:
+        print(f'{main} {tip[:12]}, fetched {int(age // 60)} minutes ago: STALE, run git fetch origin')
+    else:
+        print(f'{main} {tip[:12]}, fetched {int(age // 60)} minutes ago')
+    if git(repo, 'merge-base', '--is-ancestor', ref, tip, check=False).returncode:
+        print(f'the reference is not in the history of {main}: a reference is a commit of main')
+        return 1
+    debt, rust = [], 0
+    for sha in out(repo, 'rev-list', '--first-parent', '--reverse', f'{ref}..{tip}').split():
+        paths = outside(repo, f'{sha}^1', sha)
+        if paths:
+            areas = sorted({p.split('/')[0] for p in paths})
+            debt.append(f'  {short(repo, sha)}  [{", ".join(areas)}]')
+        else:
+            rust += 1
+    print(f'debt: {len(debt)} commit(s) of {main} beyond the reference touch something outside {PART}/'
+          + (':' if debt else ''))
+    for line in debt:
+        print(line)
+    print(f'beside it: {rust} commit(s) of {main} beyond the reference touch {PART}/ alone')
+    return 0
+
+
+# --- commit -----------------------------------------------------------------------------------
+
+def gate_commit(repo, rev='HEAD', main=MAIN):
+    """Writes the gate commit of REV into the object store (no index, no checkout) and returns its id."""
+    if git(repo, 'rev-parse', '--verify', '--quiet', f'{rev}^{{commit}}', check=False).returncode:
+        raise Refused(f'{rev} is no commit of this repository')
+    head = out(repo, 'rev-parse', f'{rev}^{{commit}}')
+    text = git(repo, 'show', f'{head}:{FILE}', check=False)
+    if text.returncode:
+        raise Refused(f'{rev} has no {FILE}')
+    ref = named(repo, text.stdout.decode(errors='replace'), f'{FILE} of {rev}')
+    if git(repo, 'merge-base', '--is-ancestor', ref, head, check=False).returncode:
+        raise Refused(f'the reference {ref[:12]} named in {rev} is not in the history of {rev}; '
+                      f'rebase onto a main that contains it')
+    if git(repo, 'rev-parse', '--verify', '--quiet', f'{main}^{{commit}}', check=False).returncode:
+        raise Refused(f'{main} is not in this repository; fetch origin first')
+    base = git(repo, 'merge-base', head, main, check=False)
+    if base.returncode:
+        raise Refused(f'{rev} has no merge base with {main}')
+    touched = outside(repo, base.stdout.decode().strip(), head)
+    if touched:
+        listed = ', '.join(touched[:10]) + (f' and {len(touched) - 10} more' if len(touched) > 10 else '')
+        raise Refused(f'{rev} changes {len(touched)} path(s) outside {PART}/ against its merge base with '
+                      f'{main}: {listed}; a candidate touches {PART}/ alone')
+    entries = git(repo, 'ls-tree', '-z', ref).stdout.split(b'\0')
+    mine = out(repo, 'rev-parse', f'{head}:{PART}')
+    tree = []
+    for entry in filter(None, entries):
+        meta, name = entry.split(b'\t', 1)
+        if name != PART.encode():
+            tree.append(entry)
+    tree.append(b'040000 tree ' + mine.encode() + b'\t' + PART.encode())
+    tree_id = out(repo, 'mktree', '-z', data=b'\0'.join(tree) + b'\0')
+    who = out(repo, 'log', '-1', '--date=raw', '--format=%an%x00%ae%x00%ad%x00%cn%x00%ce%x00%cd', head).split('\0')
+    env = dict(zip(['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE',
+                    'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE'], who))
+    message = f'gate tree: {PART}/ of {head[:12]} on the reference {ref[:12]}'
+    return out(repo, 'commit-tree', '--no-gpg-sign', tree_id, '-p', ref, '-m', message, env=env)
+
+
+# --- run and check ----------------------------------------------------------------------------
+
+def service_python():
+    try:
+        first = SERVICE_PYTHON.read_text().splitlines()[0].strip()
+    except (FileNotFoundError, IndexError):
+        raise Refused(f'no Python Host interpreter named in {SERVICE_PYTHON}; give --python')
+    return first
+
+
+def stand_up(repo, ref, gate):
+    """The reference's tree outside server-rs/, and the working tree's server-rs/ as it is now."""
+    index = gate.parent / 'index'
+    env = {'GIT_INDEX_FILE': str(index)}
+    git(repo, 'read-tree', ref, env=env)
+    paths = [p for p in git(repo, 'ls-files', '-z', env=env).stdout.split(b'\0')
+             if p and not p.startswith(PART.encode() + b'/')]
+    git(repo, 'checkout-index', '-z', '--stdin', f'--prefix={gate}/', env=env, data=b'\0'.join(paths))
+    index.unlink()
+    for name in worktree_files(repo):
+        source, target = Path(repo, name), gate / name
+        if not os.path.lexists(source):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            os.symlink(os.readlink(source), target)
+        else:
+            shutil.copy2(source, target)
+
+
+def worktree_files(repo):
+    listed = git(repo, 'ls-files', '-co', '--exclude-standard', '-z', '--', PART).stdout
+    return [name.decode() for name in listed.split(b'\0') if name]
+
+
+def survey(gate):
+    seen = {}
+    for directory, _, files in os.walk(gate / PART):
+        for name in files:
+            path = Path(directory, name)
+            st = path.lstat()
+            seen[path.relative_to(gate).as_posix()] = (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+    return seen
+
+
+def same(one, two):
+    if os.path.lexists(one) != os.path.lexists(two):
+        return False
+    if not os.path.lexists(one):
+        return True
+    if one.is_symlink() or two.is_symlink():
+        return one.is_symlink() and two.is_symlink() and os.readlink(one) == os.readlink(two)
+    return (one.stat().st_mode & 0o111) == (two.stat().st_mode & 0o111) and one.read_bytes() == two.read_bytes()
+
+
+def changes(repo, gate, before):
+    """The paths under server-rs/ the run made differ from the working tree, ignored ones left out."""
+    after = survey(gate)
+    touched = sorted(name for name in before.keys() | after.keys() if before.get(name) != after.get(name))
+    touched = [name for name in touched if not same(Path(repo, name), gate / name)]
+    if touched:
+        ignored = git(repo, 'check-ignore', '-z', '--stdin', data='\0'.join(touched).encode(),
+                      check=False).stdout.decode().split('\0')
+        touched = [name for name in touched if name not in ignored]
+    return touched
+
+
+def copy(source_root, target_root, names):
+    for name in names:
+        source, target = Path(source_root, name), Path(target_root, name)
+        if os.path.lexists(target) or target.is_symlink():
+            target.unlink()
+        if not os.path.lexists(source):
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink():
+            os.symlink(os.readlink(source), target)
+        else:
+            shutil.copy2(source, target)
+
+
+def generator_path(repo, name):
+    tools = Path(repo, PART, 'tools')
+    base = Path(name).name
+    for candidate in (base, f'{base}.py', f'{base}-vectors.py'):
+        if (tools / candidate).is_file():
+            return candidate
+    raise Refused(f'no generator {name!r} in {PART}/tools of the working tree')
+
+
+def generators(repo):
+    tools = Path(repo, PART, 'tools')
+    found = sorted(p.name for p in tools.glob('*-vectors.py'))
+    if (tools / 'casefold-table.py').is_file():
+        found.append('casefold-table.py')
+    return sorted(found)
+
+
+def own_place(place):
+    """A home, a database and every XDG directory of the generator's own, all inside its scratch place.
+
+    A generator that sets none of its own would otherwise reach the default database of whoever runs it as
+    soon as the Python Host's code under it opens its store.
+    """
+    home = place / 'home'
+    dirs = {'HOME': home, 'XDG_DATA_HOME': home / '.local/share', 'XDG_CONFIG_HOME': home / '.config',
+            'XDG_CACHE_HOME': home / '.cache', 'XDG_STATE_HOME': home / '.local/state', 'TMPDIR': place / 'tmp'}
+    for directory in [*dirs.values(), place / 'db']:
+        directory.mkdir(parents=True, exist_ok=True)
+    return {**{key: str(value) for key, value in dirs.items()}, 'CLAUDE_PWA_DB': str(place / 'db/state.sqlite')}
+
+
+def execute(repo, gate, python, name, args, *, quiet, write=True):
+    """One generator in the gate tree. Returns (exit code, changed paths).
+
+    Copies what changed back into the working tree only on success and when told to write; otherwise puts the
+    gate tree back as the working tree has it, so the next generator starts from the same place.
+    """
+    nice = ['nice'] if shutil.which('nice') else []
+    before = survey(gate)
+    with scratch.directory('clarp-reference-run-') as place:
+        env = {'PATH': os.environ.get('PATH', os.defpath), 'LANG': 'C.UTF-8', 'TZ': 'UTC',
+               'PYTHONDONTWRITEBYTECODE': '1', **own_place(Path(place))}
+        result = subprocess.run([*nice, python, str(gate / PART / 'tools' / name), *args], cwd=gate, env=env,
+                                capture_output=quiet)
+    touched = changes(repo, gate, before)
+    if result.returncode:
+        copy(repo, gate, touched)
+        if quiet:
+            tail = result.stderr.decode(errors='replace').strip().splitlines()[-12:]
+            for line in tail:
+                print(f'    {line}')
+        return result.returncode, touched
+    if write:
+        copy(gate, repo, touched)
+    else:
+        copy(repo, gate, touched)
+    return 0, touched
+
+
+@contextlib.contextmanager
+def gate_tree(repo):
+    ref = worktree_reference(repo)
+    with scratch.directory('clarp-reference-') as name:
+        box = Path(name)
+        gate = box / 'tree'
+        gate.mkdir()
+        stand_up(repo, ref, gate)
+        yield ref, gate
+
+
+def run(repo, name, args, python):
+    name = generator_path(repo, name)
+    with gate_tree(repo) as (ref, gate):
+        print(f'{name}: against the reference {ref[:12]}', flush=True)
+        code, touched = execute(repo, gate, python, name, args, quiet=False)
+    if code:
+        print(f'{name}: FAILED (exit {code}); nothing copied back'
+              + (f'; it had written {", ".join(touched)}' if touched else ''))
+        return code
+    for path in touched:
+        print(f'changed  {path}')
+    print(f'{name}: {len(touched)} fixture(s) changed' if touched else f'{name}: unchanged')
+    return 0
+
+
+def sweep(repo, python, *, write):
+    """Every generator in one gate tree: 'run --all' (write) or 'check' (the working tree as it was)."""
+    failed, changed = [], []
+    names = generators(repo)
+    word, command = ('CHANGED', 'run --all') if write else ('WOULD CHANGE', 'check')
+    with gate_tree(repo) as (ref, gate):
+        for name in names:
+            code, touched = execute(repo, gate, python, name, [], quiet=True, write=write)
+            if code:
+                failed.append(name)
+                print(f'{name}: FAILED (exit {code}); nothing copied back', flush=True)
+                continue
+            changed += touched
+            print(f'{name}: ' + (f'{word} {", ".join(touched)}' if touched else 'unchanged'), flush=True)
+    said = 'changed, copied back' if write else 'would change; the working tree is as it was'
+    if failed or changed:
+        print(f'reference {command}: {len(names)} generator(s) against {ref[:12]}: {len(failed)} failed'
+              + (f' ({", ".join(failed)})' if failed else '')
+              + f', {len(changed)} fixture(s) {said}' + (f' ({", ".join(changed)})' if changed else ''))
+        return 1 if failed or not write else 0
+    print(f'reference {command}: {len(names)} generator(s) against {ref[:12]}: none failed, no fixture changed')
+    return 0
+
+
+def check(repo, python):
+    return sweep(repo, python, write=False)
+
+
+# --- selftest ---------------------------------------------------------------------------------
+
+OK = '''import pathlib
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+value = (ROOT / 'server/value.txt').read_text().strip()
+out = ROOT / 'server-rs/crates/k/tests/fixtures/ok.json'
+out.write_text('{"value": "' + value + MARK + '"}\\n')
+(ROOT / 'server-rs/tools/__pycache__').mkdir(exist_ok=True)
+(ROOT / 'server-rs/tools/__pycache__/ok.cache').write_text(value + MARK)
+'''
+DB = '''import os, pathlib, sqlite3, sys
+home = pathlib.Path.home()
+data = pathlib.Path(os.environ.get('XDG_DATA_HOME') or home / '.local/share')
+default = pathlib.Path(os.environ.get('CLAUDE_PWA_DB', str(data / 'clarp/state.sqlite')))
+place = pathlib.Path(os.environ['TMPDIR']).parent
+if not place.name.startswith('clarp-reference-run-'):
+    sys.exit(f'TMPDIR is not in a scratch place of its own: {place}')
+names = ['HOME', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'CLAUDE_PWA_DB']
+for name in names:
+    value = os.environ.get(name)
+    if not value or not pathlib.Path(value).is_relative_to(place):
+        sys.exit(f'{name} is not inside the scratch place: {value}')
+with sqlite3.connect(default) as db:
+    db.execute('create table if not exists seen (n integer)')
+    db.execute('insert into seen values (1)')
+    rows = db.execute('select count(*) from seen').fetchone()[0]
+if rows != 1:
+    sys.exit(f'the default database was not a fresh one: {rows} rows')
+for name in names[:-1]:
+    (pathlib.Path(os.environ[name]) / 'written').write_text('x')
+'''
+READER = '''import pathlib
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+fixtures = ROOT / 'server-rs/crates/k/tests/fixtures'
+(fixtures / 'reader.json').write_text((fixtures / 'ok.json').read_text())
+'''
+FAIL = '''import pathlib, sys
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+(ROOT / 'server-rs/crates/k/tests/fixtures/fail.json').write_text('partial\\n')
+(ROOT / 'server-rs/crates/k/tests/fixtures/ok.json').write_text('spoiled\\n')
+with open(ROOT / 'server-rs/tools/ok-vectors.py', 'a') as spoil:
+    spoil.write("out.write_text('spoiled by the generator before\\\\n')\\n")
+sys.exit(3)
+'''
+
+
+def selftest():
+    held = []
+
+    def hold(what, condition):
+        if not condition:
+            raise SystemExit(f'reference selftest: FAILED: {what}')
+        held.append(what)
+
+    def refused(what, call, words):
+        try:
+            call()
+        except Refused as refusal:
+            hold(what, words in str(refusal))
+        else:
+            raise SystemExit(f'reference selftest: FAILED: {what}: not refused')
+
+    def said(call):
+        text = io.StringIO()
+        with contextlib.redirect_stdout(text):
+            code = call()
+        return code, text.getvalue()
+
+    with scratch.directory('clarp-reference-selftest-') as name:
+        box = Path(name)
+        repo, tmp, home = box / 'repo', box / 'tmp', box / 'home'
+        for d in (repo, tmp, home):
+            d.mkdir()
+        saved = dict(os.environ)
+        os.environ.update({'HOME': str(home), 'TMPDIR': str(tmp), 'GIT_CONFIG_NOSYSTEM': '1',
+                           'GIT_CONFIG_GLOBAL': os.devnull, 'GIT_AUTHOR_NAME': 'Selftest',
+                           'GIT_AUTHOR_EMAIL': 'selftest@example.invalid', 'GIT_COMMITTER_NAME': 'Selftest',
+                           'GIT_COMMITTER_EMAIL': 'selftest@example.invalid'})
+        trap = box / 'trap'
+        os.environ.update({'CLAUDE_PWA_DB': str(trap / 'state.sqlite'), 'XDG_DATA_HOME': str(trap / 'data'),
+                           'XDG_CONFIG_HOME': str(trap / 'config'), 'XDG_CACHE_HOME': str(trap / 'cache'),
+                           'XDG_STATE_HOME': str(trap / 'state')})
+        try:
+            def put(path, text):
+                p = repo / path
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(text)
+
+            def commit(message, *paths):
+                git(repo, 'add', '--', *paths)
+                git(repo, 'commit', '-q', '--no-gpg-sign', '-m', message)
+                return out(repo, 'rev-parse', 'HEAD')
+
+            def scratch_empty():
+                return not any(tmp.iterdir())
+
+            fixture = 'server-rs/crates/k/tests/fixtures/ok.json'
+            git(repo, 'init', '-q', '-b', 'main')
+            put('server/value.txt', 'one\n')
+            put('server-rs/tools/ok-vectors.py', "MARK = ''\n" + OK)
+            put(fixture, '{"value": "one"}\n')
+            put('server-rs/crates/k/tests/fixtures/hand.json', 'by hand\n')
+            put('.gitignore', '__pycache__/\n')
+            a = commit('the reference', '.')
+            put('server-rs/REFERENCE', f'{a}\nThe reference.\n')
+            b = commit('name the reference', 'server-rs/REFERENCE')
+            put('server/value.txt', 'two\n')
+            c = commit('the Python Host moves on', 'server/value.txt')
+            put('server-rs/crates/k/src.rs', 'rust\n')
+            d = commit('a train lands', 'server-rs/crates/k/src.rs')
+            git(repo, 'update-ref', 'refs/remotes/origin/main', d)
+
+            code, text = said(lambda: show(repo))
+            hold('show names the reference', code == 0 and f'reference  {a}' in text)
+            hold('show counts the debt: the commit outside server-rs/, not the one inside',
+                 'debt: 1 commit(s)' in text and 'the Python Host moves on  [server]' in text
+                 and 'a train lands' not in text and '2 commit(s) of origin/main beyond the reference touch server-rs/ alone' in text)
+            hold('show says origin/main is stale when it was never fetched', 'never fetched here: STALE' in text)
+            git(repo, 'worktree', 'add', '-q', '--detach', str(box / 'other'), d)
+            fetched = Path(box / 'other', out(box / 'other', 'rev-parse', '--git-path', 'FETCH_HEAD'))
+            fetched.write_text('')
+            os.utime(fetched, (time.time() - 2 * STALE_AFTER,) * 2)
+            code, text = said(lambda: show(repo))
+            hold('show says origin/main is stale when its newest fetch is old', 'fetched 120 minutes ago: STALE' in text)
+            os.utime(fetched)
+            (repo / '.git/FETCH_HEAD').write_text('')
+            os.utime(repo / '.git/FETCH_HEAD', (time.time() - 2 * STALE_AFTER,) * 2)
+            code, text = said(lambda: show(repo))
+            hold('the newest fetch from any worktree of the repository counts (origin/main is shared)',
+                 'fetched 0 minutes ago\n' in text)
+            git(repo, 'worktree', 'remove', '--force', str(box / 'other'))
+
+            git(repo, 'switch', '-q', '-c', 'piece', d)
+            put('server-rs/crates/k/src.rs', 'rust, more\n')
+            e = commit('the piece', 'server-rs/crates/k/src.rs')
+            gate = gate_commit(repo, 'HEAD')
+            hold('commit is the same id for the same REV', gate == gate_commit(repo, e))
+            hold('commit has one parent, the reference', out(repo, 'rev-list', '--parents', '-n1', gate).split()[1:] == [a])
+            hold('commit: outside server-rs/ is the reference\'s tree',
+                 outside(repo, a, gate) == [] and out(repo, 'rev-parse', f'{gate}:server') == out(repo, 'rev-parse', f'{a}:server'))
+            hold('commit: server-rs/ is REV\'s tree', out(repo, 'rev-parse', f'{gate}:server-rs') == out(repo, 'rev-parse', f'{e}:server-rs'))
+            hold('commit touched no checkout or index', out(repo, 'status', '--porcelain') == '' and out(repo, 'rev-parse', 'HEAD') == e)
+
+            git(repo, 'switch', '-q', '-c', 'nowhere', d)
+            put('server-rs/REFERENCE', 'f' * 40 + '\n')
+            commit('a reference of nothing', 'server-rs/REFERENCE')
+            refused('commit refuses a REFERENCE that names no commit', lambda: gate_commit(repo), 'no commit of this repository')
+            put('server-rs/REFERENCE', 'main\n')
+            refused('run refuses a REFERENCE that is not a full commit', lambda: run(repo, 'ok', [], sys.executable), 'does not name a commit')
+            hold('the refused run left no scratch', scratch_empty())
+            git(repo, 'checkout', '-q', '--', 'server-rs/REFERENCE')
+
+            git(repo, 'switch', '-q', '-c', 'early', b)
+            put('server-rs/REFERENCE', f'{c}\n')
+            commit('a reference ahead of the piece', 'server-rs/REFERENCE')
+            refused('commit refuses a REV whose history lacks the reference', lambda: gate_commit(repo), 'is not in the history of HEAD')
+
+            git(repo, 'switch', '-q', '-c', 'wide', d)
+            put('server/value.txt', 'three\n')
+            commit('a piece that reaches outside', 'server/value.txt')
+            refused('commit refuses a REV that touches a file outside server-rs/', lambda: gate_commit(repo), 'server/value.txt')
+
+            git(repo, 'switch', '-q', 'piece')
+            code, text = said(lambda: run(repo, 'ok', [], sys.executable))
+            hold('run uses the reference\'s Python, not the working tree\'s (value one, not two)',
+                 code == 0 and f'{"ok-vectors.py"}: unchanged' in text and (repo / fixture).read_text() == '{"value": "one"}\n')
+            hold('run removed its scratch', scratch_empty())
+
+            put('server-rs/tools/ok-vectors.py', "MARK = '!'\n" + OK)
+            put(fixture, '{"value": "one!"}\n')
+            put('server-rs/crates/k/tests/fixtures/hand.json', 'by hand, edited\n')
+            stamp = (repo / fixture).stat().st_mtime_ns
+            code, text = said(lambda: run(repo, 'ok-vectors.py', [], sys.executable))
+            hold('uncommitted generator and fixture edits ride along and are not lost when nothing changed',
+                 code == 0 and 'unchanged' in text and (repo / fixture).read_text() == '{"value": "one!"}\n'
+                 and (repo / fixture).stat().st_mtime_ns == stamp
+                 and (repo / 'server-rs/crates/k/tests/fixtures/hand.json').read_text() == 'by hand, edited\n')
+
+            put('server-rs/tools/ok-vectors.py', "MARK = '?'\n" + OK)
+            code, text = said(lambda: run(repo, 'ok', [], sys.executable))
+            hold('run copies back a changed fixture and names it',
+                 code == 0 and f'changed  {fixture}' in text and (repo / fixture).read_text() == '{"value": "one?"}\n')
+            status = git(repo, 'status', '--porcelain', '--ignored', '--untracked-files=all').stdout.decode()
+            hold('run copies back nothing else (no bytecode, no file outside server-rs/)',
+                 sorted(status.splitlines()) == [' M server-rs/crates/k/tests/fixtures/hand.json',
+                                                 ' M server-rs/crates/k/tests/fixtures/ok.json',
+                                                 ' M server-rs/tools/ok-vectors.py'])
+
+            put('server-rs/tools/ok-vectors.py', "MARK = '+'\n" + OK)
+            put('server-rs/tools/reader-vectors.py', READER)
+            put('server-rs/crates/k/tests/fixtures/reader.json', (repo / fixture).read_text())
+            was, stamp = (repo / fixture).read_bytes(), (repo / fixture).stat().st_mtime_ns
+            code, text = said(lambda: check(repo, sys.executable))
+            hold('check names a fixture that would change and does not end 0',
+                 code == 1 and f'ok-vectors.py: WOULD CHANGE {fixture}' in text and '1 fixture(s) would change' in text)
+            hold('check puts the gate tree back after a change, so the generator after it reads what the working tree has',
+                 'reader-vectors.py: unchanged' in text)
+            hold('check never writes the working tree (bytes and mtime held)',
+                 (repo / fixture).read_bytes() == was and (repo / fixture).stat().st_mtime_ns == stamp)
+            hold('check removed its scratch', scratch_empty())
+            code, text = said(lambda: sweep(repo, sys.executable, write=True))
+            hold('run --all regenerates every generator, copies back what changed and names it',
+                 code == 0 and f'ok-vectors.py: CHANGED {fixture}' in text and '2 fixture(s) changed, copied back' in text
+                 and 'reader-vectors.py: CHANGED' in text
+                 and (repo / fixture).read_text() == '{"value": "one+"}\n')
+            hold('run --all removed its scratch', scratch_empty())
+            code, text = said(lambda: check(repo, sys.executable))
+            hold('check ends 0 when nothing fails and nothing changes', code == 0 and 'none failed, no fixture changed' in text)
+
+            put('server-rs/tools/db-vectors.py', DB)
+            for attempt in (1, 2):
+                code, text = said(lambda: run(repo, 'db', [], sys.executable))
+                hold(f'a generator that opens the default database gets a fresh scratch one, and its home and XDG '
+                     f'directories are inside its scratch place (run {attempt})', code == 0 and 'unchanged' in text)
+            hold('the home of whoever runs the tool is never touched', not any(home.iterdir()))
+            hold('the runner\'s CLAUDE_PWA_DB and XDG directories (traps) are never reached', not trap.exists())
+            hold('the scratch database and home are removed with the run', scratch_empty())
+
+            put('server-rs/tools/fail-vectors.py', FAIL)
+            kept = (repo / fixture).read_text()
+            source = (repo / 'server-rs/tools/ok-vectors.py').read_text()
+            code, text = said(lambda: run(repo, 'fail', [], sys.executable))
+            hold('run of a failing generator says so with its exit',
+                 code == 3 and 'fail-vectors.py: FAILED (exit 3); nothing copied back' in text)
+            hold('a failing generator\'s fixtures are not copied back',
+                 not (repo / 'server-rs/crates/k/tests/fixtures/fail.json').exists() and (repo / fixture).read_text() == kept
+                 and (repo / 'server-rs/tools/ok-vectors.py').read_text() == source)
+            hold('the failed run removed its scratch', scratch_empty())
+            code, text = said(lambda: check(repo, sys.executable))
+            hold('check names a failing generator, does not end 0, and the generator after it sees an unspoiled tree',
+                 code == 1 and 'fail-vectors.py: FAILED (exit 3)' in text and 'ok-vectors.py: unchanged' in text
+                 and 'db-vectors.py: unchanged' in text
+                 and '1 failed (fail-vectors.py)' in text)
+            hold('the failed check copied nothing back and removed its scratch',
+                 not (repo / 'server-rs/crates/k/tests/fixtures/fail.json').exists()
+                 and (repo / fixture).read_text() == kept and scratch_empty())
+            code, text = said(lambda: sweep(repo, sys.executable, write=True))
+            hold('run --all names a failing generator, does not end 0, and copies nothing of it back',
+                 code == 1 and 'fail-vectors.py: FAILED (exit 3)' in text and '1 failed (fail-vectors.py)' in text
+                 and not (repo / 'server-rs/crates/k/tests/fixtures/fail.json').exists()
+                 and (repo / fixture).read_text() == kept and scratch_empty())
+            refused('run refuses a generator that is not there', lambda: run(repo, 'absent', [], sys.executable), 'no generator')
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+    for what in held:
+        print(f'held: {what}')
+    print(f'reference selftest: {len(held)} held')
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--main', default=MAIN, help='the fetched main to read (default origin/main)')
+    parser.add_argument('--python', help='the interpreter for generators (default: the Python Host\'s)')
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('show')
+    one = sub.add_parser('commit')
+    one.add_argument('rev', nargs='?', default='HEAD')
+    gen = sub.add_parser('run')
+    gen.add_argument('--all', action='store_true', help='every generator, copying back what changed')
+    gen.add_argument('generator', nargs='?')
+    gen.add_argument('args', nargs=argparse.REMAINDER)
+    sub.add_parser('check')
+    sub.add_parser('selftest')
+    args = parser.parse_args()
+    try:
+        if args.command == 'show':
+            return show(REPO, args.main)
+        if args.command == 'commit':
+            print(gate_commit(REPO, args.rev, args.main))
+            return 0
+        if args.command == 'run':
+            if args.all == bool(args.generator):
+                parser.error('run takes either a GENERATOR [ARGS] or --all')
+            if args.all:
+                return sweep(REPO, args.python or service_python(), write=True)
+            return run(REPO, args.generator, args.args, args.python or service_python())
+        if args.command == 'check':
+            return check(REPO, args.python or service_python())
+        return selftest()
+    except Refused as refusal:
+        print(f'reference: refused: {refusal}', file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())
