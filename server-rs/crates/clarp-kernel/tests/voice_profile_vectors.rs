@@ -142,7 +142,7 @@ fn an_agent_speaks_with_the_voice_the_python_host_would_show() {
         }
         checked += 1;
     }
-    assert_eq!((checked, handed), (574, 2870));
+    assert_eq!((checked, handed), (576, 2880));
 }
 
 /// What the speaker hands over is the profile's voice, and it hands over nothing exactly when
@@ -186,7 +186,7 @@ fn the_speaker_hands_over_what_the_profile_shows_and_nothing_when_it_is_silent()
     assert_eq!((spoken, silent), (SPOKEN, SILENT));
 }
 
-const SPOKEN: usize = 408;
+const SPOKEN: usize = 410;
 const SILENT: usize = 166;
 
 /// ElevenLabs is handed only an id it can take. An agent that spoke with ElevenLabs before
