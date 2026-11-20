@@ -1276,9 +1276,42 @@ impl Drop for Worker {
     }
 }
 
+// A burst of 32 messages amortizes a forced timer turn while bounding the
+// number of mailbox handlers that can run ahead of an already-due deadline.
+const MAILBOX_BURST: usize = 32;
+
+#[derive(Default)]
+struct Mailbox {
+    handled: usize,
+}
+
+impl Mailbox {
+    fn next<T>(
+        &mut self,
+        rx: &mpsc::Receiver<T>,
+        due: Option<Instant>,
+        now: Instant,
+    ) -> Result<T, RecvTimeoutError> {
+        if self.handled >= MAILBOX_BURST && due.is_some_and(|at| at <= now) {
+            self.handled = 0;
+            return Err(RecvTimeoutError::Timeout);
+        }
+        let result = match due {
+            Some(at) => rx.recv_timeout(at.saturating_duration_since(now)),
+            None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        };
+        match result {
+            Ok(_) => self.handled = (self.handled + 1).min(MAILBOX_BURST),
+            Err(_) => self.handled = 0,
+        }
+        result
+    }
+}
+
 impl Worker {
     fn run(mut self, rx: &mpsc::Receiver<Ask>) {
         let mut wait = REOPEN_FIRST;
+        let mut mailbox = Mailbox::default();
         loop {
             if self.actor.is_none() {
                 match self.open() {
@@ -1350,49 +1383,43 @@ impl Worker {
             .into_iter()
             .flatten()
             .min();
-            let ask = match due {
-                None => match rx.recv() {
-                    Ok(ask) => ask,
-                    Err(_) => return,
-                },
-                Some(due) => match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
-                    Ok(ask) => ask,
-                    Err(RecvTimeoutError::Timeout) => {
-                        let now = Instant::now();
-                        if self.transcript_due.is_some_and(|due| due <= now) {
-                            self.tell_transcript();
-                        }
-                        let mut looked = Ok(());
-                        if jobs_due.is_some_and(|due| due <= now) {
-                            looked = self.check_jobs();
-                        }
-                        if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
-                            looked = self.check_goals();
-                        }
-                        if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
-                            looked = self.settle_requests();
-                        }
-                        if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
-                            looked = self.retry_turn();
-                        }
-                        if let Err(error) = looked {
-                            eprintln!(
-                                "clarp-host: agent {} failed and is opened again: {error}",
-                                self.setup.record.session
-                            );
-                            self.actor = None;
-                        }
-                        if shown_due.is_some_and(|due| due <= now) {
-                            let now_ms = self.now_ms();
-                            if let Some(actor) = self.actor.as_mut() {
-                                actor.shown_due(now_ms);
-                            }
-                        }
-                        self.tell_shown();
-                        continue;
+            let ask = match mailbox.next(rx, due, Instant::now()) {
+                Ok(ask) => ask,
+                Err(RecvTimeoutError::Timeout) => {
+                    let now = Instant::now();
+                    if self.transcript_due.is_some_and(|due| due <= now) {
+                        self.tell_transcript();
                     }
-                    Err(RecvTimeoutError::Disconnected) => return,
-                },
+                    let mut looked = Ok(());
+                    if jobs_due.is_some_and(|due| due <= now) {
+                        looked = self.check_jobs();
+                    }
+                    if looked.is_ok() && goals_due.is_some_and(|due| due <= now) {
+                        looked = self.check_goals();
+                    }
+                    if looked.is_ok() && requests_due.is_some_and(|due| due <= now) {
+                        looked = self.settle_requests();
+                    }
+                    if looked.is_ok() && retry_due.is_some_and(|due| due <= now) {
+                        looked = self.retry_turn();
+                    }
+                    if let Err(error) = looked {
+                        eprintln!(
+                            "clarp-host: agent {} failed and is opened again: {error}",
+                            self.setup.record.session
+                        );
+                        self.actor = None;
+                    }
+                    if shown_due.is_some_and(|due| due <= now) {
+                        let now_ms = self.now_ms();
+                        if let Some(actor) = self.actor.as_mut() {
+                            actor.shown_due(now_ms);
+                        }
+                    }
+                    self.tell_shown();
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
             };
             if let Ask::Close(closed) = ask {
                 // The agent is gone: the pool of its tool's accounts does not wait for its
@@ -3652,5 +3679,45 @@ fn refuse_for(
             Err(RecvTimeoutError::Disconnected) => return false,
             Err(RecvTimeoutError::Timeout) => return true,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod mailbox_tests {
+    use super::*;
+
+    #[test]
+    fn a_ready_deadline_gets_a_turn_under_continuous_mail() {
+        let (tx, rx) = mpsc::channel();
+        let now = Instant::now();
+        let mut mailbox = Mailbox::default();
+        tx.send(0).unwrap();
+        for batch in 0..2 {
+            for n in 0..32 {
+                let expected = batch * 32 + n;
+                tx.send(expected + 1).unwrap();
+                assert_eq!(mailbox.next(&rx, Some(now), now), Ok(expected));
+            }
+            // Mail is still waiting. The timeout branch runs due work before
+            // the 33rd message, then gives the mailbox its turn again.
+            assert_eq!(
+                mailbox.next(&rx, Some(now), now),
+                Err(RecvTimeoutError::Timeout)
+            );
+        }
+        for _ in 0..33 {
+            tx.send(64).unwrap();
+            assert_eq!(mailbox.next(&rx, None, now), Ok(64));
+        }
+        assert_eq!(
+            mailbox.next(&rx, Some(now + Duration::from_secs(1)), now),
+            Ok(64)
+        );
+        drop(tx);
+        assert_eq!(
+            mailbox.next(&rx, None, now),
+            Err(RecvTimeoutError::Disconnected)
+        );
     }
 }
