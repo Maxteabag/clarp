@@ -143,32 +143,40 @@ enum ToStdin {
 
 /// Appends one entry. A spool that cannot be written is a turn nobody will ever read; there is
 /// no one to tell but stderr, and the tool goes on regardless.
-fn write(writer: &mut SpoolWriter, entry: Entry, durable: bool) {
+fn write(writer: &mut SpoolWriter, entry: Entry, durable: bool) -> bool {
     let record = Record { t: now_ms(), entry };
     let written = writer
         .append(&record)
         .and_then(|()| if durable { writer.sync() } else { Ok(()) });
     if let Err(error) = written {
         eprintln!("clarp-shim: cannot write the spool: {error}");
+        return false;
     }
+    true
 }
 
 fn spool_thread(mut writer: SpoolWriter, entries: mpsc::Receiver<ToSpool>) {
     let mut followers: Vec<UnixStream> = Vec::new();
+    let mut complete = true;
     for message in entries {
         let last = matches!(&message, ToSpool::Last(..));
         match message {
             ToSpool::Entry(entry) => {
                 let durable = matches!(entry, Entry::Shim(_));
-                write(&mut writer, entry, durable);
+                complete &= write(&mut writer, entry, durable);
             }
             ToSpool::Now(entry, done) | ToSpool::Last(entry, done) => {
-                write(&mut writer, entry, true);
+                complete &= write(&mut writer, entry, true);
                 let _ = done.send(());
             }
             ToSpool::Follow(follower) => followers.push(follower),
             ToSpool::End(answer) => {
-                let _ = answer.send(writer.end());
+                let end = if complete {
+                    writer.end()
+                } else {
+                    Err(std::io::Error::other("the spool has an unwritten record"))
+                };
+                let _ = answer.send(end);
             }
         }
         // Whoever follows is told there is more to read. A follower that is not reading already
@@ -675,9 +683,9 @@ impl Control {
     }
 
     /// Takes everything the stopped group printed into the spool, and says how far the spool
-    /// goes. Nothing is in a pipe, no pump has a chunk in hand, no hook's report is half taken
-    /// and no connection waits to be taken, all at once, and then the one writer of the spool is
-    /// asked for its length after everything sent to it before.
+    /// goes. Both pipes are empty, neither pump has a chunk in hand, every complete request
+    /// has been handled, and no connection waits to be accepted. Then the spool writer reports
+    /// its length if it wrote everything sent before the fence.
     fn count(&self, own: &Arc<Connection>, until: Instant) -> Option<Held> {
         let (Some(out), Some(err)) = (self.printed.as_deref(), self.errors.as_deref()) else {
             return None;
@@ -711,7 +719,8 @@ impl Control {
                 if !out.waits(false) && !err.waits(false) {
                     let (answer, end) = mpsc::channel();
                     self.to_spool.send(ToSpool::End(answer)).ok()?;
-                    let spool = end.recv().ok()?.ok()?;
+                    let remaining = until.saturating_duration_since(Instant::now());
+                    let spool = end.recv_timeout(remaining).ok()?.ok()?;
                     return Some(Held {
                         spool,
                         partial_out: out.partial.load(Ordering::SeqCst) as u64,
@@ -1429,6 +1438,33 @@ mod tests {
                 .is_some()
         );
         rig.end();
+    }
+
+    #[test]
+    fn a_count_expires_if_the_spool_writer_has_not_answered() {
+        let mut rig = rig("count-no-answer");
+        let (own, _peer) = UnixStream::pair().unwrap();
+        let (to_spool, requests) = mpsc::channel();
+        Arc::get_mut(&mut rig.control).unwrap().to_spool = to_spool;
+        assert_eq!(count(&rig, &connection(&own)), None);
+        assert!(matches!(requests.try_recv(), Ok(ToSpool::End(_))));
+        rig.end();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_count_cannot_attest_to_a_spool_with_a_failed_write() {
+        let writer = SpoolWriter::open(Path::new("/dev/full")).unwrap();
+        let (to_spool, requests) = mpsc::channel();
+        let writing = std::thread::spawn(move || spool_thread(writer, requests));
+        to_spool
+            .send(ToSpool::Entry(Entry::Out("printed".into())))
+            .unwrap();
+        let (answer, end) = mpsc::channel();
+        to_spool.send(ToSpool::End(answer)).unwrap();
+        assert!(end.recv_timeout(Duration::from_secs(2)).unwrap().is_err());
+        drop(to_spool);
+        writing.join().unwrap();
     }
 
     #[test]
