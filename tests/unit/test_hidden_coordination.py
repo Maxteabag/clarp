@@ -92,6 +92,15 @@ class _World:
         return sorted({row["audience"] for row in self.log() if row.get("trace_id") == trace})
 
 
+@pytest.fixture(autouse=True)
+def _dispatcher_state_is_this_tests_own():
+    """The dispatcher tests leave agents in turn_dispatch's in-process state; a later test file in
+    the same process (test_snapshot_without_archived) counted them (R160)."""
+    yield
+    from lib import turn_dispatch
+    turn_dispatch.reset_for_tests()
+
+
 @pytest.fixture
 def world(tmp_path, monkeypatch):
     return _World(tmp_path, monkeypatch)
