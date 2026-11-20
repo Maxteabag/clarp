@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import ctypes
 import datetime
 import fcntl
+import json
 import os
 from pathlib import Path
 import re
@@ -403,8 +404,46 @@ def make_room(root, current, floor):
     return free >= floor
 
 
+def prepare_debug(workspace, profile):
+    """Keep one dev/test profile generation in this target. The caller holds the slot."""
+    mark = '.clarp-debug-profile'
+    try:
+        os.mkdir('target', dir_fd=workspace)
+    except FileExistsError:
+        pass
+    with directory('target', workspace) as target:
+        wanted = json.dumps(profile).encode() + b'\n'
+        try:
+            fd = os.open(mark, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=target)
+        except FileNotFoundError:
+            pass
+        else:
+            with os.fdopen(fd, 'rb') as previous:
+                if stat.S_ISREG(os.fstat(fd).st_mode) and previous.read(len(wanted) + 1) == wanted:
+                    return False
+        try:
+            with directory('debug', target):
+                shutil.rmtree('debug', dir_fd=target)
+            cleared = True
+        except FileNotFoundError:
+            cleared = False
+        # A partial write must never bless a generation, even if the build was interrupted.
+        temp = f'{mark}.{os.getpid()}.{time.monotonic_ns()}'
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=target)
+        try:
+            with os.fdopen(fd, 'wb') as writing:
+                writing.write(wanted)
+            os.replace(temp, mark, src_dir_fd=target, dst_dir_fd=target)
+        finally:
+            try:
+                os.unlink(temp, dir_fd=target)
+            except FileNotFoundError:
+                pass
+        return cleared
+
+
 @contextmanager
-def build_space(floor):
+def build_space(floor, debug=False):
     if floor is None:  # repo-gates does not produce a Cargo target
         yield True
         return
@@ -415,6 +454,11 @@ def build_space(floor):
         with directory('server-rs', copy) as workspace:
             if not os.path.samestat(os.fstat(workspace), os.stat('.')):
                 raise SystemExit('Build workspace changed during admission.')
+            if debug:
+                profile = [os.environ[k] for k in ('CARGO_PROFILE_DEV_DEBUG', 'CARGO_PROFILE_TEST_DEBUG')]
+                if prepare_debug(workspace, profile):
+                    print('Build profile changed: cleared target/debug.', flush=True)
+                    free_after_removal(floor)
         if not make_room(root, cwd.parent.name, floor):
             yield False
             return
@@ -429,7 +473,7 @@ def build_space(floor):
             os.replace(temp, STAMP, src_dir_fd=copy, dst_dir_fd=copy)
 
 
-def run(lock, who, command, floor=None):
+def run(lock, who, command, floor=None, debug=False):
     # PR_SET_CHILD_SUBREAPER adopts orphaned descendants, including children
     # which start their own process group or session.
     libc = ctypes.CDLL(None, use_errno=True)
@@ -445,7 +489,7 @@ def run(lock, who, command, floor=None):
         since = datetime.datetime.now().strftime('%H:%M:%S')
         identity = f'{os.getpid()}:{process_start(os.getpid())}:{lock}'
         HOLDER.write_text(f'{identity} {prefix}{who} since {since}\n')
-        with build_space(floor) as ready:
+        with build_space(floor, debug) as ready:
             if not ready:
                 return 1
             child = subprocess.Popen(command)
@@ -471,7 +515,7 @@ if __name__ == '__main__':
     with LOCK.open('a') as slot:
         if sys.argv[1] == 'status':
             status(slot.fileno())
-        elif sys.argv[1] == '--build':
-            sys.exit(run(slot.fileno(), sys.argv[3], sys.argv[4:], int(sys.argv[2])))
+        elif sys.argv[1] in ('--build', '--build-debug'):
+            sys.exit(run(slot.fileno(), sys.argv[3], sys.argv[4:], int(sys.argv[2]), sys.argv[1] == '--build-debug'))
         else:
             sys.exit(run(slot.fileno(), sys.argv[1], sys.argv[2:]))
