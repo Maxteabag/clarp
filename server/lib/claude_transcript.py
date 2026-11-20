@@ -17,6 +17,7 @@ from functools import lru_cache
 from typing import Any
 
 from . import transcript_paths
+from .message_text import claude_block_is_line
 from .claude_reply_evidence import is_synthetic_assistant_record
 from .activity import summarize_tool_activity
 from .log import log_exception
@@ -409,7 +410,12 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
             text = "\n".join(p for p in text_parts if p).strip()
             if t == "user" and subagent_cells:
                 _subagent_notifications(text, subagent_cells)
-            if not text and not tools and not cells:
+            if t == "assistant" and isinstance(content, list):
+                # The block count the live items and the live rows use too (R108).
+                kept = any(claude_block_is_line(c) for c in content)
+            else:
+                kept = bool(text or tools or cells)
+            if not kept:
                 continue
             # Harness-injected user envelopes (task notifications, system
             # reminders, slash-command echoes) aren't anything the user said —

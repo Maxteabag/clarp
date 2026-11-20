@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 from .voice_markup import clean_for_display
 
@@ -121,6 +122,26 @@ def _strip_block(text: str, opening: str, closing: str) -> str:
         _, after = rest.split(closing, 1)
         out = (before + after).strip()
     return out
+
+
+def claude_block_is_line(block: Any) -> bool:
+    """Whether a content block of a Claude assistant message is a line of its own in the
+    transcript (R108's block count, k): text with words, or a tool use (a client tool or a
+    subagent cell). Thinking, a server tool and its result are not lines. The transcript parser,
+    the live items and the drain's live rows count blocks with this one function, so block k of
+    a message names the same row on the live channel, in the live row and in /log."""
+    if not isinstance(block, dict):
+        return False
+    kind = block.get("type")
+    if kind == "text":
+        return bool(str(block.get("text") or "").strip())
+    return kind == "tool_use"
+
+
+# The keys a key-less stream's rows take in one turn: the first message, then the next ones
+# rolled over to a segment of their own (message_live._live_target). The importer tells a
+# key-less live row from a keyed one by these (R108).
+LIVE_KEYLESS_KEYS = ("",) + tuple(f"seg{n}" for n in range(1, 64))
 
 
 def live_message_id(agent_id: str, backend_session_id: str, trace_id: str, item_key: str = "") -> str:
