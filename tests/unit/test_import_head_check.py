@@ -123,3 +123,39 @@ def test_a_moved_head_is_one_line(agent, monkeypatch):
                                       text="moved")
     _locked(agent, prepared)
     assert [line for line in lines if line[0] == "importCarryReread"] == [("importCarryReread", "reason=head_moved")]
+
+
+# The agent's rows (session_rows off) are checked by one statement over the agent's heads:
+# (COUNT, MAX(revision), MAX(replace_revision)). Each part is needed (the reviewer of 464: with
+# either of the first two left out, a write elsewhere in the agent let stale rows through).
+
+def test_a_write_to_another_existing_conversation_of_the_agent_is_read_again(agent, rereads):
+    """Only MAX(revision) moves: the other conversation was there before the read."""
+    message_store.record_user_message(agent_id=agent, backend_session_id="bs-other", client_msg_id="o1",
+                                      text="the other conversation's first words")
+    prepared = _prepared(agent, session_rows=False)
+    message_store.record_user_message(agent_id=agent, backend_session_id="bs-other", client_msg_id="o2",
+                                      text="written in the other conversation after the read")
+    again = _locked(agent, prepared)
+    assert len(rereads) == 1
+    assert any(row["text"] == "written in the other conversation after the read" for row in again.carry_rows)
+
+
+def test_a_new_conversation_whose_head_is_not_the_newest_is_read_again(agent, rereads):
+    """Only COUNT moves: a conversation of the agent appears, its row and its head written in one
+    commit (the invariant holds), with a revision below the agent's newest."""
+    con = db.conn()
+    low = con.execute("SELECT MIN(revision) FROM messages WHERE agent_id=?", (agent,)).fetchone()[0]
+    prepared = _prepared(agent, session_rows=False)
+    before = message_writes._carry_head(con, agent, SESSION, False)
+    con.execute("BEGIN IMMEDIATE")
+    con.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file, seq, role,
+                   timestamp, text, updated_at, revision) VALUES ('m-late', ?, 'bs-late', 'client:late', 1,
+                   'user', '2026-11-20T06:00:00.000Z', 'a conversation that appeared', 1, ?)""", (agent, low))
+    con.execute("INSERT INTO conversation_heads(agent_id, backend_session_id, revision, replace_revision) "
+                "VALUES (?, 'bs-late', ?, 0)", (agent, low))
+    con.execute("COMMIT")
+    after = message_writes._carry_head(con, agent, SESSION, False)
+    assert after[1] == before[1] + 1 and after[2:] == before[2:]       # the COUNT alone moved
+    again = _locked(agent, prepared)
+    assert len(rereads) == 1 and any(row["message_id"] == "m-late" for row in again.carry_rows)
