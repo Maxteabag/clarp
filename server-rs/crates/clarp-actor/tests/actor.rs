@@ -2792,3 +2792,884 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
     );
     assert_eq!(actor.held_deliveries(), 2);
 }
+
+// ---- following a conversation by revision ---------------------------------------------------
+
+/// A client that follows a conversation by revision holds, after every change of it, the rows
+/// a client that reads it anew reads. What the two hold is compared after every step: one
+/// scripted case for each way a conversation changes, and walks over the same moves.
+mod following {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+
+    use clarp_actor::conversation::{Page, Versioned};
+    use clarp_actor::helper_cells::HelperRows;
+    use clarp_backend::{Interpreter, Launch, TurnSpec};
+    use clarp_kernel::conversation::{ToolCall, ToolStatus, TurnEnd};
+
+    use super::*;
+
+    /// A tool that lets go of the conversations it names `gone-…`, as Antigravity prunes old
+    /// ones: a turn that would continue one begins a new conversation, and when the tool names
+    /// that one the Host carries the agent's conversation over.
+    struct LetsGo(Scripted);
+
+    impl Backend for LetsGo {
+        fn id(&self) -> &'static str {
+            self.0.id()
+        }
+
+        fn launch(&self, spec: &TurnSpec) -> Launch {
+            self.0.launch(spec)
+        }
+
+        fn interpreter(&self, turn: u64, name: &str) -> Box<dyn Interpreter> {
+            self.0.interpreter(turn, name)
+        }
+
+        fn keeps(&self, session: &str) -> bool {
+            !session.starts_with("gone-")
+        }
+    }
+
+    /// What a client shows of a row: the row itself, the uses of the tools its message calls
+    /// as they stand, how its turn ended when it is the row that closed it, whether it was said
+    /// along the way, and whether it is still being written. Its revision is how a client
+    /// knows that it changed; its time is compared by itself ([`TIME`]).
+    type Shows = (Entry, Vec<ToolCall>, Option<TurnEnd>, bool, bool);
+
+    fn shows(row: &Versioned) -> Shows {
+        (
+            row.entry.clone(),
+            row.tools.clone(),
+            row.turn.clone(),
+            row.commentary,
+            row.live,
+        )
+    }
+
+    const SAME_REVISION: &str =
+        "a row the follower holds otherwise than a reload reads it, at the revision it holds";
+    const NOT_GIVEN: &str = "a row that changed to a higher revision and was not given again";
+    const MISSING: &str = "a row a reload reads that the follower was never given";
+    const GONE: &str = "a row the follower holds that a reload does not read";
+    const LOWER: &str = "a row given at a lower revision than the one the follower holds";
+    const AT_OR_BELOW: &str = "a change given at or below the cursor it was asked after";
+    const NOT_ASCENDING: &str = "a page of changes that is not ascending by revision";
+    const BACK: &str = "a cursor that goes back";
+    const TIME: &str = "a row the follower holds at another time than a reload reads it";
+    const ORDER: &str = "a conversation read anew in pages in another order than in one";
+    const STUCK: &str = "an older page that gives nothing new while it says there is more";
+
+    /// What was found: for each kind, how often, and where first.
+    #[derive(Default)]
+    struct Findings {
+        kinds: BTreeMap<&'static str, (usize, String)>,
+    }
+
+    impl Findings {
+        fn note(&mut self, kind: &'static str, at: &str, detail: impl FnOnce() -> String) {
+            let first = self
+                .kinds
+                .entry(kind)
+                .or_insert_with(|| (0, format!("{at}: {}", detail())));
+            first.0 += 1;
+        }
+
+        fn add(&mut self, other: Findings) {
+            for (kind, (count, first)) in other.kinds {
+                self.kinds.entry(kind).or_insert((0, first)).0 += count;
+            }
+        }
+
+        fn none(self) {
+            let said: Vec<String> = self
+                .kinds
+                .iter()
+                .map(|(kind, (count, first))| format!("{kind}: {count} times, first at {first}"))
+                .collect();
+            assert!(
+                said.is_empty(),
+                "following by revision is not reading anew:\n{}",
+                said.join("\n")
+            );
+        }
+    }
+
+    /// A client that follows a conversation by revision, as the apps do
+    /// (`static/lib/conversation-sync.js`): it asks what is newer than its cursor, page after
+    /// page while there is more, and puts each row it is given in the place of the one with
+    /// its id, unless it holds that one at a higher revision; a row it did not have it puts
+    /// after everything it has. Told that its conversation ended, it drops everything and
+    /// reads the conversation anew: the newest page, then pages before the oldest row it has
+    /// while there are more, each before what it has.
+    ///
+    /// What a client is promised about order, and what is compared of it: a page read anew,
+    /// the newest or an older one, is in the order a chat shows (a conversation read anew in
+    /// pages is in the order it is in when read in one); a page of changes is ascending by
+    /// revision, each above the cursor. Where a row a client was given as a change stands
+    /// among the rows it had is the client's own, and is not compared.
+    struct Follower {
+        which: Which,
+        limit: usize,
+        cursor: u64,
+        order: Vec<String>,
+        rows: HashMap<String, Versioned>,
+        /// What its last catching up came to: how many rows it was given, whether it was told
+        /// its conversation ended, whether it read the conversation anew.
+        given: usize,
+        told: bool,
+        anew: bool,
+    }
+
+    impl Follower {
+        fn new(which: Which, limit: usize) -> Self {
+            Self {
+                which,
+                limit,
+                cursor: 0,
+                order: Vec::new(),
+                rows: HashMap::new(),
+                given: 0,
+                told: false,
+                anew: false,
+            }
+        }
+
+        fn name(&self) -> String {
+            let which = match self.which {
+                Which::All => "all",
+                Which::WithoutAutomated => "without automated",
+            };
+            format!("{which}, {} a page", self.limit)
+        }
+
+        fn follow(&mut self, actor: &Actor, at: &str, found: &mut Findings) {
+            (self.given, self.told, self.anew) = (0, false, false);
+            if self.cursor == 0 {
+                // A client that holds nothing asks for the newest page (`after_revision=0`).
+                return self.read_anew(actor, at, found);
+            }
+            for _ in 0..10_000 {
+                let page = actor.after_of(self.cursor, self.limit, self.which).unwrap();
+                if page.ended_for(self.cursor) {
+                    self.told = true;
+                    return self.read_anew(actor, at, found);
+                }
+                for pair in page.entries.windows(2) {
+                    if pair[0].revision >= pair[1].revision {
+                        found.note(NOT_ASCENDING, at, || {
+                            let ids = (pair[0].entry.id(), pair[1].entry.id());
+                            format!("{ids:?} at {} and {}", pair[0].revision, pair[1].revision)
+                        });
+                    }
+                }
+                for row in page.entries {
+                    self.given += 1;
+                    let id = row.entry.id().to_string();
+                    if row.revision <= self.cursor {
+                        found.note(AT_OR_BELOW, at, || {
+                            format!("{id} at {} after {}", row.revision, self.cursor)
+                        });
+                    }
+                    match self.rows.get(&id) {
+                        None => {
+                            self.order.push(id.clone());
+                            self.rows.insert(id, row);
+                        }
+                        Some(held) if row.revision >= held.revision => {
+                            self.rows.insert(id, row);
+                        }
+                        Some(held) => found.note(LOWER, at, || {
+                            format!("{id}: held at {}, given at {}", held.revision, row.revision)
+                        }),
+                    }
+                }
+                if page.latest_revision < self.cursor {
+                    found.note(BACK, at, || {
+                        format!("from {} to {}", self.cursor, page.latest_revision)
+                    });
+                }
+                self.cursor = self.cursor.max(page.latest_revision);
+                if !page.has_more {
+                    return;
+                }
+            }
+            panic!("{at}: a conversation that is never caught up with");
+        }
+
+        fn read_anew(&mut self, actor: &Actor, at: &str, found: &mut Findings) {
+            self.anew = true;
+            self.order.clear();
+            self.rows.clear();
+            let page = actor.tail_of(self.limit, self.which).unwrap();
+            self.cursor = page.latest_revision;
+            let mut more = page.has_more;
+            for row in page.entries {
+                self.given += 1;
+                let id = row.entry.id().to_string();
+                if !self.rows.contains_key(&id) {
+                    self.order.push(id.clone());
+                }
+                self.rows.insert(id, row);
+            }
+            for _ in 0..10_000 {
+                let Some(oldest) = self.order.first().cloned().filter(|_| more) else {
+                    return;
+                };
+                let Some(older) = actor.before_of(&oldest, self.limit, self.which).unwrap() else {
+                    return found.note(STUCK, at, || format!("no page before {oldest}"));
+                };
+                more = older.has_more;
+                let mut before = Vec::new();
+                for row in older.entries {
+                    let id = row.entry.id().to_string();
+                    if let std::collections::hash_map::Entry::Vacant(place) =
+                        self.rows.entry(id.clone())
+                    {
+                        before.push(id);
+                        place.insert(row);
+                    }
+                }
+                if before.is_empty() && more {
+                    // The client would ask for the same page again, and again.
+                    let limit = self.limit;
+                    return found.note(STUCK, at, || {
+                        format!("{limit} a page: before {oldest}, nothing new")
+                    });
+                }
+                self.given += before.len();
+                before.append(&mut self.order);
+                self.order = before;
+            }
+            panic!("{at}: a conversation that is never read to its beginning");
+        }
+
+        /// Compares what this follower holds with what a reload reads.
+        fn compare(&self, reload: &Page, at: &str, found: &mut Findings) {
+            let at = format!("{at}, {}", self.name());
+            let mut read = HashSet::new();
+            for row in &reload.entries {
+                let id = row.entry.id();
+                read.insert(id);
+                match self.rows.get(id) {
+                    None => found.note(MISSING, &at, || id.to_string()),
+                    Some(held) if shows(held) != shows(row) => {
+                        let kind = if held.revision >= row.revision {
+                            SAME_REVISION
+                        } else {
+                            NOT_GIVEN
+                        };
+                        found.note(kind, &at, || {
+                            format!(
+                                "{id}: held at {} as {:?}; a reload reads it at {} as {:?}",
+                                held.revision,
+                                shows(held),
+                                row.revision,
+                                shows(row)
+                            )
+                        });
+                    }
+                    Some(held) if held.ts_ms != row.ts_ms => found.note(TIME, &at, || {
+                        format!("{id}: held at {}, a reload reads {}", held.ts_ms, row.ts_ms)
+                    }),
+                    Some(_) => {}
+                }
+            }
+            for id in &self.order {
+                if !read.contains(id.as_str()) {
+                    found.note(GONE, &at, || id.clone());
+                }
+            }
+            if self.anew {
+                let reloaded: Vec<&str> = reload.entries.iter().map(|row| row.entry.id()).collect();
+                if self.order != reloaded {
+                    found.note(ORDER, &at, || {
+                        format!("{:?}; in one page {reloaded:?}", self.order)
+                    });
+                }
+            }
+        }
+    }
+
+    fn watcher() -> Origin {
+        Origin::Trigger {
+            name: "watcher".to_string(),
+        }
+    }
+
+    /// One agent, the tool it runs, the clients that follow its conversation, and what they
+    /// found.
+    struct Walk {
+        world: World,
+        actor: Option<Actor>,
+        name: String,
+        claude: bool,
+        n: u64,
+        /// Claude: the message being streamed, and the calls it makes.
+        open: Option<String>,
+        pending: Vec<String>,
+        /// The calls that have not returned.
+        running: Vec<String>,
+        helpers: HelperRows,
+        /// How many times the Host was told it carried the conversation over.
+        carried: usize,
+        followers: Vec<Follower>,
+        found: Findings,
+        steps: usize,
+    }
+
+    impl Walk {
+        fn new(name: &str, claude: bool) -> Self {
+            let mut world = World::new(name);
+            world.backend = if claude {
+                Arc::new(Claude::new())
+            } else {
+                Arc::new(LetsGo(Scripted::echo()))
+            };
+            let actor = world.open();
+            let mut followers = Vec::new();
+            for which in [Which::All, Which::WithoutAutomated] {
+                for limit in [1, 2, 3] {
+                    followers.push(Follower::new(which, limit));
+                }
+            }
+            Self {
+                world,
+                actor: Some(actor),
+                name: name.to_string(),
+                claude,
+                n: 0,
+                open: None,
+                pending: Vec::new(),
+                running: Vec::new(),
+                helpers: HelperRows::default(),
+                carried: 0,
+                followers,
+                found: Findings::default(),
+                steps: 0,
+            }
+        }
+
+        fn actor(&self) -> &Actor {
+            self.actor.as_ref().unwrap()
+        }
+
+        fn next(&mut self) -> u64 {
+            self.n += 1;
+            self.n
+        }
+
+        /// The turn a shim runs.
+        fn live(&self) -> Option<u64> {
+            self.world.shims.keys().next_back().copied()
+        }
+
+        /// Every follower catches up, and holds what a reload reads.
+        fn check(&mut self, what: &str) {
+            self.steps += 1;
+            let at = format!("{} step {} ({what})", self.name, self.steps);
+            let actor = self.actor.as_ref().unwrap();
+            for follower in &mut self.followers {
+                follower.follow(actor, &at, &mut self.found);
+                let reload = actor.tail_of(1_000_000, follower.which).unwrap();
+                follower.compare(&reload, &at, &mut self.found);
+            }
+        }
+
+        fn every(&self, holds: impl Fn(&Follower) -> bool) -> bool {
+            self.followers.iter().all(holds)
+        }
+
+        /// The rows a reload reads.
+        fn reload(&self) -> Vec<Versioned> {
+            self.actor().tail_of(1_000_000, Which::All).unwrap().entries
+        }
+
+        fn hint(&mut self) {
+            let actor = self.actor.as_mut().unwrap();
+            let out = self.world.hint(actor);
+            self.carried += out.carried.len();
+        }
+
+        fn line(&mut self, turn: u64, line: serde_json::Value) {
+            self.world.says(turn, &line.to_string());
+        }
+
+        fn stream(&mut self, turn: u64, event: serde_json::Value) {
+            self.line(turn, json!({"type": "stream_event", "event": event}));
+        }
+
+        /// Claude: the message being streamed, begun when there is none.
+        fn message(&mut self, turn: u64) -> String {
+            if let Some(open) = &self.open {
+                return open.clone();
+            }
+            let id = format!("m{}", self.next());
+            let start = json!({"type": "message_start", "message": {"id": format!("msg_{id}")}});
+            self.stream(turn, start);
+            let text = json!({"type": "text", "text": ""});
+            let block = json!({"type": "content_block_start", "index": 0, "content_block": text});
+            self.stream(turn, block);
+            self.open = Some(id.clone());
+            id
+        }
+
+        fn import(&mut self) -> bool {
+            let now = self.world.tick();
+            let cell = json!({"id": "imp-cell", "kind": "subagents", "ephemeral": true,
+                              "status": "running", "summary": "a helper", "lines": []});
+            let rows = vec![
+                ImportedRow {
+                    id: "imp-1".to_string(),
+                    ts_ms: 100,
+                    row: json!({"id": "imp-1", "role": "user", "text": "from before"}),
+                },
+                ImportedRow {
+                    id: "imp-2".to_string(),
+                    ts_ms: 200,
+                    row: json!({"id": "imp-2", "role": "assistant", "text": "its answer",
+                                "display_cells": [cell]}),
+                },
+            ];
+            let actor = self.actor.as_mut().unwrap();
+            let (taken, out) = actor.import("elsewhere", None, rows, now).unwrap();
+            self.world.carry_out(actor, out);
+            taken.is_ok()
+        }
+
+        fn send(&mut self, admission: Admission, origin: Origin) -> String {
+            let n = self.next();
+            let id = format!("u-{n}");
+            let said = Message {
+                origin,
+                ..message(&id, &format!("message {n}"))
+            };
+            let now = self.world.tick();
+            let actor = self.actor.as_mut().unwrap();
+            let (_, out) = actor.send(&said, admission, now).unwrap();
+            self.world.carry_out(actor, out);
+            id
+        }
+
+        /// More of a reply: written, not stored.
+        fn say(&mut self) -> bool {
+            let Some(turn) = self.live() else {
+                return false;
+            };
+            let n = self.next();
+            if self.claude {
+                self.message(turn);
+                let delta = json!({"type": "text_delta", "text": format!("word {n} ")});
+                self.stream(
+                    turn,
+                    json!({"type": "content_block_delta", "index": 0, "delta": delta}),
+                );
+            } else {
+                self.line(turn, json!({"say": format!("word {n}")}));
+            }
+            self.hint();
+            true
+        }
+
+        /// A reply is stored: Claude's message stops, the scripted tool says a whole reply.
+        fn store(&mut self) -> bool {
+            let Some(turn) = self.live() else {
+                return false;
+            };
+            let n = self.next();
+            if self.claude {
+                if self.open.is_none() {
+                    self.message(turn);
+                    let delta = json!({"type": "text_delta", "text": format!("said {n}")});
+                    self.stream(
+                        turn,
+                        json!({"type": "content_block_delta", "index": 0, "delta": delta}),
+                    );
+                }
+                self.stream(turn, json!({"type": "message_stop"}));
+                self.open = None;
+                let mut stored = std::mem::take(&mut self.pending);
+                self.running.append(&mut stored);
+            } else {
+                self.line(turn, json!({"reply": format!("said {n}")}));
+            }
+            self.hint();
+            true
+        }
+
+        /// A tool is called: Claude's on the message being streamed (a helper, when asked),
+        /// the scripted tool's as a row by itself.
+        fn call(&mut self, helper: bool) -> bool {
+            let Some(turn) = self.live() else {
+                return false;
+            };
+            let id = format!("t{}", self.next());
+            if self.claude {
+                let message = self.message(turn);
+                let block = if helper {
+                    json!({"type": "tool_use", "id": id, "name": "Agent",
+                           "input": {"description": format!("helper {id}"), "prompt": "look"}})
+                } else {
+                    json!({"type": "tool_use", "id": id, "name": "Bash",
+                           "input": {"command": "ls"}})
+                };
+                let whole = json!({"type": "assistant",
+                                   "message": {"id": format!("msg_{message}"), "content": [block]}});
+                self.line(turn, whole);
+                self.pending.push(id);
+            } else {
+                self.line(
+                    turn,
+                    json!({"tool": "Bash", "id": id, "input": {"command": "ls"}}),
+                );
+                self.running.push(id);
+            }
+            self.hint();
+            true
+        }
+
+        /// A call that runs returns.
+        fn give_back(&mut self, which: usize) -> bool {
+            let Some(turn) = self.live().filter(|_| !self.running.is_empty()) else {
+                return false;
+            };
+            let id = self.running.remove(which % self.running.len());
+            let output = format!("out {}", self.next());
+            if self.claude {
+                claude_returns(&mut self.world, turn, &id, &output, false);
+            } else {
+                self.line(turn, json!({"done": id, "output": output}));
+            }
+            self.hint();
+            true
+        }
+
+        fn forget_turn(&mut self) {
+            self.open = None;
+            self.pending.clear();
+            self.running.clear();
+        }
+
+        /// The turn ends as it should; the next one that waits begins.
+        fn end_turn(&mut self) -> bool {
+            let Some(turn) = self.live() else {
+                return false;
+            };
+            if self.claude {
+                if self.open.take().is_some() {
+                    self.stream(turn, json!({"type": "message_stop"}));
+                }
+                let result = json!({"type": "result", "subtype": "success", "is_error": false, "result": ""});
+                self.line(turn, result);
+            }
+            self.world.exits(turn, Some(0), None);
+            self.forget_turn();
+            self.hint();
+            true
+        }
+
+        /// The user stops the agent: the turn's tool goes by the signal, and what waits is held.
+        fn stop(&mut self) -> bool {
+            let now = self.world.tick();
+            let actor = self.actor.as_mut().unwrap();
+            let (_, out) = actor.stop("user", now).unwrap();
+            self.world.carry_out(actor, out);
+            if let Some(turn) = self.live() {
+                self.world.exits(turn, None, Some(15));
+                self.forget_turn();
+                self.hint();
+            }
+            true
+        }
+
+        fn resume(&mut self) -> bool {
+            let now = self.world.tick();
+            let actor = self.actor.as_mut().unwrap();
+            let (resumed, out) = actor.resume("user", now).unwrap();
+            self.world.carry_out(actor, out);
+            resumed
+        }
+
+        fn start_again(&mut self) -> bool {
+            let now = self.world.tick();
+            let actor = self.actor.as_mut().unwrap();
+            let (started, out) = actor.start_again(now).unwrap();
+            self.world.carry_out(actor, out);
+            started
+        }
+
+        /// The Host is restarted; a turn's tool goes on.
+        fn restart(&mut self) -> bool {
+            drop(self.actor.take());
+            self.actor = Some(self.world.open());
+            self.helpers = HelperRows::default();
+            true
+        }
+
+        /// The scripted tool names its conversation: one it lets go of (`gone-…`) and, when it
+        /// had one of those, another, which the Host carries the conversation over to.
+        fn bind(&mut self) -> bool {
+            let Some(turn) = self.live().filter(|_| !self.claude) else {
+                return false;
+            };
+            let n = self.next();
+            let had = self.actor().status().backend_session;
+            let name = match had {
+                Some(had) if had.starts_with("gone-") => format!("s-{n}"),
+                _ => format!("gone-{n}"),
+            };
+            self.line(turn, json!({"session": name}));
+            self.hint();
+            true
+        }
+
+        /// What a helper's cells show changes: they are read again.
+        fn refresh(&mut self) -> bool {
+            let pass = self.next();
+            let now = self.world.tick();
+            let actor = self.actor.as_mut().unwrap();
+            if !actor.track_helpers(&mut self.helpers).unwrap() {
+                return false;
+            }
+            let out = actor
+                .refresh_helpers(&mut self.helpers, true, now, |cell, _, _| {
+                    cell["summary"] = json!(format!("pass {pass}"));
+                })
+                .unwrap();
+            self.world.carry_out(actor, out);
+            true
+        }
+    }
+
+    #[test]
+    fn a_follower_by_revision_holds_what_a_reload_reads_after_every_change() {
+        let mut walk = Walk::new("follow-scripted", false);
+        walk.name = "scripted case".to_string();
+        assert!(walk.import());
+        walk.check("rows imported, one with a helper's cells");
+        assert!(walk.refresh());
+        walk.check("the imported helper's cells change");
+        walk.send(Admission::Queue, Origin::User);
+        walk.check("a message");
+        walk.say();
+        walk.check("a reply being written");
+        walk.say();
+        walk.check("more of it: a revision in between");
+        walk.call(false);
+        walk.check("a call that is a row by itself; the reply before it is stored");
+        walk.bind();
+        walk.check("the tool names its conversation");
+        walk.send(Admission::Queue, Origin::User);
+        walk.check("a message that waits in the conversation");
+        walk.send(Admission::Later, Origin::User);
+        walk.check("a message left for later: in the queue, not in the conversation");
+        walk.send(Admission::Queue, watcher());
+        walk.check("a message a watcher began");
+        walk.give_back(0);
+        walk.check("the call ends: its row is written again");
+        walk.say();
+        walk.check("a reply being written after the call");
+        walk.end_turn();
+        walk.check("the turn ends on the row that closed it; the next begins");
+        let carried = walk.carried;
+        walk.bind();
+        walk.check("the tool names another conversation: the Host carries it over");
+        assert_eq!(walk.carried, carried + 1, "the Host was told of the carry");
+        assert!(
+            walk.every(|follower| follower.given == 0 && !follower.told),
+            "a carry changes no row, and nobody who follows is told anything"
+        );
+        walk.end_turn();
+        walk.check("a turn that said nothing ends on its message");
+        walk.say();
+        walk.check("the message left for later has its turn: in the conversation now");
+        walk.end_turn();
+        walk.check("its turn ends");
+        walk.say();
+        walk.check("the watcher's turn says something");
+        walk.end_turn();
+        walk.check("the watcher's turn ends");
+        let rows = walk.reload();
+        assert!(rows.iter().any(|row| matches!(&row.entry,
+            Entry::Tool(call) if call.reply.is_none() && call.status == ToolStatus::Ok)));
+        assert!(rows.iter().any(|row| row.turn.is_some()));
+        assert!(rows.iter().any(|row| row.entry.origin_name() == "watcher"));
+
+        // Started again with a message that was said already, and with nothing.
+        walk.send(Admission::Queue, Origin::User);
+        walk.say();
+        walk.check("a message, and its turn says something");
+        walk.send(Admission::Queue, Origin::User);
+        walk.check("a message that waits");
+        walk.stop();
+        walk.check("the user stops the agent: the message that waits is held");
+        assert!(walk.start_again());
+        walk.check("started again: the message said already is written anew");
+        assert!(
+            walk.every(|follower| follower.told),
+            "whoever follows is told the conversation it holds ended"
+        );
+        walk.resume();
+        walk.check("resumed: the message's turn begins");
+        walk.say();
+        walk.end_turn();
+        walk.check("its turn ends");
+        assert!(walk.start_again());
+        walk.check("started again with nothing");
+        assert!(walk.every(|follower| follower.told));
+        assert!(walk.reload().is_empty());
+
+        // A restart while a reply is being written.
+        walk.send(Admission::Queue, Origin::User);
+        walk.say();
+        walk.check("a reply being written");
+        walk.restart();
+        walk.check("the Host is restarted");
+        walk.say();
+        walk.check("more of the reply");
+        walk.end_turn();
+        walk.check("the turn ends");
+        walk.found.none();
+    }
+
+    #[test]
+    fn a_follower_by_revision_holds_what_a_reload_reads_of_a_claude_turn() {
+        let mut walk = Walk::new("follow-claude", true);
+        walk.name = "claude case".to_string();
+        walk.send(Admission::Queue, Origin::User);
+        walk.check("a message");
+        walk.say();
+        walk.check("a reply being written");
+        walk.call(false);
+        walk.check("its message calls a tool");
+        walk.store();
+        walk.check("the message is stored with its tool's use");
+        walk.give_back(0);
+        walk.check("the tool returns: the reply changes by its part");
+        walk.call(true);
+        walk.check("the next message calls a helper");
+        walk.store();
+        walk.check("stored: the reply before it was said along the way");
+        assert!(walk.reload().iter().any(|row| row.commentary));
+        assert!(walk.refresh());
+        walk.check("the helper's cells change");
+        assert!(walk.reload().iter().any(|row| row.tools.iter().any(|call| {
+            call.cell.as_ref().is_some_and(|cell| {
+                cell["summary"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("pass "))
+            })
+        })));
+        walk.give_back(0);
+        walk.check("the helper returns");
+        walk.say();
+        walk.store();
+        walk.check("the last message");
+        walk.end_turn();
+        walk.check("the turn ends on the row that closed it");
+        walk.send(Admission::Queue, watcher());
+        walk.say();
+        walk.end_turn();
+        walk.check("a watcher's turn");
+        walk.send(Admission::Queue, Origin::User);
+        walk.call(false);
+        walk.store();
+        walk.check("a call that runs");
+        walk.stop();
+        walk.check("the user stops: the call is cut off, and its reply changes");
+        walk.resume();
+        walk.check("resumed");
+        walk.found.none();
+    }
+
+    /// A small generator of numbers, the same for the same seed (xorshift64*).
+    struct Dice(u64);
+
+    impl Dice {
+        fn new(seed: u64) -> Self {
+            Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+        }
+
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) as usize % n
+        }
+    }
+
+    const MOVES: &[(&str, usize)] = &[
+        ("a message", 4),
+        ("a message for later", 2),
+        ("a watcher's message", 2),
+        ("more of a reply", 5),
+        ("a reply stored", 3),
+        ("a call", 4),
+        ("a helper called", 2),
+        ("a call returns", 4),
+        ("the turn ends", 4),
+        ("the user stops", 1),
+        ("resumed", 2),
+        ("started again", 1),
+        ("the Host restarts", 1),
+        ("the tool names a conversation", 2),
+        ("a helper's cells change", 2),
+    ];
+
+    fn walk(seed: u64, claude: bool) -> Findings {
+        let tool = if claude { "claude" } else { "scripted" };
+        let mut walk = Walk::new(&format!("walk-{tool}-{seed}"), claude);
+        walk.name = format!("{tool} walk, seed {seed}");
+        let mut dice = Dice::new(seed);
+        if dice.below(2) == 0 && walk.import() {
+            walk.check("rows imported");
+        }
+        let total: usize = MOVES.iter().map(|(_, weight)| weight).sum();
+        for _ in 0..80 {
+            let mut pick = dice.below(total);
+            let (what, _) = MOVES
+                .iter()
+                .find(|(_, weight)| {
+                    let here = pick < *weight;
+                    pick = pick.saturating_sub(*weight);
+                    here
+                })
+                .unwrap();
+            let which = dice.below(8);
+            let did = match *what {
+                "a message" => !walk.send(Admission::Queue, Origin::User).is_empty(),
+                "a message for later" => !walk.send(Admission::Later, Origin::User).is_empty(),
+                "a watcher's message" => !walk.send(Admission::Queue, watcher()).is_empty(),
+                "more of a reply" => walk.say(),
+                "a reply stored" => walk.store(),
+                "a call" => walk.call(false),
+                "a helper called" => walk.call(true),
+                "a call returns" => walk.give_back(which),
+                "the turn ends" => walk.end_turn(),
+                "the user stops" => walk.stop(),
+                "resumed" => walk.resume(),
+                "started again" => walk.start_again(),
+                "the Host restarts" => walk.restart(),
+                "the tool names a conversation" => walk.bind(),
+                _ => walk.refresh(),
+            };
+            walk.check(if did { what } else { "nothing" });
+        }
+        // Every turn ends, and whoever follows catches up once more.
+        while walk.end_turn() {
+            walk.check("the turn ends");
+        }
+        walk.found
+    }
+
+    #[test]
+    fn a_follower_by_revision_holds_what_a_reload_reads_on_walks_of_every_move() {
+        let mut found = Findings::default();
+        for seed in [1, 2, 3, 5, 8, 13, 21, 34, 55, 89] {
+            for claude in [false, true] {
+                found.add(walk(seed, claude));
+            }
+        }
+        found.none();
+    }
+}
