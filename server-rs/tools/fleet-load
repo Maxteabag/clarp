@@ -259,23 +259,42 @@ def moves(root,shape,env,deadline,limit=None,local_jobs=0):
                         "request_id":f"benchmark-job-{index}","template_id":"scheduled-prompt",
                         "options":{"instructions":"Synthetic."},"attachments":[{"attachment_id":f"sample-{index}",
                          "trigger_id":"schedule","config":{"cron":"15 3 * * *","timezone":"UTC"}}]})
-        if any(session(i) in present for i in range(len(done),len(shape))):
-            raise RuntimeError("unreceipted identity exists; reconcile before continuing")
+        # A stopped slice can leave an admitted identity without its verification receipt.
+        # Only a contiguous prefix can have arrived through this sequential move runner.
         for i in range(len(done),len(shape) if limit is None else limit):
             if NOW()+25>deadline:break
-            start=NOW()
-            p=subprocess.run([BINARY,"import","--session",session(i),"--from","127.0.0.1:"+str(source_host.server_port),
-                              "--host",f"127.0.0.1:{host.port}"],capture_output=True,cwd=root/"work",env=env,timeout=min(90,deadline-NOW()))
-            elapsed=NOW()-start
-            if p.returncode:
-                raise RuntimeError(p.stderr.decode()[:1200])
+            elapsed=None
+            receipt="reconciled from destination"
+            if session(i) not in present:
+                if any(session(j) in present for j in range(i+1,len(shape))):
+                    raise RuntimeError("unexpected gap in imported identities")
+                start=NOW()
+                p=subprocess.run([BINARY,"import","--session",session(i),"--from","127.0.0.1:"+str(source_host.server_port),
+                                  "--host",f"127.0.0.1:{host.port}"],capture_output=True,cwd=root/"work",env=env,timeout=min(90,deadline-NOW()))
+                elapsed=NOW()-start
+                if p.returncode:
+                    raise RuntimeError(p.stderr.decode()[:1200])
+                receipt=p.stdout.decode()
             rows=get(host.port,"/log?session="+session(i)+"&limit=1")[0]["turns"]
             assert rows[-1]["id"]==row_id(i,shape[i]["rows"]-1)
-            libraries=get(host.port,"/artifacts?session="+session(i)+"&limit=500")[0]["artifacts"]
+            library=[]
+            while True:
+                page=get(host.port,f"/artifacts?session={session(i)}&limit=500&offset={len(library)}")[0]["artifacts"]
+                library.extend(a["artifact_id"] for a in page)
+                if len(page)<500:break
+            assert set(library)=={f"doc-{i}-{k}" for k in range(shape[i]["artifacts"])}, i
             plans=get(host.port,"/task-plans?session="+session(i))[0]["plans"]
-            assert len(plans)==shape[i]["plans"] and len(libraries)==shape[i]["artifacts"], (i,len(plans),len(libraries))
-            write(root/"moves.jsonl",dict(index=i,seconds=elapsed,rows=shape[i]["rows"],plans=len(plans),
-                artifacts=len(libraries),rss_kib=memory(host.proc.pid)["VmRSS"],receipt=p.stdout.decode()))
+            assert len(plans)==min(100,shape[i]["plans"]), i
+            plan_ids={f"plan-{i}-{k}" for k in range(shape[i]["plans"])}
+            assert all(p["plan_id"] in plan_ids for p in plans)
+            # The public plans list is capped at 100. Verify all mirrored plan
+            # artifacts beyond that list individually and inspect their embedded plan.
+            for k in range(shape[i]["plans"]):
+                if f"plan-{i}-{k}" not in {p["plan_id"] for p in plans}:
+                    artifact=get(host.port,f"/artifacts/doc-{i}-{k}")[0]["artifact"]
+                    assert artifact["plan"]["plan_id"]==f"plan-{i}-{k}"
+            write(root/"moves.jsonl",dict(index=i,seconds=elapsed,rows=shape[i]["rows"],plans=shape[i]["plans"],
+                artifacts=len(library),rss_kib=memory(host.proc.pid)["VmRSS"],receipt=receipt))
     finally:
         source_host.shutdown()
         source_host.server_close()
