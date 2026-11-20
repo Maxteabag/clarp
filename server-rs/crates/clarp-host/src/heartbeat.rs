@@ -79,11 +79,12 @@ impl Desk {
                 "the heartbeat's book could not be read".to_string(),
             ));
         };
-        let before = book.clone();
-        let answer = ask(book);
-        if *book != before {
-            let kept = serde_json::to_vec(book).unwrap_or_default();
+        let mut next = book.clone();
+        let answer = ask(&mut next);
+        if next != *book {
+            let kept = serde_json::to_vec(&next).unwrap_or_default();
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
+            *book = next;
         }
         Ok(answer)
     }
@@ -514,4 +515,34 @@ pub fn routes() -> Router<App> {
         .route("/heartbeat/settings", get(settings).post(change_settings))
         .route("/agent-heartbeat", post(switch))
         .route("/agent-heartbeat/status", get(status))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_cached_book_matches_what_the_store_accepted() {
+        let place = crate::unkept::at_the_port::place("heartbeat-kept");
+        let app = place.app();
+        let desk = &app.heartbeat;
+        let read = |book: &mut Book| book.settings.interval_sec;
+        desk.ask(&app, |book| book.settings.interval_sec = 600)
+            .await
+            .unwrap();
+        place.refuse_writes(Some(KIND));
+        let refused = desk
+            .ask(&app, |book| book.settings.interval_sec = 900)
+            .await;
+        assert!(refused.unwrap_err().0.contains("refused here"));
+        assert_eq!(desk.ask(&app, read).await.unwrap(), 600);
+        assert_eq!(Desk::default().ask(&app, read).await.unwrap(), 600);
+        place.refuse_writes(None);
+        desk.ask(&app, |book| book.settings.interval_sec = 900)
+            .await
+            .unwrap();
+        assert_eq!(desk.ask(&app, read).await.unwrap(), 900);
+        assert_eq!(Desk::default().ask(&app, read).await.unwrap(), 900);
+    }
 }

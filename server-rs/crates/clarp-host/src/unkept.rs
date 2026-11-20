@@ -359,6 +359,10 @@ pub(crate) mod at_the_port {
     }
 
     impl Place {
+        pub(crate) fn refuse_writes(&self, kind: Option<&str>) {
+            *self.refused.lock().unwrap() = kind.map(fleet::shelf);
+        }
+
         pub(crate) fn refuse_reads(&self, kind: &str) {
             *self.refused_read.lock().unwrap() = Some(fleet::shelf(kind));
         }
