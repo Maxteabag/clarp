@@ -1349,7 +1349,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let used_up = crate::quota::used_up(&app).await;
     // Which agents the user calls live: by their profiles, as they are now.
     let called_live = app.calls.taking(&app).await;
-    let owners = app.mouth.owners();
+    let owners = app.mouth.owners_from(&directory);
     let mut agents: Vec<Value> = directory
         .members
         .iter()
@@ -1431,8 +1431,8 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     }
     // How each agent sounds and is heard, from one view of the Host and one pass over its
     // agents; an archived agent speaks to nobody and has none.
-    let voices = crate::profile::view(&app.mouth, &app.ears, &directory);
-    let profiles: HashMap<String, Value> = crate::profile::all(&voices, &directory)
+    let voices = crate::profile::view(&app.mouth, &app.ears, &directory, &owners);
+    let mut profiles: HashMap<String, Value> = crate::profile::all(&voices, &directory)
         .into_iter()
         .collect();
     let archived: HashSet<&str> = directory
@@ -1443,11 +1443,11 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         .map(|member| member.record.session.as_str())
         .collect();
     for row in &mut agents {
-        let session = row["session"].as_str().unwrap_or("").to_string();
-        if let (false, Some(profile)) =
-            (archived.contains(session.as_str()), profiles.get(&session))
+        let session = row["session"].as_str().unwrap_or("");
+        if !archived.contains(session)
+            && let Some(profile) = profiles.remove(session)
         {
-            row["voice_profile"] = profile.clone();
+            row["voice_profile"] = profile;
         }
     }
     let (voice_defaults, voice_profile_version) = crate::profile::head(&voices);

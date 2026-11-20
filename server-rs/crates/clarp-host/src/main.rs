@@ -303,9 +303,11 @@ async fn serve(config: Config) -> Result<(), String> {
         },
     };
     // Every event of the roster about one agent carries how it sounds and is heard.
-    let profiles =
-        clarp_host::profile::Profiles::new(app.mouth.clone(), app.ears.clone(), app.fleet.clone());
-    let _ = app.hub.profiles.set(Arc::new(profiles));
+    let profiles = clarp_host::profile::Profiles::new(&app.mouth, &app.ears);
+    app.hub
+        .profiles
+        .set(profiles)
+        .map_err(|_| "voice profiles were already connected".to_string())?;
     // Where someone else puts another account in place when one is out, turns that wait for
     // an account are tried as soon as the tool's login has changed.
     if config.accounts == clarp_kernel::recovery::Accounts::Follow {
