@@ -46,24 +46,59 @@ def _managed_root(model_id: str) -> Path:
     return MANAGED_MODELS / model_id.replace(":", "--")
 
 
-def _own_folder(model_id: str, stored: object) -> Path:
-    """The folder a removal of ``model_id`` may delete: one its id gives (R112, _own_folders).
+def _refuse(model_id: str, reason: str) -> None:
+    from .log import log
+    log("transcriptionModelFolderRefused", f"model={model_id} reason={reason}")
+    raise ValueError(f"refusing to remove {model_id}: its folder is a link or outside the managed models folder")
 
-    The path a registry record stores is not trusted. It must be, exactly, that folder: an
-    absolute path that resolves to itself and to the id's folder, which is no link. The managed
-    root itself, a sibling's folder, a deeper or an outer path, a relative or empty one, or one
-    that reaches the folder or leaves it through a symbolic link is refused, before any file or
-    the registry changes, with an error that names the model and not the paths. The stored path
-    is only compared: what is returned, and deleted, is the computed folder it equals."""
+
+def _deletable(model_id: str, folders) -> list[Path]:
+    """Of ``folders`` (computed from the id, _own_folders), those that are there to delete.
+
+    Each must be real and directly inside the managed root: one that is a symbolic link, or
+    resolves anywhere else (the root itself, deeper, outside), refuses the whole removal before
+    any file or the registry changes, with one log line and an error that names the model and
+    not the paths (R112). A folder that is not there is simply not deleted."""
+    root = MANAGED_MODELS.resolve()
+    found = []
+    for folder in folders:
+        if folder.is_symlink():
+            _refuse(model_id, "link")
+        if not folder.exists():
+            continue
+        if folder.resolve().parent != root or folder.resolve().name != folder.name:
+            _refuse(model_id, "outside")
+        found.append(folder)
+    return found
+
+
+def _note_stored_path(model_id: str, stored: object) -> None:
+    """The stored path decides nothing about what is deleted (R112): only the folders the id
+    gives are. When it names anything else (or nothing), that is said once, and the removal
+    goes on: a registered model can always be removed."""
     text = str(stored) if isinstance(stored, (str, os.PathLike)) else ""
     path = Path(text)
-    owned = [folder for folder in _own_folders(model_id)
-             if not folder.is_symlink() and path == folder.resolve()]
-    if not text or not path.is_absolute() or path.resolve() != path or not owned:
-        from .log import log
-        log("transcriptionModelFolderRefused", f"model={model_id}")
-        raise ValueError(f"refusing to remove {model_id}: its stored folder is not the model's own")
-    return owned[0]
+    if (text and path.is_absolute() and path.resolve() == path
+            and any(path == folder for folder in _own_folders(model_id))):
+        return
+    from .log import log
+    log("transcriptionModelFolderRefused", f"model={model_id} reason=stored_path")
+
+
+def _shared_hf_folder(model_id: str, records) -> bool:
+    """Whether another registered model's id gives the same Hugging Face folder as this one's
+    (two faster-whisper ids of one repo): then that folder is not this removal's to delete."""
+    mine = _own_folders(model_id)[1:]
+    return bool(mine) and any(
+        item.get("id") != model_id and _own_folders(str(item.get("id") or ""))[1:] == mine
+        for item in records)
+
+
+def _removal_folders(model_id: str, records) -> list[Path]:
+    folders = _own_folders(model_id)
+    if _shared_hf_folder(model_id, records):
+        folders = folders[:1]
+    return _deletable(model_id, folders)
 
 
 def _own_folders(model_id: str) -> list[Path]:
@@ -268,23 +303,27 @@ def rollback_terminal_install(
                 records = _read_registry()
                 record = next(
                     (item for item in records if item.get("id") == model_id), None)
-                tombstone = None
+                tombstones = []
                 if record is None or "_managed_root" in record:
-                    # Only the folder the id gives, and only when the record names exactly it (R112).
-                    target = (_own_folder(model_id, record["_managed_root"]) if record
-                              else _managed_root(model_id).resolve())
-                    if target.exists():
+                    # Only the folders the id gives, each real and inside the managed root
+                    # (R112): with no record, the id's own folder; with one, as a removal.
+                    if record is not None:
+                        _note_stored_path(model_id, record["_managed_root"])
+                    targets = (_removal_folders(model_id, records) if record is not None
+                               else _deletable(model_id, [_managed_root(model_id)]))
+                    for target in targets:
                         tombstone = target.with_name(
                             f".{target.name}.cancelled-{uuid.uuid4().hex}")
                         target.rename(tombstone)
+                        tombstones.append(tombstone)
                 if record:
                     _write_registry([
                         item for item in records if item.get("id") != model_id])
-                return tombstone
+                return tombstones
 
-    claimed, tombstone = background_jobs.run_terminal_generation_cleanup(
+    claimed, tombstones = background_jobs.run_terminal_generation_cleanup(
         job_id, generation=generation, cleanup=quarantine, statuses=statuses)
-    if claimed and isinstance(tombstone, Path):
+    for tombstone in (tombstones or []) if claimed else []:
         if tombstone.is_dir():
             shutil.rmtree(tombstone, ignore_errors=True)
         else:
@@ -642,10 +681,16 @@ def remove(model_id: str, *, allow_active: bool = False) -> None:
                 with _lock:
                     _tasks.pop(model_id, None)
                 return
-            # Only the folder the id gives, and only when the record names exactly it (R112).
-            target = _own_folder(model_id, record["_managed_root"])
-            if target.is_dir(): shutil.rmtree(target)
-            elif target.is_file(): target.unlink()
+            # Only the folders the id gives, each real and inside the managed root (R112);
+            # the stored path is compared and noted, never deleted, never a reason to refuse.
+            records = _read_registry()
+            targets = _removal_folders(model_id, records)
+            _note_stored_path(model_id, record["_managed_root"])
+            for target in targets:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
             _write_registry([
                 item for item in _read_registry() if item.get("id") != model_id])
     with _lock:
