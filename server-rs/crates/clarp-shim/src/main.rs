@@ -1610,6 +1610,31 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_that_cannot_count_releases_before_its_deadline() {
+        let mut rig = rig("count-writer-refused");
+        let (own, _peer) = UnixStream::pair().unwrap();
+        let (to_spool, requests) = mpsc::channel();
+        Arc::get_mut(&mut rig.control).unwrap().to_spool = to_spool;
+        let writing = std::thread::spawn(move || {
+            let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
+            let ToSpool::End(answer) = request else {
+                panic!("expected the hold's spool fence");
+            };
+            answer
+                .send(Err(std::io::Error::other("the spool could not be written")))
+                .unwrap();
+        });
+
+        let began = Instant::now();
+        let reply = rig.control.hold(2_000, &connection(&own));
+        writing.join().unwrap();
+        assert!(!reply.ok);
+        assert!(reply.held.is_none());
+        assert!(began.elapsed() < Duration::from_secs(1));
+        assert!(matches!(*lock(&rig.control.hold), Hold::Released));
+    }
+
+    #[test]
     fn without_proc_a_hold_is_refused_and_nothing_is_signalled() {
         let rig = rig_in("noproc", Path::new("/no/such/proc"));
         let (own, _peer) = UnixStream::pair().unwrap();

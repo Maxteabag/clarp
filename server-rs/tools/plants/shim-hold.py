@@ -24,7 +24,7 @@ RUNS = {
     'hook': SHIM + ['a_hooks_report_under_way_at_the_hold_is_counted'],
     'served': SHIM + ['a_served_tool_is_not_held'],
     'shim': SHIM + ['a_request_ends_with_its_line_or_with_the_connection'],
-    'unit-late': UNIT + ['a_hold_that_cannot_count_within_its_bound'],
+    'unit-late': UNIT + ['a_hold_that_cannot_count'],
     'unit-proc': UNIT + ['without_proc_a_hold_is_refused'],
     'unit-line': UNIT + ['a_holds_line_says'],
     'begun': SHIM + ['a_hooks_report_begun_at_the_hold_is_said_and_not_waited_for'],
@@ -128,7 +128,7 @@ PLANTS = [
     (MAIN, 'unit-ended', 'a hold ended while it counted answers with its count', '            (_, Hold::Ended) => Reply::failed(ENDED_WHILE_HELD),\n', ''),
     (MAIN, 'unit-ended', 'a hold ended while it counted is refused in other words', 'const ENDED_WHILE_HELD: &str = "the tool was ended while it was held";', 'const ENDED_WHILE_HELD: &str = "ended";'),
     (MAIN, 'unit-late', 'a count that ran out of time is refused in other words', 'let why = "what the tool printed could not be counted within the bound";', 'let why = "not counted";'),
-    (MAIN, 'unit-late', 'a count that ran out of time leaves the tool stopped', '                let why = "what the tool printed could not be counted within the bound";\n                self.let_go(&format!("refused: {why}"));', '                let why = "what the tool printed could not be counted within the bound";'),
+    (MAIN, 'unit-late', 'a failed count leaves release to the bound', '                let why = "what the tool printed could not be counted within the bound";\n                self.let_go(&format!("refused: {why}"));', '                let why = "what the tool printed could not be counted within the bound";'),
 
     # Letting go.
     (MAIN, 'once', 'a tool that is not held is let go', '        let Hold::Held { timing, .. } = *hold else {\n            return false;\n        };', '        let timing = match *hold {\n            Hold::Held { timing, .. } => timing,\n            Hold::Ended => return false,\n            _ => Timing { began: Instant::now(), still: None, drained: None },\n        };'),
@@ -139,7 +139,7 @@ PLANTS = [
     (MAIN, 'outside', 'a tool killed from outside leaves its group stopped', '    control.let_go("let go when the tool ended");\n', '    let _ = "let go when the tool ended";\n'),
 
     # Ended while held.
-    (MAIN, 'ended', 'a held tool is stopped politely', '            if let Hold::Held { timing, .. } = *hold {', '            if let (Hold::Held { timing, .. }, true) = (*hold, self.pid == 0) {'),
+    (MAIN, 'ended', 'a held tool is stopped politely', '            if let Hold::Held { timing, .. } = *hold {', '            if let Hold::Held { timing, .. } = *hold && self.pid == 0 {'),
     (MAIN, 'unit-ended', 'a held tool ended is not marked so', '                *hold = Hold::Ended;\n                log(', '                log('),
     (MAIN, 'ended', 'a held tool is ended with the polite signal', '                let kill = Signal::SIGKILL;', '                let kill = Signal::SIGTERM;'),
     (MAIN, 'ended', 'the kill of a held tool is not on record', '                Self::signal(self.pid, &self.to_spool, kill);', '                let _ = killpg(self.group(), kill);'),
@@ -154,7 +154,7 @@ PLANTS = [
     (MAIN, 'unit-count', 'a report begun holds the count up', '        !self.pending.load(Ordering::SeqCst) && !waits(self.socket.as_fd(), false)', '        !self.pending.load(Ordering::SeqCst) && self.partial.load(Ordering::SeqCst) == 0 && !waits(self.socket.as_fd(), false)'),
     (MAIN, 'begun', 'a connection does not say what it has begun', '            me.partial.store(taken.len() - whole, Ordering::SeqCst);', '            me.partial.store(0, Ordering::SeqCst);'),
     (MAIN, 'begun', 'what is read is not looked at until a line is whole', '                Err(_) => break,\n            }\n            note(&taken);', '                Err(_) => break,\n            }'),
-    (MAIN, 'words', 'a report begun is told under another name', '                        partial_reports: reports_begun,', '                        partial_reports: reports_begun + 1,'),
+    (LIB, 'words', 'a report begun is told under another name', '    pub partial_reports: u64,', '    #[serde(rename = "reports_begun")]\n    pub partial_reports: u64,'),
     (MAIN, 'unit-proc', 'a system without /proc is held', '        if !self.proc.is_dir() {', '        if self.proc.as_os_str().is_empty() {'),
     (MAIN, 'unit-proc', 'a system without /proc is refused in other words', '                "this system shows no processes in /proc: the tool cannot be seen to stand still",\n', '                "no /proc",\n'),
     (MAIN, 'count', 'the processes are looked for where there are none', '        proc: PathBuf::from("/proc"),', '        proc: PathBuf::from("/no/proc"),'),
