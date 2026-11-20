@@ -25,5 +25,16 @@ PLANTS += [
     ('clarp-host/src/quota_keeper.rs', 'tick', 'the failed quota read is filed under a different kind', 'app.fleet.unkept(ROLE, &format!', 'app.fleet.unkept("other", &format!'),
     ('clarp-host/src/label_checker.rs', 'tick', 'the failed label read goes unsaid', 'app.fleet.unkept(ROLE, &why.0);', 'let _ = why;'),
 ]
+RUNS['cache'] = ['test', '--lib', 'the_cached_book_matches_what_the_store_accepted']
+for module, book in [('heartbeat', 'book'), ('schedules', 'schedules')]:
+    file = f'clarp-host/src/{module}.rs'
+    keep = 'app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;'
+    publish = f'*{book} = next;'
+    PLANTS.extend([
+        (file, 'cache', 'publish the candidate even if the store refuses', keep + '\n            ' + publish, publish + '\n            ' + keep),
+        (file, 'cache', 'a successful write never changes the cached book', publish, ''),
+        (file, 'cache', 'write only when nothing changed', f'if next != *{book}', f'if next == *{book}'),
+        (file, 'cache', 'turn a failed write into a success', keep, 'drop(app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await);'),
+    ])
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
