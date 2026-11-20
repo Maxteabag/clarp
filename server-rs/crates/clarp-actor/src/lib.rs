@@ -40,6 +40,7 @@ use clarp_kernel::conversation::{
     ToolStatus, Total, TurnEnd,
 };
 use clarp_kernel::failures;
+pub mod bookkeeping;
 pub mod delegation;
 mod goal_ledger;
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
@@ -628,6 +629,7 @@ pub struct Actor {
     /// The agent's goals and plans, as the log has them.
     goals: GoalBook,
     delegation: Option<delegation::Binding>,
+    listener_heartbeat: Option<i64>,
     /// What the agent made for its user and what it asks its user, as the log has it.
     artifacts: ArtifactBook,
     /// The files the agent published, as the log has them.
@@ -1060,11 +1062,20 @@ impl Actor {
         // What the Host did not hear while it was away says nothing about the workers.
         jobs.heard_at(now_ms);
         let mut goals = GoalBook::new();
+        let mut older_imports = std::collections::BTreeMap::new();
         records(
             recorder.log(),
             kind::GOALS,
             kind::GOAL,
             |record: GoalRecord| {
+                if record.accounting.is_some() {
+                    older_imports.remove(&record.plan_id);
+                } else if record.goal
+                    && record.event_count > 0
+                    && goals.plan(&record.plan_id).is_none()
+                {
+                    older_imports.insert(record.plan_id.clone(), record.event_count);
+                }
                 goals.apply(&record);
             },
         )?;
@@ -1096,6 +1107,7 @@ impl Actor {
         let delegation = delegation::active(recorder.log())?;
         let mut actor = Self {
             delegation,
+            listener_heartbeat: None,
             pool: None,
             stopped_for_pool: false,
             held_for_an_account: false,
@@ -1120,6 +1132,7 @@ impl Actor {
             remembered: Remembered::default(),
         };
         actor.open_goal_ledger(now_ms)?;
+        actor.recover_imported_accounts(older_imports, now_ms)?;
         actor.remembered = actor.remembered_in_log()?;
         // The sends whose turn is not over are what the agent's state holds, as they were;
         // each one's names are read from its message, once (a queue's length of reads).
@@ -1644,6 +1657,26 @@ impl Actor {
             },
             None => Standing::Unknown,
         })
+    }
+
+    /// The trace of this turn, as its rows carry it, when it is the agent's running turn now
+    /// (starting, running, or between two attempts after a dropped connection, as the Python
+    /// Host's release owner ruled at his merge of PR 470): `None` for a turn that does not run
+    /// (one that ended, one that waits for an account, or another), and the empty text for a
+    /// running turn whose message came without one.
+    pub fn running_trace(&self, turn: u64) -> Result<Option<String>, ActorError> {
+        let message_seq = match self.recorder.agent().live() {
+            Some(Turn::Starting(live)) if live.id.0 == turn => live.message_seq,
+            Some(Turn::Running(live)) if live.id.0 == turn => live.message_seq,
+            // Between two attempts after one that passed (a dropped connection): the same turn
+            // goes on in a moment. Not one that waits for an account: it makes no progress.
+            Some(Turn::Parked(live)) if live.id.0 == turn && !live.wait.is_for_an_account() => {
+                live.message_seq
+            }
+            _ => return Ok(None),
+        };
+        let message = self.message_at(message_seq)?;
+        Ok(Some(message.trace_id.unwrap_or_default()))
     }
 
     /// What the agent last finished for one of those `asked_by` names (by the contract's
@@ -2276,6 +2309,12 @@ impl Actor {
                 .as_mut()
                 .filter(|_| kept.imported_events.is_some() || matches!(kept.author, Author::Legacy))
             {
+                record.accounting = Some(
+                    events
+                        .iter()
+                        .filter_map(clarp_kernel::goals::bookkeeping::accounting_row)
+                        .collect(),
+                );
                 record.event_count = i64::try_from(events.len())
                     .map_err(|_| ActorError::Corrupt("too many imported goal events".into()))?;
                 record.last_event_at = events.iter().map(|e| e.at).max();

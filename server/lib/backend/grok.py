@@ -19,7 +19,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import GROK
-from .base import CatalogueDefault, BackendBrand, CompactionStrategy
+from .base import CatalogueDefault, BackendBrand, CliMissing, CompactionStrategy
 from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv, removing
 
@@ -185,7 +185,7 @@ class GrokBackend(StreamJsonBackend):
     ) -> TurnHandle:
         grok_bin = self.required_binary
         if shutil.which(grok_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{grok_bin}` not on PATH — install Grok Build "
                 f"(https://x.ai/cli) to run Grok-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
@@ -218,7 +218,7 @@ class GrokBackend(StreamJsonBackend):
                 cmd += ["--prompt-file", prompt_file.path]
             proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                          provider=self.id, pid=proc.pid)
+                                          provider=self.id, pid=proc.pid, trace_id=trace_id)
             self.register_handle(runtime_agent_id, handle)
             self.start_drain(
                 handle, removing(self._drain_stdout, prompt_file),

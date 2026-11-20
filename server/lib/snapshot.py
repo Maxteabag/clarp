@@ -395,6 +395,8 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     except agent_ring_live.CallError:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
+    # The user's last compaction of each agent and what it did (R148).
+    last_compactions = compaction.last_outcomes([str(r["agent_id"]) for r in agent_rows])
     persona_rows = persona_store.list_all()
     personas_by_key = {
         str(row["name"]).strip().casefold(): row
@@ -585,6 +587,10 @@ def _project(ctx, select) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             # auto-compact, so no gauge).
             "context_window": context_window,
             "compacting":     is_compacting(a["session"], state.get("kind")),
+            # What the user's last compaction did, from numbers: outcome
+            # compacted / not_compacted / unknown (docs/protocol.md). None
+            # until the agent has been compacted (feature compaction_outcome).
+            "last_compaction": last_compactions.get(agent_id),
             "queued_turn_count": queue_states.get(agent_id, {}).get("count", 0),
             "queued_turn_revision": queue_states.get(agent_id, {}).get("revision", 0),
             "queue_paused": bool(queue_states.get(agent_id, {}).get("paused", False)),

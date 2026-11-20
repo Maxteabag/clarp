@@ -445,7 +445,15 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # fields and events are left out of both sides before the Rust Host is compared: they are not
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
-NOT_YET: dict = {}
+NOT_YET = {
+    # What the user's last compaction of an agent did, from numbers (`last_compaction` on its
+    # row of the snapshot, the Python Host's PR 483, R148): `null` there until the agent is
+    # compacted. The port to the Rust Host is owed; its contract stays 106 until it lands.
+    'compaction_outcome': {
+        'fields': ('last_compaction',),
+        'events': (),
+    },
+}
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
@@ -508,10 +516,8 @@ def in_any_order(path, body):
 # compared of such an answer is what an app's reader needs of it: the status, and every field
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
 NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options',
-                      # Screens of what this Host has not, where the Python Host's first day says something
-                      # this Host must not: that a picture could be made with a key, what the Oracle
-                      # could do. Compared as their fields.
-                      '/agent-portrait-generation', '/oracle/status'})
+                      # The Oracle's available functions depend on the installed providers.
+                      '/oracle/status'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])

@@ -1,4 +1,4 @@
-"""voice_profile (issue 475, Host contract 111): what an app is shown is what the Host does.
+"""voice_profile (issue 475, Host contract 109): what an app is shown is what the Host does.
 
 The heart of it is the report's table 1.4 (stored voice shape x Host provider), run as a
 test: for every row the profile's provider, voice and silence are compared with what the

@@ -61,7 +61,8 @@ def open_current(ident):
         raise
 
 
-def publish(agent, ident, title, summary_text, status, reference, payload, expected, *, validate_only=False):
+def publish(agent, ident, title, summary_text, status, reference, payload, expected, *, validate_only=False,
+            source_trace_id=""):
     from . import artifacts
     contract.validate(payload)
     identity = contract.content_identity(payload["spec"], payload["version"])
@@ -95,7 +96,8 @@ def publish(agent, ident, title, summary_text, status, reference, payload, expec
             result = artifacts.get(ident)
         else:
             result = artifacts._insert_artifact(agent, ident or artifacts._new("artifact"), "render_spec",
-                                                title, summary_text, status, reference, stored)
+                                                title, summary_text, status, reference, stored,
+                                                source_trace_id=source_trace_id)
         con.execute("COMMIT")
         return result
     except BaseException:
