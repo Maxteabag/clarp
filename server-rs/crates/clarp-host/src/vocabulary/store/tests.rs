@@ -123,6 +123,7 @@ impl Place {
             turns: std::sync::Arc::default(),
             pools: Vec::new(),
             log: crate::unkept::Log::stderr(Arc::new(SystemClock)),
+            left_out: Arc::default(),
         };
         let store = Counted {
             inner: self.engine.open(Path::new("vocab-test")).unwrap(),

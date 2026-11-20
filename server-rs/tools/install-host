@@ -587,6 +587,31 @@ if [ "$start" = 1 ]; then
     done
     if curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/server-info" > /dev/null 2>&1; then
         echo "running: the Host answers on $listen"
+        # How its start went: asked until no agent is still being opened (a minute at most). What
+        # is broken or could not be read is said, and the install ends with a code of its own;
+        # the Host stays up as it is, and whoever installed it decides what to do.
+        started=""
+        for _ in $(seq 1 120); do
+            started=$(curl -fsS -m 2 -H "Authorization: Bearer $token" "http://$listen/host/start" 2>/dev/null) || started=""
+            opening=$(printf '%s' "$started" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("opening", 0))' 2>/dev/null || echo 1)
+            [ "$opening" = 0 ] && break
+            sleep 0.5
+        done
+        report=$(printf '%s' "$started" | python3 -c '
+import json, sys
+said = json.load(sys.stdin)
+parts = []
+if said.get("opening"):
+    parts.append("still opening=%d" % said.get("opening"))
+if said.get("broken"):
+    parts.append("broken agents=%d" % said.get("broken"))
+parts += [f"{kind}={count}" for kind, count in sorted((said.get("left_out") or {}).items()) if count]
+print(" ".join(parts))' 2>/dev/null || echo "its start could not be read")
+        if [ -n "$report" ]; then
+            echo "install-host: the Host started, and not all of it: $report" >&2
+            echo "install-host: nothing was written over; the journal names what was left out (journalctl --user -u clarp-host.service)" >&2
+            exit 3
+        fi
     else
         echo "install-host: the unit was started and the Host does not answer on $listen" >&2
         journalctl --user -u clarp-host.service --no-pager -n 8 >&2 || true
