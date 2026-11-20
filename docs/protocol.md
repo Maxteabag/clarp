@@ -1088,8 +1088,9 @@ report. Create it with `POST /artifacts`:
 
 ### Moving a render spec: `GET /artifacts/<id>/export`
 
-For the administrator's token only; any paired device is refused (403), limited or full, and
-the client header plays no part. For a `render_spec` it answers
+For the administrator's token only, and only when it comes in the `Authorization` header: the
+same token in a query string or a cookie is refused (403), as any paired device is, limited or
+full, and the client header plays no part. For a `render_spec` it answers
 `{"kind": "render_spec", "render_spec": {"artifact": ..., "stored": ..., "submission": ...}}`:
 the row as `GET /artifacts` lists it, the stored payload as kept (the spec, its catalog and
 schema identity, its content identity), and the accepted submission or `null` (its
