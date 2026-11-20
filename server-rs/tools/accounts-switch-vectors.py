@@ -5,6 +5,8 @@ import itertools
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scratch as tool_scratch
@@ -12,6 +14,95 @@ import scratch as tool_scratch
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parents[1]
 OUT = TOOLS.parent / "crates/clarp-kernel/tests/fixtures/accounts-switch-vectors.json"
+
+
+def codex_reset_cases(policy):
+    from lib import janitor_reset
+
+    def window(used, label="Codex weekly"):
+        return dict(label=label, used=used)
+
+    def account(alias, windows, **reading):
+        return dict(alias=alias, is_active=alias == "current",
+                    usage=dict(windows=windows, worst_used=1, **reading))
+
+    weekly = []
+
+    def add(name, *rows):
+        body = dict(accounts=rows)
+        parsed = policy.parse_codex(body)
+        weekly.append(dict(name=name, body=body, parsed=parsed,
+                           eligible=policy.codex_weekly_spent(parsed)))
+
+    add("no accounts")
+    add("weekly evidence at the inclusive 99 percent bound",
+        account("current", [window(0.99)]), account("backup", [window(0.99)]))
+    add("all accounts above the bound",
+        account("current", [window(0.991)]), account("backup", [window(1)]))
+    add("the spare is just below the bound",
+        account("current", [window(1)]), account("backup", [window(0.989999)]))
+    add("the active account is just below the bound",
+        account("current", [window(0.989999)]), account("backup", [window(1)]))
+    add("a five-hour or model block does not count as weekly exhaustion",
+        account("current", [window(1, "Codex 5-hour"), window(1, "GPT-5 weekly"),
+                            window(1, "Spend control weekly"), window(1, "weekly"),
+                            window(1, "Codex 7d"), window(0.5)], blocked=True, usable=False))
+    add("a blocked account still reports its weekly number",
+        account("current", [window(1)], blocked=True))
+    add("an unusable account still reports a successful weekly read",
+        account("current", [window(0.99)], usable=False))
+    add("a failed read suppresses the weekly number",
+        account("current", [window(1)], error="unavailable"), account("backup", [window(1)]))
+    add("falsey error does not suppress the reading",
+        account("current", [window(0.99)], error=""))
+    add("a missing week on one account blocks the offer",
+        account("current", [window(1)]), dict(alias="backup", usage=dict(worst_used=1)))
+    add("malformed nonweekly entries are ignored",
+        account("current", [None, "Codex weekly", {}, window(2, 7),
+                            window("bad", "GPT-5 weekly"), window(1)]))
+    add("account-wide labels include mixed case, tier, and Python whitespace",
+        account("current", [window(0.99, "  cOdEX\x1fPro\tWEEKLY  ")]))
+    add("two weekly numbers use the greatest regardless of order",
+        account("current", [window(1), window(0.1)]),
+        account("backup", [window(0.1), window(1)]))
+    add("equal weekly values retain the first numeric representation",
+        account("current", [window(1.0), window(1)]),
+        account("backup", [window(1), window(1.0)]))
+    add("an empty list of windows reports no week", account("current", []))
+    add("a weekly row missing its used field invalidates the other weekly number",
+        account("current", [dict(label="Codex weekly"), window(1)]))
+    for invalid in [None, True, False, "1", [], {}]:
+        add(f"an unreadable weekly value invalidates duplicate windows: {invalid!r}",
+            account("current", [window(1), window(invalid)]))
+
+    ledger = []
+    now = 2 * janitor_reset.DAY_MS
+    worker = janitor_reset.ResetWorker(None)
+    cap_field = "codex_reset_max_per_day"
+    expired = now - janitor_reset.DAY_MS
+    for name, cap, saved in [
+        ("missing ledger defaults to empty", 1, None),
+        ("reset off", 0, "[]"),
+        ("malformed ledger", 1, "{"),
+        ("wrong top-level value", 1, "null"),
+        ("boolean timestamp", 1, "[true]"),
+        ("fractional timestamp type", 1, "[1.0]"),
+        ("string after a valid timestamp", 1, json.dumps([now, str(now)])),
+        ("expired and future timestamps do not count", 1, json.dumps([expired, now + 1])),
+        ("the earliest unexpired timestamp counts", 1, json.dumps([expired + 1])),
+        ("the present timestamp counts", 1, json.dumps([now])),
+        ("a higher cap has room", 2, json.dumps([now])),
+        ("a higher cap is reached", 2, json.dumps([expired + 1, now])),
+    ]:
+        with (patch.object(janitor_reset.settings_store, "get_text",
+                           side_effect=lambda _, default: default if saved is None else saved),
+              patch.object(janitor_reset.db, "now_ms", return_value=now),
+              patch.object(janitor_reset.config, "load", return_value=SimpleNamespace(**{cap_field: cap}))):
+            redemptions = worker.spent_today("codex")
+            blocked = worker.capped("codex", cap_field)
+        ledger.append(dict(name=name, cap=cap, count=None if redemptions is None else len(redemptions),
+                           eligible=not blocked, blocked=blocked))
+    return dict(weekly=weekly, ledger=ledger)
 
 
 def capture(place):
@@ -103,7 +194,8 @@ def capture(place):
         preview=policy.preview(provider,decision,mode=mode,switched=switched)
         reports.append(dict(provider=provider,decision=decision,mode=mode,switched=switched,
                             expected=[preview,policy.run_summary(provider,decision,text=preview)]))
-    return {"reads":reads, "decisions":decisions, "manual":manual, "reports":reports}
+    return {"reads":reads, "decisions":decisions, "manual":manual, "reports":reports,
+            "codex_reset":codex_reset_cases(policy)}
 
 
 if __name__ == "__main__":
