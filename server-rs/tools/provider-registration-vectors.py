@@ -6,9 +6,11 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch
 
 ROOT=Path(__file__).resolve().parents[2]
 FIXTURES=ROOT/'server-rs/crates/clarp-kernel/tests/fixtures'
@@ -72,9 +74,9 @@ def record(root):
 
 if __name__=='__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as td:print(json.dumps(record(Path(td))))
+        with scratch.directory() as td:print(json.dumps(record(Path(td))))
     else:
-        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'}))
+        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=scratch.child_env({'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'})))
         for name,rows in zip(['provider-origins','provider-output'],data):
             (FIXTURES/(name+'.json')).write_text('[\n'+',\n'.join(json.dumps(r) for r in rows)+'\n]\n',encoding='ascii')
             print(name,len(rows))

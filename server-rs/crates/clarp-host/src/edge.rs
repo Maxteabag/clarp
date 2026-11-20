@@ -105,6 +105,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_form_reply_audio", 50),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
+    ("provider_background_tasks", 24),
     ("diagnostics", 1),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
