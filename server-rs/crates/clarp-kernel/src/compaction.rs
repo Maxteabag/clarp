@@ -158,12 +158,15 @@ pub fn newest(held: Option<Boundary>, seen: Option<Boundary>) -> Option<Boundary
 
 /// What the compaction turn that ended so did: from Claude Code's record of it in that turn
 /// (`boundary`), else from how the turn ended. `gauge`: how full the conversation was when it
-/// began; `model`: what the tool ran on, for the words of a failure.
+/// began; `model`: what the tool ran on, for the words of a failure; `concluded`: the tool said
+/// how the turn went, in a result of its own. A failure it told did not compact; a process that
+/// ended without its word may have, unless the Host never started it.
 pub fn decide(
     ended: &Outcome,
     boundary: Option<Boundary>,
     gauge: Option<u64>,
     model: &str,
+    concluded: bool,
 ) -> Decided {
     if let Some(record) = boundary {
         let mut said = decide_claude(gauge, Some(record.pre_tokens), true, "settled");
@@ -186,6 +189,9 @@ pub fn decide(
             } else {
                 kind.as_str()
             };
+            if !concluded && kind != failures::NOT_STARTED {
+                return outcome(UNKNOWN, gauge, None, false, ENDED_UNSAID);
+            }
             let told = failures::told(kind, reason, model, failures::Known::default());
             outcome(NOT_COMPACTED, gauge, None, false, &told.row)
         }
