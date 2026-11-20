@@ -1470,7 +1470,7 @@ mod tests {
         batch
             .command(Command::TurnStarted { turn: TurnId(1) }, 2)
             .unwrap();
-        batch.commit().unwrap();
+        let launched = batch.commit().unwrap().first_seq;
         recorder.take_deliveries();
         recorder.take_launched();
 
@@ -1531,18 +1531,25 @@ mod tests {
         );
         assert_eq!(recorder.agent().user_stop_generation(), 1);
 
-        // Folded from the log: the same send, at the same place.
+        // Folded from the log: the same sends, at the same places. The turn that ran is not
+        // over (it was asked to stop), so its send is held too, handed over at its launch.
         let held = recorder.agent().deliveries().clone();
         drop(recorder);
         let mut reopened = open(&engine);
         assert_eq!(reopened.agent().deliveries(), &held);
-        let sends: Vec<(u64, bool, u64, u64)> = reopened
+        let sends: Vec<(u64, bool, bool, u64, u64)> = reopened
             .agent()
             .deliveries()
             .sends()
-            .map(|send| (send.turn, send.fenced, send.rev, send.seq))
+            .map(|send| (send.turn, send.fenced, send.handed, send.rev, send.seq))
             .collect();
-        assert_eq!(sends, [(2, true, 2, revision(fenced, 0))]);
+        assert_eq!(
+            sends,
+            [
+                (1, false, true, 2, revision(launched, 0)),
+                (2, true, false, 2, revision(fenced, 0)),
+            ]
+        );
         assert!(
             reopened.take_deliveries().is_empty(),
             "a fold tells nothing as changed"
