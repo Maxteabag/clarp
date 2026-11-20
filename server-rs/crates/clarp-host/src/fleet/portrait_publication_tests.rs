@@ -207,6 +207,17 @@ async fn a_portrait_pair_is_atomic_on_refusal_and_recovered_without_another_requ
         .await
         .unwrap();
     assert_eq!(member.record.portraits.len(), 3);
+    let primary = member
+        .record
+        .portraits
+        .iter()
+        .find(|p| p.media_asset_id.is_none())
+        .unwrap();
+    assert_eq!(Some(&primary.sha256), made.avatar.as_ref());
+    assert_eq!(
+        primary.portrait_id,
+        kept::worn_id(&made.agent_id, &primary.sha256)
+    );
     for (a, raw) in restored.assets.iter().zip(raw) {
         assert_eq!(member.agent.view().books.media.get(&a.asset_id), Some(a));
         assert_eq!(blobs.read(&picture_name(&a.sha256), 0, 1000).unwrap(), raw);
