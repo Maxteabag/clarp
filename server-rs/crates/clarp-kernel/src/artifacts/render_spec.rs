@@ -13,6 +13,8 @@
 //! (`content_omitted`), and reads the spec from the artifact itself; any other app sees a
 //! plain row and cannot answer.
 
+use std::collections::BTreeMap;
+
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -238,14 +240,53 @@ pub fn stored(catalog: &Catalog, payload: &J) -> Result<Map<String, Value>, Refu
     Ok(kept)
 }
 
-/// Whether the client that sent this header can answer a render spec: it says who it is as
-/// `<platform>/<build> contract=<n>` exactly, and its contract is at least the threshold the
-/// owner set (`server_identity.render_spec_capable`). Without a threshold nobody can.
-pub fn capable(header: Option<&str>, minimum: Option<i64>) -> bool {
-    let (Some(header), Some(minimum)) = (header, minimum.filter(|minimum| *minimum >= 1)) else {
+/// The lowest client contract that draws and answers a render spec, per client, by the name
+/// it sends (`server_identity.RENDER_SPEC_MIN_CONTRACT`, the Python Host's PR 474): iOS from
+/// contract 74. A client not named never gets the kind: Android (until its owner names its
+/// number), the desktop, the web app, the Watch, an unknown or absent name. Each client's
+/// contract numbers are its own series.
+pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74)];
+
+/// Whether the client that sent this header can answer a render spec
+/// (`server_identity.render_spec_capable`): it says who it is as `<name>/<build> contract=<n>`
+/// exactly, and its contract is at least the minimum for that name, as sent: the default
+/// ([`DEFAULT_MINIMUMS`]) with what the owner set laid over it (`overrides`; 0: never).
+pub fn capable(header: Option<&str>, overrides: Option<&BTreeMap<String, i64>>) -> bool {
+    let Some(header) = header else {
         return false;
     };
-    crate::client::named(header).is_some_and(|(_, contract)| contract >= minimum)
+    let Some((platform, rest)) = header.split_once('/') else {
+        return false;
+    };
+    let mut signs = platform.chars();
+    let platform_ok = signs
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && platform.len() <= 32
+        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');
+    let Some((build, contract)) = rest.split_once(' ') else {
+        return false;
+    };
+    let build_ok = (1..=80).contains(&build.len())
+        && build
+            .chars()
+            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '.' | '_' | '-'));
+    let Some(number) = contract.strip_prefix("contract=") else {
+        return false;
+    };
+    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());
+    // The name as sent, exactly: what the owner set for it, else the default.
+    let named = overrides.and_then(|set| set.get(platform).copied());
+    let defaulted = || {
+        DEFAULT_MINIMUMS
+            .iter()
+            .find(|(name, _)| *name == platform)
+            .map(|(_, minimum)| *minimum)
+    };
+    let Some(minimum) = named.or_else(defaulted).filter(|minimum| *minimum >= 1) else {
+        return false;
+    };
+    platform_ok && build_ok && number_ok && number.parse::<i64>().is_ok_and(|n| n >= minimum)
 }
 
 /// Whether a submission id is one (`[A-Za-z0-9-]{16,80}`).
