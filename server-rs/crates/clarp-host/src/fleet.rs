@@ -301,6 +301,10 @@ pub struct Directory {
     pub settings: Arc<BTreeMap<String, String>>,
     /// The personas the owner made, and how he made built-in ones look.
     pub personas: Arc<Book>,
+    /// The agents that were removed, by id: the name and the session each had last. A row an
+    /// agent wrote, or that answers one, still names it by them, as the Python Host's roster
+    /// keeps a removed agent's row.
+    pub gone: Arc<BTreeMap<String, (String, String)>>,
 }
 
 /// The contact a launch asked for in place of a name of its own: always a minted one
@@ -393,6 +397,20 @@ impl Directory {
     /// The agent or the janitor a request names: for what is read of either.
     pub fn anyone(&self, key: &str) -> Option<&Arc<Member>> {
         self.named(key).or_else(|| self.janitor(key))
+    }
+
+    /// The name and the session of the agent of this id as the roster has them now, also of
+    /// one that was removed: what a row that names another agent shows of it when it is read.
+    /// By its id alone, as the Python Host joins its roster.
+    pub fn shown_as(&self, agent_id: &str) -> Option<(String, String)> {
+        let member = self.members.iter().chain(&self.janitors);
+        match member
+            .into_iter()
+            .find(|member| member.record.agent_id == agent_id)
+        {
+            Some(member) => Some((member.record.persona.clone(), member.record.session.clone())),
+            None => self.gone.get(agent_id).cloned(),
+        }
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -1257,6 +1275,8 @@ struct Fleet {
     works: Works,
     store: Box<dyn KeyValue>,
     members: Vec<Arc<Member>>,
+    /// The agents that were removed, by id: their name and session as last kept.
+    gone: BTreeMap<String, (String, String)>,
     focus: Option<String>,
     /// The devices that may speak, by the digest of their token.
     devices: HashMap<String, Arc<Device>>,
@@ -1378,6 +1398,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let tx = Arc::new(tx);
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let mut members = Vec::new();
+    let mut gone = BTreeMap::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
         let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
             format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
@@ -1385,6 +1406,10 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
+            gone.insert(
+                record.agent_id.clone(),
+                (record.persona.clone(), record.session.clone()),
+            );
             if !record.ledger_retired {
                 retire_goals(&works, &record, at)?;
                 record.ledger_retired = true;
@@ -1474,6 +1499,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         peers: Arc::new(peers.clone()),
         settings: Arc::new(settings.clone()),
         personas: book.clone(),
+        gone: Arc::new(gone.clone()),
     }));
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
@@ -1484,6 +1510,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         works,
         store,
         members,
+        gone,
         focus,
         devices,
         jobs,
@@ -1826,6 +1853,7 @@ impl Fleet {
             peers: Arc::new(self.peers.clone()),
             settings,
             personas: self.book.clone(),
+            gone: Arc::new(self.gone.clone()),
         }));
     }
 
@@ -3006,6 +3034,7 @@ impl Fleet {
         record.deleted_at_ms = None;
         let setup = setup(&self.works, &self.delegation_desk, &record)?;
         self.put(&record)?;
+        self.gone.remove(&record.agent_id);
         let member = Arc::new(Member {
             record: record.clone(),
             agent: agent::spawn(setup),
@@ -3107,6 +3136,10 @@ impl Fleet {
         let mut record = self.members[at].record.clone();
         record.deleted_at_ms = Some(self.now_ms());
         self.stop_for_roster(&record, "agent deleted")?;
+        self.gone.insert(
+            record.agent_id.clone(),
+            (record.persona.clone(), record.session.clone()),
+        );
         let member = self.members.remove(at);
         member.agent.close();
         let retired = retire_goals(

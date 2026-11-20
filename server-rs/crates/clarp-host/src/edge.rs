@@ -2061,12 +2061,9 @@ async fn log(
     if let Some(answer) = answer.as_object_mut() {
         answer.extend(fields);
     }
-    // An answer to another agent says whom it answers, by the name that agent has today.
+    // The other agents a row names are named as the roster has them now.
     let directory = app.fleet.directory();
-    wire::reply_to(&mut answer, &|agent_id| {
-        let asked = directory.named(agent_id)?;
-        Some((asked.record.persona.clone(), asked.record.session.clone()))
-    });
+    wire::roster_names(&mut answer, &|agent_id| directory.shown_as(agent_id));
     Ok(Json(answer))
 }
 

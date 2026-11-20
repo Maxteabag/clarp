@@ -5086,6 +5086,23 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (&json!("agent"), &json!(asker), &json!("Asker"))
     );
     assert_eq!(rows[1]["origin"], "agent");
+    // The writer is named as the roster has it when the row is read: renamed, the row says the
+    // new name, and its revision does not move (a follower learns of it from the roster).
+    let revision = rows[0]["revision"].clone();
+    let renamed = host.post(
+        "/agent-rename",
+        json!({ "session": asker, "name": "Asker Renamed" }),
+    );
+    assert_eq!(renamed["name"], "Asker Renamed", "{renamed}");
+    let rows = host.turns(&worker);
+    assert_eq!(
+        (
+            &rows[0]["sender_name"],
+            &rows[0]["sender_session"],
+            &rows[0]["revision"]
+        ),
+        (&json!("Asker Renamed"), &json!(asker), &revision)
+    );
     // What agents say to each other tells the user nothing, and the agent the user has
     // open stays the one it was.
     assert!(
@@ -5241,6 +5258,21 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         admin(&["prompt", "--server", "work", "--to", &remote, "--text", "x"]).0,
         1
     );
+    // Removed, the writer is named as it was last, as the Python Host's roster keeps it; and
+    // so after the Host was started again.
+    assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
+    let named = |host: &Host| {
+        let rows = host.turns(&worker);
+        (
+            rows[0]["sender_name"].clone(),
+            rows[0]["sender_session"].clone(),
+        )
+    };
+    let last = (json!("Asker Renamed"), json!(asker));
+    assert_eq!(named(&host), last);
+    host.kill();
+    let host = place.start();
+    assert_eq!(named(&host), last);
 }
 
 #[test]

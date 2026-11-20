@@ -1430,22 +1430,30 @@ pub fn without_tool_details(response: &mut Value) {
     }
 }
 
-/// Fills in whom the answers on a page are to: the name and the session, today, of each
-/// agent a row names by its id. An agent that is gone leaves both empty.
-pub fn reply_to(response: &mut Value, named: &dyn Fn(&str) -> Option<(String, String)>) {
+/// Fills in the other agents the rows on a page name: who wrote a user's row and whom an
+/// answer is to, by the name and the session the roster has for that agent's id when the page
+/// is read (`shown_as`), as the Python Host reads them (`provenance_fields`, with its roster
+/// joined in). An agent that was removed is named as it was last. An id the roster never had
+/// is an agent of another Host, which the Python Host does not take as a sender at all: its
+/// row keeps the name it gave when its message was taken. These change without the row's
+/// revision moving: whoever follows a conversation learns of a rename or a removal from the
+/// roster's events, not from the row.
+pub fn roster_names(response: &mut Value, shown_as: &dyn Fn(&str) -> Option<(String, String)>) {
     let Some(rows) = response["turns"].as_array_mut() else {
         return;
     };
     for row in rows {
-        let Some(agent_id) = row["reply_to_agent_id"]
-            .as_str()
-            .filter(|id| !id.is_empty())
-        else {
-            continue;
-        };
-        if let Some((name, session)) = named(agent_id) {
-            row["reply_to_name"] = json!(name);
-            row["reply_to_session"] = json!(session);
+        for (id, name, session) in [
+            ("sender_agent_id", "sender_name", "sender_session"),
+            ("reply_to_agent_id", "reply_to_name", "reply_to_session"),
+        ] {
+            let Some(agent_id) = row[id].as_str().filter(|id| !id.is_empty()) else {
+                continue;
+            };
+            if let Some((named, at)) = shown_as(agent_id) {
+                row[name] = json!(named);
+                row[session] = json!(at);
+            }
         }
     }
 }
@@ -3013,5 +3021,80 @@ mod tests {
             rows[2]["tools"],
             json!([{ "id": "c-1", "name": "Edit", "summary": "notes.md" }])
         );
+    }
+
+    /// The other agents a row names are named as the roster has them when the row is read,
+    /// as the Python Host names them (`tools/roster-names-vectors.py`, from its `list_messages`
+    /// and `provenance_fields`): the same rows read as they were written, after their sender
+    /// was renamed, and after it was removed; and a row of an agent the roster never had.
+    #[test]
+    fn the_agents_a_row_names_are_named_as_the_python_hosts_roster_has_them_when_it_is_read() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../clarp-kernel/tests/fixtures/roster-names-vectors.json"
+        ))
+        .unwrap();
+        const FIELDS: [&str; 6] = [
+            "sender_agent_id",
+            "sender_name",
+            "sender_session",
+            "reply_to_agent_id",
+            "reply_to_name",
+            "reply_to_session",
+        ];
+        for state in vectors["states"].as_array().unwrap() {
+            let roster = &state["roster"];
+            let shown_as = |id: &str| -> Option<(String, String)> {
+                let agent = roster.get(id)?;
+                let text = |key: &str| agent[key].as_str().map(str::to_string);
+                Some((text("persona")?, text("session")?))
+            };
+            let expected = state["rows"].as_array().unwrap();
+            // The rows as this Host keeps them: a user's row with its sender as it was when the
+            // message was taken, an answer with the id of whom it answers.
+            let kept: Vec<Value> = expected
+                .iter()
+                .enumerate()
+                .map(|(n, said)| {
+                    let entry = if said["role"] == "user" {
+                        let agent_id = said["sender_agent_id"].as_str().unwrap().to_string();
+                        Entry::Message(Message {
+                            id: format!("u-{n}"),
+                            text: said["text"].as_str().unwrap().to_string(),
+                            origin: Origin::Agent {
+                                agent_id: agent_id.clone(),
+                            },
+                            sender: Some(clarp_kernel::conversation::Sender {
+                                agent_id,
+                                name: "as it was named when the message was taken".to_string(),
+                                session: "a session it had then".to_string(),
+                            }),
+                            ..Message::default()
+                        })
+                    } else {
+                        let agent_id = said["reply_to_agent_id"].as_str().unwrap().to_string();
+                        Entry::Reply(Reply {
+                            id: format!("r-{n}"),
+                            turn: 1,
+                            text: said["text"].as_str().unwrap().to_string(),
+                            trace_id: None,
+                            origin: Origin::Agent { agent_id },
+                            tools: Vec::new(),
+                        })
+                    };
+                    row(&version(entry, (n as u64 + 1) << 20, None))
+                })
+                .collect();
+            let mut answer = json!({ "turns": kept });
+            roster_names(&mut answer, &shown_as);
+            for (shown, expected) in answer["turns"].as_array().unwrap().iter().zip(expected) {
+                for field in FIELDS {
+                    assert_eq!(
+                        shown[field], expected[field],
+                        "{}: {field} of {}",
+                        state["state"], expected["text"]
+                    );
+                }
+            }
+        }
     }
 }
