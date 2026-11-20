@@ -47,6 +47,12 @@ impl Blobs for RejectSecond {
         }
         self.inner.put(key, bytes)
     }
+    fn names_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+        self.inner.names_with_prefix(prefix)
+    }
+    fn remove(&self, key: &str) -> Result<(), StoreError> {
+        self.inner.remove(key)
+    }
     fn len(&self, key: &str) -> Result<Option<u64>, StoreError> {
         self.inner.len(key)
     }
