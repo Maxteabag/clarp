@@ -343,11 +343,52 @@ enum Hold {
     #[default]
     Free,
     /// Every process of the tool's group is sent SIGSTOP, and is let go at `until` at the latest.
-    Held { until: Instant },
+    Held { until: Instant, timing: Timing },
     /// Let go: by a release, or by the bound.
     Released,
     /// Killed while it was held, without running again.
     Ended,
+}
+
+/// How long the steps of a hold took, for the line the shim writes in its own log.
+#[derive(Clone, Copy)]
+struct Timing {
+    began: Instant,
+    /// From the first SIGSTOP until every thread of the group stood still.
+    still: Option<Duration>,
+    /// From then until all the group printed was taken.
+    drained: Option<Duration>,
+}
+
+impl Hold {
+    fn held(until: Instant) -> Self {
+        Self::Held {
+            until,
+            timing: Timing {
+                began: Instant::now(),
+                still: None,
+                drained: None,
+            },
+        }
+    }
+}
+
+/// The line a hold leaves in the shim's own log (its standard error, never the spool): how long
+/// until the group stood still, how long taking what it printed took, how long it was held, and
+/// how the hold ended. What is not known is `-`.
+fn hold_line(timing: Option<&Timing>, end: &str) -> String {
+    let ms = |took: Option<Duration>| took.map_or_else(|| "-".to_string(), |d| d.as_millis().to_string());
+    format!(
+        "clarp-shim: hold still_ms={} drain_ms={} held_ms={} end={end}",
+        ms(timing.and_then(|t| t.still)),
+        ms(timing.and_then(|t| t.drained)),
+        ms(timing.map(|t| t.began.elapsed())),
+    )
+}
+
+/// Writes one line in the shim's own log. A log nobody reads any more is no reason to stop.
+fn log(line: &str) {
+    let _ = writeln!(std::io::stderr(), "{line}");
 }
 
 /// One connection to the socket. A request read from it is read and carried out by whoever holds
@@ -358,6 +399,9 @@ struct Connection {
     turn: Mutex<()>,
     /// Whether a whole request has been read from it and waits to be carried out.
     pending: AtomicBool,
+    /// The bytes read from it of a request that is not whole: a report begun. Changed only by
+    /// whoever holds `turn`.
+    partial: AtomicUsize,
 }
 
 impl Connection {
@@ -373,8 +417,8 @@ fn lock<T>(held: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Whether every thread of every process of the group `group` stands still: stopped, or dead.
 /// What `/proc` cannot say of a process is a process that is gone.
-fn stands_still(group: i32) -> bool {
-    let Ok(all) = std::fs::read_dir("/proc") else {
+fn stands_still(proc: &Path, group: i32) -> bool {
+    let Ok(all) = std::fs::read_dir(proc) else {
         return false;
     };
     for entry in all.flatten() {
@@ -385,11 +429,11 @@ fn stands_still(group: i32) -> bool {
         else {
             continue;
         };
-        match state_and_group(Path::new(&format!("/proc/{pid}/stat"))) {
+        match state_and_group(&proc.join(format!("{pid}/stat"))) {
             Some((_, member)) if member == group => {}
             _ => continue,
         }
-        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+        let Ok(tasks) = std::fs::read_dir(proc.join(format!("{pid}/task"))) else {
             continue;
         };
         for task in tasks.flatten() {
@@ -427,6 +471,9 @@ struct Control {
     errors: Option<Arc<Printed>>,
     /// Whether the tool is a server run through the shim's own driver: it is never held.
     served: bool,
+    /// Where the system shows its processes (`/proc`). Without it a hold cannot see the tool
+    /// stand still, and is refused.
+    proc: PathBuf,
     hold: Mutex<Hold>,
     hold_changed: Condvar,
     /// A second name for the socket's listener, to ask whether a connection waits to be taken.
@@ -440,7 +487,7 @@ impl Control {
         match request {
             Request::Hold { ms } => self.hold(ms, own),
             Request::Release => Reply {
-                let_go: Some(self.let_go()),
+                let_go: Some(self.let_go("let go by request")),
                 ..Reply::ok(Some(self.pid))
             },
             Request::Ping | Request::Follow => Reply::ok(Some(self.pid)),
@@ -493,8 +540,9 @@ impl Control {
         // it, and a tool that runs prints.
         {
             let mut hold = self.hold.lock().unwrap_or_else(PoisonError::into_inner);
-            if matches!(*hold, Hold::Held { .. }) {
+            if let Hold::Held { timing, .. } = *hold {
                 *hold = Hold::Ended;
+                log(&hold_line(Some(&timing), "ended while held"));
                 self.hold_changed.notify_all();
                 drop(hold);
                 let kill = Signal::SIGKILL;
@@ -534,33 +582,48 @@ impl Control {
     /// Holds the tool: every process of its group stands still until it is let go, and the
     /// answer says how far the spool goes with all it printed before.
     fn hold(self: &Arc<Self>, ms: u64, own: &Arc<Connection>) -> Reply {
+        let refused = |why: &str| {
+            log(&hold_line(None, &format!("refused: {why}")));
+            Reply::failed(why)
+        };
         if self.served {
-            return Reply::failed("a served tool cannot be held");
+            return refused("a served tool cannot be held");
+        }
+        if !self.proc.is_dir() {
+            return refused("this system shows no processes in /proc: the tool cannot be seen to stand still");
         }
         let until = {
             let stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
             if self.leader_exited.load(Ordering::SeqCst) {
-                return Reply::failed("the tool is gone");
+                return refused("the tool is gone");
             }
             if !stage.ready() {
-                return Reply::failed("the tool is being stopped");
+                return refused("the tool is being stopped");
             }
             let mut hold = self.hold.lock().unwrap_or_else(PoisonError::into_inner);
             if !matches!(*hold, Hold::Free) {
-                return Reply::failed("the turn has been held once already");
+                return refused("the turn has been held once already");
             }
             let until = Instant::now() + Duration::from_millis(ms.min(HOLD_MOST_MS));
-            *hold = Hold::Held { until };
+            *hold = Hold::held(until);
             until
         };
         // The bound holds whatever the Host does: a thread of its own lets the tool go.
         let control = self.clone();
         std::thread::spawn(move || control.let_go_at_the_bound());
-        if let Err(error) = self.stand_still(until, || stands_still(self.pid as i32)) {
+        let proc = self.proc.clone();
+        if let Err(error) = self.stand_still(until, || stands_still(&proc, self.pid as i32)) {
             return Reply::failed(error);
         }
+        let stood = Instant::now();
+        if let Hold::Held { timing, .. } = &mut *lock(&self.hold) {
+            timing.still = Some(stood.duration_since(timing.began));
+        }
         let counted = self.count(own, until);
-        let hold = lock(&self.hold);
+        let mut hold = lock(&self.hold);
+        if let Hold::Held { timing, .. } = &mut *hold {
+            timing.drained = Some(stood.elapsed());
+        }
         let left = until.saturating_duration_since(Instant::now());
         match (counted, &*hold) {
             (_, Hold::Ended) => Reply::failed(ENDED_WHILE_HELD),
@@ -573,8 +636,9 @@ impl Control {
             }
             _ => {
                 drop(hold);
-                self.let_go();
-                Reply::failed("what the tool printed could not be counted within the bound")
+                let why = "what the tool printed could not be counted within the bound";
+                self.let_go(&format!("refused: {why}"));
+                Reply::failed(why)
             }
         }
     }
@@ -593,8 +657,9 @@ impl Control {
                 }
                 _ => {
                     drop(hold);
-                    self.let_go();
-                    return Err("the tool did not stand still within the bound");
+                    let why = "the tool did not stand still within the bound";
+                    self.let_go(&format!("refused: {why}"));
+                    return Err(why);
                 }
             }
             drop(hold);
@@ -624,12 +689,17 @@ impl Control {
                 .is_none_or(|listener| waits(listener.as_fd(), false));
             let mut turns = Vec::new();
             let mut idle = !waiting;
+            let mut reports_begun = 0;
             for connection in connections.iter().filter(|c| !Arc::ptr_eq(c, own)) {
                 if !idle {
                     break;
                 }
                 turns.push(lock(&connection.turn));
                 idle = connection.idle();
+                // Its sender stands still and cannot finish: what it began is said, not waited for.
+                if connection.partial.load(Ordering::SeqCst) > 0 {
+                    reports_begun += 1;
+                }
             }
             if idle {
                 let _out = lock(&out.turn);
@@ -642,6 +712,7 @@ impl Control {
                         spool,
                         partial_out: out.partial.load(Ordering::SeqCst) as u64,
                         partial_err: err.partial.load(Ordering::SeqCst) as u64,
+                        partial_reports: reports_begun,
                         left_ms: 0,
                     });
                 }
@@ -652,25 +723,26 @@ impl Control {
         }
     }
 
-    /// Lets a held tool go on. Says whether it was held.
-    fn let_go(&self) -> bool {
+    /// Lets a held tool go on, and says how in the shim's log. Says whether it was held.
+    fn let_go(&self, how: &str) -> bool {
         let mut hold = self.hold.lock().unwrap_or_else(PoisonError::into_inner);
-        if !matches!(*hold, Hold::Held { .. }) {
+        let Hold::Held { timing, .. } = *hold else {
             return false;
-        }
+        };
         *hold = Hold::Released;
         let _ = killpg(self.group(), Signal::SIGCONT);
+        log(&hold_line(Some(&timing), how));
         self.hold_changed.notify_all();
         true
     }
 
     fn let_go_at_the_bound(&self) {
         let mut hold = self.hold.lock().unwrap_or_else(PoisonError::into_inner);
-        while let Hold::Held { until } = *hold {
+        while let Hold::Held { until, .. } = *hold {
             let left = until.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 drop(hold);
-                self.let_go();
+                self.let_go("let go at the bound");
                 return;
             }
             (hold, _) = self
@@ -696,6 +768,15 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
         if !me.pending.load(Ordering::SeqCst) {
             waits(me.socket.as_fd(), true);
         }
+        // Whether a whole request waits, and how much of one is begun.
+        let note = |taken: &[u8]| {
+            let whole = taken
+                .iter()
+                .rposition(|byte| *byte == b'\n')
+                .map_or(0, |at| at + 1);
+            me.pending.store(whole > 0, Ordering::SeqCst);
+            me.partial.store(taken.len() - whole, Ordering::SeqCst);
+        };
         let turn = lock(&me.turn);
         if !me.pending.load(Ordering::SeqCst) {
             match read_half.read(&mut chunk) {
@@ -705,6 +786,7 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
                 Ok(read) => taken.extend_from_slice(&chunk[..read]),
                 Err(_) => break,
             }
+            note(&taken);
         }
         // A whole line, or what is left when the other end has finished.
         let end = match taken.iter().position(|byte| *byte == b'\n') {
@@ -716,7 +798,7 @@ fn serve(connection: UnixStream, me: &Arc<Connection>, control: &Arc<Control>) {
         if !taken.is_empty() {
             taken.remove(0);
         }
-        me.pending.store(taken.contains(&b'\n'), Ordering::SeqCst);
+        note(&taken);
         if line.last() == Some(&b'\r') {
             line.pop();
         }
@@ -780,6 +862,7 @@ fn accept(listener: &UnixListener, control: &Arc<Control>) {
                 socket,
                 turn: Mutex::new(()),
                 pending: AtomicBool::new(false),
+                partial: AtomicUsize::new(0),
             }),
             _ => continue,
         };
@@ -969,6 +1052,7 @@ fn run(args: Args) -> Result<u8, String> {
         printed,
         errors,
         served: args.program_args.first().is_some_and(|word| word == SERVED),
+        proc: PathBuf::from("/proc"),
         hold: Mutex::default(),
         hold_changed: Condvar::new(),
         listener: listener
@@ -1021,7 +1105,7 @@ fn run(args: Args) -> Result<u8, String> {
     // A tool killed from outside while it was held may leave a process of its group that holds
     // neither pipe. It is let go now, while the group's number is still the tool's: once the
     // shim is gone nothing would ever let it go.
-    control.let_go();
+    control.let_go("let go when the tool ended");
     child
         .wait()
         .map_err(|e| format!("reaping {}: {e}", args.program))?;
@@ -1110,6 +1194,10 @@ mod tests {
     }
 
     fn rig(name: &str) -> Rig {
+        rig_in(name, Path::new("/proc"))
+    }
+
+    fn rig_in(name: &str, proc: &Path) -> Rig {
         let dir = std::env::temp_dir().join(format!("clarp-rig-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1142,6 +1230,7 @@ mod tests {
                 err_read.as_fd().try_clone_to_owned().unwrap(),
             ))),
             served: false,
+            proc: proc.to_path_buf(),
             hold: Mutex::default(),
             hold_changed: Condvar::new(),
             listener: Some(listener.as_fd().try_clone_to_owned().unwrap()),
@@ -1186,6 +1275,7 @@ mod tests {
             socket: stream.as_fd().try_clone_to_owned().unwrap(),
             turn: Mutex::new(()),
             pending: AtomicBool::new(false),
+            partial: AtomicUsize::new(0),
         })
     }
 
@@ -1266,6 +1356,14 @@ mod tests {
             "a request read and not carried out"
         );
         other.pending.store(false, Ordering::SeqCst);
+        // A request begun and not whole is not waited for: its sender stands still. It is said.
+        other.partial.store(4, Ordering::SeqCst);
+        own.partial.store(9, Ordering::SeqCst);
+        let held = count(&rig, &own).expect("a report begun is not in the way");
+        assert_eq!(held.partial_reports, 1, "its own is not counted");
+        other.partial.store(0, Ordering::SeqCst);
+        own.partial.store(0, Ordering::SeqCst);
+        assert_eq!(count(&rig, &own).unwrap().partial_reports, 0);
         // But not the connection that asks for the count.
         let own_other = other.clone();
         (&client).write_all(b"{\"op\":\"ping\"}\n").unwrap();
@@ -1333,7 +1431,7 @@ mod tests {
     fn a_group_that_does_not_stand_still_is_let_go_at_the_bound() {
         let rig = rig("bound");
         let until = Instant::now() + Duration::from_millis(80);
-        rig.mark(Hold::Held { until });
+        rig.mark(Hold::held(until));
         let began = Instant::now();
         let (control, said) = (rig.control.clone(), mpsc::channel());
         let answer = said.0;
@@ -1349,9 +1447,7 @@ mod tests {
 
         // One that stands still is held at once and stays so.
         let rig2 = self::rig("still");
-        rig2.mark(Hold::Held {
-            until: Instant::now() + Duration::from_secs(2),
-        });
+        rig2.mark(Hold::held(Instant::now() + Duration::from_secs(2)));
         let looked = AtomicUsize::new(0);
         let until = Instant::now() + Duration::from_secs(2);
         let still = || looked.fetch_add(1, Ordering::SeqCst) >= 2;
@@ -1363,7 +1459,7 @@ mod tests {
         );
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(rig2.state(), Some('T'));
-        assert!(rig2.control.let_go());
+        assert!(rig2.control.let_go("by the test"));
         // Ended while it was looked at: not let go, and said.
         rig2.mark(Hold::Ended);
         let (control, said) = (rig2.control.clone(), mpsc::channel());
@@ -1409,7 +1505,10 @@ mod tests {
         let reply = holding.join().unwrap();
         assert_eq!(reply.error.as_deref(), Some(ENDED_WHILE_HELD));
         assert_eq!(reply.held, None);
-        assert!(!rig.control.let_go(), "an ended tool is not let go");
+        assert!(
+            !rig.control.let_go("by the test"),
+            "an ended tool is not let go"
+        );
         let said: Vec<Entry> = clarp_spool::SpoolReader::new(&rig.spool)
             .read_from(0)
             .unwrap()
@@ -1448,6 +1547,53 @@ mod tests {
     }
 
     #[test]
+    fn without_proc_a_hold_is_refused_and_nothing_is_signalled() {
+        let rig = rig_in("noproc", Path::new("/no/such/proc"));
+        let (own, _peer) = UnixStream::pair().unwrap();
+        let reply = rig.control.hold(2_000, &connection(&own));
+        assert_eq!(
+            reply.error.as_deref(),
+            Some("this system shows no processes in /proc: the tool cannot be seen to stand still")
+        );
+        assert_eq!(reply.held, None);
+        assert!(matches!(*lock(&rig.control.hold), Hold::Free), "not the one hold");
+        std::thread::sleep(Duration::from_millis(50));
+        assert_ne!(rig.state(), Some('T'));
+        rig.end();
+    }
+
+    #[test]
+    fn a_holds_line_says_how_long_each_step_took_and_how_it_ended() {
+        assert_eq!(
+            hold_line(None, "refused: the tool is gone"),
+            "clarp-shim: hold still_ms=- drain_ms=- held_ms=- end=refused: the tool is gone"
+        );
+        let timing = Timing {
+            began: Instant::now() - Duration::from_millis(250),
+            still: Some(Duration::from_millis(3)),
+            drained: Some(Duration::from_micros(1_900)),
+        };
+        let line = hold_line(Some(&timing), "let go by request");
+        let held: u64 = line
+            .split("held_ms=")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!((250..1_000).contains(&held), "{line}");
+        assert_eq!(
+            line.replace(&format!("held_ms={held}"), "held_ms=N"),
+            "clarp-shim: hold still_ms=3 drain_ms=1 held_ms=N end=let go by request"
+        );
+        let begun = Timing {
+            still: None,
+            ..timing
+        };
+        assert!(hold_line(Some(&begun), "x").starts_with("clarp-shim: hold still_ms=- drain_ms=1 "));
+    }
+
+    #[test]
     fn a_stat_is_read_after_the_last_bracket_of_the_name() {
         let dir = std::env::temp_dir().join(format!("clarp-stat-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1471,9 +1617,9 @@ mod tests {
     fn a_group_with_one_process_awake_does_not_stand_still() {
         // This test's own process group: this thread runs.
         let group = nix::unistd::getpgrp().as_raw();
-        assert!(!stands_still(group));
+        assert!(!stands_still(Path::new("/proc"), group));
         // A group with no process left stands still.
-        assert!(stands_still(i32::MAX));
+        assert!(stands_still(Path::new("/proc"), i32::MAX));
     }
 
     #[test]
