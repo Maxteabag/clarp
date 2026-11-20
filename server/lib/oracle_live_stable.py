@@ -1314,10 +1314,12 @@ def serve(handler):
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     live = live_model(cfg)  # this session's one read of the configured GPT-Live model
-    # A podcast's session is built once from that value: the history records what is sent (ruling B).
-    podcast_session = (podcast_live.session_config(podcast_context, stable=True, model=live)
-                       if podcast_context is not None else None)
+    podcast_session = None
     try:
+        # A podcast's session is built once from that value: the history records what is sent (ruling B).
+        # Inside the try, so a failure here still releases the device's claim.
+        if podcast_context is not None:
+            podcast_session = podcast_live.session_config(podcast_context, stable=True, model=live)
         if podcast_context is None:
             try:
                 memory = oracle_memory.open_thread(principal, selected_contact, connection_id=token,
