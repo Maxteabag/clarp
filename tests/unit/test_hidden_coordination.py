@@ -397,3 +397,27 @@ def test_a_notes_row_is_exactly_what_every_app_draws_as_an_ordinary_reply(world,
         "reply_to_name": "", "reply_to_session": "", "audience": "user", "automated": False,
         "automation_kind": "", "phase": None}
     assert "note" in origins.CHAT_ACTIVITY_ORIGINS
+
+
+def test_a_note_after_its_turn_completed_normally_is_refused(tmp_path, pushes):
+    """Driven through the real dispatcher: the turn ends by the dispatcher's own normal
+    completion (on_result), not by closing its row by hand. A settled turn keeps ended_at
+    empty; it is not running, and no newer turn started, so a note is refused, with or
+    without the settled turn's own token."""
+    from lib.turn_dispatch import DispatchCommand
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backends, agent_id = _make_service(tmp_path)
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    service.submit(DispatchCommand(text="Report please", requested_session="mike", forced_session="mike",
+                                   trace_id="t-done", client_msg_id="c-done", synthesize_audio=False,
+                                   origin="agent", sender_agent_id=boss))
+    token = _token(agent_id, "t-done")
+    assert _note("While it runs.", session="mike", token=token).answer[0] == 200
+    _, call = backends.spawned[0]
+    call["on_result"]({"duration_ms": 50})
+    row = db.conn().execute("SELECT ended_at, settled_at FROM turns WHERE trace_id='t-done'").fetchone()
+    assert row["settled_at"] is not None          # what the dispatcher's completion leaves
+    for request in (_note("After it ended.", session="mike", token=token),
+                    _note("After it ended.", session="mike")):
+        assert request.answer[0] == 409, request.answer
+        assert "works only inside a running turn of mike" in request.answer[1]["error"]
