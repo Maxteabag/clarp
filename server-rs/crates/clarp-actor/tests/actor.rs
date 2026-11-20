@@ -5058,6 +5058,19 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
         found(&world, "trace-tr-1").map(|(kind, _)| kind),
         Some(kind::TRACE)
     );
+    // A trusted Host trace follows the ordinary admission path even if the supplied ID
+    // already exists. The original caller-named trace keeps its owner.
+    let now = world.tick();
+    let (trusted, _) = actor
+        .send_marked(&theirs, Admission::Queue, None, &Marks::default(), now)
+        .unwrap()
+        .unwrap();
+    assert!(!trusted.duplicate);
+    let (again, _) = actor
+        .send_marked(&asked, Admission::Queue, None, &marks, now)
+        .unwrap()
+        .unwrap();
+    assert!(again.duplicate);
 }
 
 /// Fills an agent's log with `turns` turns that are over, as a long conversation's log holds them:

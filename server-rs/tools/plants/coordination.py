@@ -42,6 +42,12 @@ HF = 'clarp-host/src/fleet.rs'
 #   the rebuild of a live turn's note count when the actor opens (`notes_since`): no Host test stops a Host inside a
 #     turn that left notes; the actor's own test holds the count over a restart.
 #   the costs at 300,000 rows: a timed test, run by hand (`coordination_costs_the_same_...`), not a rule.
+#   the Antigravity alias falling back to Claude: both backends can leave a note, the only caller of the
+#     normalization here. A change to the alias alone has no effect on this port's behaviour.
+#   the caller replacing an already named sender: the principal has already refused a different sender whenever
+#     the caller has a session. The remaining nonempty sender is already the caller's own id.
+#   looking up a Host-generated trace at the edge: the HTTP request cannot set that ID. The actor plant covers
+#     the distinction between a caller-supplied trace and the Host supplying one, with a deterministic collision.
 PLANTS = [
     # Which turn is for the agents (the kernel).
     (KC, 'vectors', "the oracle's word is another agent's", '    if USER_WORD_ORIGINS.contains(&origin) {\n        return false;', '    if origin == "user" {\n        return false;'),
@@ -58,7 +64,6 @@ PLANTS = [
     (KC, 'vectors', 'Muse can leave a note', 'const NOTE_BACKENDS: [&str; 6] = ["claude", "agy", "grok", "opencode", "deepseek", "codex"];', 'const NOTE_BACKENDS: [&str; 7] = ["claude", "agy", "grok", "opencode", "deepseek", "codex", "muse"];'),
     (KC, 'vectors', 'a Host without its key lets an agent leave a note', '    !agent_id.is_empty() && key_readable && NOTE_BACKENDS', '    !agent_id.is_empty() && NOTE_BACKENDS'),
     (KC, 'vectors', 'an agent with no id can leave a note', '    !agent_id.is_empty() && key_readable && NOTE_BACKENDS', '    key_readable && NOTE_BACKENDS'),
-    (KC, 'vectors', 'Antigravity is not known by its long name', '        "antigravity" => "agy",', '        "antigravity" => "antigravity",'),
     (KC, 'vectors', 'a backend is known in capitals', '    let word = python::strip(raw.unwrap_or("")).to_lowercase();', '    let word = python::strip(raw.unwrap_or("")).to_string();'),
     (KC, 'vectors', 'an unknown backend is none', '        .unwrap_or(DEFAULT_BACKEND)', '        .unwrap_or("unknown")'),
     # Who made a send, and its origin (the kernel).
@@ -68,7 +73,6 @@ PLANTS = [
     (KC, 'vectors', 'an agent waking itself is from another turn', '        made.self_prompt = caller_agent_id == target_agent_id;', '        made.self_prompt = false;'),
     (KC, 'vectors', "a turn's agent is not the sender it did not name", '            if made.sender_agent_id.is_empty() && caller_session.is_some() {\n                made.sender_agent_id = caller_agent_id.to_string();', '            if made.sender_agent_id.is_empty() && caller_session.is_some() {\n                made.sender_agent_id = String::new();'),
     (KC, 'vectors', "a gone agent's turn is the sender", '            if made.sender_agent_id.is_empty() && caller_session.is_some() {', '            if made.sender_agent_id.is_empty() {'),
-    (KC, 'vectors', "a turn's agent replaces the sender it named", '            if made.sender_agent_id.is_empty() && caller_session.is_some() {', '            if caller_session.is_some() {'),
     (KC, 'vectors', 'an origin no client may name is kept', '    let origin = if CLIENT_SETTABLE_ORIGINS.contains(&claimed.as_str()) {', '    let origin = if !claimed.is_empty() {'),
     (KC, 'vectors', 'an origin is told in capitals', '    let claimed = python::strip(claimed.unwrap_or("")).to_lowercase();', '    let claimed = python::strip(claimed.unwrap_or("")).to_string();'),
     (KC, 'vectors', 'no origin with a sender is the user', '    } else if principal.sender_agent_id.is_empty() {\n        "user".to_string()\n    } else {\n        "agent".to_string()\n    };', '    } else {\n        "user".to_string()\n    };'),
@@ -76,7 +80,7 @@ PLANTS = [
     (KC, 'vectors', "a peer speaks the user's word", '    if user_word && (principal.own_turn || peer) {', '    if user_word && principal.own_turn {'),
     (KC, 'vectors', "an agent waking itself speaks the user's word", '    } else if user_word && principal.self_prompt {\n        "automation".to_string()', '    } else if user_word && principal.self_prompt {\n        origin'),
     (KC, 'vectors', "the oracle's word is no user's word", 'pub const USER_WORD_ORIGINS: [&str; 2] = ["oracle", "user"];', 'pub const USER_WORD_ORIGINS: [&str; 2] = ["agent", "user"];'),
-    (KC, 'vectors', 'a client may name a watcher no more', '    "watcher",\n    "heartbeat",', '    "heartbeat",'),
+    (KC, 'vectors', 'a client may name a watcher no more', '    "watcher",\n    "heartbeat",', '    "unavailable-watcher",\n    "heartbeat",'),
     # The note: what a request asks, and its refusals (the kernel).
     (KC, 'notes', 'a body that is no object is read', '    let Value::Object(fields) = body else {\n        return Err(refused(400, "bad json"));\n    };', '    let Value::Object(fields) = body.clone() else {\n        return Ok(Asked { session: String::new(), text: String::new(), note_id: None });\n    };'),
     (KC, 'notes', 'no words are asked of before the session', '    if session.is_empty() {\n        return Err(refused(400, "session required"));\n    }\n    if text.is_empty() {', '    if text.is_empty() && !session.is_empty() {'),
@@ -98,7 +102,7 @@ PLANTS = [
     (KC, 'notes', "a note's row is named without its agent", '    format!("note-{agent_id}-{note_id}")', '    format!("note-{note_id}")'),
     (KC, 'notes', "a note's notification is of its row without the mark", '    let mark = Sha256::digest(format!("note\\0{message_id}").as_bytes());', '    let mark = Sha256::digest(message_id.as_bytes());'),
     (KC, 'notes', "a note's notification id is longer", '    format!("pn-{}", &mark[..20])\n}\n\n/// The millisecond', '    format!("pn-{}", &mark[..24])\n}\n\n/// The millisecond'),
-    (KC, 'notes', "a quiet agent's note pages its user", '    if agent.quiet || (agent.present && !agent.can_chat) {', '    if agent.present && !agent.can_chat {'),
+    (KC, 'vectors', "a quiet agent's note pages its user", '    if agent.quiet || (agent.present && !agent.can_chat) {', '    if agent.present && !agent.can_chat {'),
     (KC, 'notes', "a muted agent's note is pushed", '        push: !agent.muted,', '        push: true,'),
     (KC, 'notes', "a muted agent's note is told as any note", '    let reason = if agent.muted {', '    let reason = if false {'),
     # The mark, the note and the trace in the log (the kernel's journal and the actor).
@@ -114,7 +118,7 @@ PLANTS = [
     (AL, 'actor', 'a note is left from a turn that does not run', '        let Some(trace) = self.running_trace(turn)? else {\n            return Ok((Noted::NotRunning, Outputs::default()));\n        };', '        let trace = self.running_trace(turn)?.unwrap_or_default();'),
     (AL, 'actor', 'a note asked again with the same words is other words', '                Some(Entry::Note(note)) if note.text == text => Noted::Again {', '                Some(Entry::Note(note)) if note.text != text => Noted::Again {'),
     (AL, 'actor', "a note's trace is not the turn's", '            trace_id: Some(trace.clone()).filter(|trace| !trace.is_empty()),', '            trace_id: None,'),
-    (AL, 'actor', 'a note is not counted', '        self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)) + 1);', '        self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)));'),
+    (AL, 'host', 'a note is not counted', '        self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)) + 1);', '        self.turn_notes = (turn, notes_of(self.turn_notes, TurnId(turn)));'),
     (AL, 'actor', "a turn's end does not carry its notes", '    end.note_count = facts.notes;', '    end.note_count = 0;'),
     (AL, 'actor', "another turn's notes are counted", '    if kept.0 == turn.0 { kept.1 } else { 0 }', '    kept.1'),
     (AL, 'actor', 'a note tells nobody the conversation changed', '            changed: Changed {\n                conversation: true,\n                ..Changed::default()\n            },\n            ..Outputs::default()\n        };\n        Ok((\n            Noted::Written {', '            ..Outputs::default()\n        };\n        Ok((\n            Noted::Written {'),
@@ -153,7 +157,6 @@ PLANTS = [
     (HE, 'host', 'a page hides the rows of an agent without the key', '        app.turns.has_key(),\n    );\n    let mut answer = wire::log_response', '        true,\n    );\n    let mut answer = wire::log_response'),
     # What a send presents (the Host's edge).
     (HE, 'host', "a send's turn token is not read", '    crate::coordination::made(app, turn_of(headers), peer, trace_named).await', '    crate::coordination::made(app, None, peer, trace_named).await'),
-    (HE, 'host', 'a trace the Host named is looked at', '    let trace_named = named.is_some_and(|trace| !trace.is_empty());', '    let trace_named = true;'),
     (HE, 'host', 'a trace the caller named is not looked at', '    let trace_named = named.is_some_and(|trace| !trace.is_empty());', '    let trace_named = false;'),
     (HE, 'host', "a turn's agent may name another as its sender", '    .map_err(crate::coordination::refused)?;\n    let sender = sender(app, request.sender.as_ref()).or_else(|| {', '    .unwrap_or_default();\n    let sender = sender(app, request.sender.as_ref()).or_else(|| {'),
     (HE, 'host', "a send from a turn has not that turn's agent as sender", '            .then(|| sender_by_id(app, &principal.sender_agent_id))', '            .then(|| None)'),
