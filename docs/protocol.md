@@ -379,10 +379,12 @@ Coordination between agents (Host contract 110). `audience` says who a row is
 for: `agents` when the turn it belongs to was started by another agent's
 message, else `user`. Every row of that turn has it: the incoming prompt, the
 live and final rows, and the thinking, tool and reply rows the transcript
-import brings in. A message is another agent's when its sender is another agent
-of this Host, or when it arrived as an agent's (`origin: agent`) with no sender
-this Host knows (an agent of a peer Host); a message an agent sends itself is
-not. The mark is the flag, and the Host sets it: it reads it from the turn's
+import brings in. The user's own word (origin `user` or `oracle`) is never
+coordination, whatever sender it names. Otherwise a message is another agent's
+when its sender is another agent of this Host, or when it arrived as an agent's
+(`origin: agent`) with no sender this Host knows (an agent of a peer Host); a
+message an agent sends itself is not. A send made from an agent's own turn is
+that agent's, whatever origin it claims, and so is a peer Host's. The mark is the flag, and the Host sets it: it reads it from the turn's
 trace, never from a row's `origin`, and no sender can set or clear it. An agent
 never hides anything by its own say-so. It can only show something, by an
 explicit act addressed to the user: a note (`POST /agent-notes`), a decision

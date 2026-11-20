@@ -108,6 +108,7 @@ class SendRequest:
                      orchestrator_fallback: bool = False,
                      resolve_sender: Callable[[str], str] = _resolve_sender_agent_id,
                      caller_agent_id: str = "",
+                     peer: bool = False,
                      ) -> "SendRequest":
         """Interpret a decoded /send body.
 
@@ -155,6 +156,18 @@ class SendRequest:
             raise SendRequestError(
                 403, f"this turn belongs to {own}, not to the sender it named; "
                 f"send as --from {own}", trace_id=trace_id)
+        # A send made from an agent's own turn (its Host-issued X-Clarp-Turn,
+        # whatever state that turn is in now) is that agent's, whatever origin
+        # it claims: the Host knows the principal here, and only here. Not a
+        # self-prompt: an agent addressing itself keeps its origin.
+        own_turn_agent = ""
+        if caller_agent_id:
+            from . import identity
+            target = identity.lookup(session) or {}
+            if caller_agent_id != target.get("agent_id"):
+                own_turn_agent = caller_agent_id
+                if not sender_agent_id and identity.lookup(caller_agent_id):
+                    sender_agent_id = caller_agent_id
         if sender_agent_id:
             from . import goal_ledger, identity
             target = identity.lookup(session) or {}
@@ -166,6 +179,10 @@ class SendRequest:
         origin = (data.get("origin") or "").strip().lower()
         if origin not in origins.CLIENT_SETTABLE_ORIGINS:
             origin = "agent" if sender_agent_id else "user"
+        if origin in origins.USER_WORD_ORIGINS and (own_turn_agent or peer):
+            # Neither an agent's own turn nor a peer Host speaks the user's
+            # word on this Host: a peer forwards only its agents' messages.
+            origin = "agent"
         if synthesize_audio_raw is None:
             synthesize_audio = origin == "user"
         else:

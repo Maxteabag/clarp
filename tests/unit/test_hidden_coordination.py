@@ -421,3 +421,67 @@ def test_a_note_after_its_turn_completed_normally_is_refused(tmp_path, pushes):
                     _note("After it ended.", session="mike")):
         assert request.answer[0] == 409, request.answer
         assert "works only inside a running turn of mike" in request.answer[1]["error"]
+
+
+# ---- the user's word, and who said it (the /send boundary) -----------------------------------
+
+def _boundary(world, *, origin, to="worker", caller="", sender="", peer=False):
+    from lib.send_request import SendRequest
+    payload = {"text": "hello", "session": to, "origin": origin, "client_msg_id": f"c-{origin}-{caller}"}
+    if sender:
+        payload["sender"] = sender
+    req = SendRequest.from_payload(payload, default_session="worker", trace_id_factory=lambda: "t",
+                                   authenticated=True, caller_agent_id=caller, peer=peer)
+    mark = coordination.is_coordination(agent_id=agents.get_by_session(to)["agent_id"],
+                                        origin=req.origin, sender_agent_id=req.sender_agent_id)
+    return req, mark
+
+
+@pytest.mark.parametrize("claimed", ["user", "oracle"])
+def test_a_send_from_an_agents_own_turn_is_that_agents_whatever_origin_it_claims(world, claimed):
+    req, mark = _boundary(world, origin=claimed, caller=world.boss)
+    assert (req.origin, req.sender_agent_id, mark) == ("agent", world.boss, True)
+    # Kept out of the user's own prompt history too.
+    assert req.admit().cooperative_principal != "user"
+
+
+def test_the_users_word_is_never_coordination_whatever_sender_it_names(world):
+    req, mark = _boundary(world, origin="user", sender="boss")     # a claim, no turn token
+    assert (req.origin, req.sender_agent_id, mark) == ("user", world.boss, False)
+    for origin in ("user", "oracle"):
+        assert not coordination.is_coordination(agent_id=world.id, origin=origin, sender_agent_id=world.boss)
+
+
+def test_an_agent_prompting_itself_from_its_own_turn_is_not_coordination(world):
+    req, mark = _boundary(world, origin="automation", caller=world.id)
+    assert (req.origin, req.sender_agent_id, mark) == ("automation", "", False)
+
+
+def test_a_settled_turns_token_and_an_archived_agents_are_still_that_agent(world):
+    """The principal does not depend on its turn still running."""
+    token = _token(world.boss, "t-gone")
+    turn_lifecycle.open_turn(agent_id=world.boss, source="pwa", trace_id="t-gone")
+    turn_lifecycle.close_turns_for_trace(world.boss, "t-gone")
+    from lib import turn_identity
+    caller = turn_identity.caller_agent_id({provider_jobs.TURN_ENV: token})
+    assert caller == world.boss
+    assert _boundary(world, origin="user", caller=caller)[1] is True
+    agents.set_archived(world.peer, True)
+    req, mark = _boundary(world, origin="user", caller=world.peer)
+    assert (req.origin, req.sender_agent_id, mark) == ("agent", world.peer, True)
+
+
+def test_a_deleted_agents_token_names_no_sender_but_is_never_the_users_word(world):
+    gone = agents.create_agent(persona="Gone", session="gone", voice_id="v", cwd="/tmp")
+    with db.conn() as con:
+        con.execute("UPDATE agents SET deleted_at=1 WHERE agent_id=?", (gone,))
+    db.close_local()
+    req, mark = _boundary(world, origin="user", caller=gone)
+    assert (req.origin, req.sender_agent_id, mark) == ("agent", "", True)
+
+
+def test_a_peer_hosts_claim_of_the_users_word_is_an_agents_and_a_devices_is_untouched(world):
+    req, mark = _boundary(world, origin="user", peer=True)
+    assert (req.origin, mark) == ("agent", True)
+    req, mark = _boundary(world, origin="user")                     # a device, or the Host's own token
+    assert (req.origin, mark) == ("user", False)
