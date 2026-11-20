@@ -144,3 +144,22 @@ def test_agys_restore_keeps_each_rows_trace_phase_and_summary(tmp_path):
     reply = next(r for r in agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
                  if r["id"] == "reply-1")
     assert reply["audience"] == "agents"
+
+
+def test_agys_restore_takes_a_snapshot_the_previous_release_captured(tmp_path):
+    """A snapshot captured by the code before this change has no trace_id, phase or turn_json
+    keys: the restore reads them with a default and does not fail."""
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="agy")
+    agents.bind_backend_session(agent_id, "native")
+    message_store.store_transcript_turns(agent_id=agent_id, backend_session_id="native", source_file="t.jsonl",
+                                         turns=_conversation())
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-old")
+    snapshot = message_store.capture_assistant_state(agent_id=agent_id, backend_session_id="native")
+    for row in snapshot["messages"]:
+        for key in ("trace_id", "phase", "turn_json"):
+            row.pop(key, None)
+    agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-old",
+                                     snapshot=snapshot, terminal_status="success", text="Done.")
+    texts = [row["text"] for row in db.conn().execute(
+        "SELECT text FROM messages WHERE agent_id=? AND role='assistant' ORDER BY seq", (agent_id,))]
+    assert "first answer" in texts and "second answer" in texts
