@@ -3205,6 +3205,12 @@ arms another look in a minute. Each timer stays with the desk that knows when it
 A limited paired device may use either door. A controller edge requires POST and the receipt names the
 same event ID as the broadcast. Reconnecting clients cannot replay an earlier button press.
 
+**The router's ready-spoken phrases (20 Nov 2026).** A normal router announcement can keep its completed
+primary audio after the apps are offered their clip. The phrase book belongs to the fleet and the MP3 bytes
+to the blob store. A hit still names the speaker of the current request. Factoring out the session means
+two agents using the same engine voice can share one fill. No operator script or scheduled operation
+asks for audio. The first use after eviction follows the ordinary speech path.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
