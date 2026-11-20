@@ -58,7 +58,7 @@ use crate::{apps, ids, joblog, library, media, peers, plans, push, roster, wire}
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 104;
+pub const HOST_CONTRACT: u64 = 106;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -105,6 +105,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("html_form_reply_audio", 50),
     // Background jobs, and a cancel that names the run it means.
     ("background_jobs", 1),
+    ("provider_background_tasks", 24),
     ("diagnostics", 1),
     // Pairing codes and devices with tokens of their own.
     ("pairing", 1),
@@ -162,6 +163,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // Goals kept current by the Goal keeper: `plan.goal.updater` beside the owner's own
     // checkpoint, `plan.updater`, a criterion set aside, a paused goal's step that keeps
     // its place.
+    ("goal_ledger", 52),
     ("goal_updater", 96),
     // A receipt for everything the keeper did with a goal: `plan.updater.last_receipt`,
     // `receipts` on the keeper's runs, `clarp-goal receipts`.
@@ -230,6 +232,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("tts", 1),
     ("controller_narration", 8),
     ("controller_actions", 63),
+    ("remote_action", 1),
     ("tts_provider_google", 69),
     ("tts_google_id_guard", 70),
     // The clips of a reply, to play it again (`GET /clips/message`).
@@ -269,6 +272,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("herald", 1),
     // How the agents speak: the owner's personalities and the humanness of a spoken reply.
     ("personalities", 1),
+    ("agent_portraits", 1),
     ("voice_humanness", 46),
     // The router of spoken messages (`/orchestrator/*`).
     ("orchestrator", 1),
@@ -595,6 +599,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::past::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
+        .merge(crate::portrait_generation::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())
@@ -1187,6 +1192,7 @@ pub(crate) fn agent_row(
     families: &Families,
     member: &Member,
     faces: &crate::faces::Faces,
+    owners: &toml::Table,
     used_up: &crate::quota::UsedUp,
 ) -> Value {
     let view = member.agent.view();
@@ -1213,7 +1219,11 @@ pub(crate) fn agent_row(
     row["avatar_symbol"] = json!(record.avatar_symbol);
     row["model_avatar_url"] = json!(match &own {
         Some(_) => String::new(),
-        None => faces.on_model(&record.persona, view.backend, &record.model),
+        None => {
+            let field = format!("{}_model", view.backend);
+            let default = crate::owner::text_at(owners, &["agents", &field]).unwrap_or_default();
+            faces.on_model(&record.persona, view.backend, &record.model, &default)
+        }
     });
     row["avatar_url"] = json!(match own {
         Some(own) => own,
@@ -1230,7 +1240,10 @@ pub(crate) fn agent_row(
         .jobs
         .iter()
         .filter(|job| job.status.is_active())
-        .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none())
+        .filter(|job| {
+            !view.mirrored_provider(&job.id)
+                && wire::mirrored_helper(job, &helper_sessions).is_none()
+        })
         .map(|job| helpers::Process {
             title: job.title.clone(),
             progress: job.progress_text.clone(),
@@ -1270,12 +1283,13 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     let used_up = crate::quota::used_up(&app).await;
     // Which agents the user calls live: by their profiles, as they are now.
     let called_live = app.calls.taking(&app).await;
+    let owners = app.mouth.owners();
     let mut agents: Vec<Value> = directory
         .members
         .iter()
         .filter(|member| !(without_archived && put_away(member)))
         .map(|member| {
-            let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
+            let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
             if called_live.contains(&member.record.session) {
                 row["call_mode"] = json!(clarp_kernel::live_call::LIVE);
             }
@@ -1290,7 +1304,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         if without_archived && put_away(member) {
             continue;
         }
-        let mut row = agent_row(&directory, &families, member, &app.faces, &used_up);
+        let mut row = agent_row(&directory, &families, member, &app.faces, &owners, &used_up);
         let job = jobs.get(&member.record.agent_id).map_or("", String::as_str);
         row["avatar_url"] = json!(app.faces.janitor(clarp_kernel::janitors::portrait(job)));
         row["model_avatar_url"] = json!("");
@@ -1298,7 +1312,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
     }
     // Who an agent can be: the personas this Host has built in, with the voices the owner's
     // file gives them and the look the owner gave them, and the personas the owner made.
-    let [named, cartesia, gemini] = crate::owner::personas(&app.mouth.owners());
+    let [named, cartesia, gemini] = crate::owner::personas(&owners);
     let personas = directory.personas.listed(&clarp_kernel::personas::Owner {
         roster: &named,
         cartesia: &cartesia,
@@ -1355,7 +1369,7 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
         "roster": roster,
         "personas": personas,
         "available_mcp_servers": [],
-        "model_avatars": false,
+        "model_avatars": clarp_kernel::portraits::model_avatars(directory.setting(clarp_kernel::portraits::MODEL_SETTING)),
         // Nothing explains a tool's use here, and an app is told so wherever it asks: it
         // then shows the tool's own command on the row.
         "tool_explanations": apps::explanations_told(&app),
@@ -1665,7 +1679,14 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
         .map(|member| {
             // Whether its tool's account is used up is none of the fields of this answer.
             let (families, unasked) = (Families::of(&directory), crate::quota::UsedUp::new());
-            agent_row(&directory, &families, member, &app.faces, &unasked)
+            agent_row(
+                &directory,
+                &families,
+                member,
+                &app.faces,
+                &app.mouth.owners(),
+                &unasked,
+            )
         })
         .unwrap_or_default();
     // Three of them the Python Host answers as it stores them: a number, 0 or 1.
@@ -2013,9 +2034,8 @@ async fn log(
     let after = query.after_revision.filter(|revision| *revision > 0);
     let (page, replace) = if let Some(revision) = after {
         let page = member.agent.after(revision, limit, which).await?;
-        // A client that holds a revision this conversation never reached holds another
-        // conversation: it must drop what it has.
-        let replace = revision > page.head_revision || revision <= page.begins_after;
+        // A client that holds another conversation must drop what it has.
+        let replace = page.ended_for(revision);
         (page, replace)
     } else if let Some(id) = query.before {
         let older = member.agent.before(id, limit, which).await?;
@@ -2062,12 +2082,9 @@ async fn log(
     if let Some(answer) = answer.as_object_mut() {
         answer.extend(fields);
     }
-    // An answer to another agent says whom it answers, by the name that agent has today.
+    // The other agents a row names are named as the roster has them now.
     let directory = app.fleet.directory();
-    wire::reply_to(&mut answer, &|agent_id| {
-        let asked = directory.named(agent_id)?;
-        Some((asked.record.persona.clone(), asked.record.session.clone()))
-    });
+    wire::roster_names(&mut answer, &|agent_id| directory.shown_as(agent_id));
     Ok(Json(answer))
 }
 
@@ -2159,6 +2176,7 @@ async fn route_delegation(
 /// A message from an app: one that carries its call goes to the agent of the call that can
 /// take speech, whoever it names; then it is a message like any other.
 async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -> Response {
+    let voice = crate::voice_timeline::Sent::read(&request);
     let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
         .chars()
         .take(64)
@@ -2228,6 +2246,9 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
         }
         return match sent {
             Ok(answer) => {
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 let mut body = json!(answer);
                 body["opening"] = result["opening"].clone();
                 Json(body).into_response()
@@ -2287,13 +2308,21 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
                         let _ = desk.routed(app, to).await;
                     }
                 }
+                if let Some(voice) = &voice {
+                    voice.posted(app, &answer);
+                }
                 return (status, Json(answer)).into_response();
             }
             Err(refused) => return refused.into_response(),
         }
     }
     match send_message(app, request).await {
-        Ok(sent) => Json(sent).into_response(),
+        Ok(sent) => {
+            if let Some(voice) = &voice {
+                voice.posted(app, &sent);
+            }
+            Json(sent).into_response()
+        }
         Err(refused) => refused.into_response(),
     }
 }
@@ -2667,16 +2696,25 @@ async fn run_tool(State(app): State<App>, Json(call): Json<ToolCall>) -> Json<To
 }
 
 /// Every job the Host knows that is worth showing, with the agent it belongs to.
-async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job)>, ApiError> {
+async fn shown_jobs(
+    app: &App,
+    now: i64,
+) -> Result<Vec<(Option<Arc<Member>>, Job, bool)>, ApiError> {
     let directory = app.fleet.directory();
-    let mut jobs: Vec<(Option<Arc<Member>>, Job)> = directory
+    let mut jobs: Vec<(Option<Arc<Member>>, Job, bool)> = directory
         .members
         .iter()
         .flat_map(|member| {
             let view = member.agent.view();
             view.jobs
                 .iter()
-                .map(|job| (Some(member.clone()), job.clone()))
+                .map(|job| {
+                    (
+                        Some(member.clone()),
+                        job.clone(),
+                        view.mirrored_provider(&job.id),
+                    )
+                })
                 .collect::<Vec<_>>()
         })
         .collect();
@@ -2688,10 +2726,10 @@ async fn shown_jobs(app: &App, now: i64) -> Result<Vec<(Option<Arc<Member>>, Job
             .filter(|job| {
                 job.status.is_active() || job.updated_at_ms >= now - crate::agent::JOB_SHOWN_FOR_MS
             })
-            .map(|job| (None, job)),
+            .map(|job| (None, job, false)),
     );
     // What runs first, then what ended; within each, the last changed first.
-    jobs.sort_by_key(|(_, job)| {
+    jobs.sort_by_key(|(_, job, _)| {
         (
             job.status.is_terminal(),
             std::cmp::Reverse(job.updated_at_ms),
@@ -2705,11 +2743,12 @@ async fn background_jobs(State(app): State<App>) -> Result<Json<Value>, ApiError
     let now = app.clock.now_ms();
     let jobs = shown_jobs(&app, now).await?;
     let (active, ended): (Vec<_>, Vec<_>) =
-        jobs.iter().partition(|(_, job)| job.status.is_active());
+        jobs.iter().partition(|(_, job, _)| job.status.is_active());
     let listed: Vec<Value> = active
         .iter()
         .chain(ended.iter().take(100))
-        .map(|(member, job)| project_job(member.as_deref(), &app.server_id, job, now))
+        .filter(|(_, _, hidden)| !hidden)
+        .map(|(member, job, _)| project_job(member.as_deref(), &app.server_id, job, now))
         .collect();
     Ok(Json(json!({
         "jobs": listed,
@@ -2738,12 +2777,8 @@ async fn job_and_owner(app: &App, job_id: &str) -> Result<Option<(Arc<Member>, J
     else {
         return Ok(None);
     };
-    let view = member.agent.view();
-    Ok(view
-        .jobs
-        .iter()
-        .find(|job| job.id == job_id)
-        .map(|job| (member.clone(), job.clone())))
+    let job = member.agent.job_record(job_id.to_owned()).await?;
+    Ok(job.map(|job| (member.clone(), job)))
 }
 
 /// `GET /background-jobs/<id>`: one job with its timeline, its progress and the end of its log.
@@ -2773,6 +2808,8 @@ async fn background_job(
     );
     let log = if limited {
         joblog::forbidden()
+    } else if job.provider_owned() {
+        joblog::provider_output(&job.metadata)
     } else {
         let roots = joblog::roots(&job.worker_cwd, owner.map_or("", |r| &r.cwd));
         joblog::tail(&job.log_path, &roots, joblog::TAIL_BYTES)
@@ -2839,7 +2876,24 @@ async fn cancel_background_job(
         let refused = json!({ "ok": false, "error": "invalid expected_generation" });
         return Ok((StatusCode::BAD_REQUEST, Json(refused)).into_response());
     };
-    let member = job_and_owner(&app, &job_id).await?.map(|(m, _)| m);
+    let owned = job_and_owner(&app, &job_id).await?;
+    if let Some((member, current)) = &owned
+        && current.provider_owned()
+    {
+        let job = wire::job(&member.record, current, app.clock.now_ms());
+        let (status, mut receipt) = clarp_kernel::provider_tasks::cancel_refusal(&job);
+        if let Some(wanted) = expected.filter(|generation| *generation != current.generation) {
+            receipt["error"] = json!("generation_mismatch");
+            receipt["expected_generation"] = json!(wanted);
+            receipt["current_generation"] = json!(current.generation);
+        }
+        return Ok((
+            StatusCode::from_u16(status).unwrap_or(StatusCode::CONFLICT),
+            Json(receipt),
+        )
+            .into_response());
+    }
+    let member = owned.map(|(m, _)| m);
     let command = JobCommand::Cancel {
         id: job_id.clone(),
         expected_generation: expected,
@@ -2855,7 +2909,7 @@ async fn cancel_background_job(
             if app.fleet.computer_job(job_id).await?.is_none() {
                 return Err(ApiError::new(StatusCode::NOT_FOUND, "job not found"));
             }
-            app.ears.installs.cancel(&app.fleet, command).await?
+            app.ears.installs.cancel(&app, command).await?
         }
     };
     let Some(job) = change.job else {

@@ -70,7 +70,11 @@ fn roster(directory: &Directory) -> Vec<Candidate> {
         let mut jobs: Vec<_> = view
             .jobs
             .iter()
-            .filter(|j| j.status.is_active() && wire::mirrored_helper(j, &names).is_none())
+            .filter(|j| {
+                j.status.is_active()
+                    && !view.mirrored_provider(&j.id)
+                    && wire::mirrored_helper(j, &names).is_none()
+            })
             .collect();
         jobs.sort_by_key(|j| j.started_at_ms);
         let processes: Vec<_> = jobs
@@ -446,7 +450,14 @@ async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
                 ),
             ))
         })
-        .await?;
+        .await;
+    let owner = match owner {
+        Ok(owner) => owner,
+        Err(why) => {
+            app.fleet.unread(ROLE, &why.0);
+            return Ok(now + 15_000);
+        }
+    };
     when_enabled(owner, |owner| active_pass(app, now, owner)).await
 }
 

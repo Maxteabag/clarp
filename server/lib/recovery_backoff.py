@@ -17,6 +17,9 @@ from dataclasses import dataclass, replace
 BASE_S = 1.0
 MAX_S = 60.0
 PARK_AFTER = 8
+# A launch refused before anything was sent ends its row after PARK_AFTER identical refusals in
+# a row, or after this many refusals of any kinds for that row, whichever comes first (R121).
+REFUSED_IN_ALL = 20
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
@@ -25,6 +28,7 @@ class Backoff:
     queue_id: str
     failures: int = 0
     identical: int = 0
+    refusals: int = 0       # of these failures, launches a backend refused before sending
     signature: str = ""
     error: str = ""
     retry_at: float = 0.0
@@ -73,14 +77,17 @@ class RecoveryBackoff:
             return None
 
     def failed(self, agent_id: str, queue_id: str, error: BaseException,
-               now: float) -> Backoff:
-        """Record one failed launch; return the new state (a copy)."""
+               now: float, *, refused: bool = False) -> Backoff:
+        """Record one failed launch (``refused``: a backend refused it before sending anything);
+        return the new state (a copy). The counts are the head row's and this process's: a
+        different head row, or a restart, starts them at nought."""
         sig = signature(error)
         with self._lock:
             state = self._by_agent.get(agent_id)
             if state is None or state.queue_id != queue_id:
                 state = self._by_agent[agent_id] = Backoff(queue_id=queue_id)
             state.failures += 1
+            state.refusals += 1 if refused else 0
             state.identical = state.identical + 1 if sig == state.signature else 1
             state.signature = sig
             state.error = _brief(str(error))

@@ -456,7 +456,7 @@ async fn create_form(app: &App, call: &ToolCall, rest: &[String]) -> Result<Valu
         return Ok(json!({ "method": "POST", "path": "/artifacts", "body": body }));
     }
     let asked = body.as_object().cloned().unwrap_or_default();
-    library::create(app, &asked)
+    library::create(app, &asked, turn(call))
         .await
         .map_err(|error| refusal(&error))
 }
@@ -501,7 +501,7 @@ async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Va
         return Ok(json!({ "method": "POST", "path": "/artifacts", "body": body }));
     }
     let asked = |body: &Value| body.as_object().cloned().unwrap_or_default();
-    let taken = match library::create(app, &asked(&body)).await {
+    let taken = match library::create(app, &asked(&body), turn(call)).await {
         Ok(made) => return Ok(made),
         Err(error) if error.status() == StatusCode::CONFLICT => error,
         Err(error) => return Err(refusal(&error)),
@@ -519,7 +519,7 @@ async fn create_report(app: &App, call: &ToolCall, rest: &[String]) -> Result<Va
         return Err(refusal(&taken));
     }
     body["expected_version"] = current["version"].clone();
-    library::create(app, &asked(&body))
+    library::create(app, &asked(&body), turn(call))
         .await
         .map_err(|error| refusal(&error))
 }
@@ -552,6 +552,14 @@ async fn report_history(app: &App, rest: &[String]) -> Result<Value, String> {
     .map_err(|error| refusal(&error))
 }
 
+/// The token of the turn a call of the tool runs in (`CLARP_PROVIDER_TURN`), which it presents
+/// with what it publishes, as the Python Host's tool sends it (`X-Clarp-Turn`).
+fn turn(call: &ToolCall) -> Option<&str> {
+    call.env
+        .get(crate::turn_identity::TURN_ENV)
+        .map(String::as_str)
+}
+
 /// `publish-render-spec REQUEST_FILE [--validate-only]`: a whole request to publish a render
 /// spec, as the agent wrote it, is sent as its bytes, so that the Host's validator is the
 /// only one: a key written twice or a number's spelling is judged there. A refusal is
@@ -568,7 +576,7 @@ async fn publish_render_spec(app: &App, call: &ToolCall, rest: &[String]) -> Too
         Err(error) => return failed(unread(&error, file)),
     };
     let validate_only = parsed.flags.contains("--validate-only");
-    match library::posted(app, &bytes, validate_only, false).await {
+    match library::posted(app, &bytes, validate_only, false, turn(call)).await {
         Ok((_, answer)) => ToolAnswer::printed(0, answer.to_string()),
         Err(error) => {
             let told = matches!(error.status().as_u16(), 400 | 403 | 409);
@@ -697,7 +705,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                         "summary": rest.get(3).map_or("", String::as_str), "payload": payload,
                     });
                     let body = body.as_object().cloned().unwrap_or_default();
-                    library::create(app, &body)
+                    library::create(app, &body, turn(call))
                         .await
                         .map_err(|error| refusal(&error))
                 }

@@ -48,6 +48,7 @@ struct Intent {
 }
 
 enum RollbackError {
+    Refused(String),
     Store(crate::agent::Unavailable),
     Entry(std::io::Error),
 }
@@ -67,6 +68,7 @@ impl From<std::io::Error> for RollbackError {
 impl From<RollbackError> for ApiError {
     fn from(e: RollbackError) -> Self {
         match e {
+            RollbackError::Refused(why) => ApiError::new(StatusCode::BAD_REQUEST, why),
             RollbackError::Store(e) => e.into(),
             RollbackError::Entry(e) => error(e),
         }
@@ -90,13 +92,17 @@ impl Desk {
 
     /// An interrupted transfer cannot launch itself. Move a renamed but uncommitted
     /// inode back into staging before ever allowing a new generation to adopt it.
-    pub(super) async fn recover(&self, fleet: &FleetHandle) -> Result<(), ApiError> {
+    pub(super) async fn recover(
+        &self,
+        fleet: &FleetHandle,
+        inventory: &super::inventory::Inventory,
+    ) -> Result<(), ApiError> {
         for model in models::CATALOG.iter().filter(|m| m.source.is_some()) {
             let id = model.id();
             let job = fleet.computer_job(job_id(&id)).await?.map(|r| r.job);
             let rollback = match self.rollback(fleet, &id, job.as_ref()).await {
                 Ok(()) => true,
-                Err(RollbackError::Entry(_)) => false,
+                Err(RollbackError::Entry(_) | RollbackError::Refused(_)) => false,
                 Err(RollbackError::Store(e)) => return Err(e.into()),
             };
             if let Some(job) = job.as_ref().filter(|j| j.status.is_active()) {
@@ -109,6 +115,16 @@ impl Desk {
             }
             if !rollback {
                 eprintln!("clarp-host: a pending model publication could not be reconciled");
+                continue;
+            }
+            if let Some(cancelled) = job.as_ref().filter(|j| j.status == JobStatus::Cancelled) {
+                if self
+                    .cancelled_files(fleet, inventory, &id, cancelled)
+                    .await
+                    .is_err()
+                {
+                    eprintln!("clarp-host: pending model cancellation could not finish");
+                }
                 continue;
             }
             if let Err(e) = self.prune_stage(&id, job.as_ref().map(|j| j.status)) {
@@ -148,7 +164,9 @@ impl Desk {
         for model in models::CATALOG.iter().filter(|m| m.source.is_some()) {
             let id = model.id();
             let status = fleet.computer_job(job_id(&id)).await?.map(|r| r.job.status);
-            self.prune_stage(&id, status).map_err(error)?;
+            if status.is_none() {
+                self.prune_stage(&id, status).map_err(error)?;
+            }
         }
         Ok(())
     }
@@ -178,6 +196,7 @@ impl Desk {
                 std::io::Error::other("model publication belongs to another generation").into(),
             );
         }
+        super::managed::ManagedFolder::checked(&self.root, id).map_err(RollbackError::Refused)?;
         Folders::open(&self.root, id, false)?.undo_publish(intent.device, intent.inode)?;
         fleet.keep(INTENTS, id.into(), None).await?;
         Ok(())
@@ -284,12 +303,42 @@ impl Desk {
         Ok(answer)
     }
 
+    async fn cancelled_files(
+        &self,
+        fleet: &FleetHandle,
+        inventory: &super::inventory::Inventory,
+        id: &str,
+        job: &Job,
+    ) -> Result<(), ApiError> {
+        self.check_stage_for_removal(id)?;
+        // Inventory and the job's success publish in one transaction. Without an
+        // inventory record only the directory this id gives may be cleaned up.
+        if let Some(record) = inventory.records().iter().find(|r| r["id"] == id) {
+            if record["_install_generation"]
+                .as_u64()
+                .is_some_and(|gen_id| gen_id != job.generation)
+            {
+                return Ok(());
+            }
+            inventory.remove(fleet, &self.root, id, true).await?;
+        } else if let Some(folder) = super::managed::ManagedFolder::checked(&self.root, id)
+            .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?
+        {
+            tokio::task::spawn_blocking(move || folder.remove())
+                .await
+                .map_err(error)?
+                .map_err(error)?;
+        }
+        self.clean_stage(id)
+    }
+
     /// Serialize a cancellation with publication. A stale receipt cannot stop another run.
     pub(crate) async fn cancel(
         &self,
-        fleet: &FleetHandle,
+        app: &App,
         command: JobCommand,
     ) -> Result<clarp_kernel::jobs::JobChange, ApiError> {
+        let fleet = &app.fleet;
         let mut running = self.running.lock().await;
         let change = fleet
             .change_computer_job(command)
@@ -310,7 +359,9 @@ impl Desk {
                 r.run.cancel().map_err(error)?;
             }
             self.rollback(fleet, id, Some(job)).await?;
-            self.clean_stage(id)?;
+            let _selected = app.ears.variants.exclusive().await;
+            self.cancelled_files(fleet, &app.ears.inventory, id, job)
+                .await?;
         }
         Ok(change)
     }
@@ -331,19 +382,40 @@ impl Desk {
                 "cannot remove the configured server default; choose another default or disable server transcription first",
             ));
         }
+        self.check_stage_for_removal(id)?;
         let prior = app.fleet.computer_job(job_id(id)).await?;
         self.rollback(&app.fleet, id, prior.as_ref().map(|r| &r.job))
             .await?;
         let mut selected = app.ears.variants.exclusive().await;
         app.ears
             .inventory
-            .remove(&app.fleet, &self.root, id)
+            .remove(&app.fleet, &self.root, id, false)
             .await?;
         self.clean_stage(id)?;
         if selected.as_ref().is_some_and(|(loaded, _)| loaded == id) {
             selected.take();
         }
         Ok(())
+    }
+
+    fn check_stage_for_removal(&self, id: &str) -> Result<(), ApiError> {
+        if models::install_model(id).is_err() {
+            return Ok(());
+        }
+        match Folders::open(&self.root, id, false).and_then(|folders| folders.staging(false)) {
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e)
+                if e.raw_os_error()
+                    .is_some_and(|n| n == nix::libc::ELOOP || n == nix::libc::ENOTDIR) =>
+            {
+                Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    super::managed::refused(id, "link"),
+                ))
+            }
+            Err(e) => Err(error(e)),
+        }
     }
 
     pub(super) fn clean_stage(&self, id: &str) -> Result<(), ApiError> {

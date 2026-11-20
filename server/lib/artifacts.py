@@ -241,17 +241,22 @@ def _sanitize_json(value: Any) -> Any:
 
 def create(*, session: str, type: str, title: str, summary: str = "",
            status: str = "ready", reference_id: str = "", payload: Any = None,
-           artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False) -> dict:
+           artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False,
+           source_trace_id: str = "") -> dict:
+    """``source_trace_id``: the trace of the publishing agent's running turn, as the route
+    proved it (R102); set on a new artifact only, never changed by a later revision."""
     if type.strip().lower() in {"decision", "question", "plan"}:
         raise ValueError(f"{type} must use its dedicated lifecycle endpoint")
     return _create(session=session, type=type, title=title, summary=summary,
                    status=status, reference_id=reference_id, payload=payload,
-                   artifact_id=artifact_id, expected_version=expected_version, validate_only=validate_only)
+                   artifact_id=artifact_id, expected_version=expected_version, validate_only=validate_only,
+                   source_trace_id=source_trace_id)
 
 
 def _create(*, session: str, type: str, title: str, summary: str = "",
             status: str = "ready", reference_id: str = "", payload: Any = None,
-            artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False) -> dict:
+            artifact_id: str = "", expected_version: str | None = None, validate_only: bool = False,
+            source_trace_id: str = "") -> dict:
     type, status = type.strip().lower(), status.strip().lower()
     title = strip_hidden_blocks(title).strip()
     if type == "render_spec":
@@ -267,7 +272,8 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
         if ident and not _VALID_ID.fullmatch(ident):
             raise render_spec.Refusal("element_id", "/artifact_id")
         return render_spec_store.publish(agent, ident, title, summary, status, reference_id,
-                                         payload, expected_version, validate_only=validate_only)
+                                         payload, expected_version, validate_only=validate_only,
+                                         source_trace_id=source_trace_id)
     agent = _agent(session)
     if type not in TYPES: raise ValueError("unsupported artifact type")
     if status not in STATUSES: raise ValueError("unsupported artifact status")
@@ -283,21 +289,24 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
     _require_payload(type, payload, artifact_id, str(agent["session"]))
     if type == "html_form" and payload.get("read_only") is True:
         from . import html_report_revisions
-        return html_report_revisions.publish(agent, artifact_id, title, summary, status, reference_id, payload, expected_version)
-    return _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload)
+        return html_report_revisions.publish(agent, artifact_id, title, summary, status, reference_id, payload,
+                                             expected_version, source_trace_id=source_trace_id)
+    return _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload,
+                            source_trace_id=source_trace_id)
 
 
-def _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload):
+def _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload, *,
+                     source_trace_id: str = ""):
     now = db.now_ms()
     db.conn().execute(
         """INSERT INTO artifacts(artifact_id,agent_id,session,type,title,summary,
-               status,reference_id,payload_json,created_at,updated_at,completed_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+               status,reference_id,payload_json,created_at,updated_at,completed_at,source_trace_id)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (artifact_id, agent["agent_id"], agent["session"], type, title[:300],
          strip_hidden_blocks(summary).strip()[:4000], status,
          strip_hidden_blocks(reference_id).strip()[:500],
          json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
-         now, now, now if status in {"completed", "cancelled", "expired"} else None))
+         now, now, now if status in {"completed", "cancelled", "expired"} else None, str(source_trace_id or "")))
     return get(artifact_id) or {}
 
 

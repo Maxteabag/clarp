@@ -475,6 +475,8 @@ install -m 644 "$here/tools/whisper-worker.py" "$share/libexec/.whisper-worker.p
 mv -f "$share/libexec/.whisper-worker.py.new" "$share/libexec/whisper-worker.py"
 install -m 644 "$here/tools/transcription-download.py" "$share/libexec/.transcription-download.py.new"
 mv -f "$share/libexec/.transcription-download.py.new" "$share/libexec/transcription-download.py"
+install -m 644 "$here/tools/voice-metrics.py" "$share/libexec/.voice-metrics.py.new"
+mv -f "$share/libexec/.voice-metrics.py.new" "$share/libexec/voice-metrics.py"
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 

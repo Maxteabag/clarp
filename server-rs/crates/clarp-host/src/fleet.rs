@@ -39,6 +39,7 @@ use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
 mod computer_jobs;
+pub(crate) mod portrait_jobs;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
 
@@ -301,6 +302,10 @@ pub struct Directory {
     pub settings: Arc<BTreeMap<String, String>>,
     /// The personas the owner made, and how he made built-in ones look.
     pub personas: Arc<Book>,
+    /// The agents that were removed, by id: the name and the session each had last. A row an
+    /// agent wrote, or that answers one, still names it by them, as the Python Host's roster
+    /// keeps a removed agent's row.
+    pub gone: Arc<BTreeMap<String, (String, String)>>,
 }
 
 /// The contact a launch asked for in place of a name of its own: always a minted one
@@ -393,6 +398,20 @@ impl Directory {
     /// The agent or the janitor a request names: for what is read of either.
     pub fn anyone(&self, key: &str) -> Option<&Arc<Member>> {
         self.named(key).or_else(|| self.janitor(key))
+    }
+
+    /// The name and the session of the agent of this id as the roster has them now, also of
+    /// one that was removed: what a row that names another agent shows of it when it is read.
+    /// By its id alone, as the Python Host joins its roster.
+    pub fn shown_as(&self, agent_id: &str) -> Option<(String, String)> {
+        let member = self.members.iter().chain(&self.janitors);
+        match member
+            .into_iter()
+            .find(|member| member.record.agent_id == agent_id)
+        {
+            Some(member) => Some((member.record.persona.clone(), member.record.session.clone())),
+            None => self.gone.get(agent_id).cloned(),
+        }
     }
 
     /// The device that presents this token, when it is paired and not revoked.
@@ -493,6 +512,11 @@ pub struct Works {
 }
 
 enum Ask {
+    AppendVoice {
+        rows: Vec<serde_json::Value>,
+        answer: Option<Answer<usize>>,
+    },
+
     DelegationMismatch(delegations::Mismatch),
     GoalDelegation {
         request: delegations::Request,
@@ -688,6 +712,21 @@ enum Ask {
         picture: Vec<u8>,
         answer: Answer<Option<String>>,
     },
+    PortraitStatus {
+        id: String,
+        answer: Answer<(Option<ComputerJob>, u32)>,
+    },
+    BeginPortraits {
+        agent: String,
+        answer: Answer<portrait_jobs::Admission>,
+    },
+    AcceptPortraits {
+        id: String,
+        generation: u64,
+        publication: Box<portrait_jobs::Publication>,
+        bytes: [Vec<u8>; 2],
+        answer: Answer<bool>,
+    },
     /// The owner removes a persona of his own. Answers whether there was one to remove.
     PersonaRemove {
         name: String,
@@ -705,6 +744,27 @@ pub struct FleetHandle {
 }
 
 impl FleetHandle {
+    pub async fn append_voice(&self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        self.ask(|answer| Ask::AppendVoice {
+            rows,
+            answer: Some(answer),
+        })
+        .await
+    }
+
+    pub fn record_voice(&self, row: serde_json::Value) {
+        if self
+            .tx
+            .send(Ask::AppendVoice {
+                rows: vec![row],
+                answer: None,
+            })
+            .is_err()
+        {
+            self.unkept("voice-events", "the fleet is closed");
+        }
+    }
+
     /// The fleet as it is now.
     pub fn directory(&self) -> Arc<Directory> {
         self.directory.borrow().clone()
@@ -1051,6 +1111,36 @@ impl FleetHandle {
         .await
     }
 
+    pub(crate) async fn portrait_status(
+        &self,
+        id: String,
+    ) -> Result<(Option<ComputerJob>, u32), Unavailable> {
+        self.ask(|answer| Ask::PortraitStatus { id, answer }).await
+    }
+    pub(crate) async fn begin_portraits(
+        &self,
+        agent: String,
+    ) -> Result<portrait_jobs::Admission, Unavailable> {
+        self.ask(|answer| Ask::BeginPortraits { agent, answer })
+            .await
+    }
+    pub(crate) async fn accept_portraits(
+        &self,
+        id: String,
+        generation: u64,
+        publication: portrait_jobs::Publication,
+        bytes: [Vec<u8>; 2],
+    ) -> Result<bool, Unavailable> {
+        self.ask(|answer| Ask::AcceptPortraits {
+            id,
+            generation,
+            publication: Box::new(publication),
+            bytes,
+            answer,
+        })
+        .await
+    }
+
     /// Removes a persona the owner made. Answers whether there was one of that name.
     pub async fn persona_remove(&self, name: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::PersonaRemove { name, answer }).await
@@ -1084,6 +1174,10 @@ impl FleetHandle {
     /// record and the store's words, never by what was to be written.
     pub fn unkept(&self, kind: &str, why: &str) {
         self.log.unkept(kind, why);
+    }
+
+    pub fn unread(&self, kind: &str, why: &str) {
+        self.log.unread(kind, why);
     }
 
     /// Keeps as [`Self::keep`] does, for a caller that waits on nothing: a failure is said.
@@ -1257,6 +1351,8 @@ struct Fleet {
     works: Works,
     store: Box<dyn KeyValue>,
     members: Vec<Arc<Member>>,
+    /// The agents that were removed, by id: their name and session as last kept.
+    gone: BTreeMap<String, (String, String)>,
     focus: Option<String>,
     /// The devices that may speak, by the digest of their token.
     devices: HashMap<String, Arc<Device>>,
@@ -1296,6 +1392,15 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
             .tool_env
             .iter()
             .cloned()
+            .chain(std::iter::once((
+                "CLARP_DELEGATION_DIR".into(),
+                works
+                    .config
+                    .data_dir
+                    .join("delegations")
+                    .to_string_lossy()
+                    .into_owned(),
+            )))
             .chain(std::iter::once((
                 "CLARP_SESSION".into(),
                 record.session.clone(),
@@ -1378,6 +1483,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     let tx = Arc::new(tx);
     let delegation_desk = delegations::Desk::open(&works, store.as_mut(), &tx)?;
     let mut members = Vec::new();
+    let mut gone = BTreeMap::new();
     for (agent_id, stored) in store.list(AGENTS).map_err(|error| error.to_string())? {
         let mut record: AgentRecord = serde_json::from_slice(&stored).map_err(|error| {
             format!("the fleet's entry for agent {agent_id} cannot be read: {error}")
@@ -1385,6 +1491,10 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
+            gone.insert(
+                record.agent_id.clone(),
+                (record.persona.clone(), record.session.clone()),
+            );
             if !record.ledger_retired {
                 retire_goals(&works, &record, at)?;
                 record.ledger_retired = true;
@@ -1474,6 +1584,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         peers: Arc::new(peers.clone()),
         settings: Arc::new(settings.clone()),
         personas: book.clone(),
+        gone: Arc::new(gone.clone()),
     }));
     let log = works.log.clone();
     let delegation_view = delegation_desk.for_worker();
@@ -1484,6 +1595,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         works,
         store,
         members,
+        gone,
         focus,
         devices,
         jobs,
@@ -1669,13 +1781,7 @@ impl Fleet {
                         owner = self
                             .members
                             .iter()
-                            .find(|m| {
-                                m.agent
-                                    .view()
-                                    .jobs
-                                    .iter()
-                                    .any(|j| j.provider_owned() && j.id == job_id)
-                            })
+                            .find(|m| m.agent.view().provider_mirrors.contains_key(&job_id))
                             .map(|m| m.record.agent_id.clone());
                         if let Some(id) = &owner {
                             self.jobs.insert(job_id, id.clone());
@@ -1727,6 +1833,22 @@ impl Fleet {
                 } => {
                     let _ = answer.send(self.picture_made(&persona_id, &picture));
                 }
+                Ask::PortraitStatus { id, answer } => {
+                    let _ = answer.send(Ok((self.computer_jobs.get(&id), self.portrait_count())));
+                }
+                Ask::BeginPortraits { agent, answer } => {
+                    let _ = answer.send(self.begin_portraits(&agent));
+                }
+                Ask::AcceptPortraits {
+                    id,
+                    generation,
+                    publication,
+                    bytes,
+                    answer,
+                } => {
+                    let _ =
+                        answer.send(self.accept_portraits(&id, generation, &publication, bytes));
+                }
                 Ask::PersonaRemove { name, answer } => {
                     let _ = answer.send(self.persona_remove(&name));
                 }
@@ -1740,6 +1862,14 @@ impl Fleet {
                     answer,
                 } => {
                     let _ = answer.send(Ok(self.keep(kind, &key, value)));
+                }
+                Ask::AppendVoice { rows, answer } => {
+                    let result = self.append_voice(rows);
+                    if let Some(answer) = answer {
+                        let _ = answer.send(result);
+                    } else if let Err(error) = result {
+                        self.works.log.unkept("voice-events", &error.0);
+                    }
                 }
                 Ask::KeepTogether { writes, answer } => {
                     let result = self
@@ -1806,6 +1936,44 @@ impl Fleet {
         }
     }
 
+    fn append_voice(&mut self, rows: Vec<serde_json::Value>) -> Result<usize, Unavailable> {
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        // The high-water mark is committed with the batch. A failed write consumes no IDs,
+        // and a restart never reads the owner's transcripts just to discover the next one.
+        let cursor = shelf("voice-event-sequence");
+        let table = shelf("voice-events");
+        let stored = self
+            .store
+            .get(&cursor, "last")
+            .map_err(|e| Unavailable(e.to_string()))?;
+        let mut last = match stored {
+            None => 0,
+            Some(bytes) => u64::from_be_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|_| Unavailable("invalid voice event sequence".into()))?,
+            ),
+        };
+        let count = rows.len();
+        let mut writes = Vec::with_capacity(count + 1);
+        for mut row in rows {
+            last = last
+                .checked_add(1)
+                .ok_or_else(|| Unavailable("voice event sequence exhausted".into()))?;
+            row["event_id"] = serde_json::json!(last);
+            let bytes = serde_json::to_vec(&row)
+                .map_err(|_| Unavailable("cannot encode voice event".into()))?;
+            writes.push((table.clone(), format!("{last:020}"), Some(bytes)));
+        }
+        writes.push((cursor, "last".into(), Some(last.to_be_bytes().to_vec())));
+        self.store
+            .put_together(&writes)
+            .map_err(|e| Unavailable(e.to_string()))?;
+        Ok(count)
+    }
+
     fn now_ms(&self) -> i64 {
         self.works.clock.now_ms()
     }
@@ -1826,6 +1994,7 @@ impl Fleet {
             peers: Arc::new(self.peers.clone()),
             settings,
             personas: self.book.clone(),
+            gone: Arc::new(self.gone.clone()),
         }));
     }
 
@@ -2915,7 +3084,10 @@ pub fn doing(members: &[Arc<Member>], member: &Member) -> helpers::Doing {
             .jobs
             .iter()
             .filter(|job| job.status.is_active())
-            .filter(|job| wire::mirrored_helper(job, &helper_sessions).is_none());
+            .filter(|job| {
+                !view.mirrored_provider(&job.id)
+                    && wire::mirrored_helper(job, &helper_sessions).is_none()
+            });
         let last_job = view.jobs.iter().map(|job| job.updated_at_ms).max();
         let last_turn = view.status.last.as_ref().map(|last| last.ended_at_ms);
         helpers::Doing {
@@ -3006,6 +3178,7 @@ impl Fleet {
         record.deleted_at_ms = None;
         let setup = setup(&self.works, &self.delegation_desk, &record)?;
         self.put(&record)?;
+        self.gone.remove(&record.agent_id);
         let member = Arc::new(Member {
             record: record.clone(),
             agent: agent::spawn(setup),
@@ -3107,6 +3280,10 @@ impl Fleet {
         let mut record = self.members[at].record.clone();
         record.deleted_at_ms = Some(self.now_ms());
         self.stop_for_roster(&record, "agent deleted")?;
+        self.gone.insert(
+            record.agent_id.clone(),
+            (record.persona.clone(), record.session.clone()),
+        );
         let member = self.members.remove(at);
         member.agent.close();
         let retired = retire_goals(

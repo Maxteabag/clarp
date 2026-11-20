@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
+#[path = "host/agent_portraits.rs"]
+mod agent_portraits;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -25,6 +27,10 @@ mod delivery;
 mod diagnostics;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
+#[path = "host/harness.rs"]
+mod harness;
+#[path = "host/import_render_specs.rs"]
+mod import_render_specs;
 #[path = "host/installer.rs"]
 mod installer;
 #[path = "host/janitor_attention.rs"]
@@ -37,10 +43,18 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/remote_action.rs"]
+mod remote_action;
+#[path = "host/source_trace.rs"]
+mod source_trace;
+#[path = "host/stand_ins.rs"]
+mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
 mod transcription_inventory;
+#[path = "host/voice_timeline.rs"]
+mod voice_timeline;
 
 /// This file holds no more tests than it held when the pieces were given files of their own
 /// (172 `#[test]`, 2 `#[tokio::test]`, and this one): two pieces that both add tests at its
@@ -61,6 +75,51 @@ fn this_file_holds_no_more_tests_than_it_held_when_each_piece_was_given_a_file()
 }
 
 static HOSTS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// Every Host the test on this thread started, by the line it said it listens with, and
+    /// what it has said since, while it lives: what a wait that times out shows.
+    static STARTED: std::cell::RefCell<Vec<(String, std::sync::Weak<Mutex<String>>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The last lines each Host of this test still living has said, each cut to a length that can
+/// be read: nothing when there is none. A Host whose shim is not beside it starts no turn and
+/// says so only to the turn: that is said here too.
+fn what_the_hosts_said() -> String {
+    const LINES: usize = 40;
+    const LONGEST: usize = 300;
+    STARTED.with(|started| {
+        let mut told = String::new();
+        let shim =
+            std::path::Path::new(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
+        if !started.borrow().is_empty() && !shim.exists() {
+            told.push_str(
+                "\n--- no clarp-shim beside the Host under test: no turn of its can start (a test \
+                 run named by package builds no other binary: build -p clarp-shim first)",
+            );
+        }
+        for (start, heard) in started.borrow().iter() {
+            let Some(heard) = heard.upgrade() else {
+                continue;
+            };
+            let heard = heard.lock().unwrap().clone();
+            let lines: Vec<&str> = heard.lines().collect();
+            let last = &lines[lines.len().saturating_sub(LINES)..];
+            told.push_str(&format!(
+                "\n--- the Host that said \"{start}\", its last {} of {} lines:",
+                last.len(),
+                lines.len()
+            ));
+            for line in last {
+                let cut: String = line.chars().take(LONGEST).collect();
+                let more = if cut.len() < line.len() { " [...]" } else { "" };
+                told.push_str(&format!("\n    {cut}{more}"));
+            }
+        }
+        told
+    })
+}
 
 /// A command of the Host's own program that is to end by itself: what it said and how it
 /// ended. One that does not end is ended, and that is a failure: a Host that starts where it
@@ -185,6 +244,8 @@ impl Place {
             startup.push_str(&line);
         };
         let heard = Arc::new(Mutex::new(startup));
+        let start = format!("clarp-host listens on {address}");
+        STARTED.with(|started| started.borrow_mut().push((start, Arc::downgrade(&heard))));
         let keeping = heard.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -381,10 +442,18 @@ const TOOLS: [&str; 7] = [
     "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
 ];
 
-fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+fn wait_for(what: &str, ready: impl FnMut() -> bool) {
+    wait_within(what, Duration::from_secs(30), ready);
+}
+
+/// The same, for as long as is given. When it gives up, it says what every Host the test
+/// started and that still lives last said.
+fn wait_within(what: &str, most: Duration, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + most;
     while !ready() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {what}{}", what_the_hosts_said());
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -413,7 +482,7 @@ fn a_message_is_answered_and_the_apps_are_told() {
     let place = Place::new("answer");
     let host = place.start();
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 104);
+    assert_eq!(info["contract"]["host"], 106);
     assert!(info["server_id"].as_str().is_some_and(|id| id.len() == 36));
 
     let session = host.new_agent("Echo");
@@ -5086,6 +5155,23 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         (&json!("agent"), &json!(asker), &json!("Asker"))
     );
     assert_eq!(rows[1]["origin"], "agent");
+    // The writer is named as the roster has it when the row is read: renamed, the row says the
+    // new name, and its revision does not move (a follower learns of it from the roster).
+    let revision = rows[0]["revision"].clone();
+    let renamed = host.post(
+        "/agent-rename",
+        json!({ "session": asker, "name": "Asker Renamed" }),
+    );
+    assert_eq!(renamed["name"], "Asker Renamed", "{renamed}");
+    let rows = host.turns(&worker);
+    assert_eq!(
+        (
+            &rows[0]["sender_name"],
+            &rows[0]["sender_session"],
+            &rows[0]["revision"]
+        ),
+        (&json!("Asker Renamed"), &json!(asker), &revision)
+    );
     // What agents say to each other tells the user nothing, and the agent the user has
     // open stays the one it was.
     assert!(
@@ -5241,6 +5327,21 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
         admin(&["prompt", "--server", "work", "--to", &remote, "--text", "x"]).0,
         1
     );
+    // Removed, the writer is named as it was last, as the Python Host's roster keeps it; and
+    // so after the Host was started again.
+    assert_eq!(host.ask("DELETE", &format!("/agents/{asker}"), None).0, 200);
+    let named = |host: &Host| {
+        let rows = host.turns(&worker);
+        (
+            rows[0]["sender_name"].clone(),
+            rows[0]["sender_session"].clone(),
+        )
+    };
+    let last = (json!("Asker Renamed"), json!(asker));
+    assert_eq!(named(&host), last);
+    host.kill();
+    let host = place.start();
+    assert_eq!(named(&host), last);
 }
 
 #[test]
@@ -8794,7 +8895,7 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     // The contract this Host speaks, and the feature.
     let info = host.get("/server-info");
-    assert_eq!(info["contract"]["host"], 104);
+    assert_eq!(info["contract"]["host"], 106);
     assert_eq!(info["contract"]["features"]["render_spec"], 102);
 
     // What the envelope says is read as the reference reads it: without its blanks and its
@@ -18001,7 +18102,7 @@ fn the_host_accepts_full_voice_batches_and_large_artifact_bodies() {
     assert_eq!(response.status, 200);
     let ack: Value = serde_json::from_slice(&response.body).unwrap();
     assert_eq!(ack["ok"], true);
-    assert_eq!(ack["stored"], 0);
+    assert_eq!(ack["stored"], 500);
     drop(bytes);
     let too_many = post(
         "/voice-events",
@@ -21285,7 +21386,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }
 
     // An app's record of what its microphone and player did: taken, read as the Python Host
-    // reads it, and not kept on this Host yet.
+    // reads it, and kept on the corrected timeline.
     let report = |said: Value| host.ask("POST", "/voice-events", Some(&said));
     let (status, told) = report(json!({
         "source": "ios", "sent_at": now_ms(),
@@ -21293,7 +21394,7 @@ fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     }));
     assert_eq!(
         (status, &told["ok"], &told["stored"]),
-        (200, &json!(true), &json!(0))
+        (200, &json!(true), &json!(1))
     );
     assert!(
         told["clock_offset_ms"]
@@ -23341,8 +23442,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
     for (path, body) in [
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
-        ("/agent-portrait-generation", json!({ "session": echo })),
-        ("/avatar-settings", json!({ "model_avatars": true })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (
@@ -24356,7 +24455,10 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
         .ended();
     assert!(!elsewhere.status.success());
     let said = String::from_utf8_lossy(&elsewhere.stderr).into_owned();
-    assert!(said.contains("an address on this machine"), "{said}");
+    assert!(
+        said.contains("CLARP_RELAY_DIAL: a socket on this machine"),
+        "{said}"
+    );
 }
 
 // ---- the heartbeat ---------------------------------------------------------------------------
@@ -37790,136 +37892,6 @@ fn read_push_token(bearer: &str, public: &[u8]) -> (Value, Value) {
         serde_json::from_slice(&bytes(parts[0])).unwrap(),
         serde_json::from_slice(&bytes(parts[1])).unwrap(),
     )
-}
-
-#[test]
-fn the_host_observes_native_bash_jobs_and_only_their_launching_attempt_ends_them() {
-    let place = Place::new("provider-observer");
-    let cwd = place.root.join("work");
-    let sid = "a10bafe2-20cd-4d3e-b884-8dacf57c5aa4";
-    let project = place
-        .root
-        .join(".claude/projects")
-        .join(clarp_backend::past::claude_project(cwd.to_str().unwrap()));
-    std::fs::create_dir_all(&project).unwrap();
-    let parent = project.join(format!("{sid}.jsonl"));
-    let launch = |tool: &str, time: &str| {
-        json!({"type":"assistant","timestamp":time,"sessionId":sid,
-        "message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","id":tool,"input":{"run_in_background":true,"description":"Check password=fixture"}}]}})
-    };
-    let receipt = |tool: &str, time: &str| {
-        json!({"type":"user","timestamp":time,"sessionId":sid,
-        "message":{"content":[{"type":"tool_result","tool_use_id":tool}]},"toolUseResult":{"backgroundTaskId":"fixture-child"}})
-    };
-    std::fs::write(
-        &parent,
-        format!("{}\n", launch("pre-binding", "2000-01-01T00:00:00Z")),
-    )
-    .unwrap();
-    let append = |row: &Value| {
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&parent)
-            .unwrap();
-        writeln!(file, "{row}").unwrap();
-    };
-    let fake = place.root.join("fixture-claude");
-    let release = place.root.join("release");
-    let init = json!({"type":"system","subtype":"init","session_id":sid});
-    let done = json!({"type":"result","subtype":"success","session_id":sid,"result":"Done."});
-    program(
-        &fake,
-        &format!(
-            "#!/bin/sh\nread -r request\ntouch '{}'\nprintf '%s\\n' '{init}'\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{done}'\n",
-            place.root.join("started").display(),
-            release.display()
-        ),
-    );
-    let env = [
-        ("HOME", place.root.to_str().unwrap()),
-        ("CLARP_CLAUDE_PROGRAM", fake.to_str().unwrap()),
-    ];
-    let flags = ["--janitors-checked-every-ms", "100"];
-    let host = place.start_in("", &flags, &env);
-    let made = host.post(
-        "/agents",
-        json!({"backend":"claude","name":"Fixture","cwd":cwd,"resume_session_id":sid}),
-    );
-    let session = made["session"].as_str().unwrap();
-    let job = |host: &Host, tool: &str| {
-        host.get("/background-jobs")["jobs"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|j| j["session"] == session && j["metadata"]["tool_use_id"] == tool)
-            .cloned()
-            .unwrap_or(Value::Null)
-    };
-    // The bound native runtime can receive evidence without a shim. Its
-    // earlier history and uncorrelated tool results cannot create jobs.
-    let stamp = || clarp_host::wire::iso(now_ms() + 1);
-    append(&receipt("unclaimed", &stamp()));
-    append(&launch("terminal", &stamp()));
-    append(&receipt("terminal", &stamp()));
-    wait_for("the idle binding sees a native receipt", || {
-        job(&host, "terminal")["status"] == "running"
-    });
-    assert!(job(&host, "pre-binding").is_null());
-    assert!(job(&host, "unclaimed").is_null());
-    // A managed turn has a separate launch identity. Only its unfinished
-    // tasks stop at its exit, even when the Host restarts during that turn.
-    host.send(session, "Run the fixture", "native-turn");
-    wait_for("the stand-in received the turn", || {
-        place.root.join("started").is_file()
-    });
-    let time = stamp();
-    append(&launch("managed", &time));
-    append(&receipt("managed", &time));
-    wait_for("the running managed task reaches the registry", || {
-        job(&host, "managed")["status"] == "running"
-    });
-    let shown = job(&host, "managed");
-    assert_eq!(shown["generation"], 1);
-    assert_eq!(shown["kind"], "provider-task");
-    assert_eq!(shown["heartbeat_source"], "provider_event");
-    assert!(shown["heartbeat_at"].is_null() && shown["worker_pid"].is_null());
-    assert_eq!(shown["worker_freshness"], "unknown");
-    assert_eq!(shown["can_cancel"], false);
-    assert_eq!(shown["title"], "Check password=[redacted]");
-    let path = format!("/background-jobs/{}", shown["job_id"].as_str().unwrap());
-    let detail = host.get(&path);
-    assert_eq!(detail["job"]["revision"], shown["revision"]);
-    assert_eq!(detail["timeline"].as_array().unwrap().len(), 2);
-    host.kill();
-    std::fs::write(&release, "end").unwrap();
-    let host = place.start_in("", &flags, &env);
-    wait_for("the exited attempt is reconciled after rejoin", || {
-        job(&host, "managed")["metadata"]["stop_basis"] == "turn_exit"
-    });
-    let stopped = job(&host, "managed");
-    assert_eq!(stopped["outcome_state"], "unknown");
-    assert_eq!(stopped["status"], "failed");
-    assert!(job(&host, "terminal")["terminal_at"].is_null());
-    // A late completion for the wrong task is powerless. The receipted
-    // task settles the inferred stop once, including after another restart.
-    let finish = |task: &str| {
-        json!({"type":"queue-operation","timestamp":stamp(),"content":format!(
-        "<task-notification><tool-use-id>managed</tool-use-id><task-id>{task}</task-id><status>completed</status></task-notification>")})
-    };
-    append(&finish("foreign"));
-    append(&finish("fixture-child"));
-    wait_for(
-        "the exact task receipt supersedes the inferred stop",
-        || job(&host, "managed")["status"] == "succeeded",
-    );
-    let settled = host.get(&path);
-    assert_eq!(settled["timeline"].as_array().unwrap().len(), 4);
-    assert!(settled["job"]["metadata"].get("stop_basis").is_none());
-    host.kill();
-    let host = place.start_in("", &flags, &env);
-    let restored = host.get(&path);
-    assert_eq!(restored["timeline"], settled["timeline"]);
-    assert_eq!(restored["job"]["revision"], settled["job"]["revision"]);
 }
 
 #[test]

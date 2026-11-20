@@ -313,7 +313,7 @@ pub fn compact_ascii(value: &Value) -> String {
 }
 
 /// All Unicode decimal digit blocks consist of ten consecutive code points.
-fn decimal_digit(sign: char) -> Option<u32> {
+pub(crate) fn decimal_digit(sign: char) -> Option<u32> {
     if sign.is_ascii() {
         return sign.to_digit(10);
     }
@@ -499,6 +499,18 @@ pub fn first(text: &str, count: usize) -> &str {
     match text.char_indices().nth(count) {
         Some((at, _)) => &text[..at],
         None => text,
+    }
+}
+
+/// A word as a shell is given it safely (`shlex.quote`).
+pub fn shell_quote(word: &str) -> String {
+    let plain = |sign: char| sign.is_ascii_alphanumeric() || "_@%+=:,./-".contains(sign);
+    if word.is_empty() {
+        "''".to_string()
+    } else if word.chars().all(plain) {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\"'\"'"))
     }
 }
 
