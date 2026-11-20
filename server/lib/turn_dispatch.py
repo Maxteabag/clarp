@@ -90,7 +90,7 @@ from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-modu
     _default_retry_scheduler, OPENING_NOT_CONFIRMED, OPENING_WITHDRAWN, _AdmissionRefused,
     _ADMISSION_REFUSED, _is_call_opening, _mark_backend_invoked, _backend_invoked,
     _with_team_context, _with_delivery_context, _REQUEST_LOCKS, _REQUEST_LOCKS_GUARD,
-    DispatchCommand, _serialize_client_retry, _mark_preinvoke_failure,
+    DispatchCommand, _serialize_client_retry, _mark_preinvoke_failure, _launch_refused,
 )
 _DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
 
@@ -644,11 +644,13 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                     if account_attempt is not None:
                         account_attempt.spawned.set()
             except BaseException as exc:
-                if state.get("spawn_started"):
+                if state.get("spawn_started") and not _launch_refused(exc):
                     _mark_backend_invoked(exc)
                 raise
         except BaseException as exc:
-            if not invocation_started:
+            # A backend that refused before sending anything (LaunchRefused)
+            # proves the turn unlaunched although spawn_turn was entered (R121).
+            if not invocation_started or _launch_refused(exc):
                 _mark_preinvoke_failure(exc, agent_id=spec.agent_id, trace_id=spec.trace_id)
             raise
 

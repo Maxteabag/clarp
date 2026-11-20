@@ -29,7 +29,7 @@ from ..process_registry import TurnHandle
 from ..turn_lifecycle import TurnEvent
 from ..voice_preamble import apply_voice_preamble
 from ..backend_catalogue import MUSE
-from .base import CatalogueDefault, BackendBrand
+from .base import CatalogueDefault, BackendBrand, CliMissing
 from .stream_json import StreamJsonBackend, iter_json_dicts, stop_after_drain_failure
 from .long_prompt import PromptFile, fits_argv, removing
 
@@ -261,7 +261,7 @@ class MuseBackend(StreamJsonBackend):
     ) -> TurnHandle:
         muse_bin = self.required_binary
         if shutil.which(muse_bin) is None:
-            raise FileNotFoundError(
+            raise CliMissing(
                 f"`{muse_bin}` not on PATH — install Muse Code "
                 f"(https://api.meta.ai/muse-launcher.sh) to run Muse-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
