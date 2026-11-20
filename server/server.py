@@ -1509,6 +1509,9 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         except ValueError as exc:
             return self._json_error(400, str(exc))
         payload["ok"] = True
+        # Every agent's hearing may have changed: open apps re-read the agents.
+        from lib import events
+        events.broadcast(self.ctx.stream, events.agent_roster("voice-profile"))
         self._json_ok(payload)
 
     # ---- vocabulary: packs, terms, profiles, assignments, preview, runs ----
