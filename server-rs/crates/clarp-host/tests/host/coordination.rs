@@ -845,17 +845,18 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         );
         assert_eq!(made["session"], session, "{made}");
     }
+    std::fs::write(holds.join("oak"), "").unwrap();
     let saved = host.post(
         "/send",
         json!({ "session": "oak", "text": "remember this", "client_msg_id": "saved",
                 "sender": "ivy", "origin": "agent" }),
     );
-    wait_for("the marked turn to finish", || {
-        answered(&host, "oak", &saved["trace_id"])
+    wait_for("the marked turn to get its token", || {
+        std::fs::read_to_string(tokens.join("oak")).is_ok_and(|token| !token.is_empty())
     });
     assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "agents");
+    assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "agents");
     drop(host);
-    std::fs::remove_file(tokens.join("oak")).unwrap();
     keep_record(
         &place,
         "turn-identity",
@@ -863,8 +864,17 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         &json!({ "key": "not a key" }),
     );
     let host = start_host(&place, &[]);
-    // A read immediately after restart must also use the current capability, before any send.
+    // The rejoined turn and past rows use the current capability before any send can set it.
+    wait_for("the marked turn to rejoin", || {
+        host.get("/live?session=oak")["turn"].is_object()
+    });
     assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "user");
+    assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "user");
+    std::fs::write(release.join("oak"), "").unwrap();
+    wait_for("the rejoined turn to finish", || {
+        answered(&host, "oak", &saved["trace_id"])
+    });
+    std::fs::remove_file(tokens.join("oak")).unwrap();
     let heard = host.listen();
     std::fs::write(holds.join("oak"), "").unwrap();
     let (status, sent) = asked(
