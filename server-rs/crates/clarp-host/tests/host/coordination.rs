@@ -68,6 +68,25 @@ fn answered(host: &Host, session: &str, trace: &Value) -> bool {
     replied && host.state(session) == "done"
 }
 
+fn dispatched(heard: &Mutex<Vec<Value>>, session: &str, client_msg_id: &str) -> Value {
+    let mut dispatched = None;
+    wait_for("the send's dispatch on the event stream", || {
+        dispatched = heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "agent-state"
+                    && event["kind"] == "thinking"
+                    && event["session"] == session
+                    && event["client_msg_id"] == client_msg_id
+            })
+            .cloned();
+        dispatched.is_some()
+    });
+    dispatched.unwrap()
+}
+
 /// A stand-in for Claude Code (and Codex) that writes down the token of the turn it runs in,
 /// under its agent's session, and runs on, where the test marked its session to hold, until
 /// the test lets it go. It answers "on it".
@@ -101,6 +120,79 @@ fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path
     (tokens, release, holds)
 }
 
+fn start_host(place: &Place) -> Host {
+    let home = place.root.join("home");
+    let config = home.join(".config");
+    let data = home.join(".local/share");
+    let cache = home.join(".cache");
+    let state = home.join(".local/state");
+    let claude = place.root.join("claude");
+    place.start_without(
+        "",
+        &[],
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+            ("XDG_DATA_HOME", data.to_str().unwrap()),
+            ("XDG_CACHE_HOME", cache.to_str().unwrap()),
+            ("XDG_STATE_HOME", state.to_str().unwrap()),
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", claude.to_str().unwrap()),
+        ],
+        &[
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "CLAUDE_PWA_CONFIG",
+            "CLARP_CONFIG_DIR",
+        ],
+    )
+}
+
+/// Forward two calls to the real Host, dropping the response to the first after it wrote the note.
+fn lose_the_first_tool_answer(host: &Host) -> (String, std::thread::JoinHandle<Value>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let (upstream, token) = (host.address.clone(), host.token.clone());
+    let worker = std::thread::spawn(move || {
+        let mut first_note = Value::Null;
+        for first in [true, false] {
+            let mut connection = None;
+            wait_for("the tool to connect", || {
+                connection = listener.accept().ok().map(|(socket, _)| socket);
+                connection.is_some()
+            });
+            let mut connection = connection.unwrap();
+            connection.set_nonblocking(false).unwrap();
+            connection
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let request = whole_request(&mut connection);
+            let (head, body) = request.split_once("\r\n\r\n").unwrap();
+            assert!(head.starts_with("POST /tools/run "));
+            let body = serde_json::from_str(body).unwrap();
+            let (status, reply) =
+                clarp_host::admin::post(&upstream, "/tools/run", &token, &body).unwrap();
+            assert_eq!((status, &reply["exit"]), (200, &json!(0)), "{reply}");
+            if first {
+                first_note = serde_json::from_str(reply["stdout"].as_str().unwrap()).unwrap();
+                assert_eq!(first_note["created"], true);
+                assert_eq!(first_note["notified"], true);
+                continue;
+            }
+            let reply = reply.to_string();
+            write!(
+                connection,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+        }
+        first_note
+    });
+    (address, worker)
+}
+
 /// A send that another agent's turn makes (by its token), that names a sender, or that comes
 /// from a peer Host: the turn it begins is for the agents, on every row of it, on the live
 /// turn and on the working state, with the agent that sent it where this Host has it. The
@@ -120,12 +212,7 @@ fn stand_in(place: &Place) -> (std::path::PathBuf, std::path::PathBuf, std::path
 fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_note_from_it() {
     let place = Place::new("coordination");
     let (tokens, release, holds) = stand_in(&place);
-    let claude = place.root.join("claude");
-    let world = [
-        ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
-        ("CLARP_CODEX_PROGRAM", claude.to_str().unwrap()),
-    ];
-    let host = place.start_in("", &[], &world);
+    let host = start_host(&place);
     for (name, session, backend) in [
         ("Ivy", "ivy", "claude"),
         ("Oak", "oak", "claude"),
@@ -158,18 +245,6 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     };
     let send = |headers: &[(&str, &str)], body: Value| asked(&host, "/send", headers, &body);
     let note = |headers: &[(&str, &str)], body: Value| asked(&host, "/agent-notes", headers, &body);
-    let states = |session: &str| -> Vec<Value> {
-        let heard = heard.lock().unwrap();
-        heard
-            .iter()
-            .filter(|event| {
-                event["type"] == "agent-state"
-                    && event["kind"] == "thinking"
-                    && event["session"] == session
-            })
-            .cloned()
-            .collect()
-    };
     let told_of = |session: &str| -> Vec<Value> {
         let heard = heard.lock().unwrap();
         heard
@@ -216,8 +291,7 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     // The live turn says whom it is for, and the working state names the agent it works with.
     let live = host.get("/live?session=oak");
     assert_eq!(live["turn"]["audience"], "agents", "{live}");
-    wait_for("Oak's working state", || !states("oak").is_empty());
-    let working = states("oak")[0].clone();
+    let working = dispatched(&heard, "oak", "c-1");
     assert_eq!(
         (
             &working["audience"],
@@ -230,8 +304,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     // Ivy's own turn, the user's, is for the user everywhere.
     assert_eq!(rows_of(&host, "ivy")["u-i-1"]["audience"], "user");
     assert_eq!(host.get("/live?session=ivy")["turn"]["audience"], "user");
-    assert_eq!(states("ivy")[0]["audience"], "user");
-    assert!(states("ivy")[0].get("sender_agent_id").is_none());
+    let working = dispatched(&heard, "ivy", "i-1");
+    assert_eq!(working["audience"], "user", "{working}");
+    assert!(working.get("sender_agent_id").is_none(), "{working}");
 
     // THE NOTE. Oak's turn runs. A request that presents no turn is refused for every caller,
     // and so is another agent's turn, in the Python Host's words.
@@ -379,22 +454,38 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
                               the new words with a new note_id" })
         )
     );
-    // The agent's own tool leaves one the same way, from its turn; without the turn it is
-    // refused as the request would be.
-    let told = host.post(
-        "/tools/run",
-        json!({ "tool": "clarp-admin", "argv": ["tell-user", "--from", "oak", "--text", "Blue."],
-                "env": { "CLARP_PROVIDER_TURN": oak } }),
+    // The command itself retries after losing the response to a note the Host already wrote.
+    let (address, first) = lose_the_first_tool_answer(&host);
+    let told = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .args([
+            "tool",
+            "clarp-admin",
+            "tell-user",
+            "--from",
+            "oak",
+            "--text",
+            "Blue.",
+        ])
+        .env_clear()
+        .env("HOME", &place.root)
+        .env("CLARP_HOST_ADDR", address)
+        .env("CLARP_PROVIDER_TURN", &oak)
+        .ended();
+    assert!(
+        told.status.success(),
+        "{}",
+        String::from_utf8_lossy(&told.stderr)
     );
-    assert_eq!(told["exit"], 0, "{told}");
-    let by_tool: Value = serde_json::from_str(told["stdout"].as_str().unwrap()).unwrap();
+    let by_tool: Value = serde_json::from_slice(&told.stdout).unwrap();
+    let first = first.join().unwrap();
+    assert_eq!(by_tool["message_id"], first["message_id"]);
     assert_eq!(
         (
             &by_tool["created"],
             &by_tool["notified"],
             &by_tool["trace_id"]
         ),
-        (&json!(true), &json!(true), &json!(trace))
+        (&json!(false), &json!(false), &json!(trace))
     );
     assert!(
         by_tool["message_id"]
@@ -471,7 +562,7 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     for row in rows_of_trace(&host, "oak", sent["trace_id"].as_str().unwrap()) {
         assert_eq!(row["audience"], "user", "{row}");
     }
-    let mine = states("oak").last().cloned().unwrap();
+    let mine = dispatched(&heard, "oak", "c-2");
     assert_eq!(mine["audience"], "user", "{mine}");
     // A sender named by whoever may name one, with an agent's origin: another agent's message.
     let (_, named) = send(
@@ -521,14 +612,13 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     );
     // A peer Host forwards only its agents' messages: its own claim of the user's word is an
     // agent's, of an agent this Host does not know, and its working state names nobody.
-    let before = states("oak").len();
     let (status, from_peer) = send(
         &[("X-Clarp-Peer", "beacon")],
         json!({ "session": "oak", "text": "from afar", "client_msg_id": "c-5", "origin": "user" }),
     );
     assert_eq!(status, 200, "{from_peer}");
     wait_for("Oak's fifth turn", || {
-        states("oak").len() > before && answered(&host, "oak", &from_peer["trace_id"])
+        answered(&host, "oak", &from_peer["trace_id"])
     });
     let peer_row = &rows_of(&host, "oak")["u-c-5"];
     assert_eq!(
@@ -536,7 +626,7 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         (&json!("agent"), &json!("agents")),
         "{peer_row}"
     );
-    let afar = states("oak").last().cloned().unwrap();
+    let afar = dispatched(&heard, "oak", "c-5");
     assert_eq!(afar["audience"], "agents", "{afar}");
     assert!(afar.get("sender_agent_id").is_none(), "{afar}");
     // An agent on Codex is hidden here too: its turns carry this Host's token.
@@ -682,15 +772,13 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
 fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     let place = Place::new("coordination-no-key");
     let (tokens, release, holds) = stand_in(&place);
-    let claude = place.root.join("claude");
-    let world = [("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())];
     keep_record(
         &place,
         "turn-identity",
         "key",
         &json!({ "key": "not a key" }),
     );
-    let host = place.start_in("", &[], &world);
+    let host = start_host(&place);
     for (name, session) in [("Ivy", "ivy"), ("Oak", "oak")] {
         let made = host.post(
             "/agents",
@@ -718,20 +806,7 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         "{row}"
     );
     assert_eq!(host.get("/live?session=oak")["turn"]["audience"], "user");
-    wait_for("Oak's working state", || {
-        heard
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event["type"] == "agent-state" && event["session"] == "oak")
-    });
-    let working = heard
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|event| event["type"] == "agent-state" && event["session"] == "oak")
-        .cloned()
-        .unwrap();
+    let working = dispatched(&heard, "oak", "c-1");
     assert_eq!(working["audience"], "user", "{working}");
     assert!(working.get("sender_agent_id").is_none(), "{working}");
     let body = json!({ "session": "oak", "text": "A note." });

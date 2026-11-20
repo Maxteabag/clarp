@@ -36922,23 +36922,23 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
         "call_ended"
     );
     assert_eq!(answer(&host, &r, true).0, 409);
-    // This new turn reuses the retired greeting's trace. It still speaks and
-    // only the original reply keeps the opening tag.
-    host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","trace_id":"test-greeting","text":"<speak>Ordinary speech.</speak>"}));
-    wait_for("an unbound reply with a reused trace is available", || {
-        let events = host.get(&format!("/clips/recoverable?session={alma}"));
-        let same: Vec<_> = events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|e| e["trace_id"] == "test-greeting")
-            .collect();
-        same.iter()
-            .any(|e| e["clip_id"] != clip["clip_id"] && e.get("opening").is_none())
-            && same
+    // A new turn speaks under a fresh trace. Only the original reply keeps the opening tag.
+    let ordinary = host.post("/send",json!({"session":alma,"client_msg_id":"ordinary-again","text":"<speak>Ordinary speech.</speak>"}));
+    assert_ne!(ordinary["trace_id"], "test-greeting");
+    wait_for(
+        "an unbound reply and the retired greeting are available",
+        || {
+            let events = host.get(&format!("/clips/recoverable?session={alma}"));
+            let all = events["events"].as_array().unwrap();
+            all.iter().any(|e| {
+                e["trace_id"] == ordinary["trace_id"]
+                    && e["clip_id"] != clip["clip_id"]
+                    && e.get("opening").is_none()
+            }) && all
                 .iter()
                 .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"]["token"] == op["token"])
-    });
+        },
+    );
 
     // Model the crash after journal admission and before the fleet records
     // the binding. The journal remembers the admission's epoch and ring.
@@ -36979,25 +36979,22 @@ fn a_live_call_uses_its_frozen_team_and_keeps_what_was_said() {
     assert_eq!(recovered["tag"]["opening"], clip["opening"]);
     drop(db);
 
-    // A later opening for the same agent uses the identical trace. It gets
-    // its own playable greeting while the original keeps its retirement fence.
+    // A later opening for the same agent gets its own playable greeting while the original
+    // keeps its retirement fence.
     let later = ring(&host, &alma);
     let next = answer(&host, &later, true).1["opening"].clone();
-    let request = json!({"session":alma,"text":"<speak>Second greeting.</speak>","trace_id":"test-greeting","client_msg_id":"greet-2",
+    let request = json!({"session":alma,"text":"<speak>Second greeting.</speak>","client_msg_id":"greet-2",
         "call_id":next["call_id"],"call_opening":{"token":next["token"],"epoch":next["epoch"]}});
     assert_eq!(host.ask_as(&phone, "POST", "/send", Some(&request)).0, 200);
-    wait_for(
-        "two openings retain distinct clips for the same trace",
-        || {
-            let events = host.get(&format!("/clips/recoverable?session={alma}"));
-            let all = events["events"].as_array().unwrap();
-            all.iter().any(|e| {
-                e["opening"]["token"] == next["token"] && e["opening"]["admission_id"] == "greet-2"
-            }) && all
-                .iter()
-                .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"] == clip["opening"])
-        },
-    );
+    wait_for("two openings retain distinct clips", || {
+        let events = host.get(&format!("/clips/recoverable?session={alma}"));
+        let all = events["events"].as_array().unwrap();
+        all.iter().any(|e| {
+            e["opening"]["token"] == next["token"] && e["opening"]["admission_id"] == "greet-2"
+        }) && all
+            .iter()
+            .any(|e| e["clip_id"] == clip["clip_id"] && e["opening"] == clip["opening"])
+    });
     assert_eq!(
         host.ask_as(
             &phone,
