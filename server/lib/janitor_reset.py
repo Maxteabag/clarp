@@ -26,6 +26,19 @@ def _kill_group(process):
         pass
 
 
+# The broker is started with what it needs to run and nothing of the Host's own (R145, both
+# providers' reset commands): its home, PATH, the XDG directories and the locale. Never the Host's
+# keys, tokens or session names.
+BROKER_ENV = frozenset({"HOME", "PATH", "LANG"})
+BROKER_ENV_PREFIXES = ("LC_", "XDG_")
+
+
+def broker_env(env=None) -> dict[str, str]:
+    env = os.environ if env is None else env
+    return {key: value for key, value in env.items()
+            if key in BROKER_ENV or key.startswith(BROKER_ENV_PREFIXES)}
+
+
 def attempt(command_field: str, models, *, accounts=(), provider="claude", stop_event=None, cancelled=None,
             reconcile_only=False) -> dict:
     """Run the provider's reset broker once. A receipt is verified only when it names one of
@@ -43,7 +56,7 @@ def attempt(command_field: str, models, *, accounts=(), provider="claude", stop_
         if (stop_event and stop_event.is_set()) or (cancelled and cancelled()):
             return {"status": "cancelled", "verified": False, "needs_reconcile": reconcile_only}
         process = subprocess.Popen(list(command), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE, text=True, start_new_session=True)
+                                   stderr=subprocess.PIPE, text=True, start_new_session=True, env=broker_env())
         deadline = time.monotonic() + TIMEOUT_SECONDS
         request = {"models": models}
         if reconcile_only:
