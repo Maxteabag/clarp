@@ -35,6 +35,8 @@ mod coordination;
 mod delivery;
 #[path = "host/diagnostics.rs"]
 mod diagnostics;
+#[path = "host/enter_at_start.rs"]
+mod enter_at_start;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
 #[path = "host/harness.rs"]
@@ -26441,21 +26443,15 @@ fn the_words_of_a_waiting_message_are_changed_by_its_user_and_its_turn_answers_t
         refused(404, "queued message not found")
     );
 
-    // A message that was said while a turn ran waits its turn in the conversation: what
-    // was said stands. One left for later beside it is changed, and that outlives the Host.
+    // A message that was said while a turn ran waits outside the conversation as one left
+    // for later does (issue 491): the words of both are changed, and that outlives the Host.
     host.send(&echo, "sleep 60", "m5");
     wait_for("a turn to run again", || host.state(&echo) == "thinking");
     host.send(&echo, "said, not left", "m6");
     leave("seventh", "m7");
-    assert_eq!(
-        put("m6", json!({ "text": "x" })),
-        refused(409, "message is already in the conversation")
-    );
+    assert_eq!(put("m6", json!({ "text": "said anew" })).0, 200);
     assert_eq!(put("m7", json!({ "text": "the seventh, anew" })).0, 200);
-    let stands = [
-        named("m6", "said, not left"),
-        named("m7", "the seventh, anew"),
-    ];
+    let stands = [named("m6", "said anew"), named("m7", "the seventh, anew")];
     assert_eq!(waiting(&host), stands);
     let revision = queue(&host)["revision"].clone();
     host.kill();

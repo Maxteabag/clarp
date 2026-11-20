@@ -103,7 +103,7 @@ Every difference from the Python Host is exactly one of: our bug (fix it); an in
 | D10 | Migration moves agents, not modules: the Rust Host is a new Host in the fleet | No shared-database coupling with the Python server, no big-bang switch |
 | D11 | The binary is `clarp-host`. (`clarpd` is taken: it is the desktop installer in dotfiles.) | Avoids a name collision the report missed |
 | D12 | Rust stable, edition 2024; Tokio; Axum; no message broker, no external database, no orchestrator | Plain, widely used, one binary and one directory of data |
-| D14 | The kernel admits a message in one of four ways. **Queue**: it was said; it is in the conversation at once and the agent comes to it when it is free. **Later**: someone left it for later (`queue_if_busy`); it waits like the first, but in the queue, and enters the conversation when its turn starts. **Background**: left for later by something that is not a person; a hold holds it. **Direct**: it ends the live turn and runs ahead of what waits. A Stop holds everything that waits at that moment; what a person says or leaves afterwards is not held by it, and when the agent is free it runs past what is held. The edge admits no message direct: the Python Host queues a user's plain send to a busy agent (`turn_claim._enqueue_if_busy`), whatever `docs/protocol.md` section 4 says | The conformance runs of 15 Nov and the Python Host's admission policy (`policies/admission.py`): the apps were built against what the Host does. A hold that also held what the user says next would make Stop a trap. Direct stays in the kernel, tested, for the day something asks for it |
+| D14 | The kernel admits a message in one of four ways. **Queue**: it was said. When its turn can start at once it is in the conversation at once. When it must wait, it waits in the queue and enters the conversation in the write that starts its turn, as **Later** does: a row that stood above an answer which had not read it told its sender it was ignored (issue 491). What still sets it apart from Later is not where it waits but what is told of it: it keeps its delivery receipt while it waits, and the queue says it was said, not left. **Later**: someone left it for later (`queue_if_busy`); it waits in the queue and enters the conversation when its turn starts. **Background**: left for later by something that is not a person; a hold holds it. **Direct**: it ends the live turn and runs ahead of what waits. A Stop holds everything that waits at that moment; what a person says or leaves afterwards is not held by it, and when the agent is free it runs past what is held. The edge admits no message direct: the Python Host queues a user's plain send to a busy agent (`turn_claim._enqueue_if_busy`), whatever `docs/protocol.md` section 4 says. Whatever the admission and whoever sent it, a message is in the conversation at once exactly when its turn starts at once | The conformance runs of 15 Nov and the Python Host's admission policy (`policies/admission.py`): the apps were built against what the Host does. A hold that also held what the user says next would make Stop a trap. Direct stays in the kernel, tested, for the day something asks for it. Order by construction: a row is never written before the agent comes to it and never moved afterwards; a queue item and a row are never both there for one message |
 | D19 | The Host names the tool's session before the tool starts (Claude: `--session-id`), with the agent's conversation id | A conversation must be called the same from its first message on: a client drops what it cached when the name changes |
 | D20 | How a turn ended is a conversation item of its own (`TURN_END`), written once, and told on the row that closed the turn; that row then carries the end's revision | The apps read `turn` on the closing row. Storing it once keeps the log append-only and lets a client that asks "what is newer" get the row again |
 | D21 | The edge writes the Python Host's shapes field for field, as JSON values built in `clarp-host/src/wire.rs` from what `conformance/golden` recorded, empty fields included. `clarp-protocol` stays the typed reading side | An app's decoder may count on a field being there. The recorded answers are the specification; the conformance run fails when the two drift |
@@ -3170,10 +3170,10 @@ order of any 120 commands, sending by hand among them, loses nothing and runs no
 through a kill, and the scenario `the-queue-by-hand`. And the words of a waiting message are changed
 (`PUT /turn-queue/<id>` with `text`): the message is written anew where it waits, outside the conversation,
 its turn points at the words it has now (`Reword`, the journal's `Recorder::reword`), and it keeps its id and
-its place; the apps are told to read the queue again. Only what was left for later has words that can
-change. A message that was said while a turn ran waits its turn in the conversation on this Host, and what
-was said stands (409, in this Host's words). Held by the kernel's test, a Host test through a kill, and the
-scenario `the-queue-reworded`.
+its place; the apps are told to read the queue again. Since issue 491 every message that waits does so outside
+the conversation, and its words can change; only one that a build before it wrote into the conversation while
+it waited is refused, since what was said stands (409, in this Host's words). Held by the kernel's test, a Host
+test through a kill, and the scenario `the-queue-reworded`.
 
 **An id two agents both use** (19 Nov 2026). An app's message id is each agent's own here: every agent's rows
 are written only into its own log, the ids of a tool's answer are made from the message's id in that log, and
@@ -3454,6 +3454,32 @@ Cartesia boundary. The same resolution reaches a configured alternative after an
 provider fails. Cartesia auditions, narration and cached router phrases include the resulting
 language in their cache identity, so a language change can produce its own audio. The
 reference's model, request and session rules are held by `cartesia-language-vectors.py`.
+
+**A message enters the conversation when its turn starts** (20 Nov 2026; issue 491, part A). Messages sent one
+after another while an agent worked were answered for the first, and the second seemed ignored, though it was
+sent before the answer: both Hosts wrote a plain send to a busy agent into the conversation when it came, above
+an answer that had not read it. The Python Host's release owner ruled one rule for every origin, the user, a
+trigger or another agent: a row enters the conversation when its turn starts. Here it is one line of the journal
+(`accept_message_with`): a message is in the conversation at once exactly when its turn starts at once
+(`Agent::starts_at_once`); otherwise it is written as a waiting item (`WAITING`, D22), and `Batch::enter` writes
+its row in the write that starts its turn, after the answer before it. The admission is unchanged: a plain send
+stays `Queue`, keeps its delivery receipt while it waits (pending, stopped by the user's Stop, handed over in the
+write that makes its row; read in the delivery feed by its id, since there is no row yet), and holds, Stop and
+pause do what they did. The row stands where its turn starts, and keeps when the message was sent: the waiting
+turn's acceptance time, under `sent_at_ms` in the row's body (`conversation::SENT_AT`), which a rewording does
+not move. A message whose turn starts at once is written as before, without it. No row is moved or re-timed
+afterwards, and one message is a waiting item or a row, never both. So every send that waits can be reworded and
+taken back like one left for later: a rewording that races the start comes either before it, and the row and the
+turn have the new words, or after it, and finds nothing waiting (404); a take-back leaves no row. A message that a
+build before this one wrote into the conversation while it waited stays there: its turn does not write it again,
+its words still cannot change (409), and a start of the agent anew writes it anew as before. A kill between the
+acceptance and the start loses nothing and writes no row; the turn starts after the restart, with its row. The
+names a client reads (the send time on the wire, the queue item's kind, the feature) wait for the Python Host's
+contract page. Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts`,
+`a_message_to_a_parked_or_a_stopping_turn_enters_when_its_own_turn_starts`,
+`a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
+`a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of
+`tools/plants/enter-at-start.py`.
 
 ## 7. Stages and gates
 
