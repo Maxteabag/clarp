@@ -106,6 +106,7 @@ PLANTS += [
     # A page of changes gives a row only when it reaches the row's newest part, in the order of revisions.
     ('clarp-actor/src/conversation.rs', 'follow', 'a row with a part beyond the page is given on it', '        entries.retain(|row| row.revision <= cursor);\n', ''),
     ('clarp-actor/src/conversation.rs', 'follow', 'a page of changes not in the order of revisions', '    entries.sort_by_key(|row| row.revision);\n', ''),
+    ('clarp-actor/src/conversation.rs', 'follow', 'a page of changes with more to come may be empty', 'if entries.is_empty() && cursor / REVISION_STEP > from {', 'if false {'),
     # A row has one time: a call that is a row by itself, written again, keeps its first writing's.
     ('clarp-actor/src/lib.rs', 'follow', "a call row written again at its end's time", '*live.first_written.entry(call.id.clone()).or_insert(t)', 't'),
     ('clarp-actor/src/lib.rs', 'follow', "a call row cut off at the cut's time", 'None => first_written.get(&call.id).copied().unwrap_or(ts_ms),', 'None => ts_ms,'),

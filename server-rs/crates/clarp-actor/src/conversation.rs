@@ -447,6 +447,41 @@ pub(crate) fn revision_at(log: &dyn AgentLog, span: Span, ts_ms: i64) -> Result<
     Ok(low * REVISION_STEP)
 }
 
+/// The items after position `from` that a page of up to `limit` things reads, oldest first;
+/// whether there are more after them; and the cursor where reading stopped. What this reader
+/// does not get is passed over, and the cursor passes over it too: it is not read again.
+fn items_after(
+    log: &dyn AgentLog,
+    mut from: Seq,
+    limit: usize,
+    which: Which,
+) -> Result<(Vec<Item>, bool, Option<u64>), ActorError> {
+    let mut items: Vec<Item> = Vec::new();
+    let mut cursor = None;
+    let at_a_time = if which == Which::All {
+        limit.saturating_add(1)
+    } else {
+        CHUNK.max(limit.saturating_add(1))
+    };
+    loop {
+        let chunk = log.read_after(from, kind::CONVERSATION, at_a_time)?;
+        let whole = chunk.len() == at_a_time;
+        for item in chunk {
+            from = item.seq;
+            if which.keeps_item(&item)? {
+                if items.len() == limit {
+                    return Ok((items, true, cursor));
+                }
+                items.push(item);
+            }
+            cursor = Some(from * REVISION_STEP);
+        }
+        if !whole {
+            return Ok((items, false, cursor));
+        }
+    }
+}
+
 /// Up to `limit` things that are newer than `revision`, in the order they changed.
 pub(crate) fn after(
     log: &dyn AgentLog,
@@ -457,40 +492,19 @@ pub(crate) fn after(
     which: Which,
 ) -> Result<Page, ActorError> {
     let head_revision = span.head_revision;
-    // Read on until the page is full or the log ends. What this reader does not get is
-    // passed over, and the cursor passes over it too: it is not read again. A reader that
-    // was last told of a conversation that has ended since is told all of the one there is.
-    let mut items: Vec<Item> = Vec::new();
     let mut from = (revision / REVISION_STEP).max(span.floor);
-    let mut cursor = None;
-    let mut has_more = false;
-    let at_a_time = if which == Which::All {
-        limit.saturating_add(1)
-    } else {
-        CHUNK.max(limit.saturating_add(1))
-    };
-    'reading: loop {
-        let chunk = log.read_after(from, kind::CONVERSATION, at_a_time)?;
-        let whole = chunk.len() == at_a_time;
-        for item in chunk {
-            from = item.seq;
-            if which.keeps_item(&item)? {
-                if items.len() == limit {
-                    has_more = true;
-                    break 'reading;
+    let (mut entries, latest_revision, has_more) = loop {
+        let (items, has_more, cursor) = items_after(log, from, limit, which)?;
+        let mut entries = rows(log, &items, Place::Newest, which)?;
+        if !has_more {
+            for draft in drafts {
+                let shown = draft.versioned();
+                if draft.revision > revision && which.keeps(&shown.entry) {
+                    entries.push(shown);
                 }
-                cursor = Some(item.seq * REVISION_STEP);
-                items.push(item);
-            } else {
-                cursor = Some(item.seq * REVISION_STEP);
             }
+            break (entries, head_revision.max(revision), false);
         }
-        if !whole {
-            break;
-        }
-    }
-    let mut entries = rows(log, &items, Place::Newest, which)?;
-    let latest_revision = if has_more {
         // There is more in the log than this page: the cursor stops at what was read. A row
         // is read as it is now; one whose newest part lies beyond what this page read is
         // left out of it, and comes once, on the page that reaches that part. So no row of a
@@ -498,15 +512,14 @@ pub(crate) fn after(
         // passes over nothing.
         let cursor = cursor.unwrap_or(revision);
         entries.retain(|row| row.revision <= cursor);
-        cursor
-    } else {
-        for draft in drafts {
-            let shown = draft.versioned();
-            if draft.revision > revision && which.keeps(&shown.entry) {
-                entries.push(shown);
-            }
+        // A page that says there is more is never empty: a reader could take it for the end.
+        // Where every row it read was left for a later page (the parts of one long reply),
+        // it reads on from its cursor, as far as the head at the most.
+        if entries.is_empty() && cursor / REVISION_STEP > from {
+            from = cursor / REVISION_STEP;
+            continue;
         }
-        head_revision.max(revision)
+        break (entries, cursor, true);
     };
     // Changes in the order of their revisions: a reply being written took its revision when
     // it last grew, and what was stored since stands above it.

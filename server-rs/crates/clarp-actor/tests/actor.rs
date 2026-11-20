@@ -2869,6 +2869,7 @@ mod follow_by_revision {
     const STUCK: &str = "an older page that gives nothing new while it says there is more";
     const ABOVE_CURSOR: &str = "a row of a page of changes newer than the page's cursor";
     const TWICE: &str = "a row given twice in one pass";
+    const EMPTY: &str = "a page of changes with no row that says there is more";
 
     /// What was found: for each kind, how often, and where first.
     #[derive(Default)]
@@ -3008,6 +3009,9 @@ mod follow_by_revision {
                             .collect();
                         format!("{limit} a page after position {}: {rows:?}", cursor >> 20)
                     });
+                }
+                if page.has_more && page.entries.is_empty() {
+                    found.note(EMPTY, at, || format!("after {}", self.cursor));
                 }
                 let newest = page.entries.iter().map(|row| row.revision).max();
                 for row in page.entries {
@@ -3641,6 +3645,9 @@ mod follow_by_revision {
         walk.name = "claude case".to_string();
         walk.send(Admission::Queue, Origin::User);
         walk.check("a message");
+        // A reader that reads once now, and then not until the end: far behind by then.
+        let mut behind = Follower::new(Which::All, 2);
+        behind.follow(walk.actor.as_ref().unwrap(), "far behind", &mut walk.found);
         walk.say();
         walk.check("a reply being written");
         walk.call(false);
@@ -3682,6 +3689,27 @@ mod follow_by_revision {
         walk.check("the user stops: the call is cut off, and its reply changes");
         walk.resume();
         walk.check("resumed");
+        walk.end_turn();
+        walk.check("the turn ends");
+
+        // A reply with more parts than a page holds: its message calls five tools, and each
+        // returns. A page of two that reads only its parts gives no row of its own; the Host
+        // reads on to the page that reaches the reply's newest part.
+        walk.send(Admission::Queue, Origin::User);
+        walk.say();
+        for _ in 0..5 {
+            walk.call(false);
+        }
+        walk.store();
+        for _ in 0..5 {
+            walk.give_back(0);
+        }
+        walk.check("a reply with more parts than a page holds");
+        let actor = walk.actor.as_ref().unwrap();
+        let at = "a reader far behind";
+        behind.follow(actor, at, &mut walk.found);
+        let reload = actor.tail_of(1_000_000, Which::All).unwrap();
+        behind.compare(&reload, at, &mut walk.found);
         walk.found.none();
     }
 
