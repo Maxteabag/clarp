@@ -182,3 +182,30 @@ def test_vector_a_google_voice_off_the_allowlist_is_silence_no_voice(monkeypatch
     assert _worker_speaks(monkeypatch, tmp_path, cfg, agent) is None          # ended before it is announced
     sp = voice_profile.speech(voice_profile.HostView.build(cfg, stored={}), agent)
     assert (sp["voice_id"], sp["silent_reason"]) == (None, "no_voice")
+# ---------------------------------------------------------------- N: ElevenLabs' no-voice gate
+
+def test_elevenlabs_without_a_voice_ends_before_it_is_announced(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: sent.append(dict(event)))
+    monkeypatch.setattr(config, "_CACHED", config.Config(tts_provider="elevenlabs", eleven_api_key="ek"))
+    called = []
+    monkeypatch.setattr(tts_registry, "synthesize_streaming", lambda **kw: called.append(kw))
+    agent_id = agents_db.create_agent(persona="Zed", voice_id='{"cartesia":"x"}', cwd=str(tmp_path), session="zed")
+    for n in range(3):
+        tts_queue.enqueue(agent_id=agent_id, text=f"S{n}.", voice_id='{"cartesia":"x"}', session="zed",
+                          source=TurnSource.PWA, trace_id="t1")
+    (tmp_path / "audio").mkdir()
+    while tts_worker.synth_one(audio_dir=tmp_path / "audio", stream=object()):
+        pass
+    assert called == []                                         # ElevenLabs was never asked
+    assert [e["type"] for e in sent if e.get("type") in ("audio", "tts-error")] == ["tts-error"]
+    assert sent[-1]["reason"] == "no_voice"
+
+
+def test_deepgram_keeps_its_default_voice():
+    cfg = config.Config(tts_provider="deepgram", deepgram_api_key="dk")
+    route = tts_mode.route(cfg, {"persona": "Zed"})
+    row = {"voice_id": "{}"}
+    assert tts_worker._route_has_voice(cfg, row, {"persona": "Zed"}, route) is True
+
+
