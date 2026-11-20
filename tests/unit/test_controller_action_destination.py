@@ -139,6 +139,16 @@ DOT_SEGMENTS = {
     "a raw dot beside an encoded one": B + ".%2e/admin",
     "a raw '.'": B + "./admin",
     "an encoded '.'": B + "%2E/admin",
+    "an encoded '.' in lower case": B + "%2e/admin",
+    "a raw dot beside an encoded one in capitals": B + ".%2E/admin",
+    "an encoded dot before a raw one": B + "%2e./admin",
+    "an encoded dot in capitals before a raw one": B + "%2E./admin",
+    "a '.' as the last segment": B + "x/.",
+    "a '.' as the last segment before a slash": B + "x/./",
+    "a '..' with a parameter": B + "..;x/admin",
+    "a '.' with a parameter": B + ".;x/admin",
+    "an encoded '..' with a parameter": B + "%2e%2e;x/admin",
+    "an encoded '.' with a parameter": B + "%2E;x/admin",
     "a '..' as the last segment": B + "x/..",
     "a '..' between encoded slashes": B + "a%2F..%2Fb",
     "a '..' between encoded slashes in lower case": B + "a%2f..%2fb",
@@ -156,7 +166,6 @@ BACKSLASHES = {
 }
 BRACKETED_NAMES = {
     "a future-version address in brackets": "http://[v1.localhost]/x",
-    "an allowed name in future-version brackets": "https://[v7.allowed.example.invalid]/base/x",
     "an IPv4 address in brackets": "http://[127.0.0.1]/x",
 }
 WIDENED = {**DOT_SEGMENTS, **BACKSLASHES, **BRACKETED_NAMES}
@@ -195,13 +204,17 @@ def test_such_a_prefix_is_refused_at_configuration(url, monkeypatch):
     "a%2Fb",                            # an encoded slash with no dot segment beside it
     "%252e%252e/admin",                 # double encoding: not a dot to a server that decodes once
     "a%252F..%252Fb",
+    "report;v=2",                       # an ordinary segment with a parameter
+    "x?p=../a",                         # a dot segment in the query alone: the test is the path's
+    "x?p=/./a/%2e%2e",
 ])
 def test_what_has_no_dot_segment_once_decoded_is_sent_byte_for_byte(path):
     assert ca.sendable_url(B + path, BASE) == B + path
 
 
 def test_a_bracketed_name_is_refused_even_where_the_name_itself_is_allowed():
-    """Judged by its labels it was the allowed name, and it was sent without its brackets."""
+    """Judged by its labels it was the allowed name, and it was sent without its brackets: the one
+    name in the address and in the prefix, so only the bracket rule refuses it."""
     allowed = ("https://v1.allowed.example.invalid",)
     assert ca.sendable_url("https://v1.allowed.example.invalid/x", allowed)
     url = "https://[v1.allowed.example.invalid]/x"
