@@ -43,6 +43,48 @@ pub const PROVIDER: &str = "openai";
 /// The version of what a phone and a Host say to each other in such a call.
 pub const PROTOCOL: i64 = 1;
 
+/// The kinds of event of a live voice that some part of this Host reads: a ring's call and the
+/// Oracle's alike (their machines, what is routed, what is written of the talk, what was
+/// used). The voice may say others, such as a session's standby (`session.paused`,
+/// `session.resumed`) or a kind to come: those are passed over, and end no call.
+pub const VOICE_EVENTS: [&str; 10] = [
+    "session.started",
+    "session.instructions.appended",
+    "session.output_audio.delta",
+    "session.output_audio.interrupted",
+    "session.input_transcript.delta",
+    "session.output_transcript.delta",
+    "session.delegation.created",
+    "session.usage.updated",
+    "session.closed",
+    "error",
+];
+
+/// What the journal says of an event of the voice no part of this Host reads, once a call:
+/// its type alone (never what it carries), bounded, and in signs a journal line holds; `None`
+/// for one that is read.
+pub fn unread_voice_event(event: &serde_json::Value) -> Option<String> {
+    let kind = event["type"].as_str();
+    if kind.is_some_and(|kind| VOICE_EVENTS.contains(&kind)) {
+        return None;
+    }
+    let Some(kind) = kind else {
+        return Some("(no type)".to_string());
+    };
+    let shown: String = kind
+        .chars()
+        .take(64)
+        .map(|sign| {
+            if sign.is_ascii_alphanumeric() || "._-".contains(sign) {
+                sign
+            } else {
+                '?'
+            }
+        })
+        .collect();
+    Some(shown)
+}
+
 /// How large what a producer tells of its event may be, in its one form, and how large the
 /// snapshot of a ring. Nothing is ever cut to fit.
 pub const CONTEXT_BYTES: usize = 32 * 1024;
@@ -1152,5 +1194,35 @@ pub fn taking(known: Option<&str>, scan: Scan, strict: bool) -> Taking {
     Taking {
         keep,
         takes: Ok(known_now),
+    }
+}
+
+#[cfg(test)]
+mod unread_voice_events {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn an_event_of_the_voice_no_part_of_the_host_reads_is_named_by_its_type_alone() {
+        for kind in VOICE_EVENTS {
+            assert_eq!(unread_voice_event(&json!({ "type": kind })), None, "{kind}");
+        }
+        for (event, shown) in [
+            (
+                json!({ "type": "session.paused", "x": "never said" }),
+                "session.paused",
+            ),
+            (json!({ "type": "session.resumed" }), "session.resumed"),
+            (json!({ "type": "a kind\nwith signs" }), "a?kind?with?signs"),
+            (json!({ "type": "k".repeat(80) }), &*"k".repeat(64)),
+            (json!({ "type": 7 }), "(no type)"),
+            (json!({}), "(no type)"),
+        ] {
+            assert_eq!(
+                unread_voice_event(&event).as_deref(),
+                Some(shown),
+                "{event}"
+            );
+        }
     }
 }
