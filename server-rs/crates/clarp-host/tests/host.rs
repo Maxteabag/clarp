@@ -15639,13 +15639,22 @@ printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\
     );
     let fork = forked["session"].as_str().unwrap().to_string();
     assert_eq!(texts(&fork)[..3], texts(&agent)[..3]);
-    wait_for("the apps to be told of a fork", || {
-        heard.lock().unwrap().iter().any(|event| {
-            event["type"] == "agent-roster"
-                && event["kind"] == "forked"
-                && event["session"] == fork.as_str()
-        })
-    });
+    let fork_event = || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                event["type"] == "agent-roster"
+                    && event["kind"] == "forked"
+                    && event["session"] == fork.as_str()
+            })
+            .cloned()
+    };
+    wait_for("the apps to be told of a fork", || fork_event().is_some());
+    let profile = &forked["agent"]["voice_profile"];
+    assert!(profile.is_object());
+    assert_eq!(&fork_event().unwrap()["voice_profile"], profile);
     let snapshot = host.get("/agents/snapshot");
     let row_of = |session: &str| {
         let agents = snapshot["agents"].as_array().unwrap();
@@ -21537,12 +21546,15 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
         &format!("/agents/{maximus}/fork"),
         json!({ "backend": "scripted", "children": [{ "name": "Profile Fork", "task": "read" }] }),
     );
+    assert_eq!(children["children"][0]["fork"], "seed");
     let child = children["children"][0]["session"].as_str().unwrap();
-    wait_for("the fork told", || told_of("forked", child).is_some());
-    assert_eq!(
-        told_of("forked", child).unwrap()["voice_profile"],
-        row_of(&snapshot(), child)["voice_profile"]
-    );
+    wait_for("the seeded child's creation told", || {
+        told_of("created", child).is_some()
+    });
+    let child_row = row_of(&snapshot(), child);
+    let profile = &child_row["voice_profile"];
+    assert!(profile.is_object());
+    assert_eq!(&told_of("created", child).unwrap()["voice_profile"], profile);
 }
 
 #[test]
