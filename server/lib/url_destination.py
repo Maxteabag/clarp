@@ -47,17 +47,36 @@ def _host(raw: str) -> str | None:
             return str(ipaddress.IPv6Address(raw))
         except ValueError:
             return None
+    # A trailing dot leaves an empty last label, which the label pattern never matches.
     labels = raw.split(".")
-    if raw.endswith(".") or not all(_LABEL.match(label) for label in labels):
+    if not all(_LABEL.match(label) for label in labels):
         return None
     return raw
+
+
+_ENCODED_SEPARATOR = re.compile(r"%(2e|2f|5c)", re.IGNORECASE)
+_DECODED = {"2e": ".", "2f": "/", "5c": "\\"}
+
+
+def _dot_segment(path: str) -> bool:
+    """Whether the path, read as a server might read it, has a segment '.' or '..': the encoded
+    dot, slash and backslash decoded once (in either case; never twice, so an encoded '%' stays
+    what it is), a backslash read as a slash, and each segment cut at its first ';' (a server that
+    drops a segment's parameters before resolving sees '..;x' as '..'). A receiving server that
+    resolves dot segments would serve a path outside the one judged (R139). Only the test reads
+    it so: what is sent is the path as given."""
+    read = _ENCODED_SEPARATOR.sub(lambda m: _DECODED[m.group(1).lower()], path).replace("\\", "/")
+    return any(segment.split(";", 1)[0] in (".", "..") for segment in read.split("/"))
 
 
 def destination(url: str) -> Destination | None:
     """The parsed destination of an http(s) URL, or None: not http(s), no host, user
     information in the authority, a port that is not a number, a host that is not a plain
-    name or IP address (an encoded or unexpected character), or a URL that does not parse."""
-    if not isinstance(url, str) or any(ch.isspace() or ord(ch) < 32 for ch in url):
+    name or IP address (an encoded or unexpected character, or brackets around anything but an
+    IPv6 address), a backslash anywhere, a path with a dot segment (_dot_segment), or a URL that
+    does not parse."""
+    if (not isinstance(url, str) or any(ch.isspace() or ord(ch) < 32 for ch in url)
+            or "\\" in url):
         return None
     try:
         parts = urlsplit(url)
@@ -67,8 +86,10 @@ def destination(url: str) -> Destination | None:
     scheme = parts.scheme.lower()
     if scheme not in _SCHEMES or "@" in parts.netloc or not parts.hostname:
         return None
+    if ("[" in parts.netloc or "]" in parts.netloc) and ":" not in parts.hostname:
+        return None             # brackets around a name: the grammar's address of a version to come
     host = _host(parts.hostname.lower())
-    if host is None:
+    if host is None or _dot_segment(parts.path):
         return None
     return Destination(scheme, host, port if port is not None else _SCHEMES[scheme],
                        parts.path or "/", parts.query)

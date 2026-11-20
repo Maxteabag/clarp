@@ -183,25 +183,26 @@ def identity_env(agent_id: str) -> tuple[str, dict[str, str]]:
     return token, {TURN_ENV: token}
 
 
-def record_identity(token: str, *, agent_id: str, provider: str, pid: int) -> None:
+def record_identity(token: str, *, agent_id: str, provider: str, pid: int, trace_id: str = "") -> None:
     """Record a non-Claude turn's token; never fail the spawn over it."""
     if not token:
         return
     try:
-        turn_started(token, agent_id=agent_id, provider=provider, pid=pid)
+        turn_started(token, agent_id=agent_id, provider=provider, pid=pid, trace_id=trace_id)
     except Exception as exc:  # noqa: BLE001
         from .log import log_exception
         log_exception("turnIdentityRecordFail", exc, detail=agent_id)
 
 
-def turn_started(token: str, *, agent_id: str, provider: str, pid: int) -> None:
-    """Record one provider process: its token and the identity of its pid."""
+def turn_started(token: str, *, agent_id: str, provider: str, pid: int, trace_id: str = "") -> None:
+    """Record one provider process: its token, the identity of its pid, and the trace of the
+    turn it runs (R102: an artifact the turn publishes names it)."""
     if not (agent_id and _TOKEN.fullmatch(token or '')):
         return
     c = db.conn()
     c.execute("""INSERT OR IGNORE INTO provider_turns
-        (turn_token,agent_id,provider,pid,start_token,started_at) VALUES (?,?,?,?,?,?)""",
-        (token, agent_id, provider, pid, jobs.process_start_token(pid), db.now_ms()))
+        (turn_token,agent_id,provider,pid,start_token,started_at,trace_id) VALUES (?,?,?,?,?,?,?)""",
+        (token, agent_id, provider, pid, jobs.process_start_token(pid), db.now_ms(), str(trace_id or "")))
 
 
 def record_task_turn(agent_id: str, native: str, tool: str, token: str) -> bool:

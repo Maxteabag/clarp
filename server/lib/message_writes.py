@@ -20,7 +20,7 @@ from typing import Any, Callable
 
 from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn, note_import_holds_lock
-from . import dreaming, heartbeat, message_carry, origins, team_leader, team_store
+from . import coordination, dreaming, heartbeat, message_carry, origins, team_leader, team_store
 from .message_turns import iso_ms
 from .voice_markup import strip_hidden_blocks
 from .message_text import (CALL_OPENING_OPEN, _strip_voice_markup, strip_delivery_context,
@@ -123,6 +123,9 @@ def relink_client_message(client_msg_id: str, *, trace_id: str) -> None:
             " WHERE message_id = ? AND role = 'user'",
             (new_trace, revision, _client_message_id(client_msg_id)),
         )
+        # The message is the same, under its new attempt's trace.
+        coordination.carry(database, agent_id=row["agent_id"],
+                           from_trace=row["trace_id"], to_trace=new_trace)
         database.execute(
             """INSERT INTO conversation_heads (
                    agent_id, backend_session_id, revision, replace_revision
@@ -301,6 +304,16 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
                 prompt_admission_id=prompt_admission_id,
                 trace_id=trace_id,
             )
+        if coordination.is_coordination(agent_id=agent_id, origin=origin,
+                                        sender_agent_id=sender_agent_id):
+            # In the row's own transaction: no reader sees the prompt, or a
+            # row of the turn it starts, before its mark.
+            coordination.mark(database, agent_id=agent_id, trace_id=trace_id,
+                              sender_agent_id=sender_agent_id, at=timestamp_ms)
+        elif origin in origins.USER_WORD_ORIGINS and (trace_id or "").strip():
+            # The user's word in a trace that was marked: the turn is the
+            # user's too from now on (it never reads 'agents' again).
+            coordination.loosen(agent_id, trace_id)
         database.execute(
             """INSERT INTO conversation_heads (
                    agent_id, backend_session_id, revision, replace_revision
@@ -327,6 +340,107 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
 
 
 MARKER_ORIGIN = origins.MARKER_ORIGIN
+
+
+def restamp_trace(database, agent_id: str, trace_id: str) -> list[str]:
+    """Give every row of one turn a new revision and raise its conversation
+    heads, inside the caller's transaction: what a row's projection reads
+    from elsewhere changed (lib.coordination.loosen), its content did not.
+    One revision per row: a delta cut at its limit holds its cursor at the
+    newest row it delivered, and rows sharing that number beyond the cut
+    would be skipped. Answers the conversations touched."""
+    heads: dict[str, int] = {}
+    for row in database.execute(
+            """SELECT message_id, backend_session_id FROM messages INDEXED BY idx_messages_trace
+                WHERE agent_id = ? AND trace_id = ?""",
+            (agent_id, trace_id)).fetchall():
+        revision = _next_revision(database)
+        database.execute("UPDATE messages SET revision = ? WHERE message_id = ?",
+                         (revision, row["message_id"]))
+        session = row["backend_session_id"] or ""
+        heads[session] = max(heads.get(session, 0), revision)
+    for session, revision in heads.items():
+        database.execute(
+            """INSERT INTO conversation_heads (agent_id, backend_session_id, revision, replace_revision)
+               VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, session, revision))
+    return sorted(heads)
+
+
+def note_message_id(agent_id: str, note_id: str) -> str:
+    """A note's id is its agent's and the caller's id together: another
+    agent's note_id is another note (F5)."""
+    return f"note-{agent_id}-{note_id}"
+
+
+def record_note(*, agent_id: str, backend_session_id: str, note_id: str, text: str,
+                trace_id: str) -> dict[str, Any] | None:
+    """Write an agent's note to the user into its own chat (``POST /agent-notes``).
+
+    A row of the calling turn (``trace_id``) that the user is always shown,
+    also when the turn answers another agent and its other rows are hidden
+    (lib.coordination). Like the restart marker it is the Host's own row:
+    its ``source_file`` is ``note:<id>`` and its seq sits in the negative
+    band, so no transcript import ever moves, rewrites or removes it.
+    Idempotent by ``note_id``: a retried call answers the row already written
+    with ``created: False``. None when there is no conversation to write to.
+    """
+    if not agent_id or not backend_session_id or not note_id or not str(text or "").strip():
+        return None
+    database = conn()
+    msg_id = note_message_id(agent_id, note_id)
+    columns = """message_id, role, timestamp, text, kind, revision, trace_id"""
+    existing = database.execute(
+        f"SELECT {columns} FROM messages WHERE message_id = ?", (msg_id,)).fetchone()
+    if existing is None:
+        timestamp_ms = now_ms()
+        timestamp = _iso_from_ms(timestamp_ms)
+        with _row_with_its_head(database):
+            row = database.execute(
+                """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+                     FROM messages
+                    WHERE agent_id = ? AND backend_session_id = ?""",
+                (agent_id, backend_session_id),
+            ).fetchone()
+            seq = min(int(row["next_seq"]), -1)
+            revision = _next_revision(database)
+            inserted = database.execute(
+                """INSERT INTO messages (
+                       message_id, agent_id, backend_session_id, source_file, seq,
+                       role, timestamp, text, kind, tool_name, tools_json,
+                       display_cells_json, updated_at, revision, origin,
+                       sender_agent_id, trace_id
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(message_id) DO NOTHING""",
+                (msg_id, agent_id, backend_session_id, f"note:{note_id}", seq,
+                 "assistant", timestamp, str(text).strip(), coordination.NOTE_KIND, None,
+                 "[]", "[]", timestamp_ms, revision, coordination.NOTE_ORIGIN, None,
+                 (trace_id or "").strip() or None),
+            )
+            if inserted.rowcount == 1:
+                database.execute(
+                    """INSERT INTO conversation_heads (
+                           agent_id, backend_session_id, revision, replace_revision
+                       ) VALUES (?, ?, ?, 0)
+                       ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                           revision = MAX(conversation_heads.revision, excluded.revision)""",
+                    (agent_id, backend_session_id, revision),
+                )
+                return {"id": msg_id, "role": "assistant", "timestamp": timestamp,
+                        "text": str(text).strip(), "kind": coordination.NOTE_KIND,
+                        "origin": coordination.NOTE_ORIGIN, "trace_id": (trace_id or "").strip(),
+                        "revision": revision, "created": True}
+        existing = database.execute(
+            f"SELECT {columns} FROM messages WHERE message_id = ?", (msg_id,)).fetchone()
+        if existing is None:
+            return None
+    return {"id": existing["message_id"], "role": existing["role"],
+            "timestamp": existing["timestamp"], "text": existing["text"],
+            "kind": existing["kind"], "origin": coordination.NOTE_ORIGIN,
+            "trace_id": existing["trace_id"] or "", "revision": int(existing["revision"]),
+            "created": False}
 
 
 def marker_message_id(cause_message_id: str) -> str:
@@ -1811,8 +1925,8 @@ def turn_stamp(database, agent_id: str, trace_id: str):
         """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
     rows = database.execute(
-        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin
-             FROM messages WHERE agent_id = ? AND trace_id = ?
+        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin, kind
+             FROM messages INDEXED BY idx_messages_trace WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
         return None
@@ -1820,10 +1934,15 @@ def turn_stamp(database, agent_id: str, trace_id: str):
     if turn is not None and turn["settled_at"] is not None:
         started = int(turn["started_at"])
         ended = max(int(turn["settled_at"]), started)
-        summary = json.dumps({"turn_id": trace_id, "status": turn["outcome"],
-                              "started_at_ms": started, "ended_at_ms": ended,
-                              "worked_ms": ended - started, "tool_count": message_turns.tool_count(rows)},
-                             separators=(",", ":"))
+        fields = {"turn_id": trace_id, "status": turn["outcome"],
+                  "started_at_ms": started, "ended_at_ms": ended,
+                  "worked_ms": ended - started, "tool_count": message_turns.tool_count(rows)}
+        notes = sum(1 for row in rows if row["kind"] == coordination.NOTE_KIND)
+        if notes:
+            # How often the turn spoke to the user from the side (POST
+            # /agent-notes): a chatty agent shows in its turn's summary.
+            fields["note_count"] = notes
+        summary = json.dumps(fields, separators=(",", ":"))
     return turn, rows, summary
 
 

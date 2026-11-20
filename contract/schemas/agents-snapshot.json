@@ -83,7 +83,7 @@
   },
   "$defs": {
     "voice_profile": {
-      "description": "Feature voice_profile (Host contract 111): the agent's voice and hearing as the Host resolves them. origin, engine_origin, language_origin and silent_reason are open sets.",
+      "description": "Feature voice_profile (Host contract 109): the agent's voice and hearing as the Host resolves them. origin, engine_origin, language_origin and silent_reason are open sets.",
       "type": "object",
       "additionalProperties": true,
       "required": ["speech", "hearing"],

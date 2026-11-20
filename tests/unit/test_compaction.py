@@ -4,9 +4,21 @@ assert the early-return decisions, plus that a valid call starts a worker."""
 import sys
 import pathlib
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "server"))
 from lib import compaction  # noqa: E402
 from lib import backends  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _fresh_slots(monkeypatch):
+    from lib import turn_dispatch as td
+    monkeypatch.setattr(td, "_RUNTIME_CLIENT", None)
+    td.reset_for_tests()
+    yield
+    td.reset_for_tests()
+    compaction._active.clear()
 
 
 def _patch(monkeypatch, *, agent, bsid="bsid-1", busy=False, on_path=True,
@@ -59,7 +71,8 @@ def test_valid_claude_starts(monkeypatch):
 
 def test_compact_command_per_backend():
     assert backends.by_id(backends.CLAUDE).compaction("s").command == "/compact"
-    assert backends.by_id(backends.CODEX).compaction("s").command == "/compact"
+    assert backends.by_id(backends.CODEX).compaction("s").command == "thread/compact/start"
+    assert backends.by_id(backends.CODEX).compaction("s").in_process is True
     assert backends.by_id(backends.AGY).compaction("s").command == "/compress"
     assert backends.by_id(backends.GROK).compaction("s").command == "/compact"
 
