@@ -809,9 +809,11 @@ class CodexBackend(StreamJsonBackend):
     # --- compaction -------------------------------------------------------
 
     def compaction(self, session: str) -> CompactionStrategy:
-        """``/compact`` typed into ``codex resume <id>``; no transcript handle
-        to watch, so the Host waits a fixed window."""
-        return CompactionStrategy(launch=(self.required_binary, "resume"), command="/compact")
+        """``thread/compact/start`` on the Host's shared app-server, the
+        process that holds the thread. ``/compact`` typed into a second
+        ``codex resume`` could not shrink it: the app-server kept serving its
+        own copy from memory (R148)."""
+        return CompactionStrategy(launch=(), command="thread/compact/start", in_process=True)
 
     def native_resume_command(self, session_id: str) -> str | None:
         return f"codex resume {session_id}"

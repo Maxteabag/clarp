@@ -77,6 +77,13 @@ class _ActiveTurn:
     produced_output: bool = False
     steer_ready: threading.Event = field(default_factory=threading.Event)
     usage_entry: tuple[int, int] | None = None
+    # The user's compaction (``_Client.compact``), not a turn: its events are
+    # read for the outcome and nothing of it reaches the chat or the state.
+    compaction: bool = False
+    compact_sizes: list = field(default_factory=list)
+    compact_replaced: bool = False
+    compact_status: str = ""
+    compact_error: str = ""
 
     def observe_usage(self, usage: dict) -> None:
         """Measure each component from the opening balance to its highest observed total."""
@@ -394,9 +401,14 @@ class _Client:
         return self.active
 
     def _notification(self, method: str, params: dict) -> None:
+        if method == "thread/tokenUsage/updated":
+            _remember_context_size(params)
         if self._suppressed(method, params):
             return
         active = self._pick_active(params)
+        if active is not None and active.compaction:
+            self._compaction_event(active, method, params)
+            return
         if method == "account/rateLimits/updated":
             self.rate_limits = params
             try:
@@ -1183,6 +1195,95 @@ class _Client:
             self._forget_claim(owner, active)
             raise
 
+    def compact(self, agent: dict, thread_id: str, *, timeout: float) -> dict:
+        """The user's compaction of ``thread_id``, in this process, which holds
+        the thread (a second Codex process cannot shrink it: R148).
+
+        Returns ``status`` (completed, failed, interrupted, timeout or
+        refused), ``error`` in words, ``replaced`` (Codex reported its
+        compaction item) and ``after``: the size Codex reports for the new
+        history (its own estimate), or None.
+        """
+        agent_id = str(agent["agent_id"])
+        handle = AppTurnHandle(self, agent_id=agent_id)
+        active = _ActiveTurn(
+            "", thread_id, agent_id, str(agent.get("session") or ""), "compaction",
+            TurnState(live_backend_session_id=thread_id), handle, None, None,
+            None, tts_queue.enqueue, compaction=True)
+        try:
+            # Before the claim: a registered claim reads as a loaded thread.
+            self._ensure_loaded(agent, thread_id)
+        except Exception as exc:  # noqa: BLE001 - refused in words
+            return {"status": "refused", "replaced": False, "after": None,
+                    "error": f"Codex could not open the conversation ({exc})"}
+        with self._claims_lock:
+            current = self._actives.get(agent_id)
+            if current is not None and current.handle.is_alive():
+                return {"status": "refused", "error": "agent is busy — try again when idle",
+                        "replaced": False, "after": None}
+            self._actives[agent_id] = active
+        try:
+            self.request("thread/compact/start", {"threadId": thread_id},
+                         timeout=START_RPC_TIMEOUT_SEC)
+        except Exception as exc:  # noqa: BLE001 - refused in words below
+            self._forget_claim(agent_id, active)
+            handle._done.set()
+            return {"status": "refused", "replaced": False, "after": None,
+                    "error": f"this Codex app-server did not compact the thread ({exc})"}
+        if not handle._done.wait(timeout):
+            # Not ended in time: interrupt it. Until Codex ends it the agent
+            # stays busy (its handle is live), so no turn starts on top of it.
+            try:
+                handle.terminate()
+            except Exception as exc:  # noqa: BLE001
+                log_exception("codexCompactInterruptFail", exc, detail=agent_id)
+            return {"status": "timeout", "replaced": active.compact_replaced,
+                    "after": None,
+                    "error": f"Codex did not finish compacting within {timeout:g} s"}
+        replaced = active.compact_replaced
+        after = active.compact_sizes[-1] if (replaced and active.compact_sizes) else None
+        return {"status": active.compact_status or "completed", "replaced": replaced,
+                "after": after, "error": active.compact_error}
+
+    def _compaction_event(self, active: "_ActiveTurn", method: str, params: dict) -> None:
+        """One app-server event of a compaction: only what the outcome needs."""
+        if method == "turn/started":
+            turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+            active.turn_id = str(turn.get("id") or active.turn_id)
+            active.steer_ready.set()
+            if getattr(active.handle, "stop_requested", False):
+                threading.Thread(target=self._interrupt_quietly,
+                                 args=(active.thread_id, active.turn_id),
+                                 daemon=True, name="codex-compact-stop").start()
+            return
+        if method == "thread/tokenUsage/updated":
+            size = _context_size(params.get("tokenUsage"))
+            if size is not None:
+                active.compact_sizes.append(size)
+            return
+        if method == "item/completed":
+            item = params.get("item") if isinstance(params.get("item"), dict) else {}
+            if item.get("type") == "contextCompaction":
+                active.compact_replaced = True
+            return
+        if method != "turn/completed":
+            return
+        turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+        error = turn.get("error") if isinstance(turn.get("error"), dict) else {}
+        active.compact_status = str(turn.get("status") or "completed")
+        active.compact_error = str(error.get("message") or "")
+        with self._claims_lock:
+            if getattr(self, "_actives", {}).get(active.agent_id) is active:
+                self._actives.pop(active.agent_id, None)
+            if self.active is active:
+                self.active = None
+        active.handle._done.set()
+        if getattr(self, "detached_agents", None):
+            threading.Thread(target=self.recycle_if_quiet, daemon=True,
+                             name="codex-recycle").start()
+        if getattr(self, "draining", False):
+            _drain_later(self)
+
     def _forget_claim(self, owner: str, active: "_ActiveTurn") -> None:
         """Only this exact claim: a later turn of the same agent may already
         own the slot once the start runs outside the pool lock (TP-N3). The
@@ -1221,6 +1322,8 @@ class _Client:
         active = self._actives.get(agent_id) if agent_id else self.active
         if active is None or not active.handle.is_alive():
             return False
+        if active.compaction:
+            return False                    # a send waits behind a compaction
         # turn/start's response can precede turn/started. The protocol only
         # accepts steering after the active lifecycle notification arrives.
         if not active.steer_ready.wait(30.0) or not active.turn_id:
@@ -1441,6 +1544,48 @@ DRAIN_BACKSTOP_SEC = 60.0
 _RETIRING: dict[int, _Client] = {}
 _LOCK = threading.RLock()
 _SHARED_KEY = "__shared__"
+# The size Codex last reported for each thread's conversation (its last
+# call's tokens, or its estimate after a compaction): the "before" of the
+# user's compaction. Process-local; after a restart the rollout's tail is
+# read instead (compaction.py).
+_CONTEXT_SIZES: dict[str, int] = {}
+
+
+def _context_size(usage: Any) -> int | None:
+    """The conversation's size in a ``ThreadTokenUsage``: ``last.totalTokens``
+    (a call's input and output; after a compaction, Codex's estimate of the
+    new history, with ``last.inputTokens`` 0)."""
+    last = usage.get("last") if isinstance(usage, dict) else None
+    total = last.get("totalTokens") if isinstance(last, dict) else None
+    return total if type(total) is int and total >= 0 else None
+
+
+def _remember_context_size(params: dict) -> None:
+    thread_id = str(params.get("threadId") or "")
+    size = _context_size(params.get("tokenUsage"))
+    if thread_id and size is not None:
+        _CONTEXT_SIZES[thread_id] = size
+
+
+def last_context_size(thread_id: str) -> int | None:
+    """The size Codex last reported for ``thread_id`` in this process."""
+    return _CONTEXT_SIZES.get(thread_id)
+
+
+def compact_thread(agent: dict, thread_id: str, *, timeout: float) -> dict:
+    """Compact an idle agent's thread on the shared app-server (the process
+    that holds it). See ``_Client.compact`` for the answer."""
+    if _moving_owner(thread_id) is not None:
+        return {"status": "refused", "replaced": False, "after": None,
+                "error": "the conversation is moving between Codex processes — try again shortly"}
+    try:
+        with _LOCK:
+            client = _client(str(agent["agent_id"]), str(agent.get("session") or ""))
+            admit_turn(client, str(agent["agent_id"]))
+    except Exception as exc:  # noqa: BLE001 - refused in words
+        return {"status": "refused", "replaced": False, "after": None,
+                "error": f"Codex cannot take the conversation now ({exc})"}
+    return client.compact(agent, thread_id, timeout=timeout)
 
 
 def _auth_fingerprint() -> bytes:

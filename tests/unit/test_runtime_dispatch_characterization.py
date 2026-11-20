@@ -157,7 +157,8 @@ def test_missing_goal_and_compaction_validation(rpc, monkeypatch):
     effect = Mock(return_value={"compacted": True})
     monkeypatch.setattr(compaction, "compact_session", effect)
     assert rpc.dispatch_request("compact", {"session": " s "}) == {"ok": True, "result": {"compacted": True}}
-    effect.assert_called_once_with("s")
+    # The runtime's dispatcher starts the sends that waited behind it (R148).
+    effect.assert_called_once_with("s", dispatch=rpc.dispatch_service)
 
 
 def test_dispatch_submission_errors_and_delivery_identity(rpc):
