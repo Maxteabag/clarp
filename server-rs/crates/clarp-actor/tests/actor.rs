@@ -2226,6 +2226,7 @@ fn provider_visits_commit_one_cursor_with_job_records_and_refuse_replayed_reads(
             id: name.into(),
             kind: "fixture".into(),
             title: "Explicit".into(),
+            queued: false,
             detail: String::new(),
             worker: clarp_kernel::jobs::Worker::none(),
             restart_cancelled: false,
