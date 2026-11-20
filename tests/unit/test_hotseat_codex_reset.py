@@ -43,10 +43,17 @@ def _requests(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
-def _codex(*accounts):
-    return {"accounts": [{"alias": alias, "is_active": active, "usage": {
-        "usable": True, "blocked": room == 0, "error": None, "worst_used": 1 - room}}
-        for alias, active, room in accounts]}
+def _codex(*accounts, five_hour=None):
+    """Hotseat's Codex reading: each account's own weekly window (used = 1 - room) and, when given,
+    its five-hour window; worst_used and blocked are the worse of the two, as Hotseat gives them."""
+    def usage(room):
+        windows = [{"label": "codex primary weekly", "used": 1 - room}]
+        if five_hour is not None:
+            windows.append({"label": "codex primary 5-hour", "used": five_hour})
+        worst = max(w["used"] for w in windows)
+        return {"usable": worst < 1, "blocked": worst >= 1, "error": None, "worst_used": worst, "windows": windows}
+    return {"accounts": [{"alias": alias, "is_active": active, "usage": usage(room)}
+                         for alias, active, room in accounts]}
 
 
 # ---- the receipt, per provider ------------------------------------------------------------------
@@ -259,3 +266,50 @@ def test_a_try_later_answer_tells_the_owner_nothing(switcher, tmp_path, monkeypa
         clock[0] += 20 * 60_000
     assert len(_requests(requests)) >= 1
     assert not [n for n in sent if "banked reset" in n["preview"].lower()]
+
+
+# ---- when the Host calls the broker (F1, F2) -----------------------------------------------------
+
+def _keeper(switcher, tmp_path, monkeypatch, reading):
+    owner, worker, readings, calls, sent = switcher
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=5)
+    receipt.write_text(json.dumps({"status": "no_eligible_grant", "verified": False}))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    readings["codex"] = reading
+    _keeper_run(worker, clock)
+    return _requests(requests)
+
+
+@pytest.mark.parametrize("reading,called", [
+    # every account at its FIVE-HOUR cap, with weekly room: a banked (weekly) reset is not for that
+    (_codex(("work", True, 0.5), ("home", False, 0.7), five_hour=1.0), False),
+    # one account still has weekly room
+    (_codex(("work", True, 0.0), ("home", False, 0.2)), False),
+    # every account's weekly window spent: one call
+    (_codex(("work", True, 0.0), ("home", False, 0.0)), True),
+])
+def test_the_host_asks_for_a_banked_reset_only_when_every_weekly_window_is_spent(
+        switcher, tmp_path, monkeypatch, reading, called):  # noqa: F811
+    assert _keeper(switcher, tmp_path, monkeypatch, reading) == ([{"models": []}] if called else [])
+
+
+def test_a_spend_control_block_with_weekly_room_calls_nothing(switcher, tmp_path, monkeypatch):  # noqa: F811
+    reading = _codex(("work", True, 0.4), ("home", False, 0.4))
+    for account in reading["accounts"]:
+        account["usage"].update(blocked=True, usable=False, worst_used=1.0)  # blocked, but not weekly
+    assert _keeper(switcher, tmp_path, monkeypatch, reading) == []
+
+
+def test_the_weekly_reading_is_the_accounts_own_window():
+    from lib import janitor_hotseat
+    usage = {"windows": [{"label": "codex primary 5-hour", "used": 1.0},
+                         {"label": "gpt-5-codex weekly", "used": 1.0},       # a model's window
+                         {"label": "codex primary weekly", "used": 0.3}]}
+    assert janitor_hotseat._codex_weekly_used(usage) == 0.3
+    assert janitor_hotseat._codex_weekly_used({"windows": [{"label": "codex primary 5-hour", "used": 1}]}) is None
+    assert janitor_hotseat.codex_weekly_spent([]) is False
+    spent = janitor_hotseat.codex_weekly_spent
+    assert spent([{"weekly_used": 0.99}, {"weekly_used": 1.0}]) is True    # 99 % used is spent
+    assert spent([{"weekly_used": 0.98}, {"weekly_used": 1.0}]) is False

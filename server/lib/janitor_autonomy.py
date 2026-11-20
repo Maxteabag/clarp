@@ -660,7 +660,10 @@ class AutonomyJanitors:
                     raw_decision=janitor_hotseat.decide(raw_accounts,janitor_hotseat.floor_for(options,provider),required_models=req_models,active_models=act_models,last_switch=last_switch,now_ms=now,cooldown_ms=cooldown_ms)
                     # A withheld healthy account is not quota exhaustion. Never spend
                     # a grant merely because authentication repair hid a candidate.
-                    if raw_decision['action']=='exhausted':
+                    # A banked reset restores the window it is for: Codex's weekly one. Asked only when
+                    # every account is spent THERE by this read; an unreadable account authorises nothing.
+                    reset_due=janitor_hotseat.PROVIDERS[provider].reset_due
+                    if raw_decision['action']=='exhausted' and (reset_due is None or reset_due(raw_accounts)):
                         status=self.reset_worker.offer(provider,reset_field,req_models,owner,accounts=saved,cap_field=reset_cap)
                         if status=='daily_cap':self._reset_stop_notice(owner,run,provider,'daily_cap')
                         if status!='disabled':reset_text='Banked resets: '+status
