@@ -935,6 +935,23 @@ Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in
 every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
 edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
 
+### A stored voice and its edits (feature `voice_provider_maps`, Host contract 113, provisional)
+
+A stored `voice_id` (agent or contact) is a provider map, compact sorted JSON such as
+`{"cartesia":"<uuid>","gemini":"Kore"}`; `{}` means no voice of its own. A bare value stored
+before this release is still read as an ElevenLabs id; `clarp-admin voice migrate` brings
+stored values to the map shape and writes only rows that sound the same under every provider.
+
+- `POST /agent-voice` `{session, voice_id}` without `provider`: the id goes under the provider
+  its form names (a uuid: Cartesia; a Chirp 3 HD name: Google; 20 letters and digits:
+  ElevenLabs; otherwise ElevenLabs), merged into the agent's map. With `provider`, as before.
+- `POST /personas/update` merges `voice_id` into the stored map per provider. Optional
+  `base_voice_id`: the map the app last read. A provider whose incoming value equals the base
+  keeps the stored value (another app may have changed it since); one in the base but not in
+  the incoming map is removed. Without `base_voice_id` nothing is removed by its absence; an
+  empty value for a provider removes it. Only the incoming value is read by its form: an edit
+  never moves a stored value to another provider.
+
 ### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 109)
 
 When a reply's speech ends without audio, the Host sends `tts-error` with `reason`, `provider`
