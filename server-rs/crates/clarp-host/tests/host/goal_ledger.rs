@@ -535,7 +535,7 @@ fn a_delegate_observes_records_and_replays_without_changing_the_owners_checkpoin
     );
     let did = grant["delegation_id"].as_str().unwrap();
     let credential = std::fs::read_to_string(grant["token_path"].as_str().unwrap()).unwrap();
-    let real = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+    let real = place.host_command()
         .arg("tool")
         .args(["clarp-goal", "bookkeeping", "observe", did])
         .current_dir(&place.root)

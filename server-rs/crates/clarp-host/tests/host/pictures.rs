@@ -71,7 +71,7 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     let unit = home.join(".config/systemd/user/clarp-host.service");
     let kept = home.join(".config/clarp-host/install.conf");
     let install = |words: &[&str]| -> String {
-        let done = Command::new("bash")
+        let done = place.command("bash")
             .arg(&tool)
             .args(["--from", from.to_str().unwrap(), "--files-only"])
             .args(words)
@@ -108,7 +108,7 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
     );
     assert!(!install(&["--contact-pictures", "off"]).contains("--contact-pictures"));
     assert!(!install(&["--contact-pictures", "default"]).contains("--contact-pictures"));
-    let refused = Command::new("bash")
+    let refused = place.command("bash")
         .arg(&tool)
         .args([
             "--from",
