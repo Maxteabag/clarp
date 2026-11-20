@@ -3,6 +3,7 @@
 import runner
 
 K = 'clarp-kernel/src/controller_actions.rs'
+A = 'clarp-kernel/src/address.rs'
 H = 'clarp-host/src/controller_actions.rs'
 CLI = 'clarp-host/src/controller_action_tool.rs'
 RUNS = {'vectors':['test','--test','controller_actions_vectors'],
@@ -35,15 +36,6 @@ rules(K,'vectors',[
     ('prompt loses its last character', 'text(data, "text", 4000)', 'text(data, "text", 3999)'),
     ('prompt gains a character', 'text(data, "text", 4000)', 'text(data, "text", 4001)'),
     ('whitespace not stripped from field strings', 'Value::String(s) => python::strip(s)', 'Value::String(s) => s'),
-    ('HTTPS loopback allowed by default', 'address.0.scheme_str() == Some("http")', 'true'),
-    ('IPv6 loopback missing', '"localhost" | "[::1]"', '"localhost"'),
-    ('localhost missing', '"localhost" | "[::1]"', '"[::1]"'),
-    ('IPv4 loopback missing', '"127.0.0.1" | "localhost"', '"localhost"'),
-    ('configured port ignored', 'p != target.port_u16().unwrap_or(default)', 'false'),
-    ('scope admits a different path', 'path.strip_prefix(want)', 'Some("")'),
-    ('path colon accepted after allowed prefix', "tail.starts_with([\'/\', \'?\', \'#\'])", "tail.starts_with([\'/\', \'?\', \'#\', \':\'])"),
-    ('configured trailing slash not a prefix', "want.ends_with('/')", 'false'),
-    ('a normal exact configured path refused', 'tail.is_empty() ||', 'false ||'),
     ('different device wins over matching device', '[device, "*"]', '["*", device]'),
     ('mapping ignores the button', '.find(|m| m["device"] == d && m["button"] == button && m["gesture"] == gesture)', '.find(|m| m["device"] == d && m["gesture"] == gesture)'),
     ('mapping device limit loses a character', 'device.len() > 128', 'device.len() >= 128'),
@@ -65,6 +57,19 @@ rules(K,'vectors',[
     ('target reply one character too long', 'python::first(text,500)', 'python::first(text,501)'),
     ('request id not bounded', 'python::first(python::strip(&id), 128)', 'python::first(python::strip(&id), 129)'),
     ('audit device words not bounded', 'python::first(&word(&data[key]), 128)', 'python::first(&word(&data[key]),129)'),
+])
+
+# The admission of an address, kept in the kernel's address module since one rule judges every stand-in by it.
+rules(A,'vectors',[
+    ('HTTPS loopback allowed by default', 'address.0.scheme_str() == Some("http")', 'true'),
+    ('IPv6 loopback missing', '"localhost" | "[::1]"', '"localhost"'),
+    ('localhost missing', '"localhost" | "[::1]"', '"[::1]"'),
+    ('IPv4 loopback missing', '"127.0.0.1" | "localhost"', '"localhost"'),
+    ('configured port ignored', 'p != target.port_u16().unwrap_or(default)', 'false'),
+    ('scope admits a different path', 'path.strip_prefix(want)', 'Some("")'),
+    ('path colon accepted after allowed prefix', "tail.starts_with([\'/\', \'?\', \'#\'])", "tail.starts_with([\'/\', \'?\', \'#\', \':\'])"),
+    ('configured trailing slash not a prefix', "want.ends_with('/')", 'false'),
+    ('a normal exact configured path refused', 'tail.is_empty() ||', 'false ||'),
 ])
 rules(H,'door',[
     ('limited and full devices can define actions', 'op != "mappings" && principal != Principal::Administrator', 'false'),

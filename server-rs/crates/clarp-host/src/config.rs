@@ -5,6 +5,8 @@
 //! started. Changing one is a restart with a different word, not a change of code.
 
 use std::net::SocketAddr;
+
+use clarp_kernel::address::{Local, on_this_machine};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -290,6 +292,25 @@ pub fn working_dir(asked: &str, home: &Path, otherwise: &Path) -> PathBuf {
     }
 }
 
+/// A stand-in for a provider or an engine, given in `variable`: none where nothing is given, and
+/// otherwise an address on this machine by one rule for every one of them
+/// (`clarp_kernel::address::on_this_machine`), parsed as a client parses it and kept as it was
+/// rebuilt from its parsed parts, never as it was given. Another is refused, naming the variable
+/// and never the address: what it carries before its host may be a secret.
+pub fn stand_in(variable: &str, given: &str, rule: Local) -> Result<String, String> {
+    if given.is_empty() {
+        return Ok(String::new());
+    }
+    on_this_machine(given, rule).ok_or_else(|| {
+        let what = if rule.scheme == "ws" {
+            "a socket on this machine (ws://127.0.0.1:PORT)"
+        } else {
+            "an address on this machine (http://127.0.0.1:PORT)"
+        };
+        format!("{variable}: {what}")
+    })
+}
+
 impl Config {
     /// Reads the configuration from the command line and the environment.
     pub fn from_args(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
@@ -470,102 +491,46 @@ impl Config {
             });
             beside.unwrap_or_else(|| PathBuf::from("whisper-worker.py"))
         });
-        // A stand-in for an engine over the network is on this machine, or it is none.
-        let stand_in = |variable: &str| -> Result<String, String> {
-            let address = std::env::var(variable).unwrap_or_default();
-            let local = ["http://127.0.0.1:", "http://localhost:", "http://[::1]:"];
-            if address.is_empty() || local.iter().any(|begin| address.starts_with(begin)) {
-                Ok(address)
-            } else {
-                Err(format!("{variable} {address}: an address on this machine"))
-            }
+        // A stand-in for a provider or an engine is on this machine, or it is none: one rule for
+        // every one of them ([`stand_in`]).
+        let here = |variable: &str, rule: Local| {
+            stand_in(variable, &std::env::var(variable).unwrap_or_default(), rule)
         };
-        let judge_endpoint = std::env::var("CLARP_JUDGE_ENDPOINT").unwrap_or_default();
-        if !judge_endpoint.is_empty() {
-            let uri = judge_endpoint
-                .parse::<axum::http::Uri>()
-                .map_err(|_| "invalid judge endpoint")?;
-            let local = uri
-                .authority()
-                .and_then(|a| a.as_str().parse::<std::net::SocketAddr>().ok())
-                .is_some_and(|a| a.ip().is_loopback() && a.port() != 0);
-            if uri.scheme_str() != Some("http") || !local {
-                return Err("CLARP_JUDGE_ENDPOINT needs a loopback HTTP socket address".into());
-            }
-        }
-        let scribe_endpoint = stand_in("CLARP_SCRIBE_ENDPOINT")?;
-        let voice_endpoint = |variable: &str| -> Result<String, String> {
-            let endpoint = stand_in(variable)?;
-            if !endpoint.is_empty() {
-                let uri = endpoint
-                    .parse::<axum::http::Uri>()
-                    .map_err(|_| format!("invalid {variable}"))?;
-                let authority = uri
-                    .authority()
-                    .ok_or_else(|| format!("missing {variable} host"))?;
-                if authority.as_str().contains('@')
-                    || !matches!(authority.host(), "127.0.0.1" | "[::1]" | "localhost")
-                {
-                    return Err(format!("{variable} must be on loopback"));
-                }
-            }
-            Ok(endpoint)
-        };
-        let deepgram_voice_endpoint = voice_endpoint("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
-        let ink_endpoint = voice_endpoint("CLARP_INK_ENDPOINT")?;
-        let google_voice_endpoint = voice_endpoint("CLARP_GOOGLE_VOICE_ENDPOINT")?;
-        let eleven_voice_endpoint = voice_endpoint("CLARP_ELEVEN_VOICE_ENDPOINT")?;
-        let nova_endpoint = stand_in("CLARP_NOVA_ENDPOINT")?;
-        let picture_endpoint = stand_in("CLARP_PICTURE_ENDPOINT")?;
+        let web = |variable: &str| here(variable, Local::WEB);
+        let judge_endpoint = web("CLARP_JUDGE_ENDPOINT")?;
+        let scribe_endpoint = web("CLARP_SCRIBE_ENDPOINT")?;
+        let deepgram_voice_endpoint = web("CLARP_DEEPGRAM_VOICE_ENDPOINT")?;
+        let ink_endpoint = web("CLARP_INK_ENDPOINT")?;
+        let google_voice_endpoint = web("CLARP_GOOGLE_VOICE_ENDPOINT")?;
+        let eleven_voice_endpoint = web("CLARP_ELEVEN_VOICE_ENDPOINT")?;
+        let nova_endpoint = web("CLARP_NOVA_ENDPOINT")?;
+        let picture_endpoint = web("CLARP_PICTURE_ENDPOINT")?;
         // The engine of a stream is reached by a socket: its stand-in is one on this machine.
-        let flux_endpoint = std::env::var("CLARP_FLUX_ENDPOINT").unwrap_or_default();
-        let local = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
-        if !flux_endpoint.is_empty() && !local.iter().any(|begin| flux_endpoint.starts_with(begin))
-        {
-            let not_here = format!("CLARP_FLUX_ENDPOINT {flux_endpoint}: a socket on this machine");
-            return Err(not_here);
-        }
-        let live_endpoint = std::env::var("CLARP_LIVE_ENDPOINT").unwrap_or_default();
-        if !live_endpoint.is_empty() && !local.iter().any(|begin| live_endpoint.starts_with(begin))
-        {
-            let not_here = format!("CLARP_LIVE_ENDPOINT {live_endpoint}: a socket on this machine");
-            return Err(not_here);
-        }
-        let gemini_live_endpoint = std::env::var("CLARP_GEMINI_LIVE_ENDPOINT").unwrap_or_default();
-        if !gemini_live_endpoint.is_empty() {
-            let uri = gemini_live_endpoint.parse::<http::Uri>().ok();
-            let local = uri.as_ref().is_some_and(|uri| {
-                uri.scheme_str() == Some("ws")
-                    && uri
-                        .authority()
-                        .is_some_and(|a| !a.as_str().contains('@') && a.port_u16().is_some())
-                    && matches!(uri.host(), Some("127.0.0.1" | "[::1]" | "localhost"))
-                    && uri.query().is_none()
-            });
-            if !local {
-                return Err("CLARP_GEMINI_LIVE_ENDPOINT requires a loopback socket".into());
-            }
-        }
-        let router_endpoint = stand_in("CLARP_ROUTER_ENDPOINT")?;
-        let cartesia_endpoint = voice_endpoint("CLARP_CARTESIA_ENDPOINT")?;
-        let apns_endpoint = stand_in("CLARP_APNS_ENDPOINT")?;
-        let fcm_endpoint = std::env::var("CLARP_FCM_ENDPOINT")
-            .ok()
-            .map(|address| {
-                // A single literal loopback socket replaces BOTH credential exchange and messaging.
-                address
-                    .strip_prefix("http://")
-                    .and_then(|host| host.parse::<std::net::SocketAddr>().ok())
-                    .filter(|at| at.ip().is_loopback() && at.port() != 0)
-                    .map(|at| format!("http://{at}"))
-                    .ok_or_else(|| {
-                        "CLARP_FCM_ENDPOINT needs a loopback HTTP socket address".to_string()
-                    })
-            })
-            .transpose()?;
-        let gemini_endpoint = voice_endpoint("CLARP_GEMINI_ENDPOINT")?;
-        let google_token_endpoint = voice_endpoint("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
-        let google_speech_endpoint = stand_in("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
+        let flux_endpoint = here("CLARP_FLUX_ENDPOINT", Local::SOCKET)?;
+        let live_endpoint = here("CLARP_LIVE_ENDPOINT", Local::SOCKET)?;
+        let gemini_live_endpoint = here(
+            "CLARP_GEMINI_LIVE_ENDPOINT",
+            Local {
+                query: false,
+                ..Local::SOCKET
+            },
+        )?;
+        let router_endpoint = web("CLARP_ROUTER_ENDPOINT")?;
+        let cartesia_endpoint = web("CLARP_CARTESIA_ENDPOINT")?;
+        let apns_endpoint = web("CLARP_APNS_ENDPOINT")?;
+        // A single socket replaces both the credential exchange and the messaging: an address
+        // without a path of its own.
+        let fcm_endpoint = here(
+            "CLARP_FCM_ENDPOINT",
+            Local {
+                path: false,
+                ..Local::WEB
+            },
+        )?;
+        let fcm_endpoint = (!fcm_endpoint.is_empty()).then_some(fcm_endpoint);
+        let gemini_endpoint = web("CLARP_GEMINI_ENDPOINT")?;
+        let google_token_endpoint = web("CLARP_GOOGLE_TOKEN_ENDPOINT")?;
+        let google_speech_endpoint = web("CLARP_GOOGLE_SPEECH_ENDPOINT")?;
         // A token of the owner's real account is never handed to a stand-in, and a token a
         // stand-in made up is never sent to Google: both are stood in for, or neither.
         if google_token_endpoint.is_empty() != google_speech_endpoint.is_empty() {
@@ -576,13 +541,7 @@ impl Config {
         let chirp_decoder = std::env::var("CLARP_CHIRP_DECODER").unwrap_or_default();
         // A stand-in for the relay is on this machine too: the key a Host dials with goes
         // over TLS, or stays here.
-        let relay_stand_in = std::env::var("CLARP_RELAY_DIAL").unwrap_or_default();
-        let here = ["ws://127.0.0.1:", "ws://localhost:", "ws://[::1]:"];
-        if !relay_stand_in.is_empty() && !here.iter().any(|begin| relay_stand_in.starts_with(begin))
-        {
-            let only = "an address on this machine (ws://127.0.0.1:PORT)";
-            return Err(format!("CLARP_RELAY_DIAL {relay_stand_in}: {only}"));
-        }
+        let relay_stand_in = here("CLARP_RELAY_DIAL", Local::SOCKET)?;
         Ok(Self {
             run_dir,
             listen: listen
@@ -921,6 +880,29 @@ mod tests {
                 .unwrap()
                 .relay_config,
             Some(PathBuf::from("/c/config.toml"))
+        );
+    }
+
+    #[test]
+    fn a_stand_in_is_kept_as_it_was_rebuilt_and_refused_without_its_address() {
+        assert_eq!(stand_in("CLARP_X", "", Local::WEB), Ok(String::new()));
+        assert_eq!(
+            stand_in("CLARP_X", "HTTP://LOCALHOST:5000/a/../b", Local::WEB),
+            Ok("http://localhost:5000/b".to_string())
+        );
+        assert_eq!(
+            stand_in("CLARP_X", "ws://127.0.0.1:5000", Local::SOCKET),
+            Ok("ws://127.0.0.1:5000".to_string())
+        );
+        let refused = stand_in("CLARP_X", "http://someone:hush@127.0.0.1:5000", Local::WEB);
+        assert_eq!(
+            refused,
+            Err("CLARP_X: an address on this machine (http://127.0.0.1:PORT)".to_string())
+        );
+        let refused = stand_in("CLARP_Y", "ws://someone:hush@127.0.0.1:5000", Local::SOCKET);
+        assert_eq!(
+            refused,
+            Err("CLARP_Y: a socket on this machine (ws://127.0.0.1:PORT)".to_string())
         );
     }
 }
