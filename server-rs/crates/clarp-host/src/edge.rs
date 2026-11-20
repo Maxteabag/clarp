@@ -322,6 +322,8 @@ pub const FEATURES: &[(&str, u64)] = &[
     // What a user send's delivery is, on `GET /log` and its feed (`delivery_*`), and the
     // `delivery-updated` hint: in the in-process mode, the Host owning its turns itself.
     ("send_delivery_state", 81),
+    // What the user's last compaction of an agent did, on its row (`last_compaction`).
+    ("compaction_outcome", 107),
 ];
 
 /// After this long without an event, a stream is sent a heartbeat.
