@@ -43,7 +43,7 @@ PLANTS += [
     (HOST,'store','remove audio another row still owns on failure','if !rows.iter().any(|r| r.name == file) {','if true {'),
     (HOST,'store','publish audio metadata even when the write failed','if !write(store, &next).await {','if !write(store, &next).await && false {'),
     (HOST,'store','missing store is treated as empty','Err(why) => {\n            store.fleet.unkept(KIND, &why.0);\n            return None;', 'Err(_) => {\n            None'),
-    (HOST,'store','clean another file in the same shard','phrases::blob_name(&name) && !live.contains(name.as_str())','!live.contains(name.as_str())'),
+    (HOST,'store','clean another file in the same shard','if phrases::blob_name(&name)','if true'),
     (HOST,'store','skip orphan collection','!live.contains(name.as_str())','false && !live.contains(name.as_str())'),
     (HOST,'space','forget the newest fill instead','next.drain(..phrases::excess(&next));','next.truncate(next.len() - phrases::excess(&next));'),
     (HOST,'space','remove shared blobs on eviction','!live.contains(row.name.as_str()) && !forget(store, &row.name)','!forget(store, &row.name)'),
