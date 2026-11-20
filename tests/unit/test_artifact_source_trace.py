@@ -173,3 +173,25 @@ def test_a_card_is_dated_when_it_is_published_whichever_way_it_comes(agent, monk
     clock["ms"] += 5_000
     artifacts.update(report["artifact_id"], {"payload_patch": {"content": "<p>b</p>"}})
     assert artifacts.get(report["artifact_id"])["created_at"] == clock["ms"] - 5_000
+
+
+# The previous release's writes to provider_turns, word for word (main before R102): after a rollback
+# with --allow-older-schema it runs against a schema 129 database.
+_PREVIOUS_INSERT = """INSERT OR IGNORE INTO provider_turns
+        (turn_token,agent_id,provider,pid,start_token,started_at) VALUES (?,?,?,?,?,?)"""
+_PREVIOUS_EXIT = """UPDATE provider_turns SET exited_at=?
+            WHERE turn_token=? AND exited_at IS NULL"""
+
+
+def test_the_previous_releases_writes_still_work_against_schema_129(agent):
+    """Rolled back, the older code knows no trace_id: its insert leaves the column's default, its
+    turn names no trace, and a card it publishes is placed by time, as before."""
+    from lib import db_schema
+    con = db.conn()
+    assert db_schema._SCHEMA_VERSION >= 129
+    token = provider_jobs.new_turn_token()
+    con.execute(_PREVIOUS_INSERT, (token, agent, "claude", os.getpid(), "start", 1))
+    assert con.execute("SELECT trace_id FROM provider_turns WHERE turn_token=?", (token,)).fetchone()[0] == ""
+    turn_lifecycle.open_turn(agent_id=agent, source="pwa", trace_id="trace-a")
+    assert _publish(token)["source_trace_id"] == ""
+    assert con.execute(_PREVIOUS_EXIT, (2, token)).rowcount == 1
