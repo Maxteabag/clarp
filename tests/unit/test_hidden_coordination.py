@@ -538,8 +538,9 @@ def test_a_note_from_a_turn_parked_for_a_retry_is_its_turns(tmp_path, pushes):
     """A turn waiting to be delivered again (a dropped connection) has neither ended nor
     settled: it is still the agent's turn, and a note is a row of it.
 
-    Decided by PR 470's turn_identity.running_trace at the rebase: the note follows that one
-    function, whatever it says of a turn parked for a retry; this test may flip then."""
+    The rule is turn_identity.running_trace's (PR 470), ruled on purpose: a turn parked for a
+    retry after a dropped connection is running (a note in that gap is that turn's), a turn
+    parked for its account is not (the next test)."""
     parked = []
     service, backends, agent_id = _dispatched(tmp_path, retry_scheduler=lambda d, fn: parked.append(fn))
     _start(service, "t-park")
@@ -715,3 +716,17 @@ def test_a_notes_push_on_android_is_an_ordinary_notification_message():
                             {"agent_id": "a", "badge": True, "unread": True})
     assert data["kind"] == "user-notification" and data["body"] == "The release is out."
     assert data["title"] == "Worker" and data["notification_id"] == "pn-1" and "reason" not in data
+
+
+
+def test_a_note_from_a_turn_parked_waiting_for_its_account_is_refused(tmp_path, pushes):
+    """The rule is turn_identity.running_trace's (PR 470), ruled on purpose: a turn parked for
+    its account keeps its row open and unsettled, but makes no progress and its process may
+    still hold the token: not running. A turn parked for a retry is (the test above)."""
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-acct")
+    token = _token(agent_id, "t-acct")
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+        "dispatch": "claude", "trace_id": "t-acct", "account_recovery": "waiting",
+        "message": "waiting for an account"})
+    assert _note("Waiting.", session="mike", token=token).answer[0] == 409
