@@ -21193,6 +21193,160 @@ fn an_agent_is_heard_by_its_own_engines_in_its_own_language_and_the_next_one_whe
     );
 }
 
+/// What an app is shown of how each agent sounds and is heard is what the Host does (feature
+/// voice_profile): the snapshot's rows and head, the creation answer and the roster's events
+/// carry it, the speaker hands an engine the voice the profile shows, and the version of the
+/// Host's part moves for each Host-wide cause and stays when nothing changed.
+#[test]
+fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
+    let place = Place::new("voice-profile");
+    let sound: Vec<u8> = (0..6_000_u32).map(|at| (at % 251) as u8).collect();
+    let voice = cartesia_stand_in(sound);
+    let owners = place.root.join("python-host-config.toml");
+    let file = |more: &str| {
+        let text = format!(
+            "[tts]\nprovider = \"cartesia\"\n\n[cartesia]\napi_key = \"key-in-the-owners-file\"\n\n\
+             [cartesia.voices]\nMaximus = \"v-shared\"\nTheo = \"v-shared\"\n{more}"
+        );
+        std::fs::write(&owners, text).unwrap();
+    };
+    file("");
+    let args = ["--speech-keys", owners.to_str().unwrap()];
+    let world = [
+        ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
+        ("CARTESIA_API_KEY", ""),
+        ("DEEPGRAM_API_KEY", ""),
+        ("ELEVEN_API_KEY", ""),
+        ("GEMINI_API_KEY", ""),
+        ("GOOGLE_VERTEX_API_KEY", ""),
+    ];
+    let host = place.start_in("", &args, &world);
+    let heard = host.listen();
+    let roster = |kind: &str| -> Vec<Value> {
+        let heard = heard.lock().unwrap();
+        let of_kind = heard.iter().filter(|e| e["type"] == "agent-roster" && e["kind"] == kind);
+        of_kind.cloned().collect()
+    };
+    let speech_of = |profile: &Value| profile["speech"].clone();
+
+    // The creation answer carries the new agent's profile, its sharing counted.
+    let made = |name: &str| host.post("/agents", json!({ "name": name, "backend": "scripted" }));
+    let maximus = made("Maximus");
+    let shown = speech_of(&maximus["agent"]["voice_profile"]);
+    assert_eq!(
+        (&shown["provider"], &shown["provider_label"], &shown["voice_id"], &shown["origin"]),
+        (&json!("cartesia"), &json!("Cartesia Sonic"), &json!("v-shared"), &json!("own"))
+    );
+    assert_eq!((&shown["streaming"], &shown["silent_reason"], &shown["shared_with"]), (&json!(true), &Value::Null, &json!(0)));
+    let theo = made("Theo");
+    assert_eq!(theo["agent"]["voice_profile"]["speech"]["shared_with"], 1, "{theo}");
+    let stranger = made("Stranger");
+    let silent = speech_of(&stranger["agent"]["voice_profile"]);
+    assert_eq!(
+        (&silent["voice_id"], &silent["origin"], &silent["silent_reason"], &silent["shared_with"]),
+        (&Value::Null, &Value::Null, &json!("no_voice"), &json!(0))
+    );
+    let [maximus, theo, stranger] = [maximus, theo, stranger].map(|made| made["session"].as_str().unwrap().to_string());
+    // And so do the roster's events about one agent.
+    let told_of = |kind: &str, session: &str| roster(kind).into_iter().find(|e| e["session"] == session);
+    wait_for("three agents told with their profiles", || {
+        [&maximus, &theo, &stranger].iter().all(|session| told_of("created", session).is_some())
+    });
+    let told = roster("created");
+    let theo_told = told.iter().find(|e| e["session"] == theo.as_str()).unwrap();
+    assert_eq!(theo_told["voice_profile"]["speech"]["voice_id"], "v-shared", "{theo_told}");
+
+    // The snapshot: every row's profile from one view, its head what a new agent gets.
+    let snapshot = || host.get("/agents/snapshot");
+    let row_of = |shot: &Value, session: &str| -> Value {
+        let rows = shot["agents"].as_array().unwrap();
+        rows.iter().find(|row| row["session"] == session).unwrap().clone()
+    };
+    let first = snapshot();
+    let mine = row_of(&first, &maximus)["voice_profile"].clone();
+    assert_eq!((&mine["speech"]["voice_id"], &mine["speech"]["shared_with"]), (&json!("v-shared"), &json!(1)));
+    assert_eq!(row_of(&first, &stranger)["voice_profile"]["speech"]["silent_reason"], "no_voice");
+    let hearing = &mine["hearing"];
+    assert_eq!(
+        (&hearing["engine_origin"], &hearing["device_may_override"], &hearing["language_origin"], &hearing["languages"]),
+        (&json!("default"), &json!(true), &json!("default"), &json!(["en"]))
+    );
+    assert_eq!(hearing["device_cloud_languages"], json!(["en"]));
+    assert_eq!(
+        first["voice_defaults"]["speech"],
+        json!({ "provider": "cartesia", "provider_label": "Cartesia Sonic", "voice_id": null, "voice_label": null,
+                "origin": "default", "streaming": true, "assignment": "contact", "silent_reason": null })
+    );
+    let version = |shot: &Value| shot["voice_profile_version"].as_str().unwrap().to_string();
+    let v0 = version(&first);
+    assert_eq!(v0.len(), 16, "{v0}");
+    assert_eq!(version(&snapshot()), v0, "nothing changed: the same version");
+
+    // The speaker hands the engine the voice the profile shows, and tells the reason it shows.
+    host.send(&maximus, "<speak>Hello.</speak>", "m1");
+    let spoken = || voice.asked().into_iter().find(|asked| asked["voice"]["id"].is_string());
+    wait_for("the clip", || spoken().is_some());
+    assert_eq!(spoken().unwrap()["voice"]["id"], mine["speech"]["voice_id"]);
+    host.send(&stranger, "<speak>Nobody hears this.</speak>", "s1");
+    wait_for("the silence told", || heard.lock().unwrap().iter().any(|e| e["type"] == "tts-error"));
+    let told = heard.lock().unwrap().iter().find(|e| e["type"] == "tts-error").cloned().unwrap();
+    assert_eq!((&told["session"], &told["reason"]), (&json!(stranger), &json!("no_voice")));
+
+    // The speech providers: the apps are told to re-read the agents, and the version moves;
+    // put back, it is the version it was.
+    host.post("/tts/providers", json!({ "provider": "deepgram", "fallback": "none" }));
+    wait_for("the change told", || roster("voice-profile").len() == 1);
+    let moved = snapshot();
+    assert_ne!(version(&moved), v0);
+    let deepgram = row_of(&moved, &maximus)["voice_profile"]["speech"].clone();
+    assert_eq!(
+        (&deepgram["provider"], &deepgram["voice_id"], &deepgram["silent_reason"]),
+        (&json!("deepgram"), &Value::Null, &json!("not_configured")),
+        "no key for Deepgram"
+    );
+    host.post("/tts/providers", json!({ "provider": "cartesia", "fallback": "none" }));
+    wait_for("the change back told", || roster("voice-profile").len() == 2);
+    assert_eq!(version(&snapshot()), v0, "the same inputs, the same version");
+
+    // The transcription settings: told, and the version moves.
+    let mut its_own = serde_json::Map::new();
+    its_own.insert(maximus.clone(), json!("google:chirp_3"));
+    host.post("/transcription-providers", json!({ "agent_engines": its_own }));
+    wait_for("the hearing change told", || roster("voice-profile").len() == 3);
+    let moved = snapshot();
+    assert_ne!(version(&moved), v0);
+    let own = row_of(&moved, &maximus)["voice_profile"]["hearing"].clone();
+    assert_eq!(
+        (&own["engines"][0]["id"], &own["engine_origin"], &own["device_may_override"], &own["device_cloud_languages"]),
+        (&json!("google:chirp_3"), &json!("own"), &json!(false), &Value::Null)
+    );
+    let v1 = version(&moved);
+
+    // The owner's file is read when a snapshot is made: one asked after it changed shows the
+    // new voice and a new version at once (no event tells of it: docs/differences.md).
+    file("Stranger = \"v-stranger\"\n");
+    let moved = snapshot();
+    assert_ne!(version(&moved), v1);
+    let found = row_of(&moved, &stranger)["voice_profile"]["speech"].clone();
+    assert_eq!((&found["voice_id"], &found["origin"], &found["silent_reason"]), (&json!("v-stranger"), &json!("own"), &Value::Null));
+
+    // A voice given from an app: told with the profile it makes.
+    host.post("/agent-voice", json!({ "session": stranger, "voice_id": "v-own", "provider": "cartesia" }));
+    wait_for("the voice change told", || roster("voice-changed").len() == 1);
+    let changed = roster("voice-changed")[0].clone();
+    assert_eq!((&changed["session"], &changed["voice_profile"]["speech"]["voice_id"]), (&json!(stranger), &json!("v-own")));
+    // A rename is told with it too.
+    host.post("/agent-rename", json!({ "session": theo, "name": "Theodor" }));
+    wait_for("the rename told", || roster("agent-renamed").len() == 1);
+    assert!(roster("agent-renamed")[0]["voice_profile"]["speech"].is_object());
+
+    // Put away, an agent has no profile and shares nobody's voice.
+    host.post("/agent-archive", json!({ "session": theo, "archived": true }));
+    let shot = snapshot();
+    assert_eq!(row_of(&shot, &theo).get("voice_profile"), None);
+    assert_eq!(row_of(&shot, &maximus)["voice_profile"]["speech"]["shared_with"], 0);
+}
+
 #[test]
 fn an_apps_voice_picker_reads_the_catalogue_and_gives_an_agent_a_voice() {
     let place = Place::new("voices");
