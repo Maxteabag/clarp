@@ -420,3 +420,28 @@ def test_a_reset_count_that_cannot_be_read_redeems_nothing_and_is_told_once(
     assert logged.count("bankedResetLedgerUnreadable") == 1
     assert settings_store.get_text("hotseat-reset.codex.redeemed") == ledger   # left for repair
 
+
+# ---- the broker's environment (F7) ----------------------------------------------------------------
+
+@pytest.mark.parametrize("provider,field", [("codex", "codex_reset_command"), ("claude", "claude_reset_command")])
+def test_the_broker_gets_the_scrubbed_environment(tmp_path, monkeypatch, provider, field):
+    """A variable outside the list (a provider key, the Host's token, its session) never reaches the
+    broker; HOME, PATH, LANG, LC_* and XDG_* do."""
+    seen = tmp_path / "env.json"
+    script = tmp_path / "env-broker.py"
+    script.write_text("import json,os,sys\n"
+                      f"open({str(seen)!r},'w').write(json.dumps(sorted(os.environ)))\n"
+                      "sys.stdin.read(); print(json.dumps({'status': 'no_eligible_grant', 'verified': False}))\n")
+    for name, value in {"ANTHROPIC_API_KEY": "sk-synthetic", "CLAUDE_PWA_SESSION": "someone",
+                        "CLARP_TOKEN": "synthetic", "LC_TIME": "C", "XDG_STATE_HOME": str(tmp_path)}.items():
+        monkeypatch.setenv(name, value)
+    with patch.object(janitor_reset.config, "load",
+                      return_value=SimpleNamespace(**{field: (sys.executable, str(script))})):
+        result = janitor_reset.attempt(field, [], accounts=("work",), provider=provider)
+    assert result["status"] == "no_eligible_grant"
+    names = set(json.loads(seen.read_text()))
+    assert {"ANTHROPIC_API_KEY", "CLAUDE_PWA_SESSION", "CLARP_TOKEN"}.isdisjoint(names)
+    assert {"HOME", "PATH", "LC_TIME", "XDG_STATE_HOME"} <= names
+    assert all(n in janitor_reset.BROKER_ENV or n.startswith(janitor_reset.BROKER_ENV_PREFIXES)
+               or n in {"PWD", "SHLVL", "_", "LC_CTYPE", "__CF_USER_TEXT_ENCODING"} for n in names), names
+
