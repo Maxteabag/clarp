@@ -41,8 +41,10 @@ def _park_adopted_occupant(database, agent_id: str, backend_session_id: str,
     if occupant is None or occupant["message_id"] == _message_id(
             agent_id, backend_session_id, source_file, seq):
         return False
-    database.execute("UPDATE messages SET seq = ? WHERE message_id = ?",
-                     (_PARKED_SEQ_BASE + seq, occupant["message_id"]))
+    # A row whose seq changed is a changed row: it takes a new revision, as every
+    # other writer of a message column does (R119), so a delta carries the move.
+    database.execute("UPDATE messages SET seq = ?, revision = ? WHERE message_id = ?",
+                     (_PARKED_SEQ_BASE + seq, _next_revision(database), occupant["message_id"]))
     return True
 
 
@@ -802,7 +804,14 @@ def _upsert_row(database, *, agent_id: str, backend_session_id: str,
     )
     unchanged = existing is not None and _row_payload(existing) == payload \
         and (existing["trace_id"] or "") == row_trace and existing["phase"] == phase
-    revision = int(existing["revision"]) if unchanged else _next_revision(database)
+    # A row whose seq or source_file changed is a changed row, though its
+    # content is the same: it takes a new revision, so a delta carries the move
+    # and the head rises with it (R119). Its updated_at stays: the content did
+    # not change, and ``unchanged`` (what the caller re-stamps a turn by) still
+    # speaks of the content.
+    moved = existing is not None and (existing["source_file"] != source_file
+                                      or existing["seq"] != seq)
+    revision = int(existing["revision"]) if unchanged and not moved else _next_revision(database)
     updated_at = int(existing["updated_at"]) if unchanged else now_ms()
     # The upsert of an identical row still rewrites its pages into the WAL;
     # skip it when every column it sets already holds that value.

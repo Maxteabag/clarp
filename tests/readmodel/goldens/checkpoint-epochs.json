@@ -14,6 +14,11 @@
    "checkpoints": "36237420cbd2566ae91f8ee130dd69cbb5581fe78ed98b0ab8210c191ed13667",
    "parse": "e5d318b2e774abd6dd63998d7bd98adbf130d8ea6ce7aa2d45234a7e7793f846",
    "store": "f0526a74a3a2f9657f4927f71d8ca1177acf3fbee700fb115d7ee468b66dcaf5"
+  },
+  "4": {
+   "checkpoints": "36237420cbd2566ae91f8ee130dd69cbb5581fe78ed98b0ab8210c191ed13667",
+   "parse": "e5d318b2e774abd6dd63998d7bd98adbf130d8ea6ce7aa2d45234a7e7793f846",
+   "store": "6e01f82b2710c913796df511816ca6e0dee33f32ad936d20f0b1a09aeb895e77"
   }
  },
  "claude": {
@@ -31,6 +36,11 @@
    "checkpoints": "2741373649b353c7e1b8a66ae310075db9ff456d028e74648a8acfd16c82de7b",
    "parse": "0eac8f0ed77d67ae4721fe290db10daee0d32610dc2a0fc3600a4b42c642618f",
    "store": "69d5a4926e966951379466157abc728c345165186a10461cf55f2b464ced88cd"
+  },
+  "4": {
+   "checkpoints": "2741373649b353c7e1b8a66ae310075db9ff456d028e74648a8acfd16c82de7b",
+   "parse": "0eac8f0ed77d67ae4721fe290db10daee0d32610dc2a0fc3600a4b42c642618f",
+   "store": "7bdd13a486ba4208c7aa10adcbff1f1beed8c09734cb0c1252ab6097bdf99997"
   }
  },
  "codex": {
@@ -53,6 +63,10 @@
   "2": {
    "parse": "b86c2365138fd670f5c45fb3341cd3af571c1ac1a8c4c962153abc9642a14e52",
    "store": "2331dbe17b12e9bfa83d10c2a0d28071bf3d658fbac3cc3fb239c000c8e78918"
+  },
+  "3": {
+   "parse": "b86c2365138fd670f5c45fb3341cd3af571c1ac1a8c4c962153abc9642a14e52",
+   "store": "ce113de9ff053f27bc6f7da4a8b483b28499dc588ae9860a1af4e8ce86871539"
   }
  },
  "muse": {
@@ -67,6 +81,10 @@
   "3": {
    "parse": "a395ce68b40214e50ac8da9d65977011a49e266b241f12ea3ce137f46510af89",
    "store": "763c373647cbb0b04a56445bd0e3f733bf64b4c0e21ccb65aa9fe1fe9065da39"
+  },
+  "4": {
+   "parse": "a395ce68b40214e50ac8da9d65977011a49e266b241f12ea3ce137f46510af89",
+   "store": "eea96346e4cb486f06f24cbac01adc00cb56f77b0dea8137cf1e4ce37c715cd3"
   }
  },
  "opencode": {
@@ -77,6 +95,10 @@
   "2": {
    "parse": "5344820bc03964070114e92e8c304addb44fd6c960ba082b18de54f8fc3de52f",
    "store": "b72906e8b9580fe7d222ed04d87016f3e421418d8e39c6aaf5a4e8d8892dea12"
+  },
+  "3": {
+   "parse": "5344820bc03964070114e92e8c304addb44fd6c960ba082b18de54f8fc3de52f",
+   "store": "914792ddb6eee4a2e81608f52ba9a79a68c1f56f5ec5540369a28372219c02b8"
   }
  }
 }

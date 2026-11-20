@@ -637,6 +637,72 @@ def write_frontier(database, checkpoint: Checkpoint, file_hash: str, recorded: d
          message_carry.dumps(recorded), checkpoint.updated_at))
 
 
+def commit_inputs(database, agent_id: str, backend_session_id: str, session_rows: bool) -> tuple:
+    """Inside the import's final transaction, beside the checkpoint: the
+    conversation's head (message_writes._carry_head), and the turn rows and
+    the agent's oracle delegations, which move no head (R119)."""
+    from . import message_turns, message_writes
+    return (message_writes._carry_head(database, agent_id, backend_session_id, session_rows),
+            message_turns.TurnIndex.read_rows(database, agent_id),
+            database.execute("SELECT * FROM oracle_delegations WHERE agent_id=? ORDER BY delegation_id",
+                             (agent_id,)).fetchall())
+
+
+def commit_snapshot(database, agent_id: str, backend_session_id: str, under: tuple,
+                    session_rows: bool) -> tuple | None:
+    """Right after the import's commit, with no lock held: the message rows as
+    that commit left them, or None (R119).
+
+    One read transaction (WAL: it holds no lock and blocks no writer). The
+    head is read first: equal to the head at the commit, no message row of the
+    conversation (or of the agent) has changed since, so the snapshot's rows
+    are the rows the checkpoint was written against, as main read them inside.
+    Moved: a write landed between the commit and this read, and those rows are
+    gone; one line says so and no frontier is published (as before R119 a
+    foreign commit during the import's yield)."""
+    from . import message_writes
+    database.execute("BEGIN")
+    try:
+        if message_writes._carry_head(database, agent_id, backend_session_id, session_rows) != under[0]:
+            _tail_log("frontier_not_published_head_moved", retention=True)
+            return None
+        carry_rows = message_writes._carry_message_rows(database, agent_id, backend_session_id, session_rows)
+        sends, user = message_writes._sends_and_latest_user(database, agent_id, backend_session_id, carry_rows)
+        return sends, user, carry_rows
+    finally:
+        # Ended before anything else runs on this connection: an open read
+        # would pin the WAL, and the frontier's BEGIN IMMEDIATE must not
+        # start inside it.
+        if database.in_transaction:
+            database.execute("COMMIT")
+
+
+def frontier_after_commit(checkpoint: Checkpoint, file_hash: str, under: tuple, rows: tuple,
+                          witness=None, *, session_rows: bool = True) -> dict | None:
+    """Publish the frontier of a checkpoint already committed, from what was
+    read at its commit (R119): ``under`` (commit_inputs, read inside it) and
+    ``rows`` (commit_snapshot, read right after it, outside the lock).
+
+    The record is the one main wrote in the import's final transaction: a row
+    written since is NOT in it, and the next tail's guard judges it with the
+    carry rules, as it did. One short write transaction checks that the
+    checkpoint row is still this one and writes the frontier; it reads no
+    message row. Returns the record, or None."""
+    from . import db
+    from .lifecycle import transaction
+    _head, turns, oracle = under
+    sends, user, carry_rows = rows
+    con = db.conn()
+    with transaction(con):
+        if load_checkpoint(con, checkpoint.agent_id, checkpoint.backend_session_id,
+                           checkpoint.source_file) != checkpoint:
+            _tail_log("frontier_not_published_checkpoint_moved", retention=True)
+            return None
+        recorded = inputs_record((turns, sends, user, carry_rows, oracle), checkpoint, session_rows, witness)
+        write_frontier(con, checkpoint, file_hash, recorded)
+    return recorded
+
+
 def load_frontier(database, checkpoint: Checkpoint) -> dict | None:
     """The stored frontier of exactly this checkpoint, or None."""
     row = database.execute(
@@ -1703,6 +1769,9 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             return False
         return True
 
+    published_under: list = []   # what the checkpoint was written under (head, turns, oracle)
+    snapshot: list = []          # the message rows as they were at that commit
+
     def publish(database, captured):
         nonlocal recorded, source_invalidated
         try:
@@ -1714,10 +1783,25 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             source_invalidated = True
             return
         write_checkpoint(database, next_cp)
-        recorded = inputs_record(message_writes._prepare_import_prelude(
-            database, agent_id, backend_session_id, [], raw_only=True,
-            session_rows=session_rows), next_cp, session_rows, witness.get("base"))
-        write_frontier(database, next_cp, current_hash, recorded)
+        # The message rows are read for the frontier AFTER this transaction
+        # commits, not inside it (R119): here the head (one row, or one
+        # statement), and the turn rows and oracle delegations, which move no
+        # head and are read where they always were.
+        published_under.append(commit_inputs(database, agent_id, backend_session_id, session_rows))
+
+    def committed(database):
+        # The import has committed: a failed read costs the frontier, never
+        # the import's result.
+        if not published_under:
+            return
+        try:
+            snapshot.append(commit_snapshot(database, agent_id, backend_session_id,
+                                            published_under[-1], session_rows))
+        except Exception as exc:  # noqa: BLE001 - logged; the next tail goes without a frontier
+            from .log import log_exception
+            log_exception("transcriptFrontierSnapshotFail", exc)
+            _tail_log("frontier_not_published_snapshot_failed", retention=True)
+            snapshot.append(None)
 
     try:
         message_writes.store_transcript_tail(
@@ -1726,12 +1810,16 @@ def _try_tail(backend, path, agent_id, backend_session_id, conf, started, *, dia
             carry=cp.store_carry, expected_prelude=state.inputs, carry_rules=rules,
             carry_witness=witness,
             yield_after_first_write=bool(conf.get("tail_yield_after_first_write")),
-            on_stored=publish, checkpoint_status=checkpoint_status)
+            on_stored=publish, on_committed=committed, checkpoint_status=checkpoint_status)
     except message_writes._TailInvalidated as changed:
         # Which rows stood in the way: what a further rule would have to cover.
         from .log import log
         log("transcriptCarryInputsChanged", f"what={getattr(changed, 'what', 'unknown')}")
         return refuse("carry_inputs_changed")
+    if snapshot and snapshot[-1] is not None and not _checkpoint_refused(checkpoint_status) \
+            and not source_invalidated:
+        recorded = frontier_after_commit(next_cp, current_hash, published_under[-1], snapshot[-1],
+                                         witness.get("base"), session_rows=session_rows)
     try:
         source_invalidated = source_invalidated or moved(identity(path))
     except OSError:

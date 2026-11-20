@@ -25,7 +25,7 @@ GUARDS = tests/unit/test_swallowed_excepts.py tests/unit/test_import_layers.py \
          tests/unit/test_handler_boundary.py tests/unit/test_hook_silent_excepts.py \
          tests/unit/test_policies_pure.py tests/unit/test_policies_take_values.py \
          tests/unit/test_lazy_imports_resolve.py tests/unit/test_only_services_migrate.py \
-         tests/unit/test_disappearing_ids_guard.py \
+         tests/unit/test_disappearing_ids_guard.py tests/unit/test_message_writers_move_the_head.py \
          tests/integration/test_route_registry.py tests/unit/test_guards_list.py
 test-guards:
 	uv run --frozen --group dev python -m pytest -n0 $(GUARDS)

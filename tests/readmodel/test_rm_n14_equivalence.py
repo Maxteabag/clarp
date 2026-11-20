@@ -252,9 +252,28 @@ def test_tail_checkpoint_failure_keeps_rows_and_retries_progress(tmp_path, backe
     harness.assert_product_equal(reference, candidate)
 
 
+def _edit_prefix_row(candidate, *, moves_the_head):
+    """Change the row at seq 0. As a writer of the Host makes it (R119: every writer of a message
+    row gives it a new revision and moves its conversation's head in the same transaction), or
+    as raw SQL that moves no head."""
+    with sqlite3.connect(candidate) as other:
+        if moves_the_head:
+            revision = other.execute(
+                "UPDATE message_clock SET revision = revision + 1 RETURNING revision").fetchone()[0]
+            assert other.execute("UPDATE messages SET origin='agent', revision=? WHERE seq=0",
+                                 (revision,)).rowcount == 1
+            other.execute("UPDATE conversation_heads SET revision=MAX(revision, ?) "
+                          "WHERE agent_id=? AND backend_session_id=?",
+                          (revision, corpus.AGENT, corpus.SESSION))
+        else:
+            assert other.execute("UPDATE messages SET origin='agent' WHERE seq=0").rowcount == 1
+
+
 @pytest.mark.parametrize("during_admission", [False, True])
 def test_tail_carry_refuses_prefix_edit_before_any_tail_write(tmp_path, monkeypatch, during_admission):
-    """Prefix membership/payload drift invalidates carry even with equal counts."""
+    """Prefix membership/payload drift invalidates carry even with equal counts. The edit is made
+    as a writer of the Host makes it (its head moves): before the read, or between the read and
+    the lock, the tail is refused."""
     from lib import message_writes
     from lib import transcript_incremental as inc
 
@@ -272,8 +291,7 @@ def test_tail_carry_refuses_prefix_edit_before_any_tail_write(tmp_path, monkeypa
     count = connection.execute("SELECT count(*) FROM messages").fetchone()[0]
 
     def edit_prefix():
-        with sqlite3.connect(candidate) as other:
-            assert other.execute("UPDATE messages SET origin='agent' WHERE seq=0").rowcount == 1
+        _edit_prefix_row(candidate, moves_the_head=True)
 
     if during_admission:
         original = message_writes._revalidate_import_prelude
@@ -294,9 +312,48 @@ def test_tail_carry_refuses_prefix_edit_before_any_tail_write(tmp_path, monkeypa
             source_file=str(transcript), turns=tail, start_seq=previous.boundary_seq,
             carry=previous.store_carry, expected_prelude=expected)
     assert not connection.in_transaction
-    assert connection.execute("SELECT revision FROM message_clock").fetchone()[0] == clock
+    assert connection.execute("SELECT revision FROM message_clock").fetchone()[0] == clock + 1  # the edit's
     assert connection.execute("SELECT count(*) FROM messages").fetchone()[0] == count
     assert inc.load_checkpoint(connection, corpus.AGENT, corpus.SESSION, str(transcript)) == previous
+
+
+def test_the_limit_a_raw_edit_that_moves_no_head_between_the_read_and_the_lock_is_not_seen_by_the_tail(
+        tmp_path, monkeypatch):
+    """R119's price, pinned. The locked pass reads a conversation's rows again only when its head
+    moved, so an edit of a row before the boundary that moves no head (raw SQL on the store: no
+    writer of the Host makes one, test_message_writers_move_the_head), landing between the tail's
+    read and its lock, is not seen: the tail is written. Before R119 the locked pass read every
+    row and refused it. What sees it later: the next full import, which replays every turn (an
+    audit that is due, after audit_every tails or audit_seconds, or every audit_full_every-th
+    due audit when audits go by digest; or any other full import). The audit by digest checks
+    the file's bytes, not the rows, and does not see it."""
+    from lib import message_writes
+    from lib import transcript_incremental as inc
+
+    _, candidate = _clones(tmp_path, "claude")
+    transcript = tmp_path / "synthetic.jsonl"
+    transcript.write_bytes(b"".join(harness.append_bytes("claude", i) for i in range(3)))
+    harness.isolated_lane(candidate, transcript, "claude", "checkpoint", tick=0)
+    db.reset_for_tests(candidate)
+    connection = db.conn()
+    previous = inc.load_checkpoint(connection, corpus.AGENT, corpus.SESSION, str(transcript))
+    expected = message_writes._prepare_import_prelude(
+        connection, corpus.AGENT, corpus.SESSION, [], phases=[], guard_carry=True)
+    original = message_writes._revalidate_import_prelude
+
+    def race(*args, **kwargs):
+        _edit_prefix_row(candidate, moves_the_head=False)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(message_writes, "_revalidate_import_prelude", race)
+    with transcript.open("ab") as output:
+        output.write(harness.append_bytes("claude", 3))
+    tail = inc.parse_range("claude", transcript, previous.boundary_offset, transcript.stat().st_size)
+    message_writes.store_transcript_tail(                            # not refused: the limit
+        agent_id=corpus.AGENT, backend_session_id=corpus.SESSION,
+        source_file=str(transcript), turns=tail, start_seq=previous.boundary_seq,
+        carry=previous.store_carry, expected_prelude=expected)
+    assert connection.execute("SELECT origin FROM messages WHERE seq=0 AND agent_id=?",
+                              (corpus.AGENT,)).fetchone()[0] == "agent"
 
 
 @pytest.mark.parametrize("backend", harness.BACKENDS)
