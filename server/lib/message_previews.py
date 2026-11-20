@@ -132,6 +132,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                         ON ct.agent_id = m.agent_id AND ct.trace_id = m.trace_id
                      ORDER BY COALESCE(m.timestamp, '') ASC, m.seq ASC, m.message_id ASC"""
     rows = conn().execute(query, tuple(params)).fetchall()
+    # An agent that cannot leave a note is never hidden (lib.coordination, F6-b).
+    hideable = coordination.can_leave_note(agent_id)
     out: list[dict[str, Any]] = []
     for row in rows:
         automation_kind = _automation_kind(
@@ -166,8 +168,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             "revision": int(row["revision"]),
             # 'agents': a row of a turn another agent's message started
             # (lib.coordination); every other row, and a note, is 'user'.
-            "audience": coordination.row_audience(kind=row["kind"],
-                                                  trace_audience=row["trace_audience"]),
+            "audience": coordination.row_audience(
+                kind=row["kind"], trace_audience=row["trace_audience"] if hideable else None),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
             "phase": row["phase"],
