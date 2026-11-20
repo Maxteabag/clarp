@@ -26,7 +26,7 @@ def rules(file, run, changes):
 
 rules(KERNEL, 'vectors', [
     ('Cartesia skips the persona voice', 'voices.cartesia_voice_for(persona).map(str::to_string)', 'None'),
-    ('ElevenLabs discards the legacy bare stored id', 'stored.filter(|s| !s.is_empty()).map(str::to_string)', 'None'),
+    ('ElevenLabs discards the legacy bare stored id', 'stored.map(str::to_string)', 'None'),
     ('Gemini ignores the persona voice', 'voices.gemini_voice_for(persona).map(str::to_string)', 'None'),
     ('Gemini ignores the Cartesia-linked voice', '.gemini_voice_for_cartesia(cartesia)', '.gemini_voice_for_cartesia("")'),
     ('Gemini ignores the explicit provider override', 'moved && !voices.gemini_voice.is_empty()', '!voices.gemini_voice.is_empty()'),
