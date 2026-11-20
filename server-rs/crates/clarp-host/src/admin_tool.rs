@@ -212,9 +212,7 @@ async fn tell_user(app: &App, call: &ToolCall, args: &[String]) -> ToolAnswer {
     let body = json!({
         "session": parsed.option("--from").unwrap_or_default(),
         "text": parsed.option("--text").unwrap_or_default(),
-        // One id for the note, however often the tool has to ask: a note the Host wrote is
-        // answered again, not written twice.
-        "note_id": format!("tell-{}", ids::hex(8)),
+        "note_id": call.note_id.clone().unwrap_or_else(|| format!("tell-{}", ids::hex(8))),
     });
     let token = call
         .env

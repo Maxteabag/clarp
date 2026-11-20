@@ -29,6 +29,7 @@ HA = 'clarp-host/src/agent.rs'
 HE = 'clarp-host/src/edge.rs'
 HC = 'clarp-host/src/coordination.rs'
 HT = 'clarp-host/src/admin_tool.rs'
+HD = 'clarp-host/src/admin.rs'
 HF = 'clarp-host/src/fleet.rs'
 # NOT PLANTED, each with its reason:
 #   `free_ms` (the millisecond a notification is filed under past one already taken): this Host files a note's
@@ -173,6 +174,8 @@ PLANTS = [
     (HC, 'host', 'a note is answered as not told', '            (trace_id, true, true, reason)', '            (trace_id, true, false, reason)'),
     (HC, 'host', 'a note of a turn that does not run is a conflict of words', '        (Noted::NotRunning, _) => return Err(refused(rules::not_running(&record.session))),', '        (Noted::NotRunning, _) => return Err(refused(rules::other_words(&record.session, &note_id))),'),
     (HT, 'host', "the tool's note is left without its turn", '    match crate::coordination::leave_note(app, &body, token).await {', '    match crate::coordination::leave_note(app, &body, None).await {'),
+    (HD, 'host', 'the tool gives up after the first lost answer', '    let mut retries = if tell_user { 6 } else { 0 };', '    let mut retries = 0;'),
+    (HT, 'host', 'each attempt to leave a note is a new note', 'call.note_id.clone().unwrap_or_else(|| format!("tell-{}", ids::hex(8)))', 'format!("tell-{}", ids::hex(8))'),
     (HT, 'host', "the tool's refusal is a failure", '        Err(refused) if refused.status().is_client_error() => ToolAnswer::said(\n            4,\n            format!(\n                "clarp-admin tell-user: the Host refused it', '        Err(refused) if refused.status().is_client_error() => ToolAnswer::said(\n            1,\n            format!(\n                "clarp-admin tell-user: the Host refused it'),
     (HT, 'host', 'there is no tool of a note', '        Some((command, rest)) if command == "tell-user" => tell_user(app, call, rest).await,\n', ''),
 ]

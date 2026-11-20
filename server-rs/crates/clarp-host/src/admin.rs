@@ -906,6 +906,7 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
     let argv: Vec<String> = args.collect();
+    let tell_user = name == "clarp-admin" && argv.first().is_some_and(|arg| arg == "tell-user");
     // Read the capability in the invoking tool's process. The server never
     // opens an arbitrary path supplied by an HTTP tool caller.
     let mut credential = String::new();
@@ -989,8 +990,30 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     if !credential.is_empty() {
         asked["bookkeeping_credential"] = json!(credential);
     }
+    if tell_user {
+        // Each attempt carries the same id, including when the Host wrote the note but
+        // the connection closed before the tool received the answer.
+        asked["note_id"] = json!(format!("tell-{}", ids::hex(8)));
+    }
+    let mut retries = if tell_user { 6 } else { 0 };
+    let mut delay = Duration::from_secs(1);
     loop {
-        let answer = match post(&address, "/tools/run", token, &asked) {
+        let result = post(&address, "/tools/run", token, &asked);
+        let retryable = match &result {
+            Err(_) | Ok((502..=504, _)) => true,
+            Ok((200, answer)) => answer.is_null(),
+            _ => false,
+        };
+        if retryable && retries > 0 {
+            retries -= 1;
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_secs(16));
+            continue;
+        }
+        let answer = match result {
+            Ok((200, answer)) if tell_user && answer.is_null() => {
+                return unavailable(format!("{name}: the Host at {address} sent no tool answer"));
+            }
             Ok((200, answer)) => answer,
             Ok((status, answer)) => {
                 return unavailable(format!(
