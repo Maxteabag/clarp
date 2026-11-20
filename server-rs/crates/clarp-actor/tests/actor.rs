@@ -2798,7 +2798,7 @@ fn the_delivery_of_ten_thousand_turns_is_read_without_reading_the_log() {
 /// A client that follows a conversation by revision holds, after every change of it, the rows
 /// a client that reads it anew reads. What the two hold is compared after every step: one
 /// scripted case for each way a conversation changes, and walks over the same moves.
-mod following {
+mod follow_by_revision {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     use clarp_actor::conversation::{Page, Versioned};
@@ -3567,6 +3567,22 @@ mod following {
         walk.check("more of the reply");
         walk.end_turn();
         walk.check("the turn ends");
+
+        // A reader that holds a cursor this conversation never reached, another
+        // conversation's: above the head and above where this one begins. It is told, and
+        // reads what a reload reads.
+        let actor = walk.actor.as_ref().unwrap();
+        let mut stranger = Follower::new(Which::All, 2);
+        stranger.cursor = actor.head_revision() + 1_000 * clarp_actor::conversation::REVISION_STEP;
+        assert!(stranger.cursor > actor.begins_after());
+        let at = "a reader of another conversation";
+        stranger.follow(actor, at, &mut walk.found);
+        assert!(
+            stranger.told,
+            "a reader above the head is told its conversation ended"
+        );
+        let reload = actor.tail_of(1_000_000, Which::All).unwrap();
+        stranger.compare(&reload, at, &mut walk.found);
         walk.found.none();
     }
 
