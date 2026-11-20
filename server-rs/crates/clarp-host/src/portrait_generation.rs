@@ -279,8 +279,14 @@ async fn run(app: App, agent: String, generation: u64) {
                 Ok(true) => {
                     drop(_gallery);
                     let mut delay = 1;
-                    while let Err(error) = deliver(&app.fleet, &app.blobs, &publication).await {
-                        app.fleet.unkept(PENDING, &error.0);
+                    loop {
+                        match deliver(&app.fleet, &app.blobs, &publication).await {
+                            Ok(Delivery::Published) => break,
+                            Ok(Delivery::MissingBytes) => {
+                                app.fleet.unread(PENDING, &publication.assets[0].asset_id)
+                            }
+                            Err(error) => app.fleet.unkept(PENDING, &error.0),
+                        }
                         tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                         delay = (delay * 2).min(60);
                         if matches!(
@@ -310,12 +316,18 @@ async fn run(app: App, agent: String, generation: u64) {
         .await;
 }
 
+#[derive(Debug)]
+pub(crate) enum Delivery {
+    Published,
+    MissingBytes,
+}
+
 /// The result was accepted durably. Replay only local, idempotent publication after a crash.
 pub(crate) async fn deliver(
     fleet: &crate::fleet::FleetHandle,
     store: &Arc<dyn clarp_ports::blobs::Blobs>,
     publication: &Publication,
-) -> Result<(), Unavailable> {
+) -> Result<Delivery, Unavailable> {
     let member = fleet.directory().named(&publication.agent_id).cloned();
     if let Some(member) = member {
         for asset in &publication.assets {
@@ -323,15 +335,13 @@ pub(crate) async fn deliver(
             let name = asset.blob();
             let picture = picture_name(&asset.sha256);
             // Normally the fleet has already filled both immutable names before the gallery changed.
-            if matches!(blobs.len(&name),Ok(Some(n)) if n==asset.bytes)
-                && matches!(blobs.len(&picture),Ok(Some(n)) if n==asset.bytes)
-            {
+            let len = |key: &str| blobs.len(key).map_err(|e| Unavailable(e.to_string()));
+            if len(&name)? == Some(asset.bytes) && len(&picture)? == Some(asset.bytes) {
                 continue;
             }
-            let raw = fleet
-                .kept(BYTES, asset.asset_id.clone())
-                .await?
-                .ok_or_else(|| Unavailable("missing committed portrait bytes".into()))?;
+            let Some(raw) = fleet.kept(BYTES, asset.asset_id.clone()).await? else {
+                return Ok(Delivery::MissingBytes);
+            };
             tokio::task::spawn_blocking(move || {
                 blobs.put(&name, &raw)?;
                 blobs.put(&picture, &raw)
@@ -362,14 +372,25 @@ pub(crate) async fn deliver(
                 (BYTES, second.asset_id.clone()),
             ],
         )
-        .await
+        .await?;
+    Ok(Delivery::Published)
 }
 
 pub async fn recover(app: &App) -> Result<(), Unavailable> {
-    for (_, raw) in app.fleet.kept_all(PENDING).await? {
-        let publication = serde_json::from_slice(&raw)
-            .map_err(|e| Unavailable(format!("invalid portrait publication: {e}")))?;
-        deliver(&app.fleet, &app.blobs, &publication).await?;
+    for (key, raw) in app.fleet.kept_all(PENDING).await? {
+        let Ok(publication) = serde_json::from_slice::<Publication>(&raw) else {
+            app.fleet.unread(PENDING, &key);
+            continue;
+        };
+        // Cleanup uses the first asset's id. A malformed receipt must never clear a neighbour.
+        if publication.assets[0].asset_id != key
+            || matches!(
+                deliver(&app.fleet, &app.blobs, &publication).await?,
+                Delivery::MissingBytes
+            )
+        {
+            app.fleet.unread(PENDING, &key);
+        }
     }
     for job in app
         .fleet

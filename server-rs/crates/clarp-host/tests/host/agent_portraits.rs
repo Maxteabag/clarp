@@ -507,3 +507,84 @@ fn the_portrait_job_handles_each_recorded_provider_result() {
         assert!(requests.try_recv().is_err());
     }
 }
+
+#[test]
+fn startup_keeps_unreadable_portrait_publications_and_delivers_the_good_pair() {
+    use clarp_host::fleet::shelf;
+    use clarp_ports::kv::KeyValueEngine as _;
+    use sha2::{Digest, Sha256};
+
+    let place = Place::new("portrait-recovery");
+    let host = place.start();
+    let made = host.post("/agents", json!({"name":"Canvas","backend":"scripted"}));
+    let sid = made["session"].as_str().unwrap();
+    let agent_id = made["agent"]["agent_id"].as_str().unwrap();
+    host.kill();
+
+    let pending = shelf("portrait-publications");
+    let bytes = shelf("portrait-publication-bytes");
+    let open = || {
+        clarp_store_sqlite::SqliteKeyValue
+            .open(&place.root.join("data/fleet.db"))
+            .unwrap()
+    };
+    let mut db = open();
+    let invalid = b"private malformed receipt";
+    db.put(&pending, "a-invalid", invalid).unwrap();
+    let mut retained = vec![("a-invalid".to_owned(), invalid.to_vec())];
+    for (prefix, complete) in [("b-missing", false), ("c-good", true)] {
+        let mut assets = Vec::new();
+        for index in 1..=2 {
+            let id = format!("{prefix}-{index}");
+            let raw = [b"\x89PNG\r\n\x1a\n".as_slice(), id.as_bytes()].concat();
+            assets.push(json!({
+                "asset_id":id, "session":sid, "source_name":"fixture.png",
+                "extension":".png", "mime_type":"image/png", "bytes":raw.len(),
+                "sha256":format!("{:x}",Sha256::digest(&raw)), "caption":"private fixture caption",
+                "created_by":"fixture", "created_at":1
+            }));
+            if complete || index == 1 {
+                db.put(&bytes, &id, &raw).unwrap();
+            }
+        }
+        let receipt = serde_json::to_vec(&json!({"agent_id":agent_id,"assets":assets})).unwrap();
+        let key = format!("{prefix}-1");
+        db.put(&pending, &key, &receipt).unwrap();
+        if !complete {
+            retained.push((key, receipt));
+        }
+    }
+    drop(db);
+
+    let host = place.start();
+    let media = host.get(&format!("/media?session={sid}"));
+    let mut ids: Vec<_> = media["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|asset| asset["asset_id"].as_str().unwrap())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["c-good-1", "c-good-2"]);
+    let journal = host.heard.lock().unwrap().clone();
+    for (key, _) in &retained {
+        assert_eq!(
+            journal
+                .lines()
+                .filter(|line| line.contains("portrait-publications") && line.contains(key))
+                .count(),
+            1,
+            "{journal}"
+        );
+    }
+    assert!(
+        !journal.contains("private malformed receipt")
+            && !journal.contains("private fixture caption")
+    );
+    host.kill();
+    let db = open();
+    assert_eq!(db.list(&pending).unwrap(), retained);
+    let remaining = db.list(&bytes).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].0, "b-missing-1");
+}
