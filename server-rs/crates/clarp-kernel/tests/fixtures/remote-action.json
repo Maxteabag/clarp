@@ -1,0 +1,2266 @@
+{
+  "now": 1234000,
+  "draw": "aMadeUpFixtureId",
+  "rows": [
+    [
+      "POST",
+      "",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "null",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "false",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "1",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "\"record\"",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "[]",
+      400,
+      {
+        "error": "bad json"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\":false}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\":0}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "GET",
+      "action=controller-event",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"ts\": 1, \"queued\": \"ignored\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "GET",
+      "action=record",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"record\", \"ts\": 1, \"queued\": \"ignored\"}",
+      200,
+      {
+        "ok": true
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=record-toggle",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record-toggle",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"record-toggle\", \"ts\": 1, \"queued\": \"ignored\"}",
+      200,
+      {
+        "ok": true
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "record-toggle",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=stop-agent",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "stop-agent",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"stop-agent\", \"ts\": 1, \"queued\": \"ignored\"}",
+      200,
+      {
+        "ok": true
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "stop-agent",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=unknown",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"unknown\", \"ts\": 1, \"queued\": \"ignored\"}",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "GET",
+      "action= RECORD ",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \" RECORD \", \"ts\": 1, \"queued\": \"ignored\"}",
+      200,
+      {
+        "ok": true
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=rEcOrD-ToGgLe",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record-toggle",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"rEcOrD-ToGgLe\", \"ts\": 1, \"queued\": \"ignored\"}",
+      200,
+      {
+        "ok": true
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "record-toggle",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "GET",
+      "act=record",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "GET",
+      "action=&action=record",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=bad&action=record",
+      400,
+      {
+        "error": "unknown action"
+      },
+      []
+    ],
+    [
+      "GET",
+      "action=record&action=stop-agent",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "action=+STOP-AGENT+",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "stop-agent",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "GET",
+      "%61ction=%72ecord",
+      200,
+      "<!doctype html><meta charset=utf-8><title>ok</title>",
+      [
+        {
+          "type": "remote-action",
+          "action": "record",
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"double-click\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "double-click",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"down\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "down",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"rotate-clockwise\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "rotate-clockwise",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"rotate-counterclockwise\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "rotate-counterclockwise",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"single-click\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "single-click",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"swipe-down\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "swipe-down",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"swipe-left\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "swipe-left",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"swipe-right\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "swipe-right",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"swipe-up\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "swipe-up",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"up\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "up",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"double-click\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "double-click",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"down\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "down",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"hold\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"rotate-clockwise\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "rotate-clockwise",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"rotate-counterclockwise\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "rotate-counterclockwise",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"single-click\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "single-click",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"swipe-down\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "swipe-down",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"swipe-left\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "swipe-left",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"swipe-right\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "swipe-right",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"swipe-up\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "swipe-up",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"secondary\", \"controller_event\": \"up\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "secondary",
+          "controller_event": "up",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": null, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": false, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": 0, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": 7, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": true, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": [\"x\"], \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": {\"k\": \"v\"}, \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"\", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"  \", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \" primary \", \"controller_event\": \"hold\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \" hold \", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"other\", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "unknown button"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button too long"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": null}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": false}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": 0}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": 7}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": true}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": [\"x\"]}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": {\"k\": \"v\"}}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"\"}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"  \"}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \" primary \"}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \" hold \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"other\"}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      400,
+      {
+        "error": "unknown controller_event"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      400,
+      {
+        "error": "controller_event too long"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": null}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": false}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": 0}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": 7}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "7"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": true}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "True"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": [\"x\"]}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "['x']"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": {\"k\": \"v\"}}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "{'k': 'v'}"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \"\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \"  \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \" primary \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "primary"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \" hold \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "hold"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \"other\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "other"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000,
+          "controller_id": "\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42"
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_id\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      400,
+      {
+        "error": "controller_id too long"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": null}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": false}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": 0}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": 7}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "7"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "7",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": true}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "True"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "True",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": [\"x\"]}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "['x']"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "['x']",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": {\"k\": \"v\"}}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "{'k': 'v'}"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "{'k': 'v'}",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \"\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \"  \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \" primary \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "primary"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "primary",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \" hold \"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "hold"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "hold",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \"other\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "other"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "other",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42\ud83d\ude42",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"controller_event_id\": \"\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\\ud83d\\ude42\"}",
+      400,
+      {
+        "error": "controller_event_id too long"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": null}",
+      400,
+      {
+        "error": "duration_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": true}",
+      400,
+      {
+        "error": "duration_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": false}",
+      400,
+      {
+        "error": "duration_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": \"3\"}",
+      400,
+      {
+        "error": "duration_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 3.0}",
+      400,
+      {
+        "error": "duration_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": -1}",
+      400,
+      {
+        "error": "duration_ms out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 0}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 1}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 1,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 119999}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 119999,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 120000}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 120000,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"duration_ms\": 120001}",
+      400,
+      {
+        "error": "duration_ms out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": null}",
+      400,
+      {
+        "error": "age_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": true}",
+      400,
+      {
+        "error": "age_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": false}",
+      400,
+      {
+        "error": "age_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": \"3\"}",
+      400,
+      {
+        "error": "age_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 3.0}",
+      400,
+      {
+        "error": "age_ms must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": -1}",
+      400,
+      {
+        "error": "age_ms out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 0}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 1}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 1,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 119999}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 119999,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 120000}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 120000,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"age_ms\": 120001}",
+      400,
+      {
+        "error": "age_ms out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": null}",
+      400,
+      {
+        "error": "ts must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": true}",
+      400,
+      {
+        "error": "ts must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": false}",
+      400,
+      {
+        "error": "ts must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": \"3\"}",
+      400,
+      {
+        "error": "ts must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 3.0}",
+      400,
+      {
+        "error": "ts must be an integer"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": -1}",
+      400,
+      {
+        "error": "ts out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 0}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 0
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 1}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 9999999999998}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 9999999999998
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 9999999999999}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 9999999999999
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"ts\": 10000000000000}",
+      400,
+      {
+        "error": "ts out of range"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": true}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": true,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": false}",
+      200,
+      {
+        "ok": true,
+        "controller_event_id": "aMadeUpFixtureId"
+      },
+      [
+        {
+          "type": "remote-action",
+          "action": "controller-event",
+          "controller_event_id": "aMadeUpFixtureId",
+          "button": "primary",
+          "controller_event": "hold",
+          "duration_ms": 0,
+          "age_ms": 0,
+          "queued": false,
+          "ts": 1234000
+        }
+      ]
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": null}",
+      400,
+      {
+        "error": "queued must be a boolean"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": \"true\"}",
+      400,
+      {
+        "error": "queued must be a boolean"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": 1}",
+      400,
+      {
+        "error": "queued must be a boolean"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\", \"controller_event\": \"hold\", \"queued\": []}",
+      400,
+      {
+        "error": "queued must be a boolean"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"controller_event\": \"hold\"}",
+      400,
+      {
+        "error": "button required"
+      },
+      []
+    ],
+    [
+      "POST",
+      "{\"action\": \"controller-event\", \"button\": \"primary\"}",
+      400,
+      {
+        "error": "controller_event required"
+      },
+      []
+    ]
+  ],
+  "limited": {
+    "GET": false,
+    "POST": false
+  }
+}

@@ -231,6 +231,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("tts", 1),
     ("controller_narration", 8),
     ("controller_actions", 63),
+    ("remote_action", 1),
     ("tts_provider_google", 69),
     ("tts_google_id_guard", 70),
     // The clips of a reply, to play it again (`GET /clips/message`).

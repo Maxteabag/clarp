@@ -68,6 +68,7 @@ pub mod requests;
 pub mod resume;
 pub mod rings;
 pub mod roster;
+pub mod remote_action;
 pub mod router;
 pub mod said;
 pub mod schedules;
