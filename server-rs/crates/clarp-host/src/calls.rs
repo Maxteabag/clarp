@@ -37,6 +37,7 @@ use crate::edge::{ApiError, App, Principal};
 use crate::fleet::Directory;
 use crate::ids;
 use crate::pairing::Scope;
+use crate::unkept::RecordFailure;
 
 pub mod generation;
 pub mod live;
@@ -182,18 +183,28 @@ impl Desk {
     async fn read<'a>(
         held: &'a mut Option<Books>,
         app: &App,
-    ) -> Result<&'a mut Books, Unavailable> {
+    ) -> Result<&'a mut Books, RecordFailure> {
         if held.is_none() {
             let mut books: BTreeMap<String, Vec<Call>> = BTreeMap::new();
-            for (principal, kept) in app.fleet.kept_all(KIND).await? {
+            for (principal, kept) in app
+                .fleet
+                .kept_all(KIND)
+                .await
+                .map_err(RecordFailure::Read)?
+            {
                 // What cannot be read is no call: the phone starts a new one.
                 if let Ok(calls) = serde_json::from_slice::<Vec<Call>>(&kept) {
                     books.insert(principal, calls);
                 }
             }
             // And of the rings what can be read: the rest begins anew.
-            let kept: HashMap<String, Vec<u8>> =
-                app.fleet.kept_all(RINGS).await?.into_iter().collect();
+            let kept: HashMap<String, Vec<u8>> = app
+                .fleet
+                .kept_all(RINGS)
+                .await
+                .map_err(RecordFailure::Read)?
+                .into_iter()
+                .collect();
             let read = |name: &str| -> Value {
                 let kept = kept.get(name).map(|kept| serde_json::from_slice(kept));
                 kept.and_then(Result::ok).unwrap_or(Value::Null)
@@ -216,7 +227,8 @@ impl Desk {
                 let kept = serde_json::to_vec(rings.rings()).unwrap_or_default();
                 app.fleet
                     .keep(RINGS, RINGS_KEPT.to_string(), Some(kept))
-                    .await?;
+                    .await
+                    .map_err(RecordFailure::Write)?;
             }
             if let Some(ring) = rings.ringing() {
                 timer(app, ring.expires_at);
@@ -229,8 +241,9 @@ impl Desk {
                 voices: HashSet::new(),
             });
         }
-        held.as_mut()
-            .ok_or_else(|| Unavailable("the calls could not be read".to_string()))
+        held.as_mut().ok_or_else(|| {
+            RecordFailure::Read(Unavailable("the calls could not be read".to_string()))
+        })
     }
 
     async fn attach_opening(
@@ -271,13 +284,15 @@ impl Desk {
         app: &App,
         opening_id: Option<&str>,
         ask: impl FnOnce(&mut Rings, &mut Calls, &With, (&mut rings::Effects, &mut Effects)) -> T,
-    ) -> Result<(T, Vec<rings::Pushed>), Unavailable> {
+    ) -> Result<(T, Vec<rings::Pushed>), RecordFailure> {
         let mut held = self.books.lock().await;
         let books = Self::read(&mut held, app).await?;
         let mut rings = books.rings.clone();
         let mut archived = HashMap::new();
         if let Some(id) = opening_id {
-            Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+            Self::attach_opening(app, &mut rings, &mut archived, id)
+                .await
+                .map_err(RecordFailure::Read)?;
         }
         let mut calls = books.calls.clone();
         let directory = app.fleet.directory();
@@ -340,10 +355,13 @@ impl Desk {
                 && let Some(id) = app
                     .fleet
                     .kept("opening_by_call", ended.as_str().unwrap_or("").into())
-                    .await?
+                    .await
+                    .map_err(RecordFailure::Read)?
                 && let Ok(id) = std::str::from_utf8(&id)
             {
-                Self::attach_opening(app, &mut rings, &mut archived, id).await?;
+                Self::attach_opening(app, &mut rings, &mut archived, id)
+                    .await
+                    .map_err(RecordFailure::Read)?;
             }
             let Some(ring) = rings.opening_records().find(|r| ended == &r.call_id) else {
                 continue;
@@ -351,7 +369,10 @@ impl Desk {
             let id = ring.ring_id.clone();
             let session = ring.session.clone();
             let trace = ring.opening["intent"]["trace_id"].clone();
-            let evidence = self.queue_row(app, &ring.opening).await?;
+            let evidence = self
+                .queue_row(app, &ring.opening)
+                .await
+                .map_err(RecordFailure::Read)?;
             let reason = format!("call_{}", event["reason"].as_str().unwrap_or("ended"));
             let first = generation::read(&app.config.data_dir);
             let generation = if first == generation::read(&app.config.data_dir) {
@@ -390,14 +411,16 @@ impl Desk {
             rows.push((
                 RINGS,
                 TAKING_KEPT.to_string(),
-                serde_json::to_vec(taking).map_err(|e| Unavailable(e.to_string()))?,
+                serde_json::to_vec(taking)
+                    .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
             ));
         }
         for principal in &of_calls.changed {
             rows.push((
                 KIND,
                 principal.clone(),
-                serde_json::to_vec(calls.of(principal)).map_err(|e| Unavailable(e.to_string()))?,
+                serde_json::to_vec(calls.of(principal))
+                    .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
             ));
         }
         for (changed, name, bytes) in [
@@ -431,7 +454,7 @@ impl Desk {
                 rows.push((
                     RINGS,
                     name.to_string(),
-                    bytes.map_err(|e| Unavailable(e.to_string()))?,
+                    bytes.map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
                 ));
             }
         }
@@ -453,7 +476,7 @@ impl Desk {
                     for entry in entries {
                         let binding: rings::binding::Binding =
                             serde_json::from_value(entry.clone())
-                                .map_err(|e| Unavailable(e.to_string()))?;
+                                .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?;
                         if let Some(key) = rings::binding::key(&ring.agent_id, binding.turn_id) {
                             rows.push((
                                 "opening_by_turn",
@@ -483,7 +506,8 @@ impl Desk {
                     rows.push((
                         "opening_history",
                         dropped.ring_id.clone(),
-                        serde_json::to_vec(dropped).map_err(|e| Unavailable(e.to_string()))?,
+                        serde_json::to_vec(dropped)
+                            .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
                     ));
                 }
             }
@@ -493,11 +517,15 @@ impl Desk {
                 rows.push((
                     "opening_history",
                     ring.ring_id.clone(),
-                    serde_json::to_vec(&ring).map_err(|e| Unavailable(e.to_string()))?,
+                    serde_json::to_vec(&ring)
+                        .map_err(|e| RecordFailure::Write(Unavailable(e.to_string())))?,
                 ));
             }
         }
-        app.fleet.keep_together(rows).await?;
+        app.fleet
+            .keep_together(rows)
+            .await
+            .map_err(RecordFailure::Write)?;
         books.calls = calls;
         books.rings = rings;
         if let Some(taking) = taking {
@@ -513,7 +541,8 @@ impl Desk {
                 let _ = member
                     .agent
                     .withdraw(clarp_kernel::turn::TurnId(turn), reason)
-                    .await?;
+                    .await
+                    .map_err(RecordFailure::Write)?;
             }
         }
         for event in of_calls.events {
@@ -818,14 +847,19 @@ async fn look_at_rings<F: std::future::Future<Output = ()>>(
         }
         match app
             .calls
-            .rings(&app, |rings, _, with, (out, _)| {
+            .ask_rings(&app, None, |rings, _, with, (out, _)| {
                 rings.timer(with.at.now_ms, out)
             })
             .await
         {
-            Ok(_) => return,
-            Err(why) => app.fleet.unkept(RINGS, &why.0),
+            Ok((_, pushes)) => {
+                app.calls.push(&app, pushes).await;
+                return;
+            }
+            Err(why) => why.report(&app.fleet, RINGS),
         }
+        // Each due ring retains its own retry. One second gives the store time to recover
+        // while keeping the missed-call notification prompt once it does.
         after = Duration::from_secs(1);
     }
 }
@@ -1275,7 +1309,7 @@ mod due_work_tests {
             ("expiry", Duration::from_millis(700)),
         ] {
             let place = crate::unkept::at_the_port::place(name);
-            let app = place.app();
+            let app = place.app().await;
             place.refuse_reads(RINGS);
             let mut delays = Vec::new();
             let tick = look_at_rings(app.clone(), initial, |delay| {
@@ -1302,7 +1336,7 @@ mod due_work_tests {
             assert_eq!(
                 *place.said.lock().unwrap(),
                 [
-                    "clarp-host: a record of the kind ring was not kept: storage failed: read refused here"
+                    "clarp-host: the records of the kind ring could not be read: storage failed: read refused here"
                 ]
             );
         }

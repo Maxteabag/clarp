@@ -268,7 +268,7 @@ impl Chip {
         let held = match Self::read(&mut guard, app).await {
             Ok(held) => held,
             Err(why) => {
-                app.fleet.unkept(KIND, &why.0);
+                app.fleet.unread(KIND, &why.0);
                 return Some(Duration::from_secs(60));
             }
         };
@@ -662,13 +662,13 @@ mod due_work_tests {
     #[tokio::test]
     async fn an_unread_chip_arms_a_timed_look_until_its_store_recovers() {
         let place = crate::unkept::at_the_port::place("chip-retry");
-        let app = place.app();
+        let app = place.app().await;
         place.refuse_reads(KIND);
         assert_eq!(app.chip.sleeps(&app).await, Some(Duration::from_secs(60)));
         assert_eq!(
             *place.said.lock().unwrap(),
             [
-                "clarp-host: a record of the kind chip was not kept: storage failed: read refused here"
+                "clarp-host: the records of the kind chip could not be read: storage failed: read refused here"
             ]
         );
         place.allow_reads();
