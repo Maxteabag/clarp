@@ -8619,23 +8619,50 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     assert!(!spec_of("ios/12 contract=74"));
     assert!(!spec_of("desktop/1 contract=999"));
-    // A key with a capital is no client's name as clients send it: refused, it switches
-    // nothing on, and the default stands (the Python Host's PR 474 at 01ceed2d).
+    // A key is a client's name in the header's own form, counted exactly as written (one rule
+    // for both of the Python Host's tables, its owner's of 20 Nov): 'IOS' and 'Ios' are taken
+    // for clients that send them so, not for iOS, and that is said once; a key of no such form,
+    // or a value that is no whole number of at least 0, is refused in a line that names it.
     std::fs::write(
         &owner,
-        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Ios = 1, iOs = 1 }\n",
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Ios = 1, \"1os\" = 1, \"a b\" = 1, \
+         android = -1, web = 2.5 }\n",
     )
     .unwrap();
+    assert!(spec_of("IOS/12 contract=1"), "taken, exactly as written");
+    assert!(spec_of("Ios/12 contract=1"));
+    assert!(!spec_of("ios/12 contract=73"), "iOS keeps its own minimum");
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
     assert!(
-        !spec_of("IOS/12 contract=74"),
-        "a key in capitals is refused"
+        !spec_of("android/5 contract=99"),
+        "a value below 0 is refused"
     );
-    assert!(!spec_of("Ios/12 contract=74"), "a capital first sign too");
-    assert!(
-        !spec_of("iOs/12 contract=74"),
-        "a capital after the first sign too"
+    assert!(!spec_of("web/1 contract=99"), "so is a fraction");
+    let said = |line: &str| {
+        host.heard
+            .lock()
+            .unwrap()
+            .lines()
+            .filter(|heard| heard.contains(line))
+            .count()
+    };
+    assert_eq!(
+        said(
+            "config.render_spec_min_contract: refused entries (a client's name as its header \
+              sends it, and a whole number of at least 0): '1os', 'a b', 'android', 'web'"
+        ),
+        1,
+        "the refused keys are named, once: {}",
+        host.heard.lock().unwrap()
     );
-    assert!(spec_of("ios/12 contract=74"), "the default stands");
+    for key in ["'IOS'", "'Ios'"] {
+        let line = format!(
+            "config.render_spec_min_contract: {key} is taken as written: it counts for a client \
+             that sends {key}, not for 'ios'"
+        );
+        assert_eq!(said(&line), 1, "{line}: {}", host.heard.lock().unwrap());
+    }
     // A minimum is a whole number: true is none, though the Python Host's language counts it 1.
     std::fs::write(
         &owner,
