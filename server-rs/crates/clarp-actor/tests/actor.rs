@@ -2835,6 +2835,14 @@ mod follow_by_revision {
     /// as they stand, how its turn ended when it is the row that closed it, whether it was said
     /// along the way, and whether it is still being written. Its revision is how a client
     /// knows that it changed; its time is compared by itself ([`TIME`]).
+    ///
+    /// The names and sessions of the other agents a row names (`sender_name`,
+    /// `sender_session`, `reply_to_name`, `reply_to_session`) are the roster's when the row is
+    /// read: the door fills them in (`clarp-host` `wire::roster_names`, held to the Python
+    /// Host by its vectors and Host test), and they change without the row's revision moving.
+    /// So they are compared only while the roster has not changed since the row was given:
+    /// here, where there is no roster, a row's sender is the agent's id and what was kept when
+    /// its message was taken, which never changes.
     type Shows = (Entry, Vec<ToolCall>, Option<TurnEnd>, bool, bool);
 
     fn shows(row: &Versioned) -> Shows {
@@ -2859,19 +2867,8 @@ mod follow_by_revision {
     const TIME: &str = "a row the follower holds at another time than a reload reads it";
     const ORDER: &str = "a conversation read anew in pages in another order than in one";
     const STUCK: &str = "an older page that gives nothing new while it says there is more";
-
-    /// What was found and reported to the lead on 20 Nov 2026, and is not repaired here: this
-    /// piece changes nothing at the door. Each is counted and said, and fails nothing; every
-    /// other kind fails the test.
-    ///
-    /// - [`TIME`]: a call that is a row by itself is written again when it ends. Read anew, it
-    ///   keeps the time of its first appearance (`Place::First`); given as a change, it has the
-    ///   time of the item that changed it (`Place::Newest`), its end.
-    /// - [`NOT_ASCENDING`]: a page of changes is counted in items, and each row on it is read
-    ///   as it is now, with parts written after the page's last item: such a row's revision is
-    ///   above the rows after it on the page. No row is given at or below the cursor, and a
-    ///   client puts each in the place of the one with its id.
-    const REPORTED: &[&str] = &[TIME, NOT_ASCENDING];
+    const ABOVE_CURSOR: &str = "a row of a page of changes newer than the page's cursor";
+    const TWICE: &str = "a row given twice in one pass";
 
     /// What was found: for each kind, how often, and where first.
     #[derive(Default)]
@@ -2898,7 +2895,6 @@ mod follow_by_revision {
             let said: Vec<String> = self
                 .kinds
                 .iter()
-                .filter(|(kind, _)| !REPORTED.contains(kind))
                 .map(|(kind, (count, first))| format!("{kind}: {count} times, first at {first}"))
                 .collect();
             assert!(
@@ -2919,11 +2915,13 @@ mod follow_by_revision {
     ///
     /// What a client is promised about order, and what is compared of it: a page read anew,
     /// the newest or an older one, is in the order a chat shows (a conversation read anew in
-    /// pages is in the order it is in when read in one); each row of a page of changes is
-    /// above the cursor it was asked after, and a cursor never goes back. That a page of
-    /// changes is ascending by revision, as `docs/protocol.md` says, is said and not held
-    /// ([`REPORTED`]). Where a row a client was given as a change stands among the rows it
-    /// had is the client's own, and is not compared.
+    /// pages is in the order it is in when read in one); a page of changes is ascending by
+    /// revision, as `docs/protocol.md` says, each row above the cursor it was asked after and
+    /// none newer than the page's own cursor, and one pass gives a row once; a cursor never
+    /// goes back. A follower that takes the newest row's revision for its cursor, as a client
+    /// that trusts that promise may, holds what a reload reads too. Where a row a client was
+    /// given as a change stands among the rows it had is the client's own, and is not
+    /// compared.
     struct Follower {
         which: Which,
         limit: usize,
@@ -2935,11 +2933,15 @@ mod follow_by_revision {
         given: usize,
         told: bool,
         anew: bool,
+        /// It takes the revision of the newest row of a page for its cursor, where the page
+        /// has a row, and not the page's own cursor.
+        by_rows: bool,
     }
 
     impl Follower {
         fn new(which: Which, limit: usize) -> Self {
             Self {
+                by_rows: false,
                 which,
                 limit,
                 cursor: 0,
@@ -2956,7 +2958,12 @@ mod follow_by_revision {
                 Which::All => "all",
                 Which::WithoutAutomated => "without automated",
             };
-            format!("{which}, {} a page", self.limit)
+            let cursor = if self.by_rows {
+                ", the newest row's revision its cursor"
+            } else {
+                ""
+            };
+            format!("{which}, {} a page{cursor}", self.limit)
         }
 
         fn follow(&mut self, actor: &Actor, at: &str, found: &mut Findings) {
@@ -2965,6 +2972,7 @@ mod follow_by_revision {
                 // A client that holds nothing asks for the newest page (`after_revision=0`).
                 return self.read_anew(actor, at, found);
             }
+            let mut given = HashSet::new();
             for _ in 0..10_000 {
                 let page = actor.after_of(self.cursor, self.limit, self.which).unwrap();
                 if page.ended_for(self.cursor) {
@@ -3001,9 +3009,21 @@ mod follow_by_revision {
                         format!("{limit} a page after position {}: {rows:?}", cursor >> 20)
                     });
                 }
+                let newest = page.entries.iter().map(|row| row.revision).max();
                 for row in page.entries {
                     self.given += 1;
                     let id = row.entry.id().to_string();
+                    if !given.insert(id.clone()) {
+                        found.note(TWICE, at, || id.clone());
+                    }
+                    if row.revision > page.latest_revision {
+                        found.note(ABOVE_CURSOR, at, || {
+                            format!(
+                                "{id} at {}, the page's cursor {}",
+                                row.revision, page.latest_revision
+                            )
+                        });
+                    }
                     if row.revision <= self.cursor {
                         found.note(AT_OR_BELOW, at, || {
                             format!("{id} at {} after {}", row.revision, self.cursor)
@@ -3027,7 +3047,11 @@ mod follow_by_revision {
                         format!("from {} to {}", self.cursor, page.latest_revision)
                     });
                 }
-                self.cursor = self.cursor.max(page.latest_revision);
+                let next = match newest {
+                    Some(newest) if self.by_rows => newest,
+                    _ => page.latest_revision,
+                };
+                self.cursor = self.cursor.max(next);
                 if !page.has_more {
                     return;
                 }
@@ -3169,6 +3193,13 @@ mod follow_by_revision {
             for which in [Which::All, Which::WithoutAutomated] {
                 for limit in [1, 2, 3] {
                     followers.push(Follower::new(which, limit));
+                }
+                for limit in [1, 2] {
+                    let by_rows = Follower::new(which, limit);
+                    followers.push(Follower {
+                        by_rows: true,
+                        ..by_rows
+                    });
                 }
             }
             Self {
@@ -3536,11 +3567,12 @@ mod follow_by_revision {
         // Started again with a message that was said already, and with nothing.
         walk.send(Admission::Queue, Origin::User);
         walk.say();
-        walk.check("a message, and its turn says something");
+        walk.call(false);
+        walk.check("a message, and its turn says something and calls a tool");
         walk.send(Admission::Queue, Origin::User);
         walk.check("a message that waits");
         walk.stop();
-        walk.check("the user stops the agent: the message that waits is held");
+        walk.check("the user stops the agent: the call is cut off, the message that waits is held");
         assert!(walk.start_again());
         walk.check("started again: the message said already is written anew");
         assert!(
@@ -3557,16 +3589,32 @@ mod follow_by_revision {
         assert!(walk.every(|follower| follower.told));
         assert!(walk.reload().is_empty());
 
-        // A restart while a reply is being written.
+        // A restart while a reply is being written and a call runs.
         walk.send(Admission::Queue, Origin::User);
         walk.say();
         walk.check("a reply being written");
+        walk.call(false);
+        walk.check("a call that runs");
         walk.restart();
         walk.check("the Host is restarted");
+        walk.give_back(0);
+        walk.check("the call ends after the restart: written again, at its first time");
         walk.say();
         walk.check("more of the reply");
         walk.end_turn();
         walk.check("the turn ends");
+
+        // A message while a reply is being written: stored after the reply took its revision.
+        walk.send(Admission::Queue, Origin::User);
+        walk.say();
+        walk.check("a reply being written");
+        walk.send(Admission::Queue, Origin::User);
+        walk.check("a message while it is written");
+        walk.say();
+        walk.end_turn();
+        walk.check("the turn ends; the message's begins");
+        walk.end_turn();
+        walk.check("and ends");
 
         // A reader that holds a cursor this conversation never reached, another
         // conversation's: above the head and above where this one begins. It is told, and
