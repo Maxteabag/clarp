@@ -131,8 +131,8 @@ Rules:
     record's `preTokens`, and `after_tokens` stays `null` (the new size is
     known at the agent's next call, when `context_tokens` shows it; until
     then `context_tokens` is `null`). No record: `not_compacted`.
-  - `not_compacted`: refused, failed, stopped, or the conversation did not
-    shrink. `unknown`: a size is missing or it did not finish in time;
+  - `not_compacted`: refused, failed, stopped, finished without replacing the
+    history (Codex), or the conversation did not shrink. `unknown`: a size is missing or it did not finish in time;
     always for a backend that gives the Host no size (Antigravity, Grok).
     `detail` says why in words.
 - **Archived agents are optional.** A plain `GET /agents/snapshot` carries

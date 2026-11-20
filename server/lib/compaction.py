@@ -183,6 +183,10 @@ def decide_codex(before: int | None, answer: dict[str, Any]) -> dict[str, Any]:
                        detail=f"Codex reported a failure: {error or 'no reason given'}")
     if status == "timeout":
         return outcome(UNKNOWN, before=before, detail=error or "Codex did not finish in time")
+    if not answer.get("replaced"):
+        # It ended as completed, but Codex never reported its compaction item.
+        return outcome(NOT_COMPACTED, before=before,
+                       detail="Codex finished without replacing the conversation's history")
     if before is not None and after is not None:
         return outcome(NOT_COMPACTED, before=before, after=after, after_is_estimate=True,
                        detail="the conversation did not shrink")
