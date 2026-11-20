@@ -252,6 +252,13 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
                               --from ivy" })
         )
     );
+    // Nor does a peer Host that names itself: without a turn's token no caller leaves a note
+    // (the release owner's docs line of PR 492).
+    assert_eq!(
+        note(&[("X-Clarp-Peer", "beacon")], green.clone()).1,
+        note(&[], green.clone()).1
+    );
+    assert_eq!(note(&[("X-Clarp-Peer", "beacon")], green.clone()).0, 403);
     // A text that is no token is no turn.
     assert_eq!(
         note(&[("X-Clarp-Turn", "not-a-token")], green.clone()).0,
@@ -588,6 +595,46 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     assert_eq!(send(&[], posing).0, 409);
     let hush_rows = rows_of(&host, "hush");
     assert!(!hush_rows.contains_key("u-h-2"), "{hush_rows:?}");
+    // Two agents' messages with one id, one trace and one origin, from two senders: the second
+    // is no retry of the first (the release owner's wall W5). And a page read after a revision
+    // (a delta, the wall W3's way in) says whom each turn is for as the whole page does.
+    let cursor = host.get("/log?session=hush")["latest_revision"]
+        .as_u64()
+        .unwrap();
+    assert!(cursor > 0);
+    let from_ivy = json!({ "session": "hush", "text": "from ivy", "client_msg_id": "h-4",
+                           "trace_id": "agents-trace", "sender": "ivy", "origin": "agent" });
+    let (status, by_ivy) = send(&[], from_ivy.clone());
+    assert_eq!(status, 200, "{by_ivy}");
+    wait_for("Hush's turn for Ivy", || {
+        answered(&host, "hush", &json!("agents-trace"))
+    });
+    let from_oak = json!({ "session": "hush", "text": "from ivy", "client_msg_id": "h-4",
+                           "trace_id": "agents-trace", "sender": "oak", "origin": "agent" });
+    assert_eq!(send(&[], from_oak).0, 409);
+    assert_eq!(send(&[], from_ivy).0, 200);
+    let (_, mine) = send(
+        &[],
+        json!({ "session": "hush", "text": "and mine", "client_msg_id": "h-5" }),
+    );
+    wait_for("Hush's turn for the user", || {
+        answered(&host, "hush", &mine["trace_id"])
+    });
+    let delta = host.get(&format!("/log?session=hush&after_revision={cursor}&limit=500"));
+    let delta = delta["turns"].as_array().unwrap();
+    assert!(delta.iter().all(|row| row["trace_id"] != "shared-trace"), "{delta:?}");
+    let of = |trace: &str| -> Vec<&Value> {
+        delta.iter().filter(|row| row["trace_id"] == trace).collect()
+    };
+    assert!(of("agents-trace").len() >= 2, "{delta:?}");
+    for row in of("agents-trace") {
+        assert_eq!(row["audience"], "agents", "{row}");
+    }
+    let users = of(mine["trace_id"].as_str().unwrap());
+    assert!(users.len() >= 2, "{delta:?}");
+    for row in users {
+        assert_eq!(row["audience"], "user", "{row}");
+    }
 
     // A muted agent's note pages nobody, and is still told: Hush is muted, and works.
     let muted = host.post("/agent-mute", json!({ "session": "hush", "muted": true }));
