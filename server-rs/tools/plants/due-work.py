@@ -16,14 +16,14 @@ PLANTS = [(AGENT,'mail',name,old,new) for name,old,new in [
 RUNS['tick'] = ['test', '--lib', 'a_refused_janitor_book_still_gives_each_keeper_its_pass']
 JANITORS = 'clarp-host/src/janitors.rs'
 PLANTS += [
-    (JANITORS, 'tick', 'a refused schedule skips the other keepers', 'app.fleet.unkept(KIND, &why.0);', 'app.fleet.unkept(KIND, &why.0); return;'),
-    (JANITORS, 'tick', 'a schedule refusal goes unsaid', 'app.fleet.unkept(KIND, &why.0);', 'let _ = why;'),
+    (JANITORS, 'tick', 'a refused schedule skips the other keepers', 'why.report(&app.fleet, KIND);', 'why.report(&app.fleet, KIND); return;'),
+    (JANITORS, 'tick', 'a schedule refusal goes unsaid', 'why.report(&app.fleet, KIND);', 'let _ = why;'),
     (JANITORS, 'tick', 'the tick skips audio', '    crate::audio::keep(app).await;', ''),
     (JANITORS, 'tick', 'the tick skips quota', '    crate::quota_keeper::look(app);', ''),
     (JANITORS, 'tick', 'the tick skips labels', '    crate::label_checker::look(app);', ''),
-    ('clarp-host/src/audio.rs', 'tick', 'audio loses a refused read', 'Err(why) => return app.fleet.unkept(FACTS, &why.0),', 'Err(_) => return,'),
-    ('clarp-host/src/quota_keeper.rs', 'tick', 'the failed quota read is filed under a different kind', 'app.fleet.unkept(ROLE, &format!', 'app.fleet.unkept("other", &format!'),
-    ('clarp-host/src/label_checker.rs', 'tick', 'the failed label read goes unsaid', 'app.fleet.unkept(ROLE, &why.0);', 'let _ = why;'),
+    ('clarp-host/src/audio.rs', 'tick', 'audio loses a refused read', 'Err(why) => return app.fleet.unread(FACTS, &why.0),', 'Err(_) => return,'),
+    ('clarp-host/src/quota_keeper.rs', 'tick', 'the failed quota read is filed under a different kind', 'app.fleet.unread(ROLE, &format!', 'app.fleet.unread("other", &format!'),
+    ('clarp-host/src/label_checker.rs', 'tick', 'the failed label read goes unsaid', 'app.fleet.unread(ROLE, &why.0);', 'let _ = why;'),
 ]
 RUNS['cache'] = ['test', '--lib', 'the_cached_book_matches_what_the_store_accepted']
 for module, book in [('heartbeat', 'book'), ('schedules', 'schedules')]:
@@ -43,15 +43,18 @@ RUNS['restore'] = ['test', '--test', 'host', 'a_ring_that_rang_when_the_host_was
 CALLS = 'clarp-host/src/calls.rs'
 CHIP = 'clarp-host/src/chip.rs'
 PLANTS += [
-    (CALLS, 'ring', 'a ring read failure is silent', 'Err(why) => app.fleet.unkept(RINGS, &why.0),', 'Err(_) => (),'),
+    (CALLS, 'ring', 'a ring read failure is silent', 'Err(why) => why.report(&app.fleet, RINGS),', 'Err(_) => (),'),
     (CALLS, 'ring', 'a refused read loses the retry', 'after = Duration::from_secs(1);', 'return;'),
     (CALLS, 'ring', 'a ring retry is delayed too long', 'after = Duration::from_secs(1);', 'after = Duration::from_secs(2);'),
     (CALLS, 'ring', 'startup always sleeps before it looks', 'if !after.is_zero() {', 'if true {'),
     (CALLS, 'expiry', 'a newly placed ring has no expiry alarm', 'timer(app, placed.ring.expires_at);', ''),
     (CALLS, 'restore', 'a restored ringing call loses its alarm', 'timer(app, ring.expires_at);', 'let _ = ring;'),
-    (CHIP, 'chip', 'a refused chip read goes unsaid', 'app.fleet.unkept(KIND, &why.0);\n                return Some(Duration::from_secs(60));', 'let _ = why;\n                return Some(Duration::from_secs(60));'),
+    (CHIP, 'chip', 'a refused chip read goes unsaid', 'app.fleet.unread(KIND, &why.0);\n                return Some(Duration::from_secs(60));', 'let _ = why;\n                return Some(Duration::from_secs(60));'),
     (CHIP, 'chip', 'an unread chip sleeps indefinitely', 'return Some(Duration::from_secs(60));', 'return None;'),
     (CHIP, 'chip', 'an unread chip retries on every loop', 'return Some(Duration::from_secs(60));', 'return Some(Duration::ZERO);'),
 ]
+RUNS['log'] = ['test', '--lib', 'reads_and_writes_coalesce_independently']
+PLANTS += [('clarp-host/src/unkept.rs', 'log', 'a write hides the matching failed read',
+            'self.report(&self.reads, kind, why, line);', 'self.report(&self.writes, kind, why, line);')]
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

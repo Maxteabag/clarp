@@ -133,7 +133,7 @@ pub(crate) async fn said(app: &App, agent_id: &str, clip: u64, turn: u64, status
 pub(crate) async fn keep(app: &App) {
     let mut held = match app.audio.held(app).await {
         Ok(held) => held,
-        Err(why) => return app.fleet.unkept(FACTS, &why.0),
+        Err(why) => return app.fleet.unread(FACTS, &why.0),
     };
     let Some(held) = held.as_mut() else {
         return;
@@ -186,7 +186,10 @@ pub(crate) async fn keep(app: &App) {
                 .await
         }
         Ok(false) => Ok(Vec::new()),
-        Err(why) => Err(why),
+        Err(why) => {
+            app.fleet.unread(FACTS, &why.0);
+            Ok(Vec::new())
+        }
     };
     match completed {
         Ok(facts) => changed.extend(facts),
