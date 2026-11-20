@@ -143,7 +143,10 @@ def audience_of(agent_id: str, trace_id: str | None, *, database=None) -> str:
     row = database.execute(
         "SELECT audience FROM coordination_traces WHERE agent_id = ? AND trace_id = ?",
         (agent_id, trace)).fetchone()
-    return AGENTS if row is not None and row["audience"] == AGENTS else USER
+    if row is None or row["audience"] != AGENTS:
+        return USER
+    # The read side of the wall, as /log reads it: the user's word makes it the user's.
+    return USER if holds_user_word(database, agent_id, trace) else AGENTS
 
 
 def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | None:
@@ -158,7 +161,7 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
     row = database.execute(
         "SELECT sender_agent_id, audience FROM coordination_traces WHERE agent_id = ? AND trace_id = ?",
         (agent_id, trace)).fetchone()
-    if row is None or row["audience"] != AGENTS:
+    if row is None or row["audience"] != AGENTS or holds_user_word(database, agent_id, trace):
         return None
     return row["sender_agent_id"] or ""
 
