@@ -283,8 +283,33 @@ def parse_codex(payload) -> list[dict]:
             elif usage.get("usable") is not False:
                 remaining = _percent_remaining(usage.get("worst_used"))
         out.append({"alias": str(account["alias"]), "active": bool(account.get("is_active")),
-                    "remaining": remaining, "secondary": None})
+                    "remaining": remaining, "secondary": None,
+                    "weekly_used": None if usage.get("error") else _codex_weekly_used(usage)})
     return out
+
+
+def _codex_weekly_used(usage: dict) -> float | None:
+    """How much of the account's own WEEKLY window is used (0..1), by its reading; None when the
+    reading has no such window. Not the five-hour window, not a model's window, not spend control."""
+    used = [window.get("used") for window in usage.get("windows") or ()
+            if isinstance(window, dict) and isinstance(window.get("label"), str)
+            and hotseat_status._codex_kind("codex", window["label"]) == ("7d", "weekly")]
+    numbers = [value for value in used if not isinstance(value, bool) and isinstance(value, (int, float))]
+    return max(numbers) if numbers and len(numbers) == len(used) else None
+
+
+# A banked Codex reset restores the WEEKLY window (R145). The Host asks the broker for one only when
+# every saved Codex account's own weekly window is spent by the Host's reading: used at least this
+# much (the broker's own threshold is 99 % used). A five-hour or spend-control block is not that,
+# and an account whose weekly reading is missing or failed authorises nothing.
+WEEKLY_SPENT = 0.99
+
+
+def codex_weekly_spent(accounts) -> bool:
+    readings = [account.get("weekly_used") for account in accounts or ()]
+    return bool(readings) and all(
+        not isinstance(used, bool) and isinstance(used, (int, float)) and used >= WEEKLY_SPENT
+        for used in readings)
 
 
 def _repair_model_pin(value: str | None) -> str:
@@ -342,8 +367,11 @@ class HotseatProvider:
     auth_repair: HotseatAuthRepair | None = None
     model_scoped: bool = False
     reset_command_field: str = ""
-    # The config key capping verified automatic redemptions per rolling 24 hours ('' = no cap).
+    # The config key capping automatic redemptions per rolling 24 hours ('' = no cap).
     reset_cap_field: str = ""
+    # Whether the read accounts are spent in the window a banked reset restores; None: the
+    # keeper's ordinary exhaustion is enough (Claude's lane, as before).
+    reset_due: Callable[[list[dict]], bool] | None = None
     # Flags that go after the read's subcommand when only "which account is in
     # use" is asked (the Hotseat desk, before a switch): they leave out what
     # that question does not need. Codex's quota probe is the slow part.
@@ -362,7 +390,7 @@ PROVIDERS: dict[str, HotseatProvider] = {
                              "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False,
                              active_read_flags=("--no-quota",), desk=hotseat_desk_reading.CODEX_READING,
                              reset_command_field="codex_reset_command",
-                             reset_cap_field="codex_reset_max_per_day"),
+                             reset_cap_field="codex_reset_max_per_day", reset_due=codex_weekly_spent),
 }
 WINDOW_LABEL = {provider: spec.window for provider, spec in PROVIDERS.items()}
 
