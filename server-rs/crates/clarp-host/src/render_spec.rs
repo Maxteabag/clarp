@@ -77,18 +77,7 @@ fn minimums(artifacts: &toml::Table) -> BTreeMap<String, i64> {
                 .iter()
                 .map(|(key, value)| (key.as_str(), value.as_integer()));
             let read = client::minimums(entries, &known);
-            if !read.refused.is_empty() {
-                let line = format!(
-                    "refused entries (a client's name as its header sends it, and a whole number of at least 0): {}",
-                    read.refused.join(", ")
-                );
-                said_once(TABLE_KEY, &line);
-            }
-            for (key, name) in &read.cased {
-                let (key, name) = (client::as_said(key), client::as_said(name));
-                let line = format!(
-                    "{key} is taken as written: it counts for a client that sends {key}, not for {name}"
-                );
+            for line in read.lines() {
                 said_once(TABLE_KEY, &line);
             }
             set.extend(read.taken);
