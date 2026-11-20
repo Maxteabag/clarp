@@ -7,10 +7,15 @@
 //! code and a line in the log that names the code and the pointer and nothing the caller
 //! wrote.
 //!
-//! Who may see a spec is said by each request: `X-Clarp-Client: <platform>/<build>
-//! contract=<n>` at or above the threshold the owner set in his file (`[artifacts]
-//! render_spec_min_client`, read at every request). Without a threshold, as the reference
-//! ships, no client is shown a spec and none can answer one.
+//! Who may see a spec is said by each request: `X-Clarp-Client: <name>/<build>
+//! contract=<n>` at or above the minimum for that client's name, as sent (the Python Host's
+//! PR 474): iOS from contract 74 by default, no other client; the owner lays a table over it
+//! in his file (`[artifacts] render_spec_min_contract = {name = n}`, 0 switching a name off,
+//! read at every request). The old single number (`render_spec_min_client`) is iOS's minimum
+//! only.
+
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -31,14 +36,70 @@ use crate::owner::OwnerFile;
 /// The header a client says who it is in.
 const CLIENT_HEADER: &str = "x-clarp-client";
 
-/// The lowest client contract that is shown a spec and may answer one, as the owner set it:
-/// a whole number in his file, and nothing else.
-fn threshold(app: &App) -> Option<i64> {
+/// The lowest client contract that is shown a spec and may answer one, per client name, as the
+/// owner set it over the default (`config._render_spec_minimums`): the old single number as
+/// iOS's minimum, then each entry of his table whose name is a client's name and whose number
+/// is whole and not below 0. What is not so is passed over, and said once.
+fn threshold(app: &App) -> Option<BTreeMap<String, i64>> {
     let file = OwnerFile::new(app.config.speech_keys.clone()).read()?;
     let artifacts = file.get("artifacts")?.as_table()?;
-    match artifacts.get("render_spec_min_client")? {
-        toml::Value::Integer(minimum) => Some(*minimum),
-        _ => None,
+    Some(minimums(artifacts)).filter(|set| !set.is_empty())
+}
+
+/// What the owner's `[artifacts]` table sets of the minimums, as the Python Host reads it.
+fn minimums(artifacts: &toml::Table) -> BTreeMap<String, i64> {
+    let mut set = BTreeMap::new();
+    match artifacts.get("render_spec_min_client") {
+        None => {}
+        Some(toml::Value::Integer(minimum)) if *minimum >= 0 => {
+            set.insert("ios".to_string(), *minimum);
+            said_once(
+                &SINGLE,
+                "applies to iOS only; name other clients in [artifacts] render_spec_min_contract",
+            );
+        }
+        Some(_) => said_once(&SINGLE, "ignored: not a whole number"),
+    }
+    match artifacts.get("render_spec_min_contract") {
+        None => {}
+        Some(toml::Value::Table(table)) => {
+            for (name, value) in table {
+                match value {
+                    toml::Value::Integer(minimum) if *minimum >= 0 && client_name(name) => {
+                        set.insert(name.clone(), *minimum);
+                    }
+                    _ => said_once(&TABLE, "ignored an entry: a client name and a whole number"),
+                }
+            }
+        }
+        Some(_) => said_once(&TABLE, "ignored: expected a table of client = number"),
+    }
+    set
+}
+
+/// A client's name as a minimum may be set for: `[A-Za-z][A-Za-z0-9_-]{0,31}`.
+fn client_name(name: &str) -> bool {
+    let mut signs = name.chars();
+    signs
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && name.len() <= 32
+        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-')
+}
+
+/// Whether each key's word was said: once in the life of the Host, where the Python Host says
+/// it when it reads its file, since this one reads the owner's file at every request.
+static SINGLE: AtomicBool = AtomicBool::new(false);
+static TABLE: AtomicBool = AtomicBool::new(false);
+
+fn said_once(said: &AtomicBool, line: &str) {
+    if !said.swap(true, Ordering::Relaxed) {
+        let key = if std::ptr::eq(said, &SINGLE) {
+            "render_spec_min_client"
+        } else {
+            "render_spec_min_contract"
+        };
+        eprintln!("clarp-host: config.{key}: {line}");
     }
 }
 
@@ -52,8 +113,10 @@ pub(crate) fn client(headers: &HeaderMap) -> Option<&str> {
 
 /// Whether the client of this request can see a spec and answer it.
 pub(crate) fn capable(app: &App, headers: &HeaderMap) -> bool {
-    let header = client(headers);
-    header.is_some() && spec::capable(header, threshold(app))
+    let header = headers
+        .get(CLIENT_HEADER)
+        .and_then(|value| value.to_str().ok());
+    header.is_some() && spec::capable(header, threshold(app).as_ref())
 }
 
 /// What a refusal is answered with, as the Python Host answers it, and the line it logs.
