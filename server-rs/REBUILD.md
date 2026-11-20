@@ -3345,3 +3345,27 @@ the agents' snapshot. For bundled model art the Host tries the agent's model,
 the tool's configured default in the owner's settings, then the family the tool
 names. Janitors wear the bundled picture of their role or the default janitor
 picture. These reads and display changes make no image request.
+
+**Portrait edits requested by the owner.** A full-access POST to
+`/agent-portrait-generation` starts a Computer job. The capability GET tells
+the app which account pays, why a request is unavailable, and which generation
+is active. Opening the gallery, changing a display setting, and restarting the
+Host make no paid request. Up to twenty launches of this kind may begin per
+Computer in a rolling day. All attempts count. An active duplicate costs
+nothing.
+
+The worker sends the current primary portrait to two successive OpenAI image
+edits with the fixed close-up and everyday-scene prompts. Both use
+`gpt-image-2` at medium quality, 1024 by 1024. A dispatched request can cost
+money even if the other fails or the owner cancels. Each request has a
+180-second deadline. An input or generated image is bounded at 20 MiB, a
+provider response at 32 MiB. `CLARP_PICTURE_ENDPOINT` is the shared loopback
+test base for `generations` and `edits`.
+
+At acceptance the fleet checks the running generation and the primary again.
+One store transaction records the two new alternates, the successful job and
+the local publication receipt with both images. The agent's journal receives
+the two media records together. Once local publication finishes the Host
+removes the receipt and its staging bytes. On restart a committed receipt can
+finish locally and an interrupted generation ends failed. The bounded edit
+fixtures come from the Python Host's own functions in an isolated store.
