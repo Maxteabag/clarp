@@ -16,6 +16,7 @@ pub mod calendar;
 pub mod call_transcription;
 pub mod calls;
 pub mod chip;
+pub mod compaction;
 pub mod connector;
 pub mod contacts;
 pub mod control;
