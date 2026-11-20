@@ -555,9 +555,6 @@ pub struct TerminalFacts {
 pub struct AgentHandle {
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
-    /// The answer to the one close that was sent and not yet answered, kept for whoever asks
-    /// again: a thread is asked to close once.
-    closing: Arc<std::sync::Mutex<Option<mpsc::Receiver<()>>>>,
 }
 
 /// How long a caller waits for an agent's thread to close. The fleet is one worker, and a close
@@ -1140,31 +1137,15 @@ impl AgentHandle {
     }
 
     /// Ends the agent's thread, waiting for it no longer than `within`. Its turn, if one runs,
-    /// is not touched. Whether the thread is closed: it answered, now or to a close asked
-    /// before, or it is gone. A thread that did not answer in time is asked nothing more; its
-    /// answer is kept for the next call.
+    /// is not touched. Whether the thread is closed: it answered, or it is gone. A thread that
+    /// did not answer in time still has the close before it: asked again once it has handled
+    /// that, it is gone, and a close put after the first is never handled.
     pub fn close(&self, within: Duration) -> bool {
-        let mut closing = self
-            .closing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let wait = match closing.take() {
-            Some(wait) => wait,
-            None => {
-                let (closed, wait) = mpsc::channel();
-                if self.tx.send(Ask::Close(closed)).is_err() {
-                    return true;
-                }
-                wait
-            }
-        };
-        match wait.recv_timeout(within) {
-            Ok(()) | Err(RecvTimeoutError::Disconnected) => true,
-            Err(RecvTimeoutError::Timeout) => {
-                *closing = Some(wait);
-                false
-            }
+        let (closed, wait) = mpsc::channel();
+        if self.tx.send(Ask::Close(closed)).is_err() {
+            return true;
         }
+        !matches!(wait.recv_timeout(within), Err(RecvTimeoutError::Timeout))
     }
 }
 
@@ -1253,11 +1234,7 @@ pub fn spawn(setup: Setup) -> AgentHandle {
     if let Err(error) = spawned {
         eprintln!("clarp-host: an agent's thread could not be started: {error}");
     }
-    AgentHandle {
-        tx,
-        view,
-        closing: Arc::default(),
-    }
+    AgentHandle { tx, view }
 }
 
 struct Worker {
