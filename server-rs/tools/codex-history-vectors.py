@@ -162,6 +162,17 @@ ROLLOUTS = [
          'item': {'type': 'AgentMessage', 'id': 'm9', 'text': 'Item on the envelope.'}},
         {'type': 'turn.completed', 'usage': {'input_tokens': 1}},
     ]),
+    ('message-ids', "the id the provider gave an agent's message: of the first record of it that names one", [
+        said('assistant', 'Told twice.'),
+        written('completed', type='AgentMessage', id='m1', text='Told twice.'),
+        written('completed', type='AgentMessage', id='m2', text='Told twice.'),
+        rec('agent_message', message='Told once more.'),
+        printed('completed', id='i3', type='agent_message', text='Told once more.'),
+        written('completed', type='AgentMessage', id='', text='An empty id.'),
+        written('completed', type='AgentMessage', id=7, text='A number for an id.'),
+        printed('completed', id='u1', type='user_message', message='A user has none.'),
+        written('completed', type='UserMessage', id='u2', content=[{'type': 'InputText', 'text': 'Nor here.'}]),
+    ]),
     ('commands', 'a command as it is printed: running, over, failed, with what it printed', [
         said('user', 'Run things.'),
         printed('started', id='item_0', type='command_execution', command="/usr/bin/bash -lc 'cargo test -p kernel'",

@@ -67,8 +67,17 @@ fn last_of_the_agent<'a>(turns: &'a mut Vec<Value>, at: &str) -> &'a mut Value {
 }
 
 /// Something that was said. The two records Codex may write of one message are one turn:
-/// the fuller text is kept, and what the message is in its conversation.
-fn say(turns: &mut Vec<Value>, role: &str, text: &str, at: &str, phase: Option<&Value>) {
+/// the fuller text is kept, what the message is in its conversation, and the id the
+/// provider gave it where a record names one (`provider_id`: the key its live row was
+/// streamed under, R107).
+fn say(
+    turns: &mut Vec<Value>,
+    role: &str,
+    text: &str,
+    at: &str,
+    phase: Option<&Value>,
+    provider_id: &str,
+) {
     if text.is_empty() || !matches!(role, "user" | "assistant") {
         return;
     }
@@ -83,6 +92,9 @@ fn say(turns: &mut Vec<Value>, role: &str, text: &str, at: &str, phase: Option<&
             if let Some(phase) = phase.filter(|_| !python::truthy(&last["kind"])) {
                 last["kind"] = phase.clone();
             }
+            if !provider_id.is_empty() && !python::truthy(&last["provider_id"]) {
+                last["provider_id"] = Value::from(provider_id);
+            }
             return;
         }
     }
@@ -91,6 +103,9 @@ fn say(turns: &mut Vec<Value>, role: &str, text: &str, at: &str, phase: Option<&
     });
     if let Some(phase) = phase {
         turn["kind"] = phase.clone();
+    }
+    if !provider_id.is_empty() {
+        turn["provider_id"] = Value::from(provider_id);
     }
     turns.push(turn);
 }
@@ -253,7 +268,13 @@ impl Reader {
                 } else {
                     "assistant"
                 };
-                say(&mut self.turns, role, &text, at, of("phase"));
+                // Only the agent's message names the id its live row was streamed under.
+                let provider_id = if kind == "agent_message" {
+                    text_of(&[of("id")])
+                } else {
+                    String::new()
+                };
+                say(&mut self.turns, role, &text, at, of("phase"), &provider_id);
                 return;
             }
             "reasoning" => {
@@ -488,7 +509,7 @@ impl Reader {
                 if role == "user" && PUT_IN_BY_CODEX.iter().any(|mark| text.starts_with(mark)) {
                     return;
                 }
-                say(&mut self.turns, &role, &text, &at, of("phase"));
+                say(&mut self.turns, &role, &text, &at, of("phase"), "");
             }
             "item.started" | "item.updated" | "item.completed" => {
                 let item = any_of(&[record.get("item")]).filter(|item| python::truthy(item));
@@ -518,7 +539,14 @@ impl Reader {
             "user_message" => {
                 let text = of("message").and_then(Value::as_str).unwrap_or_default();
                 let text = python::strip(text.trim_start_matches('›'));
-                say(&mut self.turns, "user", without_preamble(text), &at, None);
+                say(
+                    &mut self.turns,
+                    "user",
+                    without_preamble(text),
+                    &at,
+                    None,
+                    "",
+                );
             }
             "agent_message" => {
                 let text = text_of(&[of("message")]);
@@ -528,6 +556,7 @@ impl Reader {
                     python::strip(&text),
                     &at,
                     of("phase"),
+                    "",
                 );
             }
             "function_call" | "custom_tool_call" => self.older_call(payload, &at),

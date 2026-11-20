@@ -25935,8 +25935,12 @@ fn an_agent_takes_up_a_session_codex_kept() {
     let place = Place::new("codex-past");
     let started = place.root.join("started");
     let codex = place.root.join("codex-answers");
-    // A stand-in for Codex that answers one line in the thread it was started in, and
-    // writes down how it was started.
+    let kept = "0199c0de-1111-7222-8333-444455556666";
+    let day = place.root.join(".codex/sessions/2027/02/03");
+    let rollout = day.join(format!("rollout-2027-02-03T10-00-00-{kept}.jsonl"));
+    // A stand-in for Codex that answers in the thread it was started in, a commentary and
+    // then its answer, writes them to the thread's rollout as Codex does (the event, and
+    // the item under the id it was printed with), and writes down how it was started.
     let script = format!(
         r#"#!/usr/bin/env python3
 import json, sys
@@ -25949,18 +25953,25 @@ with open({started}, "a") as out:
 thread = args[args.index("resume") + 1] if "resume" in args else "00000000-0000-7000-8000-00000000beef"
 def say(**line):
     print(json.dumps(line), flush=True)
+def kept(**payload):
+    line = {{"timestamp": "2027-02-03T10:01:00.000Z", "type": "event_msg", "payload": payload}}
+    with open({rollout}, "a") as out:
+        out.write(json.dumps(line) + "\n")
 say(type="thread.started", thread_id=thread)
 say(type="turn.started")
-say(type="item.completed", item={{"id": "item_0", "type": "agent_message", "text": "Picked up."}})
+for id, text, phase in [("item_0", "Looking again.", "commentary"), ("item_1", "Picked up.", "final_answer")]:
+    say(type="item.completed", item={{"id": id, "type": "agent_message", "text": text}})
+    kept(type="agent_message", message=text, phase=phase)
+    kept(type="item_completed", item={{"type": "AgentMessage", "id": id, "text": text, "phase": phase}})
 say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, "output_tokens": 2}})
 "#,
         started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
+        rollout = serde_json::to_string(rollout.to_str().unwrap()).unwrap(),
     );
     program(&codex, &script);
     // The Host's user has a home of their own, in which Codex kept one session.
     let work = place.root.join("work");
     std::fs::create_dir_all(&work).unwrap();
-    let kept = "0199c0de-1111-7222-8333-444455556666";
     let at = |second: u32| format!("2027-02-03T10:00:{second:02}.000Z");
     let record = |second: u32, kind: &str, payload: Value| {
         let mut payload = payload;
@@ -26005,9 +26016,7 @@ say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, 
         ),
     ];
     let written: Vec<String> = lines.iter().map(Value::to_string).collect();
-    let day = place.root.join(".codex/sessions/2027/02/03");
     std::fs::create_dir_all(&day).unwrap();
-    let rollout = day.join(format!("rollout-2027-02-03T10-00-00-{kept}.jsonl"));
     std::fs::write(&rollout, written.join("\n") + "\n").unwrap();
     let world = [
         ("HOME", place.root.to_str().unwrap()),
@@ -26090,11 +26099,27 @@ say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, 
         started_with.contains(&format!("resume {kept}")),
         "the thread is continued: {started_with}"
     );
-    let said = host.conversation(&session);
+    // What the tool said in its turn is in the conversation once, as its stream told it:
+    // nothing reads the rollout it went on writing (the commentary and the answer under
+    // their ids) into rows beside them (R107). Nor after a restart of the Host.
+    let whole = |host: &Host| -> Vec<(String, String)> { host.conversation(&session) };
+    let pair = |role: &str, text: &str| (role.to_string(), text.to_string());
+    let said = whole(&host);
     assert_eq!(
-        said.last().unwrap(),
-        &("assistant".to_string(), "Picked up.".to_string())
+        said,
+        [
+            pair("user", "do the tests pass?"),
+            pair("assistant", "I will run them."),
+            pair("assistant", "They pass."),
+            pair("user", "and now?"),
+            pair("assistant", "Looking again."),
+            pair("assistant", "Picked up."),
+        ]
     );
+    host.kill();
+    let host = place.start_in("", &[], &world);
+    assert_eq!(whole(&host), said, "the conversation after a restart");
+    let made = |body: Value| host.ask("POST", "/agents", Some(&body));
 
     // The session is that agent's now: it is opened, or it is in use.
     let again =
