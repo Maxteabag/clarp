@@ -620,11 +620,19 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     wait_for("Hush's turn for the user", || {
         answered(&host, "hush", &mine["trace_id"])
     });
-    let delta = host.get(&format!("/log?session=hush&after_revision={cursor}&limit=500"));
+    let delta = host.get(&format!(
+        "/log?session=hush&after_revision={cursor}&limit=500"
+    ));
     let delta = delta["turns"].as_array().unwrap();
-    assert!(delta.iter().all(|row| row["trace_id"] != "shared-trace"), "{delta:?}");
+    assert!(
+        delta.iter().all(|row| row["trace_id"] != "shared-trace"),
+        "{delta:?}"
+    );
     let of = |trace: &str| -> Vec<&Value> {
-        delta.iter().filter(|row| row["trace_id"] == trace).collect()
+        delta
+            .iter()
+            .filter(|row| row["trace_id"] == trace)
+            .collect()
     };
     assert!(of("agents-trace").len() >= 2, "{delta:?}");
     for row in of("agents-trace") {
