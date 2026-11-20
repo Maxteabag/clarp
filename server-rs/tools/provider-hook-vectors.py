@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/provider-hook.json'
@@ -54,9 +56,9 @@ def record(directory):
 
 if __name__ == '__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as root:
+        with scratch.directory() as root:
             print(json.dumps(record(Path(root))))
     else:
-        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'}))
+        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=scratch.child_env({'PATH':os.defpath,'TZ':'UTC','LANG':'C.UTF-8'})))
         OUT.write_text(json.dumps(data,ensure_ascii=True,indent=1)+'\n',encoding='ascii')
         print(len(data['cases']),'hook cases')

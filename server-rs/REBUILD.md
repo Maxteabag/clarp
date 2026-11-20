@@ -255,6 +255,21 @@ The rules and binding rotation are in `clarp-kernel/src/provider_tasks.rs`. The 
 `tools/provider-background-tasks-vectors.py` and `tools/provider-observer-vectors.py` record
 the Python Host's own functions, including 1,142 lifecycle steps and 320 binding selections.
 
+The feature `provider_background_tasks` is listed at contract 24. Managed Claude turns receive
+one Bash PreToolUse hook through inline settings. The shim reads at most 64 KiB of JSON, returns
+no permission decision and never contacts the Host. The hook attaches the exact agent, native
+session and tool-use id to a worker registration. A registration with that binding takes the native
+row's place in the list; its own detail and timeline remain available. Full devices can read
+the last 64 KiB of the receipted task's output with secrets redacted. A limited device sees only
+progress and history. Cancelling a native job gives a 409 receipt and leaves its state intact.
+
+The hook's turn advice is held by `tools/provider-hook-vectors.py` and the Host test that runs
+the repository's `run_detached_job.sh --goal` against its own tools. A worker awaiting a refused
+checkpoint never started the command. A successful launch stored the worker and goal dependency
+before returning and woke the agent when it finished. A separate setsid child answered after
+the managed turn ended and after the Host restarted. Registration and output are held by
+`tools/provider-registration-vectors.py`.
+
 **What agents make and ask is there, for the plain kinds** (15 Nov 2026). The rules of `server/lib/artifacts.py`
 are in the kernel (`artifacts.rs`, `artifacts/decisions.rs`, held to the Python module by 264 recorded calls,
 123 of them refusals): documents, research, data, code changes, releases, directories and workflow runs; a
