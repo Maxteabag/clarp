@@ -551,6 +551,8 @@ struct LiveTurn {
     gauge: Option<u64>,
     /// The agent's tool.
     backend: &'static str,
+    /// This attempt's tool said how it went, in a result of its own.
+    concluded: bool,
     /// What the tool said its conversation has cost so far, and what it had cost before the
     /// turn, where that is known: nothing for a conversation that begins with the turn.
     per_turn_cost: Option<u64>,
@@ -592,6 +594,7 @@ impl LiveTurn {
             compacted: self.compacted,
             gauge: self.gauge,
             backend: self.backend,
+            concluded: self.concluded,
             per_turn_cost: self.per_turn_cost,
             cost: self.cost,
             cost_before: self.cost_before,
@@ -951,6 +954,7 @@ struct Facts {
     compacted: Option<Boundary>,
     gauge: Option<u64>,
     backend: &'static str,
+    concluded: bool,
     per_turn_cost: Option<u64>,
     cost: Option<u64>,
     cost_before: Option<u64>,
@@ -964,7 +968,13 @@ fn compaction_said(batch: &mut Batch<'_>, turn: TurnId, facts: &Facts) {
     };
     let model = facts.model.as_deref().unwrap_or_default();
     let said = LastCompaction {
-        decided: compaction::decide(&owed.outcome, facts.compacted, facts.gauge, model),
+        decided: compaction::decide(
+            &owed.outcome,
+            facts.compacted,
+            facts.gauge,
+            model,
+            facts.concluded,
+        ),
         backend: facts.backend.to_string(),
         at: owed.ended_at_ms,
     };
@@ -1297,6 +1307,7 @@ impl Actor {
                 compacted: None,
                 gauge: actor.remembered.context_tokens,
                 backend: actor.backend.id(),
+                concluded: false,
                 per_turn_cost: None,
                 cost: None,
                 cost_before: actor.cost_before(turn)?,
@@ -3500,6 +3511,8 @@ impl Actor {
             compacted,
             gauge,
             backend: self.backend.id(),
+            // A new attempt has not said how it went yet.
+            concluded: false,
             // What the conversation has cost so far is said again by the next attempt, with
             // what this one cost in it.
             per_turn_cost: None,
@@ -3587,6 +3600,7 @@ impl Actor {
         let (mut model, mut tokens, mut context, mut cost) = (None, None, None, None);
         let (mut total, mut limits) = (None, None);
         let mut compacted = None;
+        let mut concluded = false;
         let mut interpreter = self
             .backend
             .interpreter(turn.0, &attempt_of(turn_name(&message.id), attempt));
@@ -3652,6 +3666,7 @@ impl Actor {
                         Signal::Compacted(record) => {
                             compacted = compaction::newest(compacted, Some(record));
                         }
+                        Signal::Concluded => concluded = true,
                         Signal::Limits(said) => limits = Some((record.t, said)),
                         Signal::TurnCost { micros } => per_turn_cost = Some(micros),
                         Signal::Cost { micros } => cost = Some(micros),
@@ -3696,6 +3711,7 @@ impl Actor {
             compacted,
             gauge: self.remembered.context_tokens,
             backend: self.backend.id(),
+            concluded,
             per_turn_cost,
             cost,
             cost_before: self.cost_before(turn)?,
@@ -4269,6 +4285,10 @@ impl Actor {
                         }
                         Signal::Compacted(record) => {
                             live.compacted = compaction::newest(live.compacted, Some(record));
+                            continue;
+                        }
+                        Signal::Concluded => {
+                            live.concluded = true;
                             continue;
                         }
                         Signal::Limits(said) => {
