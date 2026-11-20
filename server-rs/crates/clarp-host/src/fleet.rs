@@ -2433,6 +2433,7 @@ impl Fleet {
             .filter(|at| {
                 let record = &self.members[*at].record;
                 !record.is_janitor
+                    && self.members[*at].agent.accepting_work().is_ok()
                     && record.avatar.is_none()
                     && record.avatar_symbol.is_empty()
                     && record.persona.eq_ignore_ascii_case(&name)
@@ -2771,6 +2772,10 @@ impl Fleet {
             return Err(Told::new(404, why, why).into());
         };
         let before = self.members[at].record.clone();
+        self.members[at]
+            .agent
+            .accepting_work()
+            .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
         if before.is_janitor {
             let why = "Janitors are managed from their maintenance configuration";
             return Err(Told::new(409, "janitor_managed", why).into());
@@ -2859,7 +2864,18 @@ impl Fleet {
         forked: Option<String>,
         contact: Option<ContactAsked>,
     ) -> Result<AgentRecord, NotMade> {
-        if let Some(parent) = request.parent.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(parent) = request
+            .parent
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Some(at) = self.place_of(parent) {
+                self.members[at]
+                    .agent
+                    .accepting_work()
+                    .map_err(|why| Told::new(503, agent::REMOVING_CODE, why.0))?;
+            }
             match self.has_delegated_ancestor(parent) {
                 Ok(true) => {
                     return Err(Told::new(
@@ -3129,6 +3145,7 @@ impl Fleet {
         let Some(at) = found else {
             return Ok(Err(NotAmended::Unknown));
         };
+        self.members[at].agent.accepting_work()?;
         // A contact chosen by the rule is chosen here, in the turn that gives it.
         let change = match change {
             Amend::ContactAuto(fetched) => match self.contact_of_assignment(at, &fetched)? {
@@ -3261,7 +3278,7 @@ impl Fleet {
         took: oneshot::Sender<()>,
     ) -> Result<(), Unavailable> {
         if record.archived_at_ms.is_some() && self.members[at].record.archived_at_ms.is_none() {
-            self.stop_for_roster(&record, "agent archived")?;
+            self.stop_for_roster(&record, "agent archived", None)?;
         } else {
             self.put(&record).map_err(Unavailable)?;
         }
@@ -3293,6 +3310,10 @@ impl Fleet {
         else {
             return Ok(None);
         };
+        // A helper awaiting removal keeps its own tombstone, including when its parent goes.
+        if self.members[at].agent.accepting_work().is_err() {
+            return Ok(None);
+        }
         let before = &self.members[at].record;
         let current = before.helper_state.as_deref().unwrap_or("");
         let Some(moved) = helpers::next_state(current, event) else {
@@ -3360,6 +3381,7 @@ impl Fleet {
         let Some(at) = self.place_of(key) else {
             return Ok(Err(no_agent(key)));
         };
+        self.members[at].agent.accepting_work()?;
         let helper = self.members[at].record.clone();
         if !helper.is_helper() {
             let why = format!("{} is not a helper", helper.session);
@@ -3610,8 +3632,9 @@ impl Fleet {
         // An agent asked to close before is not stopped twice: it was deleted then.
         let asked_before = self.closing.get(&record.agent_id).copied();
         record.deleted_at_ms = Some(asked_before.unwrap_or_else(|| self.now_ms()));
+        let agent = self.members[at].agent.clone();
         if asked_before.is_none() {
-            self.stop_for_roster(&record, "agent deleted")?;
+            self.stop_for_roster(&record, "agent deleted", Some(&agent))?;
             self.closing.insert(
                 record.agent_id.clone(),
                 record.deleted_at_ms.unwrap_or_default(),
@@ -3619,15 +3642,11 @@ impl Fleet {
         }
         // Its thread is the one writer of what is its own: until it has closed, nothing of
         // that is touched, and the agent stays as it is. Its tombstone is kept.
-        if !self.members[at].agent.close(agent::CLOSE_WITHIN) {
+        if !agent.close(agent::CLOSE_WITHIN) {
             return Err(Unavailable(format!(
                 "The agent's thread did not answer within {} seconds, so it is not removed yet: ask again to finish removing it.",
                 agent::CLOSE_WITHIN.as_secs()
             )));
-        }
-        if asked_before.is_some() {
-            // What was changed of it since may have written over its tombstone.
-            self.put(&record).map_err(Unavailable)?;
         }
         self.closing.remove(&record.agent_id);
         self.gone.insert(
