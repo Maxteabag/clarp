@@ -43,9 +43,11 @@ changes("clarp-host/src/heard/inventory.rs", "host", [
     ('installed_path(record).is_none()', 'installed_path(record).is_some()'),
     ('r["id"] == model', 'r["id"] != model'), ('kept("transcription-models", "records".into())', 'kept("transcription-models", "unknown".into())'),
     ('records.remove(index);', 'let _ = index;'),
-    ('own_id().as_deref().unwrap_or("") == id', 'own_id().as_deref().unwrap_or("") != id'),
     ('text.trim().to_owned()', 'text.to_owned()'), ('"model_id": id', '"model_id": ""'),
-    ('*loaded == id','*loaded != id'),
+])
+changes("clarp-host/src/heard/install.rs", "host", [
+    ('own_id().as_deref().unwrap_or("") == id', 'own_id().as_deref().unwrap_or("") != id'),
+    ('loaded == id','loaded != id'),
     ('cannot remove the configured server default;', 'cannot remove default;'),
 ])
 changes("clarp-host/src/heard/managed.rs", "host", [
@@ -81,10 +83,7 @@ changes("clarp-host/src/heard/managed.rs", "host", [
     ('std::io::ErrorKind::NotFound && resuming', 'std::io::ErrorKind::NotFound && !resuming'),
     ('resuming && error.kind()', '!resuming && error.kind()'),
 ])
-changes("clarp-host/src/screens.rs", "door", [
-    ('post(no_model_install)', 'get(no_model_install)'),
-    ('"Installing a transcription model from an app is"', '"Installing models is"'),
-])
+# The 501 for install has been replaced by a working 202 route. Its rules live in transcription-installer.
 changes("clarp-host/src/heard/inventory.rs", "port", [
     ('Some(bytes),', 'Some(Vec::new()),'),
     ('.await\n            .map_err(|e| e.0)?;', '.await.unwrap_or(None);'),

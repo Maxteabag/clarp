@@ -76,7 +76,11 @@ impl Inventory {
             .unwrap_or_default()
     }
 
-    async fn publish(&self, fleet: &FleetHandle, records: Vec<Value>) -> Result<(), ApiError> {
+    pub(super) async fn publish(
+        &self,
+        fleet: &FleetHandle,
+        records: Vec<Value>,
+    ) -> Result<(), ApiError> {
         fleet
             .keep(
                 "transcription-models",
@@ -90,7 +94,55 @@ impl Inventory {
         Ok(())
     }
 
-    async fn remove(&self, fleet: &FleetHandle, root: &Path, id: &str) -> Result<(), ApiError> {
+    pub(super) async fn register_managed(
+        &self,
+        fleet: &FleetHandle,
+        id: &str,
+        path: &Path,
+        generation: u64,
+        job_id: String,
+    ) -> Result<bool, ApiError> {
+        let model =
+            rules::install_model(id).map_err(|e| ApiError::new(StatusCode::BAD_REQUEST, e))?;
+        let mut row = model.installed_record();
+        row["_local_path"] = json!(path);
+        row["_managed_root"] = json!(path);
+        row["_install_generation"] = json!(generation);
+        if installed_path(&row).is_none() {
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "published transcription model is incomplete",
+            ));
+        }
+        let mut rows = self.records().as_ref().clone();
+        rows.retain(|r| r["id"] != id);
+        rows.push(row);
+        let bytes = serde_json::to_vec(&rows)
+            .map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let change = fleet
+            .finish_computer_job_with(
+                job_id,
+                generation,
+                vec![
+                    ("transcription-models", "records".into(), Some(bytes)),
+                    ("model-publication", id.into(), None),
+                ],
+            )
+            .await?
+            .map_err(super::install::job_refused)?;
+        if change.record.is_none() {
+            return Ok(false);
+        }
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(rows));
+        Ok(true)
+    }
+
+    pub(super) async fn remove(
+        &self,
+        fleet: &FleetHandle,
+        root: &Path,
+        id: &str,
+    ) -> Result<(), ApiError> {
         let mut records = self.records().as_ref().clone();
         let Some(index) = records.iter().position(|r| r["id"] == id) else {
             let unreadable = self
@@ -169,22 +221,8 @@ pub(super) async fn remove_model(
     } else {
         clarp_kernel::python::repr(value)
     };
-    if app.ears.own_id().as_deref().unwrap_or("") == id {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "cannot remove the configured server default; choose another default or disable server transcription first",
-        ));
-    }
-    // Complete the registry write even if the client disconnects after submitting the request.
     tokio::spawn(async move {
-        let mut selected = app.ears.variants.exclusive().await;
-        app.ears
-            .inventory
-            .remove(&app.fleet, &app.config.data_dir.join("models"), &id)
-            .await?;
-        if selected.as_ref().is_some_and(|(loaded, _)| *loaded == id) {
-            selected.take();
-        }
+        app.ears.installs.remove_model(&app, &id).await?;
         Ok(Json(json!({"ok": true, "model_id": id})))
     })
     .await

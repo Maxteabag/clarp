@@ -125,6 +125,7 @@ impl Fleet {
     pub(super) fn change_computer_job(
         &mut self,
         command: JobCommand,
+        mut writes: Vec<clarp_ports::kv::Write>,
     ) -> Result<Result<JobChange, ComputerJobRefusal>, Unavailable> {
         let id = command.id().trim();
         if let Some(agent_id) = self.jobs.get(id) {
@@ -168,8 +169,9 @@ impl Fleet {
             timeline,
         };
         let bytes = serde_json::to_vec(&row).map_err(|e| Unavailable(e.to_string()))?;
+        writes.push((TABLE.into(), job.id.clone(), Some(bytes)));
         self.store
-            .put(TABLE, &job.id, &bytes)
+            .put_together(&writes)
             .map_err(|e| Unavailable(e.to_string()))?;
         if self.computer_jobs.unreadable.remove(&job.id) {
             self.works

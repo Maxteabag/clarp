@@ -28,7 +28,7 @@ change(F, "http", [
     ('self.book.jobs().cloned().collect()', 'self.book.active().cloned().collect()'),
     ('if row.job.id != id', 'if row.job.id == id'),
     ('timeline.push(entry.clone())', 'timeline.clear()'),
-    ('self.store\n            .put(TABLE, &job.id, &bytes)', 'self.store\n            .put(TABLE, "different-id", &bytes)'),
+    ('writes.push((TABLE.into(), job.id.clone(), Some(bytes)))', 'writes.push((TABLE.into(), "different-id".into(), Some(bytes)))'),
 ])
 change(F, "store", [
     ('self.book.get(id).is_some()', 'self.book.get(id).is_none()'),

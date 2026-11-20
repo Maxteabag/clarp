@@ -461,6 +461,8 @@ mv -f "$share/libexec/.soak.new" "$share/libexec/soak"
 # named above.
 install -m 644 "$here/tools/whisper-worker.py" "$share/libexec/.whisper-worker.py.new"
 mv -f "$share/libexec/.whisper-worker.py.new" "$share/libexec/whisper-worker.py"
+install -m 644 "$here/tools/transcription-download.py" "$share/libexec/.transcription-download.py.new"
+mv -f "$share/libexec/.transcription-download.py.new" "$share/libexec/transcription-download.py"
 version="$(cut -c1-12 "$from/COMMIT" 2>/dev/null || echo unknown)"
 printf '%s\n' "$version" > "$share/data/DEPLOYED_VERSION"
 
