@@ -99,10 +99,27 @@ for label,old,new in [
 # Whether a reader holds a conversation that ended (clarp-actor's conversation.rs, Page::ended_for): asked by the
 # route of GET /log and by the follower of clarp-actor's tests, which holds what a reload reads after every change.
 RUNS["page"]=["test","-p","clarp-actor","--lib","a_reader_is_told_its_conversation_ended"]
-RUNS["follow"]=["test","--test","actor","a_follower_by_revision_holds_what_a_reload_reads_after_every_change"]
+RUNS["follow"]=["test","--test","actor","a_follower_by_revision_holds"]
 PLANTS += [
     ('clarp-actor/src/conversation.rs', 'follow', 'a reader above the head is not told its conversation ended', 'held > self.head_revision || held <= self.begins_after', 'held <= self.begins_after'),
     ('clarp-actor/src/conversation.rs', 'page', 'a reader at the floor is not told its conversation ended', 'held > self.head_revision || held <= self.begins_after', 'held > self.head_revision || held < self.begins_after'),
+    # A page of changes gives a row only when it reaches the row's newest part, in the order of revisions.
+    ('clarp-actor/src/conversation.rs', 'follow', 'a row with a part beyond the page is given on it', '        entries.retain(|row| row.revision <= cursor);\n', ''),
+    ('clarp-actor/src/conversation.rs', 'follow', 'a page of changes not in the order of revisions', '    entries.sort_by_key(|row| row.revision);\n', ''),
+    # A row has one time: a call that is a row by itself, written again, keeps its first writing's.
+    ('clarp-actor/src/lib.rs', 'follow', "a call row written again at its end's time", '*live.first_written.entry(call.id.clone()).or_insert(t)', 't'),
+    ('clarp-actor/src/lib.rs', 'follow', "a call row cut off at the cut's time", 'None => first_written.get(&call.id).copied().unwrap_or(ts_ms),', 'None => ts_ms,'),
+    ('clarp-actor/src/lib.rs', 'follow', 'a call row first written at the restart, as a restart reads it', 'first_written.entry(call.id.clone()).or_insert(record.t);', 'first_written.entry(call.id.clone()).or_insert(now_ms);'),
+]
+# The other agents a row names, by the roster when the row is read (clarp-host wire.rs, fleet.rs).
+RUNS["names"]=["test","-p","clarp-host","--lib","the_agents_a_row_names"]
+RUNS["writes"]=["test","--test","host","an_agent_writes_to_another_agent_with_its_own_tool"]
+PLANTS += [
+    ('clarp-host/src/wire.rs', 'names', "a user's row names its sender as kept", '            ("sender_agent_id", "sender_name", "sender_session"),\n', ''),
+    ('clarp-host/src/wire.rs', 'names', 'a known agent named as kept', 'if let Some((named, at)) = shown_as(agent_id) {', 'if let Some((named, at)) = shown_as(agent_id).filter(|_| false) {'),
+    ('clarp-host/src/fleet.rs', 'writes', 'a removed agent is not named', 'None => self.gone.get(agent_id).cloned(),', 'None => None,'),
+    ('clarp-host/src/fleet.rs', 'writes', 'an agent removed now is forgotten', '        self.gone.insert(\n            record.agent_id.clone(),', '        let _ = (\n            record.agent_id.clone(),'),
+    ('clarp-host/src/fleet.rs', 'writes', 'an agent removed before the start is forgotten', '            gone.insert(\n                record.agent_id.clone(),\n                (record.persona.clone(), record.session.clone()),\n            );\n            if !record.ledger_retired {', '            if !record.ledger_retired {'),
 ]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
