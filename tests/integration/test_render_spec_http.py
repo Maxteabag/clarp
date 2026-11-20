@@ -505,3 +505,24 @@ def test_only_the_administrator_may_export(principal, local, token, allowed):
     handler = SimpleNamespace(_request_principal=principal, _request_is_local=local,
                               ctx=SimpleNamespace(auth_token=token))
     assert _administrator(handler) is allowed
+
+
+@pytest.mark.parametrize("how,allowed", [("header", True), ("query", False), ("cookie", False)])
+def test_the_export_takes_the_administrators_token_from_the_header_only(host, envelope, how, allowed):
+    """A link that carries the token in its query string, or a browser's cookie, never exports a
+    user's answers; the Authorization header does."""
+    import urllib.error
+    import urllib.request
+    from tests.integration.test_attention_questions_http import TOKEN
+    status, created = _request(host, "/artifacts", envelope, headers={"X-Clarp-Client": "ios/12 contract=74"})
+    assert status in (200, 201), created
+    path = f"/artifacts/{envelope['artifact_id']}/export"
+    headers = {"Authorization": "Bearer " + TOKEN} if how == "header" else \
+        {"Cookie": "claude_pwa_token=" + TOKEN} if how == "cookie" else {}
+    url = host.base + path + ("?token=" + TOKEN if how == "query" else "")
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=3) as response:
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    assert status == 200 if allowed else status in (401, 403)

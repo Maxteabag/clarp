@@ -45,3 +45,31 @@ def test_the_table_takes_whole_numbers_per_client_name(monkeypatch):
     assert config._render_spec_minimums({"render_spec_min_contract": table}) == {"ios": 0, "android": 30}
     assert lines.count("config.render_spec_min_contract") == 3
     assert config._render_spec_minimums({}) is None
+
+
+def test_a_client_name_in_capitals_is_refused_with_its_line(monkeypatch):
+    """Clients send their names in lower case and the name is matched exactly: an 'IOS' key would
+    silently switch nothing on, so it is refused and said."""
+    lines = []
+    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append(event))
+    assert config._render_spec_minimums({"render_spec_min_contract": {"IOS": 74}}) is None
+    assert lines == ["config.render_spec_min_contract"]
+
+
+def test_the_table_wins_over_the_old_key_and_says_so(monkeypatch):
+    lines = []
+    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append((event, detail)))
+    got = config._render_spec_minimums({"render_spec_min_client": 0, "render_spec_min_contract": {"ios": 80}})
+    assert got == {"ios": 80}
+    assert ("config.render_spec_min_client", "ignored: render_spec_min_contract names ios") in lines
+
+
+@pytest.mark.parametrize("value", [True, 74.0, "74", -1])
+def test_a_minimum_that_is_not_a_whole_number_is_refused(monkeypatch, value):
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: None)
+    assert config._render_spec_minimums({"render_spec_min_contract": {"ios": value}}) is None
+
+
+def test_an_empty_table_leaves_the_default(monkeypatch):
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: None)
+    assert config._render_spec_minimums({"render_spec_min_contract": {}}) is None
