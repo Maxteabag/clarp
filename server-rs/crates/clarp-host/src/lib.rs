@@ -19,6 +19,7 @@ pub mod android_chip;
 pub mod apps;
 pub mod artifact_tool;
 pub mod audio;
+mod bookkeeping;
 pub mod calendar;
 pub mod calls;
 pub(crate) mod child;

@@ -1321,6 +1321,15 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
             .iter()
             .cloned()
             .chain(std::iter::once((
+                "CLARP_DELEGATION_DIR".into(),
+                works
+                    .config
+                    .data_dir
+                    .join("delegations")
+                    .to_string_lossy()
+                    .into_owned(),
+            )))
+            .chain(std::iter::once((
                 "CLARP_SESSION".into(),
                 record.session.clone(),
             )))

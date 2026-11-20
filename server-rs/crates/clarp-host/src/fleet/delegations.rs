@@ -232,6 +232,11 @@ use std::{
 };
 
 pub(crate) enum Request {
+    Authorize {
+        id: String,
+        caller: String,
+        credential: String,
+    },
     Enable {
         principal: String,
         delegate: String,
@@ -300,7 +305,7 @@ impl Fleet {
             self.stored_agent(id)
                 .map(|v| v.map_or_else(String::new, |a| a.session))
         };
-        Ok(json!({
+        let mut shown = json!({
             "delegation_id":r.delegation_id,"principal_agent_id":r.principal_agent_id,"delegate_agent_id":r.delegate_agent_id,
             "status":if r.stopped_at.is_some(){"stopped"}else{"active"},
             "created_at":r.created_at,"created_reason":r.created_reason,"stopped_at":r.stopped_at,"stopped_reason":r.stopped_reason,
@@ -309,10 +314,88 @@ impl Fleet {
             "dispatched_goal_event_through":0,"last_wake_id":"","last_wake_at":null,"last_applied_at":null,
             "last_source_at":null,"last_heartbeat_at":null,"last_error":"","job_handle":"","unapplied_since":null,
             "lag_ms":0,"in_flight":false
-        }))
+        });
+        let progress = if let Ok(principal) = self.delegation_member(&r.principal_agent_id) {
+            principal
+                .agent
+                .delegation(DelegationCommand::Applied(
+                    r.delegation_id.clone(),
+                    r.message_through,
+                ))?
+                .applied
+                .ok_or_else(|| Unavailable("missing bookkeeping progress".into()))?
+        } else if self
+            .stored_agent(&r.principal_agent_id)?
+            .is_some_and(|p| p.deleted_at_ms.is_some())
+        {
+            let log = self
+                .works
+                .engine
+                .open(
+                    &self
+                        .works
+                        .config
+                        .data_dir
+                        .join("agents")
+                        .join(&r.principal_agent_id),
+                    self.works.codecs.clone(),
+                )
+                .map_err(|e| Unavailable(e.to_string()))?;
+            clarp_actor::bookkeeping::read_progress(
+                log.as_ref(),
+                &r.delegation_id,
+                r.message_through,
+            )
+            .map_err(|e| Unavailable(e.to_string()))?
+        } else {
+            return Err(Unavailable("principal unavailable".into()));
+        };
+        if progress.last_applied_at.is_some() {
+            progress.show(&mut shown, self.now_ms());
+        }
+        Ok(shown)
     }
     pub(super) fn delegation_request(&mut self, req: Request) -> Result<Value, ApiError> {
         match req {
+            Request::Authorize {
+                id,
+                caller,
+                credential,
+            } => {
+                use subtle::ConstantTimeEq;
+                let denied = |s| ApiError::new(StatusCode::FORBIDDEN, s);
+                let why = "unknown delegation or wrong credential";
+                let row = find(self.store.as_ref(), &id)
+                    .map_err(unavailable)?
+                    .ok_or_else(|| denied(why))?;
+                let digest = format!("{:x}", Sha256::digest(credential.as_bytes()));
+                if credential.is_empty()
+                    || !bool::from(digest.as_bytes().ct_eq(row.token_hash.as_bytes()))
+                {
+                    return Err(denied(why));
+                }
+                if caller != row.delegate_agent_id {
+                    return Err(denied(
+                        "only the delegate's own Clarp turn can keep these books",
+                    ));
+                }
+                if row.stopped_at.is_some() {
+                    return Err(denied("this delegation is stopped"));
+                }
+                for key in [&row.principal_agent_id, &row.delegate_agent_id] {
+                    if self
+                        .delegation_member(key)
+                        .map_or(true, |m| m.record.archived_at_ms.is_some())
+                    {
+                        return Err(denied("the principal or delegate is deleted or archived"));
+                    }
+                }
+                let reserved = self.delegation_desk.expects(&row);
+                if !reserved {
+                    return Err(denied(why));
+                }
+                Ok(self.public_delegation(&row)?)
+            }
             Request::Enable {
                 principal,
                 delegate,
