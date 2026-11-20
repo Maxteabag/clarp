@@ -11,7 +11,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use clarp_kernel::launch_refused::{
-    FIRST_WAIT_MS, Next, PARK_AFTER, Refusals, brief, notice, signature, wait_ms,
+    FIRST_WAIT_MS, Next, PARK_AFTER, REFUSED_IN_ALL, Refusals, brief, notice, signature, wait_ms,
 };
 use serde_json::Value;
 
@@ -48,6 +48,7 @@ fn a_refusal_is_one_refusal_as_the_python_host_tells_it() {
 fn the_waits_and_the_count_are_the_python_hosts() {
     let vectors = vectors();
     assert_eq!(vectors["park_after"], PARK_AFTER);
+    assert_eq!(vectors["refused_in_all"], REFUSED_IN_ALL);
     for case in vectors["waits"].as_array().unwrap() {
         let failures = u32::try_from(case["failures"].as_u64().unwrap()).unwrap();
         assert_eq!(wait_ms(failures), ms(&case["wait_s"]), "{case}");
@@ -60,9 +61,11 @@ fn the_waits_and_the_count_are_the_python_hosts() {
             assert_eq!(u64::from(refusals.failures), step["failures"], "{what}");
             assert_eq!(u64::from(refusals.identical), step["identical"], "{what}");
             assert_eq!(refusals.error, text(&step["error"]), "{what}");
-            let parked = step["parked"].as_bool().unwrap();
-            assert_eq!(next == Next::End, parked, "{what}");
-            if !parked {
+            // Every refusal counted here is one of the reference's `refusals` too.
+            assert_eq!(u64::from(refusals.failures), step["refusals"], "{what}");
+            let ends = step["ends"].as_bool().unwrap();
+            assert_eq!(next == Next::End, ends, "{what}");
+            if !ends {
                 assert_eq!(
                     next,
                     Next::Wait {
@@ -93,13 +96,33 @@ fn one_turn(
     refused: usize,
     asked_again_ms: Option<i64>,
 ) -> (Vec<i64>, i64, bool) {
+    one_turn_of(at_ms, own_try, refused, asked_again_ms, false)
+}
+
+/// [`one_turn`], its refusals of two kinds in turn where `alternate`.
+fn one_turn_of(
+    at_ms: i64,
+    own_try: bool,
+    refused: usize,
+    asked_again_ms: Option<i64>,
+    alternate: bool,
+) -> (Vec<i64>, i64, bool) {
+    let mut counted = 0usize;
+    let mut kind = move || {
+        counted += 1;
+        if alternate && counted.is_multiple_of(2) {
+            "Another"
+        } else {
+            "Refused"
+        }
+    };
     let mut tries = vec![at_ms];
     let mut now = at_ms;
     let mut refusals = Refusals::default();
     let mut next = if own_try {
         now + FIRST_WAIT_MS
     } else {
-        match refusals.failed("Refused", "the same") {
+        match refusals.failed(kind(), "the same") {
             Next::Wait { ms } => now + ms,
             Next::End => return (tries, now, true),
         }
@@ -116,7 +139,7 @@ fn one_turn(
         if tries.len() > refused {
             return (tries, now, false);
         }
-        match refusals.failed("Refused", "the same") {
+        match refusals.failed(kind(), "the same") {
             Next::Wait { ms } => next = now + ms,
             Next::End => return (tries, now, true),
         }
@@ -144,7 +167,12 @@ fn the_stories_of_the_python_host_are_told_again_by_this_hosts_rule() {
             (&"assistant".into(), &"system".into())
         );
         assert!(text(&notice["text"]).starts_with("A message you sent was never run.\n\n"));
-        assert!(text(&notice["text"]).contains(&format!("{PARK_AFTER} times in a row")));
+        let failures = if trace.starts_with("olga") {
+            REFUSED_IN_ALL
+        } else {
+            PARK_AFTER
+        };
+        assert!(text(&notice["text"]).contains(&format!("{failures} times in a row")));
     };
     let forever = usize::MAX;
 
@@ -189,4 +217,14 @@ fn the_stories_of_the_python_host_are_told_again_by_this_hosts_rule() {
     assert_eq!(tries(quin, "quin-1"), ours);
     assert!(!failed);
     assert_eq!(ended(quin, "quin-1"), "started");
+
+    // A send refused by two kinds in turn: never eight of one, so it ends at its twentieth
+    // counted refusal (the release owner's second bound), its own try before them.
+    let olga = story("olga");
+    let (ours, _, failed) = one_turn_of(0, true, forever, None, true);
+    assert_eq!(tries(olga, "olga-1"), ours);
+    assert_eq!(ours.len(), 1 + REFUSED_IN_ALL as usize);
+    assert!(failed);
+    assert_eq!(ended(olga, "olga-1"), "failed");
+    never_run(olga, "olga-1");
 }

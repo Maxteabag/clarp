@@ -7,7 +7,7 @@
 //! queue a second later; every refusal from there on is counted, and the next try waits 1, 2, 4
 //! ... 60 s. Refusals that differ only in ids, counts or times are one refusal ([`signature`]);
 //! another refusal begins the count of one again. At the eighth of one ([`PARK_AFTER`]), or at the
-//! twentieth refusal of the turn in all ([`MOST`], the release owner's ruling of 20 Nov 2026 on
+//! twentieth refusal of the turn in all ([`REFUSED_IN_ALL`], the release owner's ruling of 20 Nov 2026 on
 //! refusals that alternate between two kinds), whichever comes first, the turn ends. Held by `tests/fixtures/launch-refused-vectors.json`, written by the Python Host's own
 //! functions.
 
@@ -22,8 +22,8 @@ pub const MAX_MS: i64 = 60_000;
 /// How many tries of one refusal end the turn.
 pub const PARK_AFTER: u32 = 8;
 /// How many counted refusals of a turn in all end it, whatever they were (about a quarter of an
-/// hour at the waits above).
-pub const MOST: u32 = 20;
+/// hour at the waits above; `recovery_backoff.REFUSED_IN_ALL`).
+pub const REFUSED_IN_ALL: u32 = 20;
 /// The wait after a send's own try, before the first counted one: the queue is looked at again
 /// a second later.
 pub const FIRST_WAIT_MS: i64 = 1_000;
@@ -116,7 +116,7 @@ impl Refusals {
         };
         self.signature = signed;
         self.error = brief(text);
-        if self.identical >= PARK_AFTER || self.failures >= MOST {
+        if self.identical >= PARK_AFTER || self.failures >= REFUSED_IN_ALL {
             Next::End
         } else {
             Next::Wait {
@@ -167,7 +167,7 @@ mod tests {
             (
                 "two kinds that alternate",
                 alternating.as_slice(),
-                MOST as usize,
+                REFUSED_IN_ALL as usize,
             ),
             (
                 "seven, another, seven, another: the twentieth",
