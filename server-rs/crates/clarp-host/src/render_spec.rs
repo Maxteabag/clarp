@@ -44,18 +44,20 @@ const CLIENT_HEADER: &str = "x-clarp-client";
 /// old number. What is refused is named, and what only differs from a known name in its case
 /// is said: each line once.
 fn threshold(app: &App) -> Option<BTreeMap<String, i64>> {
-    let file = OwnerFile::new(app.config.speech_keys.clone()).read()?;
-    let artifacts = file.get("artifacts")?.as_table()?;
+    let text = OwnerFile::new(app.config.speech_keys.clone()).read_text()?;
+    // The reference names entries in the order the owner wrote them.
+    let file = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let artifacts = file.get("artifacts")?.as_table_like()?;
     Some(minimums(artifacts)).filter(|set| !set.is_empty())
 }
 
 /// What the owner's `[artifacts]` table sets of the minimums, as the Python Host reads it.
-fn minimums(artifacts: &toml::Table) -> BTreeMap<String, i64> {
+fn minimums(artifacts: &dyn toml_edit::TableLike) -> BTreeMap<String, i64> {
     let mut set = BTreeMap::new();
-    match artifacts.get(SINGLE_KEY) {
+    match artifacts.get(SINGLE_KEY).map(toml_edit::Item::as_integer) {
         None => {}
-        Some(toml::Value::Integer(minimum)) if *minimum >= 0 => {
-            set.insert("ios".to_string(), *minimum);
+        Some(Some(minimum)) if minimum >= 0 => {
+            set.insert("ios".to_string(), minimum);
             said_once(
                 SINGLE_KEY,
                 "applies to iOS only; name other clients in [artifacts] render_spec_min_contract",
@@ -63,20 +65,14 @@ fn minimums(artifacts: &toml::Table) -> BTreeMap<String, i64> {
         }
         Some(_) => said_once(SINGLE_KEY, "ignored: not a whole number"),
     }
-    match artifacts.get(TABLE_KEY) {
+    match artifacts.get(TABLE_KEY).map(toml_edit::Item::as_table_like) {
         None => {}
-        Some(toml::Value::Table(table)) => {
+        Some(Some(table)) => {
             if table.contains_key("ios") && set.contains_key("ios") {
                 said_once(SINGLE_KEY, "ignored: render_spec_min_contract names ios");
             }
-            let known: Vec<&str> = spec::DEFAULT_MINIMUMS
-                .iter()
-                .map(|(name, _)| *name)
-                .collect();
-            let entries = table
-                .iter()
-                .map(|(key, value)| (key.as_str(), value.as_integer()));
-            let read = client::minimums(entries, &known);
+            let entries = table.iter().map(|(key, value)| (key, value.as_integer()));
+            let read = client::minimums(entries, client::BUILT_IN_NAMES);
             for line in read.lines() {
                 said_once(TABLE_KEY, &line);
             }
