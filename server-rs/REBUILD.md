@@ -3470,3 +3470,34 @@ the two media records together. Once local publication finishes the Host
 removes the receipt and its staging bytes. On restart a committed receipt can
 finish locally and an interrupted generation ends failed. The bounded edit
 fixtures come from the Python Host's own functions in an isolated store.
+
+**The tools' skills kept installed (`managed_skills`, 20 Nov 2026).** A release ships a tree of skills with a
+manifest (the repository's `skills/`, or the tree `--skills-from` names); the install tool copies it to `<share>/releases/<version>/skills`, keeps the
+version installed before and removes older ones, and names it to the Host (`--skills`), with the releases of the
+Python Host on the machine (`--skills-other-releases`) and that Host's record of its chosen skills
+(`--skills-chosen-before`). It never touches a tool's skill folder, and the programs a skill requires are looked up
+on the unit's path, which is the Python Host's. The tools' folders (Claude Code's, Codex's, and Antigravity's where
+it is installed) are the machine's, and one Host keeps a machine's tools (the lead's ruling): this Host keeps them
+only when it is started with `--accounts select` and a tree. The install tool refuses `--accounts select` while the Python Host of the machine runs
+(its unit anything but stopped), with or without a selector of accounts: that Host keeps the tools while it runs,
+and links the skills at every update of its own. Then `GET /managed-skills` reports each skill as the
+Python Host does (`server/lib/managed_skills.py`: how each link stands, the skill's health, its requirements) and
+`POST /managed-skills` switches one on or off as it does: links made or taken away in every folder, a skill of the
+user's own preserved and the change refused, the same refusals in the same words, nothing written on a refusal and
+the links put back when the list cannot be kept. The chosen list is the Host's own, in its store; it is taken once,
+from the Python Host's record where there is one, else from the setup's defaults. At every start the Host enrols the
+core skills a newer release brought and links each chosen skill to its own release where nothing or another
+release's link is; a link into the Python Host's releases is Clarp's too (outdated), so a machine that Host kept is
+taken over without every skill reading as the user's. A Host started with `--accounts follow`, or with no mode,
+answers the list empty, refuses every change with `skills_kept_elsewhere` and one sentence, and writes nothing into
+a tool's folder, at a request or at its start; `managed_skills` is listed only by a Host that keeps the tools. The
+rules are in `clarp_kernel::managed_skills`, held to the reference's own functions run in stand-in homes and release
+trees (`tools/managed-skills-vectors.py`); the Host's part is `clarp-host` `managed_skills.rs`; the wrong rules are
+`tools/plants/managed-skills.py`. Left out: personal skills and the admin tool's `skills` words.
+
+What a Host in `follow` would need to pass a change on to the Host that keeps the tools, rather than refuse it (not
+built): which peer keeps them (a word of its configuration, which the install tool can write from the Python Host it
+finds; `peers.rs` already holds a peer's address and token); a token of full scope there, since the route takes no
+limited device; the change relayed as it was asked and the keeper's status and body relayed as they came, and the
+reading relayed too, since what is linked is the keeper's release and catalogue, not this Host's; and a keeper that
+does not answer told as 502 with the reason, with a change that may have landed never sent again, only read back.
