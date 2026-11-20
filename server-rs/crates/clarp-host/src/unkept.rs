@@ -500,6 +500,7 @@ pub(crate) mod at_the_port {
                 limits: Arc::default(),
                 pools: Vec::new(),
                 models: Arc::default(),
+                sign_ins: Arc::default(),
                 door: Arc::default(),
             }
         }

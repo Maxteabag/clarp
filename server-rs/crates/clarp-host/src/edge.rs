@@ -80,6 +80,7 @@ fn features(app: &App) -> impl Iterator<Item = &'static (&'static str, u64)> {
         (*feature != CHIP || chip)
             && (*feature != SEATS || seats)
             && (*feature != "hotseat_desk_actions" || actions)
+            && (*feature != "backend_auth" || crate::logins::sign_in::keeps(app))
             && (!matches!(*feature, "push_fcm" | "live_activity_fcm") || fcm)
             && (*feature != "managed_skills" || skills)
     })
@@ -217,6 +218,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     // for Codex by what Codex writes of its account and by a turn that failed for a usage
     // limit, for Claude by what Claude Code says as it runs. No provider is asked.
     ("backend_quota", 3),
+    // A tool signed in and out from an app (`/backend-auth/login`, `/login-code`, `/logout`).
+    // Listed only by the Host that keeps the machine's tools (`--accounts select`): every
+    // other refuses the change.
+    ("backend_auth", 1),
     // The desk of the machine's account seats (`GET /hotseat/desk`): every saved account of
     // the agents' tools with its windows, its state and its clocks, read with the owner's
     // own tool when an app asks for a reading. Listed only by a Host that was told the tool.
@@ -374,6 +379,8 @@ pub struct App {
     pub pools: Vec<Arc<crate::pool::Service>>,
     /// What the tools were last found to have of models, for an app's picker.
     pub models: Arc<crate::models::Shelf>,
+    /// The sign-ins of the tools started from an app, where this Host keeps the tools.
+    pub sign_ins: Arc<crate::logins::sign_in::Desk>,
     /// What the door keeps count of: who failed to say who they are, and whose right to
     /// speak was taken away.
     pub door: Arc<Door>,
