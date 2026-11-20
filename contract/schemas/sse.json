@@ -78,7 +78,8 @@
       "properties": {
         "type": {"const": "agent-roster"},
         "kind": {"type": "string"},
-        "session": {"type": "string"}
+        "session": {"type": "string"},
+        "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"}
       }
     },
     "agent-focus": {

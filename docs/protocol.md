@@ -473,7 +473,7 @@ Event types and payloads:
 | `transcript-updated` | `agent_id`, `session`, `backend_session_id` | The conversation changed. Fetch a delta for that session. The server rate-limits this per session to about 4/s; it is a wake-up, not the data. |
 | `agent-state` | `agent_id`, `session`, `kind`; the state watcher adds `persona`, `ts`, `detail`, `status_text`; a dispatch adds `trace_id`, `client_msg_id`, `queue_started`, `queue_remaining`; a janitor cancel adds `origin` | Patch the agent's `latest_state`. `kind` is an agent state (below). `thinking` starts a turn; `done`, `idle`, `stopped`, `interrupted` end one. |
 | `agent-activity` | `agent_id`, `session`, `persona`, `kind`, `phase`, `status`, `tool`, `action`, `summary`, `file_path`, `ts`, `state`, `call_id`, `started_at_ms`, `turn_started_ms`, `stop_actor`, `stop_actor_verified`, `stop_reason`, `repair_actor`, `repair_actor_verified`, `repair_reason`, `released_trace` | A tool call or phase change inside a turn. Show it as a transient activity row until the next delta lands. `status` ∈ running, ok, error, recorded. `state` is the status-line state of [live-items.md](live-items.md) §1.3 (`responding` while text streams; a finished tool is `thinking` with `phase: tool_finished`); `call_id` is the provider tool call id, `started_at_ms` the tool's start, `turn_started_ms` the open turn's start. Contract 61: an interrupted state from a Stop that recorded its actor adds `stop_actor`, `stop_actor_verified` and `stop_reason`; a `slot_repair` audit state adds `repair_actor`, `repair_actor_verified`, `repair_reason` and `released_trace`. They are absent otherwise, and absent means unknown. |
-| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
+| `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work, voice-changed, voice-profile (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name`, `voice_profile` (feature `voice_profile`) | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
@@ -763,6 +763,59 @@ Only the installed Host does that (Host contract 99, [installation.md](installat
 `restart_refusal` is absent whenever a restart was scheduled or none was
 needed. The same Hosts answer `POST /server-update` with
 `409 {"ok": false, "message": "This Host is not the installed Clarp service: …"}`.
+
+### An agent's voice and hearing: `voice_profile` (feature `voice_profile`, Host contract 111)
+
+Each agent row in `GET /agents/snapshot` that is not archived carries `voice_profile` (an
+archived agent speaks to nobody; its row has none, in the snapshot and in `GET /agents/archived`
+alike): what the agent is heard saying and how it hears, as the Host
+resolves it. The Host computes it with the same functions that speak and transcribe, so a
+client shows it and derives nothing from `voice_id`.
+
+```json
+"voice_profile": {
+  "speech": {"provider": "cartesia", "provider_label": "Cartesia Sonic",
+             "voice_id": "…", "voice_label": "Brooke", "origin": "own",
+             "streaming": true, "silent_reason": null, "shared_with": 0},
+  "hearing": {"engines": [{"id": "elevenlabs:scribe_v2", "provider": "elevenlabs",
+                           "model": "scribe_v2", "label": "ElevenLabs Scribe v2"}],
+              "engine_origin": "own", "device_may_override": false,
+              "languages": ["no", "en"], "language_origin": "own"}
+}
+```
+
+- `speech.provider` is the provider the next clip is spoken with (a per-agent override
+  and the configured fallback included), or `"none"`. `voice_id` is null when nothing is
+  heard; `silent_reason` then says why. `voice_label` is a name when the Host knows one.
+- `speech.origin`: `own` (the agent's or its contact's own voice) or `default` (the
+  provider's one default voice, the same for every agent without its own).
+- `speech.shared_with`: how many other active agents speak with the same provider and
+  voice (0: its own). Say it when it is not 0.
+- `speech.streaming`: whether audio begins before the whole clip is made.
+- `hearing.engines`: in the order they are tried, each only after the one before fails.
+  `hearing.languages`: ISO codes the first engine is handed; empty means it detects the
+  language itself (a multilingual local model, or ElevenLabs Scribe given a set).
+- `hearing.engine_origin`, `hearing.language_origin`: `own` (this agent's setting) or
+  `default` (the Host's).
+- `hearing.device_may_override`: the one rule for a client. When it is true (the engine
+  is the Host's default), a phone that sends its own `X-Transcription-Model` is heard
+  with that model instead; such a client shows its own setting.
+- **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
+  documented values are `own` and `default` (a later Host adds `parent`), and for
+  `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks
+  with no provider) and `not_configured` (the provider has no credential or is refused).
+  A client shows plain wording for a value it does not know; it never fails on one.
+
+The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
+agent not yet created: `speech.voice_id` is null and `speech.assignment` says how its voice
+will be chosen, `contact` today) and `voice_profile_version`, which changes whenever a
+Host-wide input of any agent's profile changes.
+
+Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in the
+`agent-roster` events `created`, `relaunched`, `forked`, `contact-assigned`,
+`agent-renamed` and `voice-changed` (after `POST /agent-voice`). A change that can alter
+every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
+edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
 
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 
