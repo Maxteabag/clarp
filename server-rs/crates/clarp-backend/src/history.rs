@@ -197,6 +197,14 @@ pub fn claude_with_children(transcript: &str, children: &Children) -> Vec<Value>
         if !cells.is_empty() {
             row["display_cells"] = Value::Array(cells);
         }
+        // The id the provider gave an agent's message, on each of its lines: the key its live
+        // row was streamed under (R107). A text, and not an empty one.
+        let provider_id = record["message"]["id"].as_str().filter(|id| !id.is_empty());
+        if role == "assistant"
+            && let Some(id) = provider_id
+        {
+            row["provider_id"] = json!(id);
+        }
         turns.push(row);
     }
     for (row, col) in calls.values().copied() {

@@ -1,7 +1,7 @@
 """Wrong rules for Claude in-process helper cells."""
 import runner
 
-RUNS={"vectors":["test","--test","helper_cells"],"host":["test","--test","host","a_helpers_cell_tracks_its_parent_call"]}
+RUNS={"vectors":["test","--test","helper_cells"],"claude":["test","-p","clarp-backend","--test","claude_history"],"host":["test","--test","host","a_helpers_cell_tracks_its_parent_call"]}
 PLANTS=[
     ('clarp-kernel/src/helper_cells.rs', 'vectors', 'legacy Task unrecognized', '"Agent" | "Task"', '"Agent" | "task"'),
     ('clarp-kernel/src/helper_cells.rs', 'vectors', 'Agent unrecognized', '"Agent" | "Task"', '"agent" | "Task"'),
@@ -65,6 +65,10 @@ PLANTS=[
     ('clarp-host/src/helper_source.rs', 'host', 'refreshed transcript line has wrong label', '"label":"Transcript","text":path', '"label":"Child","text":path'),
     ('clarp-host/src/helper_source.rs', 'host', 'parent reread loses completion', 'helper_cells::returned(c, b, &r["toolUseResult"])', '{}'),
     ('clarp-backend/src/history.rs', 'vectors', 'the result of a helper is not associated', 'part["tool_use_id"]\n                                .as_str()', 'part["wrong_id"].as_str()'),
+    # The id the provider gave an agent's message (R107), held by claude-history-vectors (the case message-ids).
+    ('clarp-backend/src/history.rs', 'claude', "a user's line names the provider's id", '        if role == "assistant"\n            && let Some(id) = provider_id', '        if let Some(id) = provider_id'),
+    ('clarp-backend/src/history.rs', 'claude', 'an empty id is named', 'record["message"]["id"].as_str().filter(|id| !id.is_empty());', 'record["message"]["id"].as_str();'),
+    ('clarp-backend/src/history.rs', 'claude', "an agent's message names no id", '            row["provider_id"] = json!(id);', '            let _ = id;'),
     ('clarp-backend/src/history.rs', 'vectors', 'a queue-operation is never applied', 'record["type"] == "queue-operation"', 'record["type"]=="absent"'),
     ('clarp-backend/src/history.rs', 'vectors', 'an empty clause drops helper-only rows', 'text.is_empty() && cards.is_empty() && cells.is_empty()', 'text.is_empty() && cards.is_empty()'),
     ('clarp-backend/src/history.rs', 'vectors', 'notifications cannot reach earlier calls', 'calls.get(id)\n            && let Some(cell)', 'calls.get("never") && let Some(cell)'),

@@ -32,11 +32,16 @@ OUT = HERE.parent / 'crates' / 'clarp-backend' / 'tests' / 'fixtures' / 'claude-
 
 
 def user(content, at='2027-01-15T08:00:00.000Z', **more):
-    return {'type': 'user', 'uuid': more.pop('uuid', ''), 'timestamp': at, 'message': {'role': 'user', 'content': content}, **more}
+    message = {'role': 'user', 'content': content}
+    if 'message_id' in more:
+        message['id'] = more.pop('message_id')
+    return {'type': 'user', 'uuid': more.pop('uuid', ''), 'timestamp': at, 'message': message, **more}
 
 
 def agent(content, at='2027-01-15T08:00:05.000Z', **more):
     message = {'role': 'assistant', 'model': more.pop('model', 'claude-test'), 'content': content}
+    if 'message_id' in more:
+        message['id'] = more.pop('message_id')
     return {'type': 'assistant', 'uuid': more.pop('uuid', ''), 'timestamp': at, 'message': message, **more}
 
 
@@ -115,6 +120,19 @@ TRANSCRIPTS = [
         agent([text('All done.')], uuid='t8'),
     ]),
 ]
+
+# The id the provider gave an agent's message (R107): a real transcript names it on every line of the message.
+TRANSCRIPTS.append(
+    ('message-ids', "the id the provider gave an agent's message: on each line of it, where it is a text that is not empty", [
+        user('Look at the code.', uuid='i0', message_id='msg_user'),
+        agent([text('I will read it.')], uuid='i1', message_id='msg_01'),
+        agent([use('Read', {'file_path': '/srv/app/main.rs'}, 'r1')], uuid='i2', message_id='msg_01'),
+        user([result('r1', 'fn main() {}')], uuid='i3'),
+        agent([text('An empty id.')], uuid='i4', message_id=''),
+        agent([text('A number for an id.')], uuid='i5', message_id=7),
+        agent([text('No id at all.')], uuid='i6'),
+        agent([text('It is small.')], uuid='i7', message_id='msg_02'),
+    ]))
 
 # The model a session last ran on: a name, what it shows, and its lines.
 MODELS = [
