@@ -38,10 +38,83 @@ use crate::pairing::{self, Device, Issued, Paired, PendingCode, Scope};
 use crate::pusher::Pusher;
 use crate::revisions::Revisions;
 use crate::wire;
-mod computer_jobs;
+pub(crate) mod computer_jobs;
 pub(crate) mod portrait_jobs;
 use clarp_kernel::jobs::{Job, JobChange, JobCommand};
 pub use computer_jobs::{ComputerJob, ComputerJobRefusal, JobOwner};
+
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::table(
+        AGENTS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<AgentRecord>,
+    ),
+    crate::kept::Kind::table(
+        DEVICES,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Device>,
+    ),
+    crate::kept::Kind::table(
+        PUSH,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<PushRow>,
+    ),
+    crate::kept::Kind::table(
+        PERSONAS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Made>,
+    ),
+    crate::kept::Kind::table(
+        LOOKS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Look>,
+    ),
+    crate::kept::Kind::table(
+        PEERS,
+        crate::kept::Policy::Rows,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Peer>,
+    ),
+    crate::kept::Kind::table(
+        SETTINGS,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Plain,
+        crate::kept::text,
+    ),
+    crate::kept::Kind::table(
+        JOBS,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Plain,
+        crate::kept::text,
+    ),
+    crate::kept::Kind::table(
+        CODES,
+        crate::kept::Policy::Book,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<PendingCode>,
+    ),
+    crate::kept::Kind::book(
+        LAUNCH_USAGE,
+        crate::kept::Key::Secret,
+        crate::kept::fits::<launches::Usage>,
+    ),
+    crate::kept::Kind::book(
+        "opening_by_turn",
+        crate::kept::Key::Plain,
+        crate::kept::json,
+    ),
+];
+
+/// The voice timeline's events and their sequence, written here and declared by its desk
+/// (`voices::KEPT`).
+pub(crate) const VOICE_EVENTS: &str = "voice-events";
+pub(crate) const VOICE_SEQUENCE: &str = "voice-event-sequence";
 
 const AGENTS: &str = "agent";
 const SETTINGS: &str = "setting";
@@ -694,6 +767,18 @@ enum Ask {
         key: Option<String>,
         answer: Answer<Result<Left, Unavailable>>,
     },
+    /// One record of a kind, judged as it is read (`kept::judged`).
+    Judged {
+        kind: &'static str,
+        key: String,
+        answer: Answer<Result<crate::kept::Found, Unavailable>>,
+    },
+    /// A whole kind, each record judged as it is read (`kept::listed_as`), as the desk's type.
+    Listed {
+        kind: &'static str,
+        as_type: Option<fn(&[u8]) -> bool>,
+        answer: Answer<Result<crate::kept::Listed, Unavailable>>,
+    },
     /// The owner makes a persona (`original` is `None`) or changes the one of that name.
     /// `fetched` are the voices of Cartesia's this Host has listed: what a voice is picked
     /// from first. The inner error is why not, in words for the app.
@@ -1249,27 +1334,117 @@ impl FleetHandle {
 
     /// Everything that was left of a kind, ordered by key.
     pub async fn kept_all(&self, kind: &'static str) -> Result<Left, Unavailable> {
-        self.ask(|answer| Ask::Kept {
-            kind,
-            key: None,
-            answer,
-        })
-        .await?
+        let kept: Left = self
+            .ask(|answer| Ask::Kept {
+                kind,
+                key: None,
+                answer,
+            })
+            .await??;
+        // A copy set aside and a row left out are no desk's: the fleet's own read hides them
+        // (`Fleet::kept`).
+        Ok(kept)
     }
 
-    /// Every record of a kind through the one loader (`kept.rs`): those that can be read, and
-    /// one that cannot left out, counted and said.
+    /// Every record of a kind of rows, judged as its desk's type as it is read (`kept.rs`): those
+    /// that can be read, and one that cannot left out, counted and said.
     pub async fn kept_rows<T: serde::de::DeserializeOwned>(
         &self,
         kind: &'static str,
     ) -> Result<crate::kept::Rows<T>, Unavailable> {
-        let kept = self.kept_all(kind).await?;
-        Ok(crate::kept::listed(
-            kept,
-            &shelf(kind),
-            &self.left_out,
-            &self.log,
-        ))
+        let as_type = Some(crate::kept::fits::<T> as fn(&[u8]) -> bool);
+        let listed = self
+            .ask(|answer| Ask::Listed {
+                kind,
+                as_type,
+                answer,
+            })
+            .await??;
+        Ok(crate::kept::typed(listed))
+    }
+
+    /// Every record of a kind judged when read, each judged as it is read by the one judge
+    /// (`kept.rs`): those that are its desk's, ordered by key. The only way such a kind is
+    /// read whole.
+    pub async fn kept_listed(&self, kind: &'static str) -> Result<Left, Unavailable> {
+        let listed = self
+            .ask(|answer| Ask::Listed {
+                kind,
+                as_type: None,
+                answer,
+            })
+            .await??;
+        Ok(listed.read)
+    }
+
+    /// One record of a kind, read when its desk asks for it (`kept.rs`): one that is not its
+    /// desk's is judged (a book's set aside under `<key>.unreadable` first, a write the store
+    /// refuses being the answer), counted and said, and the desk is answered nothing.
+    pub async fn kept_book(
+        &self,
+        kind: &'static str,
+        key: String,
+    ) -> Result<Option<Vec<u8>>, Unavailable> {
+        Ok(self.judged(kind, key).await?.read())
+    }
+
+    /// What `kept_book` reads, with whether a record was there and did not fit, for a desk that
+    /// would otherwise write over what it could not see.
+    pub async fn judged(
+        &self,
+        kind: &'static str,
+        key: String,
+    ) -> Result<crate::kept::Found, Unavailable> {
+        self.ask(|answer| Ask::Judged { kind, key, answer }).await?
+    }
+
+    /// A book's document, read entry by entry through the loader: a document that is not its
+    /// desk's is set aside (`kept_book`); an entry that is not is carried out of it, counted and
+    /// said, to be put back with every save (`kept::saved`).
+    pub async fn read_book<B, I>(
+        &self,
+        kind: &'static str,
+        key: &str,
+        fields: &[&str],
+    ) -> Result<(B, crate::kept::Carried), Unavailable>
+    where
+        B: serde::de::DeserializeOwned + Default,
+        I: serde::de::DeserializeOwned,
+    {
+        let kept = self.kept_book(kind, key.to_string()).await?;
+        let Some(mut document) =
+            kept.and_then(|kept| serde_json::from_slice::<serde_json::Value>(&kept).ok())
+        else {
+            return Ok((B::default(), crate::kept::Carried::default()));
+        };
+        let carried = crate::kept::carry::<B, I>(&mut document, fields);
+        for at in carried.labels() {
+            self.leave_out(kind, &format!("{key}#{at}"));
+        }
+        let book = serde_json::from_value(document).unwrap_or_default();
+        Ok((book, carried))
+    }
+
+    /// After a book's save: an entry carried out of it whose key the desk wrote since is repaired
+    /// by that write (`Carried::written_over`): said as written anew, counted and carried no more.
+    pub fn written_over(
+        &self,
+        kind: &str,
+        key: &str,
+        carried: &std::sync::Mutex<crate::kept::Carried>,
+        saved: &impl serde::Serialize,
+    ) {
+        let Ok(document) = serde_json::to_value(saved) else {
+            return;
+        };
+        let Ok(mut carried) = carried.lock() else {
+            return;
+        };
+        for (field, entry) in carried.written_over(&document) {
+            carried.forget(&field, &entry);
+            let at = format!("{key}#{field}.{entry}");
+            self.left_out.written(&shelf(kind), &at, &self.log);
+        }
     }
 
     /// A record of a kind left out by a desk that could not use it: counted and said by its
@@ -1487,27 +1662,12 @@ fn retire_goals(works: &Works, record: &AgentRecord, at: i64) -> Result<(), Stri
 /// the next start.
 const RETIRE: &str = "agent-ledger";
 
-/// The records of a kind that are JSON, as the records they are to be: one that is not is left
-/// out and counted like one that is no JSON at all.
-fn typed<T: serde::de::DeserializeOwned>(
-    rows: crate::kept::Rows<serde_json::Value>,
-    table: &str,
-    left: &crate::kept::LeftOut,
-    log: &crate::unkept::Log,
-) -> Vec<(String, T)> {
-    let mut read = Vec::new();
-    for (key, value) in rows.read {
-        match serde_json::from_value::<T>(value) {
-            Ok(record) => read.push((key, record)),
-            Err(_) => left.left_out(table, &key, log),
-        }
-    }
-    read
-}
-
 /// Opens the fleet from its store, starts a thread for every agent in it, and returns the way
 /// to the fleet's own thread.
 pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, String> {
+    // Every kind the Host keeps, read once before anything is opened: the count at the door is
+    // whole, and a book's record that cannot be read is set aside first (`kept.rs`).
+    crate::kept::walk(store.as_mut(), &works.left_out, &works.log).map_err(|e| e.to_string())?;
     // The owner's settings have a dot in their key (`transcription.language`); what the
     // Host keeps for itself in the same table (its id, the focus) has none. They are read
     // first: what an agent's tool is told is worked out from them.
@@ -1522,19 +1682,18 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     }
     works.telling.settings_are(Arc::new(settings.clone()));
     let mut launch_usage = Ledger::new();
-    let mut unreadable = 0usize;
+    // What cannot be read is set aside by the walk above, and counted there.
     for (key, bytes) in store
         .list(&shelf(LAUNCH_USAGE))
         .map_err(|e| e.to_string())?
     {
-        let Ok(usage) = serde_json::from_slice::<launches::Usage>(&bytes) else {
-            unreadable += 1;
+        // A copy set aside is known by the count, not by its name: a directory may be named so.
+        if works.left_out.is_left_out(&shelf(LAUNCH_USAGE), &key) {
             continue;
-        };
-        launch_usage.insert(key, usage);
-    }
-    if unreadable > 0 {
-        eprintln!("clarp-host: unreadable launch-path-usage records skipped: {unreadable}");
+        }
+        if let Ok(usage) = serde_json::from_slice::<launches::Usage>(&bytes) {
+            launch_usage.insert(key, usage);
+        }
     }
     let launch_usage = Arc::new(launch_usage);
     let mut owners = Owners::new();
@@ -1546,20 +1705,16 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
     // Every record of every kind is read alone: one that cannot be read is left out, counted
     // and said, and never written over (`kept.rs`). Its names stay its own.
     let (left, log) = (works.left_out.clone(), works.log.clone());
-    let read = |store: &dyn KeyValue,
-                table: &str|
-     -> Result<crate::kept::Rows<serde_json::Value>, String> {
-        crate::kept::rows::<serde_json::Value>(store, table, &left, &log).map_err(|e| e.to_string())
-    };
-    let agents = read(store.as_ref(), AGENTS)?;
-    let mut held: Vec<crate::kept::Name> = agents.names;
-    for (agent_id, stored) in agents.read {
-        let Ok(mut record) = serde_json::from_value::<AgentRecord>(stored.clone()) else {
-            left.left_out(AGENTS, &agent_id, &log);
-            let bytes = serde_json::to_vec(&stored).unwrap_or_default();
-            held.extend(crate::kept::Name::of(&bytes));
-            continue;
+    // One pass for each kind: each record read as its desk's type, alone (`kept.rs`).
+    macro_rules! read {
+        ($type:ty, $table:expr) => {
+            crate::kept::rows::<$type>(store.as_mut(), $table, &left, &log)
+                .map_err(|e| e.to_string())?
         };
+    }
+    let agents = read!(AgentRecord, AGENTS);
+    let mut held: Vec<crate::kept::Name> = agents.names;
+    for (agent_id, mut record) in agents.read {
         owners.insert(agent_id.clone(), (record.cwd.clone(), record.is_janitor));
         delegation_desk.known_record(&record);
         if let Some(at) = record.deleted_at_ms {
@@ -1571,7 +1726,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 // A ledger that cannot be retired now is retired at the next start: counted
                 // until then, and the agent stays deleted.
                 if retire_goals(&works, &record, at).is_err() {
-                    left.left_out(RETIRE, &agent_id, &log);
+                    left.retire_later(RETIRE, &agent_id, &log);
                     continue;
                 }
                 record.ledger_retired = true;
@@ -1591,6 +1746,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
             // backend will run it.
             Err(why) => {
                 eprintln!("clarp-host: agent {} is left out: {why}", record.session);
+                left.not_run(&record.backend);
                 held.push(crate::kept::Name {
                     agent_id: record.agent_id.clone(),
                     session: record.session.clone(),
@@ -1610,7 +1766,7 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
                 .any(|member| member.record.agent_id == *agent_id)
         });
     let mut devices = HashMap::new();
-    for (_, device) in typed::<Device>(read(store.as_ref(), DEVICES)?, DEVICES, &left, &log) {
+    for (_, device) in read!(Device, DEVICES).read {
         if device.revoked_at.is_none() {
             devices.insert(device.token_hash.clone(), Arc::new(device));
         }
@@ -1619,28 +1775,30 @@ pub fn start(works: Works, mut store: Box<dyn KeyValue>) -> Result<FleetHandle, 
         store.as_ref(),
         computer_id,
         &works.revisions,
-        &works.log,
+        &works.left_out,
     )?;
     let mut jobs = HashMap::new();
     for (job_id, stored) in store.list(JOBS).map_err(|error| error.to_string())? {
         jobs.insert(job_id, String::from_utf8_lossy(&stored).into_owned());
     }
     let mut push = PushBook::new();
-    for (_, row) in typed::<PushRow>(read(store.as_ref(), PUSH)?, PUSH, &left, &log) {
+    for (_, row) in read!(PushRow, PUSH).read {
         push.apply(&[row]);
     }
     // The personas the owner made, and the looks he gave built-in ones.
-    let made: Vec<Made> = typed::<Made>(read(store.as_ref(), PERSONAS)?, PERSONAS, &left, &log)
+    let made: Vec<Made> = read!(Made, PERSONAS)
+        .read
         .into_iter()
         .map(|(_, made)| made)
         .collect();
-    let looks: Vec<Look> = typed::<Look>(read(store.as_ref(), LOOKS)?, LOOKS, &left, &log)
+    let looks: Vec<Look> = read!(Look, LOOKS)
+        .read
         .into_iter()
         .map(|(_, look)| look)
         .collect();
     let book = Arc::new(Book::new(made, looks));
     let mut peers = BTreeMap::new();
-    for (name, peer) in typed::<Peer>(read(store.as_ref(), PEERS)?, PEERS, &left, &log) {
+    for (name, peer) in read!(Peer, PEERS).read {
         peers.insert(name, peer);
     }
     let (roster, janitors) = apart(&members);
@@ -1972,6 +2130,26 @@ impl Fleet {
                 Ask::Kept { kind, key, answer } => {
                     let _ = answer.send(Ok(self.kept(kind, key.as_deref())));
                 }
+                Ask::Judged { kind, key, answer } => {
+                    let (left, log) = (&self.works.left_out, &self.works.log);
+                    let found =
+                        crate::kept::judged(self.store.as_mut(), &shelf(kind), &key, left, log);
+                    let _ = answer.send(Ok(found.map_err(|e| Unavailable(e.to_string()))));
+                }
+                Ask::Listed {
+                    kind,
+                    as_type,
+                    answer,
+                } => {
+                    let (left, log) = (&self.works.left_out, &self.works.log);
+                    let table = shelf(kind);
+                    let store = self.store.as_mut();
+                    let listed = match as_type {
+                        Some(as_type) => crate::kept::listed_as(store, &table, as_type, left, log),
+                        None => crate::kept::listed(store, &table, left, log),
+                    };
+                    let _ = answer.send(Ok(listed.map_err(|e| Unavailable(e.to_string()))));
+                }
             }
         }
     }
@@ -1990,11 +2168,18 @@ impl Fleet {
         let found = match key {
             Some(key) => self.store.get(&table, key).map(|value| {
                 let value = value.map(|value| (key.to_string(), value));
-                value.into_iter().collect()
+                value.into_iter().collect::<Left>()
             }),
             None => self.store.list(&table),
         };
-        found.map_err(|error| Unavailable(error.to_string()))
+        let found = found.map_err(|error| Unavailable(error.to_string()))?;
+        // What the judge holds is no desk's (`kept.rs`): a row left out, until the owner repairs
+        // or deletes it, and a copy set aside, known by the count and not by its name.
+        let left = &self.works.left_out;
+        Ok(found
+            .into_iter()
+            .filter(|(key, _)| !left.is_left_out(&table, key))
+            .collect())
     }
 
     fn claim_job(
@@ -2026,17 +2211,21 @@ impl Fleet {
         // and a restart never reads the owner's transcripts just to discover the next one.
         let cursor = shelf("voice-event-sequence");
         let table = shelf("voice-events");
-        let stored = self
-            .store
-            .get(&cursor, "last")
+        // Judged as it is read (`kept.rs`): one that is not eight bytes is moved aside, and the
+        // sequence is not begun anew over the events it numbered.
+        let (left, log) = (&self.works.left_out, &self.works.log);
+        let found = crate::kept::judged(self.store.as_mut(), &cursor, "last", left, log)
             .map_err(|e| Unavailable(e.to_string()))?;
-        let mut last = match stored {
-            None => 0,
-            Some(bytes) => u64::from_be_bytes(
+        let mut last = match found {
+            crate::kept::Found::Absent => 0,
+            crate::kept::Found::Read(bytes) => u64::from_be_bytes(
                 bytes
                     .try_into()
                     .map_err(|_| Unavailable("invalid voice event sequence".into()))?,
             ),
+            crate::kept::Found::Unfit => {
+                return Err(Unavailable("invalid voice event sequence".into()));
+            }
         };
         let count = rows.len();
         let mut writes = Vec::with_capacity(count + 1);

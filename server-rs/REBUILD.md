@@ -2286,19 +2286,37 @@ inbox or the chip, and its new request and document are refused) and the wrong r
 
 **What may stop the Host from starting** (20 Nov 2026; the lead's rulings of that day). Only its configuration, its
 listener, a store that does not answer and a core thread that does not start stop a start. What it keeps is read through
-one loader (`kept.rs`): each record of a kind alone, and one that cannot be read is LEFT OUT of what the Host does, never
-written over or deleted by the Host, counted by its kind and said once in the journal by its kind and key, never by what
-it holds (a push token by its first signs only). The counts are said in one line when the Host starts and shown at the
-Host's own door, `GET /host/start` (the administrator's only: `{agents, opening, broken, left_out}`, how many agents are
-still being opened and how many could not be beside what could not be read); `/server-info` and `/status` keep the
+one loader (`kept.rs`): each record of a kind alone, and one that cannot be read is LEFT OUT of what the Host does and
+seen by no desk, counted by its kind and said once in the journal by its kind and key, never by what it holds (a row
+stays where it is, never written over or deleted by the Host and hidden from every read until the owner repairs or
+deletes it; a book's record is MOVED aside whole, in one write, never lost: the copy under `<key>.unreadable`, beside a
+copy that stands the next free name, and the key let go, so its desk starts without it; a copy is counted at every start
+while it stands, through a register written with each move, and a delete of its key takes it along, said as one delete;
+a desk that would write over what it cannot see, a counter or a ledger's tail, is told a record was there and refuses) (a secret key, a push token or an opening's token, not even in part: such a record is said by its place in its
+kind's count). The counts are said in one line when the Host starts and shown at the
+Host's own door, `GET /host/start` (the administrator's only: `{agents, opening, broken, left_out, not_run,
+judged_when_read}`, how many agents are still being opened and how many could not be beside what could not be read, the
+agents kept and not run for want of their tool, and the kinds counted only when read); `/server-info` and `/status` keep the
 reference's shape in every state, since the count is not zero for a moment at every start. `install-host` asks it until
 nothing is opening, prints what is broken and left out and ends with code 3 when either is not zero; the Host stays up. The one write
 such a key gets is the owner's own (a token registered again, a peer named again): that is its repair, said, and the
 record is no longer counted (the fleet's store is watched for it). An agent the Host keeps and does not run (left out,
 where its bytes are JSON that name it, or read and not set up for a tool this Host has not) keeps its session and the
 name it goes by: no new agent gets them. A deleted agent whose goals cannot be retired is retired at a later start and
-counted until then. Held by the loader's tests and the fleet's at the port (`fleet/tolerance_tests.rs`: stores written by
-their own crate before a start, a store that does not answer) and the wrong rules `tools/plants/start-tolerance.py`.
+counted until then. Every kind is declared once beside its desk (`kept_registry.rs`: its table, policy, whether its key
+may be printed, its desk's own type) with WHEN IT IS JUDGED: at the start, before the door opens, where some desk lists it
+at the start anyway, so that a start costs what the live fleet weighs (every kind judged by its desk's own type, plain
+JSON or bytes only where the desk reads it so); or when read, where it grows with a history (a
+vocabulary run, a form's event, a fallback attempt, the Oracle's threads), and then it is read nowhere raw, only through
+`kept_book` (by key) and `kept_listed` (whole), and a record that is not its desk's is judged at that read. One judge
+(`kept::judge`) does both: a row left out, a book's record set aside under `<key>.unreadable`, counted, said once. A desk
+that would write over what it cannot see (a counter, a ledger's tail) is told a record was there and refuses rather than
+begin anew. The start's line claims only what was read at the start. Held by the loader's tests and the fleet's at the
+port (`fleet/tolerance_tests.rs`: stores written by their own crate before a start, a store that does not answer, a kind
+judged when read), the registry's own tests (no kind kept that it lacks, none declared twice, none judged when read read
+raw), the Host's (`start_tolerance.rs`) and the wrong rules `tools/plants/start-tolerance.py`.
+Later, not part of this piece (the lead's note of 20 Nov): a copy that fits again under a later build (a build rolled
+back and forward) could be taken back when its key is free.
 
 **Who stops or repairs an agent, and why** (19 Nov 2026; Host feature `turn_slot_repair`, 61). `POST /stop` takes
 `actor` and `reason`, and so does `POST /repair-slot {session, reason, actor?}`; both are read as the Python Host reads

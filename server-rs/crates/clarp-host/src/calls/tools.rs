@@ -16,6 +16,13 @@ use std::sync::{
 };
 use std::time::Duration;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    "live_tools",
+    crate::kept::Key::Plain,
+    crate::kept::json,
+)];
+
 pub struct Worker {
     pub app: App,
     pub call: Joined,
