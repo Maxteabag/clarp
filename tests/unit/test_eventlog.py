@@ -63,6 +63,23 @@ def test_emit_is_a_noop_when_diagnostics_are_disabled(tmp_path, monkeypatch):
         "SELECT count(*) FROM diagnostic_events").fetchone()[0] == 0
 
 
+def test_emit_makes_the_log_directory_only_when_it_is_missing(tmp_path, monkeypatch):
+    """Since importing stopped creating it, the first write makes the directory;
+    a write into one that exists creates nothing (a site that logs while it must
+    stay read-only, such as a Live ring's identity read, failed on os.mkdir)."""
+    import os
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr(eventlog, "LOG_DIR", log_dir)
+    eventlog.emit("server", "first")
+    assert log_dir.is_dir() and len(list(log_dir.glob("*.jsonl"))) == 1
+    made = []
+    real_mkdir = os.mkdir
+    monkeypatch.setattr(os, "mkdir", lambda *a, **k: (made.append(a[0]), real_mkdir(*a, **k)))
+    eventlog.emit("server", "second")
+    assert made == []
+    assert len(_read_lines(next(log_dir.glob("*.jsonl")))) == 2
+
+
 def test_emit_with_no_optional_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(eventlog, "LOG_DIR", tmp_path)
     eventlog.emit("client", "playStart")
