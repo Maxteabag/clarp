@@ -920,8 +920,10 @@ client shows it and derives nothing from `voice_id`.
   recording ("this model cannot hear this agent's languages").
 - **`origin`, `engine_origin`, `language_origin` and `silent_reason` are open sets.** The
   documented values are `own` and `default` (a later Host adds `parent`), and for
-  `silent_reason`: `no_voice` (no voice for the provider), `provider_off` (the Host speaks
-  with no provider) and `not_configured` (the provider has no credential or is refused).
+  `silent_reason`: `no_voice` (no voice for the provider), `voice_unavailable` (the agent has a
+  voice of its own the provider refuses, such as a Google voice off its list; Host contract
+  113), `provider_off` (the Host speaks with no provider) and `not_configured` (the provider
+  has no credential or is refused).
   A client shows plain wording for a value it does not know; it never fails on one.
 
 The snapshot head carries `voice_defaults` (the same `speech` and `hearing` shapes for an
@@ -958,7 +960,7 @@ When a reply's speech ends without audio, the Host sends `tts-error` with `reaso
 and `trace_id`, also when no provider had a voice for the agent (before this feature that case
 sent nothing). It is sent once per turn and reason, however many clips of that reply fail.
 
-- `reason` is an open set: `no_voice`, `not_configured`, `provider_off` (the same words and causes
+- `reason` is an open set: `no_voice`, `voice_unavailable`, `not_configured`, `provider_off` (the same words and causes
   as `voice_profile.speech.silent_reason`), `provider_failed` (the provider did not make the clip)
   and `host_failed`. A client shows plain words for a value it does not know.
 - `message` is a sentence built from the reason and the provider's name ("Not spoken: Cartesia

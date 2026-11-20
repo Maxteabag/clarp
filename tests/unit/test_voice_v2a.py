@@ -226,7 +226,7 @@ def test_vector_google_default_voice_is_spoken_shown_as_default_and_shared(monke
         ("google", google_tts.DEFAULT_VOICE, "default", None, 2)}
 
 
-def test_vector_a_google_voice_off_the_allowlist_is_silence_no_voice(monkeypatch, tmp_path):
+def test_vector_a_google_voice_off_the_allowlist_is_silence_voice_unavailable(monkeypatch, tmp_path):
     from lib import google_tts, voice_profile
     cfg = config.Config(tts_provider="google", google_stt_project="p")
     monkeypatch.setattr(google_tts, "collision_code", lambda cfg=None: None)
@@ -236,7 +236,32 @@ def test_vector_a_google_voice_off_the_allowlist_is_silence_no_voice(monkeypatch
              "voice_id": json.dumps({"google": "nb-NO-Chirp3-HD-Nobody"})}
     assert _worker_speaks(monkeypatch, tmp_path, cfg, agent) is None          # ended before it is announced
     sp = voice_profile.speech(voice_profile.HostView.build(cfg, stored={}), agent)
-    assert (sp["voice_id"], sp["silent_reason"]) == (None, "no_voice")
+    assert (sp["voice_id"], sp["silent_reason"]) == (None, "voice_unavailable")
+
+
+def test_a_refused_voice_is_told_as_voice_unavailable_not_no_voice(monkeypatch, tmp_path):
+    """Arnold's ruling on row (c): the agent HAS a voice the provider refuses; the reply that is
+    not spoken says so in the profile's own word, with its own sentence."""
+    from lib import google_tts
+    sent = []
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: sent.append(dict(event)))
+    monkeypatch.setattr(config, "_CACHED", config.Config(tts_provider="google", google_stt_project="p"))
+    monkeypatch.setattr(google_tts, "collision_code", lambda cfg=None: None)
+    monkeypatch.setattr(google_tts, "refuse_if_collision", lambda cfg=None: None)
+    monkeypatch.setattr(google_tts, "credentials",
+                        lambda cfg: google_tts.Credentials("google_stt", "/adc.json", "p", ""))
+    stored = json.dumps({"google": "nb-NO-Chirp3-HD-Nobody"})
+    agent_id = agents_db.create_agent(persona="Zed", voice_id=stored, cwd=str(tmp_path), session="zed")
+    tts_queue.enqueue(agent_id=agent_id, text="S.", voice_id=stored, session="zed",
+                      source=TurnSource.PWA, trace_id="t1")
+    (tmp_path / "audio").mkdir()
+    while tts_worker.synth_one(audio_dir=tmp_path / "audio", stream=object()):
+        pass
+    (e,) = [x for x in sent if x.get("type") == "tts-error"]
+    assert (e["reason"], e["provider"]) == ("voice_unavailable", "google")
+    assert e["message"] == "Not spoken: Google Chirp 3 HD cannot use the voice set for Zed."
+
+
 # ---------------------------------------------------------------- N: ElevenLabs' no-voice gate
 
 def test_elevenlabs_without_a_voice_ends_before_it_is_announced(monkeypatch, tmp_path):

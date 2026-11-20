@@ -27,6 +27,7 @@ from .voice import CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice
 OWN = "own"
 DEFAULT = "default"
 NO_VOICE = "no_voice"
+VOICE_UNAVAILABLE = "voice_unavailable"   # the agent has a voice of its own the provider refuses
 PROVIDER_OFF = "provider_off"
 NOT_CONFIGURED = "not_configured"
 PROVIDER_FAILED = "provider_failed"   # an outage: the provider did not make the clip
@@ -268,7 +269,7 @@ def _attempt(host: HostView, agent: Mapping, route: tts_mode.Route, provider: st
     elif provider == GOOGLE:
         from . import google_tts
         silent = (NOT_CONFIGURED if host.google_refusal
-                  else NO_VOICE if choice.voice not in google_tts.VOICES
+                  else VOICE_UNAVAILABLE if choice.voice not in google_tts.VOICES
                   else None if host.keys.get(GOOGLE) else NOT_CONFIGURED)
     elif provider == DEEPGRAM:
         silent = None if host.keys.get(DEEPGRAM) else NOT_CONFIGURED
@@ -450,6 +451,7 @@ def watch_config(stream, previous: str | None) -> str:
 # label, never from an error's text, and carry nothing provider-internal.
 NOT_SPOKEN_WORDS = {
     NO_VOICE: "Not spoken: {provider} has no voice for {name}.",
+    VOICE_UNAVAILABLE: "Not spoken: {provider} cannot use the voice set for {name}.",
     NOT_CONFIGURED: "Not spoken: {provider} is not set up on this Host.",
     PROVIDER_OFF: "Not spoken: voice output is off on this Host.",
     PROVIDER_FAILED: "Not spoken: {provider} did not make the clip.",
@@ -459,7 +461,7 @@ NOT_SPOKEN_WORDS = {
 GOOGLE_REASONS = {
     "google_credentials_missing": NOT_CONFIGURED, "google_project_missing": NOT_CONFIGURED,
     "google_auth_failed": NOT_CONFIGURED, "google_id_collision": NOT_CONFIGURED,
-    "google_id_unverifiable": NOT_CONFIGURED, "voice_unavailable": NO_VOICE,
+    "google_id_unverifiable": NOT_CONFIGURED, "voice_unavailable": VOICE_UNAVAILABLE,
 }
 
 
@@ -477,6 +479,18 @@ def not_spoken_words(reason: str, *, provider_label: str = "", name: str = "",
         rest = words.removeprefix("Not spoken: ").removeprefix("Not spoken.").strip()
         words = PARTLY_SPOKEN_PREFIX + rest if rest else PARTLY_SPOKEN_PREFIX.rstrip(": ") + "."
     return words
+
+
+def no_voice_reason(cfg, agent: Mapping | None, route: tts_mode.Route) -> str:
+    """Why the worker found no voice for ``route.provider``: voice_unavailable when the agent
+    has a voice of its own the provider refuses (a Google voice off its allowlist), else
+    no_voice. The same rule as the profile's silent_reason."""
+    if route.provider == GOOGLE:
+        from . import google_tts
+        choice = provider_voice(cfg, (agent or {}).get("voice_id"), agent, route, GOOGLE)
+        if choice.voice and choice.voice not in google_tts.VOICES:
+            return VOICE_UNAVAILABLE
+    return NO_VOICE
 
 
 def clip_failure(cfg, agent: Mapping | None, *, google_code: str | None = None) -> tuple[str, str]:
