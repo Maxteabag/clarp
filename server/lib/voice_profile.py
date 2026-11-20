@@ -30,6 +30,7 @@ NO_VOICE = "no_voice"
 VOICE_UNAVAILABLE = "voice_unavailable"   # the agent has a voice of its own the provider refuses
 PROVIDER_OFF = "provider_off"
 NOT_CONFIGURED = "not_configured"
+VOICELESS_ROLE = "voiceless_role"     # a role that is never heard (a Janitor's turns are silent)
 PROVIDER_FAILED = "provider_failed"   # an outage: the provider did not make the clip
 HOST_FAILED = "host_failed"           # the Host itself failed while making the clip
 BUILTIN_PROVIDERS = frozenset({CARTESIA, ELEVENLABS, GEMINI, DEEPGRAM, GOOGLE})
@@ -292,6 +293,12 @@ def speech(host: HostView, agent: Mapping) -> dict:
     worker routes it (tts_mode.route, then the configured fallback before any
     audio), or the reason nothing is heard."""
     route = tts_mode.route(host.cfg, dict(agent))
+    if agent.get("is_janitor"):
+        # A Janitor speaks to nobody by design (its turns are dispatched silent), and
+        # gets no voice from the pool: say that, not "no voice".
+        return {"provider": route.provider, "provider_label": _provider_label(host, route.provider),
+                "voice_id": None, "voice_label": None, "origin": None,
+                "streaming": _streaming(route.provider), "silent_reason": VOICELESS_ROLE}
     # The worker ends every clip when the Host's provider is "none", before it reads
     # any per-agent override (tts_worker.synth_one): the override is never heard.
     if host.cfg.tts_provider == "none" or route.provider == "none":
@@ -361,13 +368,14 @@ def profile(host: HostView, agent: Mapping) -> dict:
 
 
 def defaults(host: HostView) -> dict:
-    """What a new agent gets before it exists. Its voice is known only once it
-    is created (its contact's), so speech names the provider alone."""
+    """What a new agent gets before it exists. Its voice is known only once it is
+    created (its contact's, else a free one from the pool: voice_pool), so speech
+    names the provider alone."""
     provider = host.cfg.tts_provider
     return {
         "speech": {"provider": provider, "provider_label": _provider_label(host, provider),
                    "voice_id": None, "voice_label": None, "origin": DEFAULT,
-                   "streaming": _streaming(provider), "assignment": "contact",
+                   "streaming": _streaming(provider), "assignment": "pool",
                    "silent_reason": PROVIDER_OFF if provider == "none" else None},
         "hearing": hearing(host, {}),
     }
