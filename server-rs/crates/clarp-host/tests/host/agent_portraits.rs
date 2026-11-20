@@ -121,10 +121,9 @@ fn the_picture_display_preference_survives_restart_and_uses_local_art() {
 }
 
 /// Holds each edit until the test has examined its bytes and supplied its reply.
-fn edit_service() -> (
-    String,
-    std::sync::mpsc::Receiver<(String, std::sync::mpsc::Sender<(u16, String)>)>,
-) {
+type EditRequest = (String, std::sync::mpsc::Sender<(u16, String)>);
+
+fn edit_service() -> (String, std::sync::mpsc::Receiver<EditRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = format!("http://{}/images", listener.local_addr().unwrap());
     let (requests, shown) = std::sync::mpsc::channel();
@@ -134,7 +133,7 @@ fn edit_service() -> (
                 break;
             };
             let raw = whole_request(&mut socket);
-            let (answer, wait) = std::sync::mpsc::channel();
+            let (answer, wait) = std::sync::mpsc::channel::<(u16, String)>();
             if requests.send((raw, answer)).is_err() {
                 break;
             }
@@ -287,8 +286,44 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     );
     assert_eq!(gallery(&host), kept);
     assert!(requests.try_recv().is_err());
+    // The worker used the original source. Selecting a different primary during its second
+    // request must preserve that selection and retire the two alternates present at commit.
+    assert_eq!(post(&host, sid).1["job"]["generation"], 5);
+    receive().1.send((200, reply("replacement-one"))).unwrap();
+    let (_, finish) = receive();
+    let chosen = kept["portraits"][1]["portrait_id"].as_str().unwrap();
+    let selected = host.post(
+        "/agent-portraits",
+        json!({"action":"select_primary","session":sid,"portrait_id":chosen}),
+    );
+    assert_eq!(selected["primary_portrait_id"], chosen);
+    finish.send((200, reply("replacement-two"))).unwrap();
+    wait_for("the replacement pair to be materialized", || {
+        job(&host, id)["status"] == "succeeded"
+            && host.get(&format!("/media?session={sid}"))["assets"]
+                .as_array()
+                .unwrap()
+                .len()
+                == 4
+    });
+    let replaced = gallery(&host);
+    assert_eq!(replaced["primary_portrait_id"], chosen);
+    let rows = replaced["portraits"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.iter().filter(|p| p["role"] == "alternate").count(), 2);
+    for prior in kept["portraits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|p| p["portrait_id"] != chosen)
+    {
+        assert!(
+            rows.iter()
+                .all(|p| p["portrait_id"] != prior["portrait_id"])
+        );
+    }
     // Each attempted launch counts once, including the interrupted one. A fresh agent shares the bound.
-    for n in 5..=20 {
+    for n in 6..=20 {
         assert_eq!(post(&host, sid).1["job"]["generation"], n);
         let (_, finish) = receive();
         if n == 20 {
