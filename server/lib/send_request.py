@@ -163,10 +163,12 @@ class SendRequest:
         # it claims: the Host knows the principal here, and only here. Not a
         # self-prompt: an agent addressing itself keeps its origin.
         own_turn_agent = ""
+        self_prompt = False
         if caller_agent_id:
             from . import identity
             target = identity.lookup(session) or {}
-            if caller_agent_id != target.get("agent_id"):
+            self_prompt = caller_agent_id == target.get("agent_id")
+            if not self_prompt:
                 own_turn_agent = caller_agent_id
                 if not sender_agent_id and identity.lookup(caller_agent_id):
                     sender_agent_id = caller_agent_id
@@ -185,6 +187,10 @@ class SendRequest:
             # Neither an agent's own turn nor a peer Host speaks the user's
             # word on this Host: a peer forwards only its agents' messages.
             origin = "agent"
+        elif origin in origins.USER_WORD_ORIGINS and self_prompt:
+            # An agent waking itself from its own turn: not the user's word
+            # (and not coordination), whatever origin it claims.
+            origin = "automation"
         if synthesize_audio_raw is None:
             synthesize_audio = origin == "user"
         else:

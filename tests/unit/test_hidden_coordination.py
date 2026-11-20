@@ -730,3 +730,13 @@ def test_a_note_from_a_turn_parked_waiting_for_its_account_is_refused(tmp_path, 
         "dispatch": "claude", "trace_id": "t-acct", "account_recovery": "waiting",
         "message": "waiting for an account"})
     assert _note("Waiting.", session="mike", token=token).answer[0] == 409
+
+
+
+@pytest.mark.parametrize("claimed", ["user", "oracle"])
+def test_a_self_prompt_from_the_agents_own_turn_is_never_the_users_word(world, claimed):
+    """AB-1: a request that carries an agent's verified turn token is never the user's word,
+    whoever the target is. Addressed to itself it is the agent waking itself: automation."""
+    req, mark = _boundary(world, origin=claimed, caller=world.id)
+    assert (req.origin, req.sender_agent_id, mark) == ("automation", "", False)
+    assert req.admit().cooperative_principal != "user"
