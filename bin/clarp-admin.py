@@ -2317,6 +2317,31 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def cmd_tell_user(args) -> int:
+    """Put a note for the user into your own chat: shown and notified whatever
+    turn you are in, also one that answers another agent, whose rows the user
+    may keep hidden. Only from your own running turn (the Host checks)."""
+    payload = {"session": args.from_session, "text": args.text,
+               # Stable across retries: a note the Host did write before the
+               # connection dropped is answered again, not written twice.
+               "note_id": f"tell-{secrets.token_hex(8)}"}
+    try:
+        result = api_request("POST", "/agent-notes", payload, retries=SEND_RETRIES)
+    except urllib.error.HTTPError as error:
+        if not 400 <= error.code < 500:
+            raise
+        detail = error.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail).get("error") or detail
+        except (ValueError, AttributeError):
+            pass
+        print(f"clarp-admin tell-user: the Host refused it (HTTP {error.code}): {detail}",
+              file=sys.stderr)
+        return 4
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def _peer_requests():
     from lib import peer_requests
     return peer_requests
@@ -3431,6 +3456,11 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     prompt_cmd.add_argument("--origin", choices=("automation", "watcher"))
     prompt_cmd.add_argument("--server", help="explicit configured peer name")
     prompt_cmd.set_defaults(func=cmd_prompt)
+    tell_cmd = sub.add_parser(
+        "tell-user", help="put a note for the user in your own chat; shown and notified in any turn")
+    tell_cmd.add_argument("--from", dest="from_session", required=True, help="your own session")
+    tell_cmd.add_argument("--text", required=True)
+    tell_cmd.set_defaults(func=cmd_tell_user)
     request_cmd = sub.add_parser(
         "request", help="ask another agent for something that must come back to you")
     request_cmd.add_argument("--to", required=True)

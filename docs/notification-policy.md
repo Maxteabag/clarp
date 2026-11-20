@@ -56,6 +56,18 @@ dispatch path finishes updating live provenance.
 Those channels are worker, automation, or team-system traffic. They may remain
 visible as transcript/activity rows, but they must not page or badge the user.
 
+## Notes To The User
+
+A turn another agent's message started never pages the user (`agent-chatter`
+above), and the user may keep its rows out of the chat. An agent that has
+something for the user in such a turn says so with a note (`clarp-admin
+tell-user`, `POST /agent-notes`): a row of its own chat that is always shown.
+The note is classified when it is written, not with its turn: `notify=1` with
+reason `agent-note`, badge and unread, and a push under the same rules as a
+reply (per-agent mute and the helper rule give `agent-note-muted` with
+`push=0`; a quiet agent's note is suppressed as `janitor-maintenance`). The
+turn's own completion never takes a note as its content. A note is not spoken.
+
 ## Quiet Agents
 
 Janitors are quiet agents (`server/lib/quiet_agents.py`, the one predicate

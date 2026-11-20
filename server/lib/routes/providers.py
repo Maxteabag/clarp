@@ -282,6 +282,9 @@ class ProviderRoutes:
             from lib import service_manager
             refusal = service_manager.host_refusal("restart")
         payload = status() | {"restart_scheduled": restart_required and refusal is None}
+        # Every agent's voice may have changed: open apps re-read the agents.
+        from lib import events
+        events.broadcast(self.ctx.stream, events.agent_roster("voice-profile"))
         if refusal is not None:
             payload["restart_refusal"] = {"reason": refusal.reason, "message": refusal.detail}
         self._json_ok(payload)

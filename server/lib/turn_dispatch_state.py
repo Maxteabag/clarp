@@ -83,6 +83,7 @@ _JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValu
 # drains via drain_after_terminal() when the terminal closes.
 _TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
 _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
+_COMPACTING_SENTINEL = turn_slots.COMPACTING_SENTINEL
 # Slot owner while a turn process the Host already finished is still running;
 # sends wait behind it (see _claim_or_queue).
 _PROCESS_OWNER_PREFIX = "process:"

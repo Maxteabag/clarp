@@ -13,7 +13,7 @@ TURN_SCHEMA = (
     """CREATE TABLE IF NOT EXISTS provider_turns (
  turn_token TEXT PRIMARY KEY, agent_id TEXT NOT NULL, provider TEXT NOT NULL,
  pid INTEGER, start_token TEXT NOT NULL DEFAULT '',
- started_at INTEGER NOT NULL, exited_at INTEGER)""",
+ started_at INTEGER NOT NULL, exited_at INTEGER, trace_id TEXT NOT NULL DEFAULT '')""",
     """CREATE INDEX IF NOT EXISTS idx_provider_turns_open
  ON provider_turns(started_at) WHERE exited_at IS NULL""",
     """CREATE TABLE IF NOT EXISTS provider_task_turns (
