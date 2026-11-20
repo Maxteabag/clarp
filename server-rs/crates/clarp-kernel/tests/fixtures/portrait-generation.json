@@ -1,4 +1,726 @@
 {
+  "starts": [
+    [
+      null,
+      null,
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      null,
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "queued",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "queued",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "running",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "running",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "succeeded",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "succeeded",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "failed",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "failed",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "cancelled",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      null,
+      "cancelled",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      null,
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      null,
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "queued",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "queued",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "running",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "running",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "succeeded",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "succeeded",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "failed",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "failed",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "cancelled",
+      false,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      [],
+      "cancelled",
+      true,
+      400,
+      "bad json",
+      false,
+      false
+    ],
+    [
+      {},
+      null,
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      null,
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {},
+      "queued",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      "queued",
+      true,
+      202,
+      null,
+      false,
+      false
+    ],
+    [
+      {},
+      "running",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      "running",
+      true,
+      202,
+      null,
+      false,
+      false
+    ],
+    [
+      {},
+      "succeeded",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      "succeeded",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {},
+      "failed",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      "failed",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {},
+      "cancelled",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {},
+      "cancelled",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      null,
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      null,
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "queued",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "queued",
+      true,
+      202,
+      null,
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "running",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "running",
+      true,
+      202,
+      null,
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "succeeded",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "succeeded",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "failed",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "failed",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "cancelled",
+      false,
+      409,
+      "Add or select a primary portrait first",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "fixture"
+      },
+      "cancelled",
+      true,
+      202,
+      null,
+      true,
+      true
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      null,
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      null,
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "queued",
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "queued",
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "running",
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "running",
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "succeeded",
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "succeeded",
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "failed",
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "failed",
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "cancelled",
+      false,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "missing"
+      },
+      "cancelled",
+      true,
+      409,
+      "unknown Agent session",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      null,
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      null,
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "queued",
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "queued",
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "running",
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "running",
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "succeeded",
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "succeeded",
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "failed",
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "failed",
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "cancelled",
+      false,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ],
+    [
+      {
+        "session": "janitor"
+      },
+      "cancelled",
+      true,
+      403,
+      "janitor_inspection_only",
+      false,
+      false
+    ]
+  ],
   "preferences": [
     [
       null,

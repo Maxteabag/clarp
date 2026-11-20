@@ -56,6 +56,7 @@ pub mod notify;
 pub mod opencode;
 pub mod oracle;
 pub mod personas;
+pub mod portrait_generation;
 pub mod portraits;
 pub mod presence;
 pub mod provider_tasks;
