@@ -553,16 +553,20 @@ fn starts_at_a_fixed_address(text: &str) -> Vec<(usize, String, bool)> {
     let mut starts = Vec::new();
     for at in 0..read.len() {
         let command = match &read[at..read.len().min(at + 5)] {
-            [(_, Token::Mark('.')), (_, Token::Word(call)), (_, Token::Mark('(')), (_, Token::Mark('[')), (_, Token::Text(first))]
-                if call == "args" =>
-            {
-                first
-            }
-            [(_, Token::Mark('.')), (_, Token::Word(call)), (_, Token::Mark('(')), (_, Token::Text(first)), ..]
-                if call == "arg" =>
-            {
-                first
-            }
+            [
+                (_, Token::Mark('.')),
+                (_, Token::Word(call)),
+                (_, Token::Mark('(')),
+                (_, Token::Mark('[')),
+                (_, Token::Text(first)),
+            ] if call == "args" => first,
+            [
+                (_, Token::Mark('.')),
+                (_, Token::Word(call)),
+                (_, Token::Mark('(')),
+                (_, Token::Text(first)),
+                ..,
+            ] if call == "arg" => first,
             _ => continue,
         };
         if !AT_A_FIXED_ADDRESS.contains(&command.as_str()) {
