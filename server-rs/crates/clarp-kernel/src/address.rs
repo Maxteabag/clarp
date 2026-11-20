@@ -3,8 +3,9 @@
 //! that begins as an address on this machine can name another host to a client that parses
 //! it (the class of defect R133).
 
-/// Parse the input once. Build the outbound client's URI from the canonical URL
-/// components, including its normalized path. Only this URI can leave admission.
+/// An address parsed once, as a client parses it: what a stand-in's address is judged by
+/// ([`on_this_machine`]). Where a controller action may send is another rule, the Python Host's
+/// (`crate::destination`).
 #[derive(Clone, Debug)]
 pub struct Address(http::Uri);
 
@@ -58,37 +59,9 @@ impl Address {
         Some(Self(uri))
     }
 
-    fn admits(&self, addr: &Self) -> bool {
-        let (prefix, target) = (&self.0, &addr.0);
-        let default = if target.scheme_str() == Some("https") {
-            443
-        } else {
-            80
-        };
-        if prefix.scheme() != target.scheme()
-            || prefix.host() != target.host()
-            || prefix
-                .port_u16()
-                .is_some_and(|p| p != target.port_u16().unwrap_or(default))
-        {
-            return false;
-        }
-        let want = prefix.path_and_query().map_or("/", |p| p.as_str());
-        let path = target.path_and_query().map_or("/", |p| p.as_str());
-        path.strip_prefix(want).is_some_and(|tail| {
-            tail.is_empty() || want.ends_with('/') || tail.starts_with(['/', '?', '#'])
-        })
-    }
-
     /// Whether the parsed host is this machine's own name for itself.
     fn loopback(&self) -> bool {
         matches!(self.0.host(), Some("127.0.0.1" | "localhost" | "[::1]"))
-    }
-
-    pub fn allowed(raw: &str, entries: &[Self]) -> Option<http::Uri> {
-        let address = Self::parse(raw)?;
-        let loopback = address.0.scheme_str() == Some("http") && address.loopback();
-        (loopback || entries.iter().any(|entry| entry.admits(&address))).then_some(address.0)
     }
 }
 
@@ -134,6 +107,17 @@ pub fn on_this_machine(raw: &str, rule: Local) -> Option<String> {
         return None;
     }
     let (_, rest) = raw.split_once("://")?;
+    // A path with a dot segment, as it was given, is refused before it is resolved (R139). The
+    // given path follows the authority where that ends at a slash, up to its query or its
+    // fragment; a slash in a query or after a '#' is no part of it.
+    let after_authority = rest.find(['/', '?', '#']).map_or("", |at| &rest[at..]);
+    let given_path = match after_authority.strip_prefix('/') {
+        Some(_) => after_authority.split(['?', '#']).next().unwrap_or_default(),
+        None => "",
+    };
+    if crate::destination::dot_segment(given_path) {
+        return None;
+    }
     let named_path = rest.find(['/', '?', '#']).is_some();
     if !rule.path && named_path {
         return None;
@@ -166,7 +150,16 @@ mod tests {
             ("http://localhost:5000/judge", "http://localhost:5000/judge"),
             ("http://[::1]:5000/a?b=1", "http://[::1]:5000/a?b=1"),
             ("HTTP://127.0.0.1:5000/x", "http://127.0.0.1:5000/x"),
-            ("http://127.0.0.1:5000/a/../b", "http://127.0.0.1:5000/b"),
+            // A slash in a query or after a '#' is no part of a path: no dot segment of one.
+            (
+                "http://127.0.0.1:5000?x=/../y",
+                "http://127.0.0.1:5000/?x=/../y",
+            ),
+            (
+                "http://127.0.0.1:5000/a?x=/../y",
+                "http://127.0.0.1:5000/a?x=/../y",
+            ),
+            ("http://127.0.0.1:5000#/../y", "http://127.0.0.1:5000/"),
         ] {
             assert_eq!(
                 on_this_machine(given, web).as_deref(),
@@ -182,6 +175,8 @@ mod tests {
             "http://someone:secret@127.0.0.1:5000/x",
             "http://@127.0.0.1:5000",
             "http://127.0.0.1:5000\\x",
+            "http://127.0.0.1:5000/a/../b",
+            "http://127.0.0.1:5000/a/%2E%2e/b",
             "http://127.0.0.1:5000/a\\b",
             "http://127.0.0.1:5000/x\ty",
             "http://example.invalid:5000",

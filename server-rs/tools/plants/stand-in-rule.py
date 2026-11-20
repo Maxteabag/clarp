@@ -39,6 +39,8 @@ PLANTS = [
     (A, 'kernel', 'a path is taken where the variable takes none', '    if !rule.path && named_path {', '    if false {'),
     (A, 'kernel', 'a query is taken where the variable takes none', '    if !rule.query && uri.query().is_some() {',
      '    if false {'),
+    (A, 'kernel', 'a path with a dot segment is taken (R139)', '    if crate::destination::dot_segment(given_path) {\n        return None;\n    }\n', ''),
+    (A, 'kernel', "a slash in a stand-in's query begins its path (R139)", '        None => "",\n    };', '        None => after_authority.find(\'/\').map_or("", |at| &after_authority[at..]),\n    };'),
     (A, 'kernel', 'the address is kept as it was given', '    Some(built)\n}', '    Some(raw.to_string())\n}'),
     (A, 'kernel', 'a socket is kept as an address of the web', '    let mut built = format!("{}://{host}", rule.scheme);',
      '    let mut built = format!("http://{host}");'),

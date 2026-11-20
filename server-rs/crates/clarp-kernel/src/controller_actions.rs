@@ -28,7 +28,7 @@ fn missing(id: &str) -> Error {
     (404, format!("no such action {id}"))
 }
 
-pub use crate::address::Address;
+pub use crate::destination::Destination;
 
 pub fn word(value: &Value) -> String {
     if python::truthy(value) {
@@ -53,7 +53,7 @@ fn text(data: &Value, key: &str, limit: usize) -> Result<String, Error> {
     Ok(s.into())
 }
 
-pub fn validate(data: &Value, entries: &[Address]) -> Result<Value, Error> {
+pub fn validate(data: &Value, entries: &[Destination]) -> Result<Value, Error> {
     if !data.is_object() {
         return Err(bad("action must be an object"));
     }
@@ -80,7 +80,7 @@ pub fn validate(data: &Value, entries: &[Address]) -> Result<Value, Error> {
     let mut action = json!({"id":id,"type":kind,"title":text(data,"title",80)?,"enabled":enabled});
     if kind == "http_post" {
         let url = text(data, "url", 2000)?;
-        if Address::allowed(&url, entries).is_none() {
+        if crate::destination::allowed(&url, entries).is_none() {
             return Err(bad("url is not allow-listed"));
         }
         let body = data.get("body").cloned().unwrap_or_else(|| json!({}));
@@ -135,7 +135,7 @@ impl Registry {
         &mut self,
         op: &str,
         data: &Value,
-        entries: &[Address],
+        entries: &[Destination],
         actor: &str,
         now: i64,
     ) -> Result<(Value, Value), Error> {

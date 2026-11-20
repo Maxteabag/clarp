@@ -47,6 +47,8 @@ fn a_host_given_a_stand_in_not_on_this_machine_refuses_to_start_naming_the_varia
             format!("{scheme}://127.0.0.1"),
             format!("{scheme}://127.0.0.1:5000\\x"),
             format!("{scheme}://127.0.0.1:5000/a\\b"),
+            // A path with a dot segment, as it was given (R139).
+            format!("{scheme}://127.0.0.1:5000/a/../b"),
         ];
         if !path {
             refused.push(format!("{scheme}://127.0.0.1:5000/x"));

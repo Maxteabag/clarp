@@ -25,23 +25,75 @@ def generate(root):
     sys.path.insert(0, str(ROOT/'server'))
     from lib import controller_actions as ca
     rows = []
+    from lib import config, url_destination
     entries = ['https://service.invalid/api', 'http://service.invalid:8123/line/']
-    cases = [('http://127.0.0.1', ''), ('http://localhost:123/x', ''), ('http://[::1]:80/', ''),
-             ('https://localhost/', ''), ('https://service.invalid/api?q=x', ''),
-             ('https://service.invalid/api#part', ''), ('https://service.invalid/api/sub', ''),
-             ('https://service.invalid/apix', ''), ('http://service.invalid:8123/line/a',''),
-             ('http://service.invalid:8124/line/a',''), ('http://service.invalid/line/',''),
-             ('http://service.invalid:8123/other',''), ('ftp://localhost/a',''), ('not-an-address',''),
-             ('http://[',''), ('https://service.invalid/api:late','colon after path prefix'),
-             ('http://fixture@localhost/', ''), ('http://@localhost/', ''),
-             ('http://service.invalid/api',''), ('https://unlisted.invalid/api',''),
-             ('https://service.invalid/api',''), ('https://service.invalid/api/one',''),
-             ('http://service.invalid:65536/', ''), ('http:///','')]
-    for url, narrowed in cases:
-        answer = ca.url_allowed(url,entries)
-        if narrowed:
-            assert answer
-        rows.append(dict(kind='address',url=url,entries=entries,reference=answer,narrowed=narrowed))
+    # Where an action may send, and what is sent (R133, sendable_url): the URL rebuilt from its parsed
+    # parts, or None. Every host is this machine's own (in any of its spellings) or a made-up name under
+    # .invalid.
+    cases = ['http://127.0.0.1', 'http://localhost:123/x', 'http://[::1]:80/', 'https://localhost/',
+             'https://service.invalid/api?q=x', 'https://service.invalid/api#part', 'https://service.invalid/api/sub',
+             'https://service.invalid/apix', 'http://service.invalid:8123/line/a', 'http://service.invalid:8124/line/a',
+             'http://service.invalid/line/', 'http://service.invalid:8123/other', 'ftp://localhost/a', 'not-an-address',
+             'http://[', 'https://service.invalid/api:late', 'http://fixture@localhost/', 'http://@localhost/',
+             'http://service.invalid/api', 'https://unlisted.invalid/api', 'https://service.invalid/api',
+             'https://service.invalid/api/one', 'http://service.invalid:65536/', 'http:///',
+             # (a) a prefix that names no port admits the scheme's own port alone
+             'https://service.invalid:443/api/x', 'https://service.invalid:8443/api', 'http://localhost:9/x',
+             # (b) the port is named only where it is not the scheme's
+             'http://127.0.0.1:80/x', 'http://127.0.0.1:8080/x', 'https://service.invalid:443/api',
+             # (d) what a host may be: plain labels or an IPv6 literal; another spelling of an address is a name
+             'http://2130706433:8123/x', 'http://127.1/x', 'http://0x7f.0.0.1/x', 'http://0177.0.0.1/x',
+             'http://LOCALHOST:9/x', 'HTTPS://SERVICE.INVALID/api', 'https://service.invalid./api',
+             'https://service_x.invalid/api', 'https://-service.invalid/api', 'http://loc%61lhost/x',
+             'http://[0:0:0:0:0:0:0:1]/x', 'http://[0::1]:8080/x', 'http://[::FFFF:127.0.0.1]/x', 'http://[::1%25lo]/x',
+             'http://[127.0.0.1]/x', 'http://[v1.service.invalid]/x', 'http://[::1]x/', 'http://x[::1]/', 'http://[::1/',
+             'http://someone@127.0.0.1:8123/x', 'http://someone:secret@localhost/x', 'http://localhost:/x',
+             'http://localhost:080/x', 'http://localhost:x/', 'http://localhost:\u0661/x', 'http://localhost /x',
+             'http://localhost/x y', 'http://localhost/\u00a0', 'http://localhost/x\x7f', 'http://localhost/x\x01', 'http://localhost:+80/x',
+             # (e) the path's boundary is of the parsed path alone
+             'http://service.invalid:8123/line', 'http://service.invalid:8123/line?x=1', 'http://service.invalid:8123/linex',
+             'https://service.invalid/api?', 'https://service.invalid?api', 'https://service.invalid/api/..x', 'https://service.invalid/api/x..',
+             'https://service.invalid/api/...', 'https://service.invalid/api/%2e%2ex']
+    for url in cases:
+        rows.append(dict(kind='address', url=url, entries=entries, reference=ca.sendable_url(url, entries)))
+    # AWAITING R139 (the release owner's PR to come): a path with a dot segment, raw or percent-encoded, is
+    # refused. Not on his main yet, so what is written here is the reference as it is, which admits them; the
+    # Rust Host refuses them already, and its test asserts that these rows still say the reference admits
+    # them: when his PR is merged and this runs again, that assertion fails, and the mark goes.
+    r139 = ['https://service.invalid/api/../x', 'https://service.invalid/api/./x', 'https://service.invalid/api/%2e%2e/x',
+            'https://service.invalid/api/%2E%2e/x', 'https://service.invalid/api/.%2E/x', 'https://service.invalid/api/%2e/x',
+            'https://service.invalid/api/sub/../one', 'https://service.invalid/api/..', 'http://127.0.0.1:8123/a/../b']
+    for url in r139:
+        rows.append(dict(kind='address', url=url, entries=entries, reference=ca.sendable_url(url, entries),
+                         awaiting='R139'))
+
+    def shown(found):
+        return None if found is None else dict(scheme=found.scheme, host=found.host, port=found.port,
+                                               path=found.path, query=found.query, url=found.url())
+    # (c) a prefix with a query or a fragment is refused at configuration, counted in one line.
+    prefixes = ['https://service.invalid/api', ' https://service.invalid/api ', 'https://service.invalid/q?x=1',
+                'https://service.invalid/f#top', 'https://service.invalid/f#', 'https://service.invalid/q?',
+                'https://u@service.invalid', 'https://service.invalid:abc', 'not a url', 'https://', '',
+                'http://service.invalid:8123/line/', 'HTTP://Service.Invalid:80/', 'http://[::1]:8123']
+    for text in prefixes:
+        rows.append(dict(kind='parse', text=text, destination=shown(url_destination.destination(text)),
+                         prefix=shown(url_destination.prefix(text))))
+    for url in cases:
+        rows.append(dict(kind='parse', text=url, destination=shown(url_destination.destination(url)),
+                         prefix=shown(url_destination.prefix(url))))
+    for url in r139:
+        rows.append(dict(kind='parse', text=url, destination=shown(url_destination.destination(url)),
+                         prefix=shown(url_destination.prefix(url)), awaiting='R139'))
+    told = []
+    with patch('lib.log.log', lambda event, detail='', *a, **k: told.append([event, detail])):
+        for given in (prefixes, ['https://service.invalid/api'], [], [' ', 'https://service.invalid/q?x=1']):
+            told.clear()
+            kept = config._controller_action_urls(given)
+            rows.append(dict(kind='config', given=given, kept=list(kept), told=list(told)))
+    # What a prefix that does not parse admits: nothing.
+    for text in ('https://service.invalid/q?x=1', 'https://u@service.invalid'):
+        rows.append(dict(kind='address', url='https://service.invalid/q?x=1', entries=[text],
+                         reference=ca.sendable_url('https://service.invalid/q?x=1', [text])))
     http = dict(id='hook',title=' Hook ',type='http_post',url='http://localhost',body={'n':3})
     ask = dict(id='note',title='Note',type='agent_prompt',session=' unit ',text=' hello ')
     def result(fn):
@@ -105,6 +157,20 @@ def generate(root):
             second=ca.run('hook',actor='fixture',request_id=f'B-{elapsed}',http_post=lambda *_:(200,'again'))
         rows.append(dict(kind='debounce',action=http,first=first,elapsed=elapsed,
                          expected=second if second.get('debounced') else None))
+    # R132: A runs; B inside the window is answered debounced; B repeated after the window is that answer
+    # again with duplicate: true, and nothing runs a second time.
+    ca._reset_runtime_state()
+    calls = []
+    def post(*_):
+        calls.append(1)
+        return 200, 'fixture'
+    with patch.object(ca.time,'monotonic',return_value=100):
+        first=ca.run('hook',actor='fixture',request_id='R-A',http_post=post)
+    with patch.object(ca.time,'monotonic',return_value=100.5):
+        debounced=ca.run('hook',actor='fixture',request_id='R-B',http_post=post)
+    with patch.object(ca.time,'monotonic',return_value=110):
+        again=ca.run('hook',actor='fixture',request_id='R-B',http_post=post)
+    rows.append(dict(kind='repeat',first=first,debounced=debounced,again=again,runs=len(calls)))
     return rows
 
 

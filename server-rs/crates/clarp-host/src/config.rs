@@ -887,9 +887,11 @@ mod tests {
     fn a_stand_in_is_kept_as_it_was_rebuilt_and_refused_without_its_address() {
         assert_eq!(stand_in("CLARP_X", "", Local::WEB), Ok(String::new()));
         assert_eq!(
-            stand_in("CLARP_X", "HTTP://LOCALHOST:5000/a/../b", Local::WEB),
+            stand_in("CLARP_X", "HTTP://LOCALHOST:5000/b", Local::WEB),
             Ok("http://localhost:5000/b".to_string())
         );
+        // A path with a dot segment is refused before anything is resolved (R139).
+        assert!(stand_in("CLARP_X", "http://localhost:5000/a/../b", Local::WEB).is_err());
         assert_eq!(
             stand_in("CLARP_X", "ws://127.0.0.1:5000", Local::SOCKET),
             Ok("ws://127.0.0.1:5000".to_string())
