@@ -163,8 +163,13 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
 # The read side of "a turn the user started is never hidden": a trace marked
 # 'agents' that nonetheless holds a user row with the user's word reads as the
 # user's. Evaluated only for marked rows (a primary-key probe found a mark).
+# The index is named on purpose: left to itself the planner searches ``u`` by
+# agent (idx_messages_agent_timestamp) and walks the agent's whole conversation
+# once per marked row; a real coordination trace holds no user row, so nothing
+# ends that walk early. By trace it reads the turn's own rows only.
 TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
-        SELECT 1 FROM messages u WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
+        SELECT 1 FROM messages u INDEXED BY idx_messages_trace
+         WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
            AND u.role = 'user' AND COALESCE(u.origin, 'user') IN ('user', 'oracle'))
      THEN 'agents' WHEN ct.audience IS NULL THEN NULL ELSE 'mixed' END"""
 
