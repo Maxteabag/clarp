@@ -24,7 +24,14 @@ def parts(name):
 
 def children(directory, prefix=""):
     """Check every existing entry, including partial files, without following a link."""
-    for name in os.listdir(directory):
+    # On btrfs a directory stream can retain the view from when it was opened.
+    # List from a fresh stream anchored to the same pinned directory.
+    stream = os.open(".", DIRECTORY, dir_fd=directory)
+    try:
+        names = os.listdir(stream)
+    finally:
+        os.close(stream)
+    for name in names:
         path = prefix + name
         entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
         if stat.S_ISDIR(entry.st_mode):
