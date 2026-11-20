@@ -96,6 +96,8 @@ class SendRequest:
     # The group call this utterance belongs to (docs/group-calls.md): the Host
     # then routes only among the call's reachable participants.
     call_id: str = ""
+    # Whether the caller named the trace itself (else the Host minted it).
+    trace_given: bool = False
 
     @property
     def channel(self) -> str:
@@ -203,6 +205,7 @@ class SendRequest:
             authenticated=bool(authenticated),
             client=_client(data.get("client")),
             call_id=str(data.get("call_id") or "").strip()[:64],
+            trace_given=bool((data.get("trace_id") or "").strip()),
         )
 
     def admit(self) -> PromptAdmission:
@@ -220,6 +223,34 @@ class SendRequest:
             original_text=self.text,
             client=self.client,
         )
+
+    def require_new_trace(self) -> None:
+        """Refuse a trace that already belongs to a message, unless this is a
+        retry of that very message (the same client_msg_id, sender and origin).
+
+        The apps name a fresh trace per send (or one their voice pipeline
+        minted) and send it again only when they retry. A caller that names
+        another message's trace would attach its words, and the mark of
+        coordination with them, to that message's turn: a user's turn could
+        then read as one between agents. No caller may do that."""
+        if not self.trace_given:
+            return
+        con = db.conn()
+        mine = con.execute(
+            """SELECT client_admission_id, sender_agent_id, origin FROM prompt_admissions
+                WHERE trace_id = ? LIMIT 50""", (self.trace_id,)).fetchall()
+        if any(row["client_admission_id"] == self.client_msg_id
+               and (row["sender_agent_id"] or "") == self.sender_agent_id
+               and (row["origin"] or "") == self.origin for row in mine):
+            return
+        taken = bool(mine) or any(
+            con.execute(f"SELECT 1 FROM {table} WHERE trace_id = ? LIMIT 1",
+                        (self.trace_id,)).fetchone() is not None
+            for table in ("turns", "queued_turns", "messages"))
+        if taken:
+            raise SendRequestError(
+                409, "trace_id already belongs to another message; send without trace_id "
+                "(the Host names one) or with a new one", trace_id=self.trace_id)
 
     def require_text(self) -> None:
         if not self.text:

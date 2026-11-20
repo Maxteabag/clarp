@@ -68,12 +68,29 @@ def is_coordination(*, agent_id: str, origin: str | None, sender_agent_id: str |
     return (origin or "").strip() == "agent"
 
 
+def holds_user_word(database, agent_id: str, trace_id: str) -> bool:
+    """Whether the trace holds the user's own word for this agent: a user row
+    or a prompt admission with origin 'user' or 'oracle'. Such a turn is the
+    user's and is never 'agents', whatever arrives in it."""
+    from .origins import USER_WORD_ORIGINS
+    words = tuple(sorted(USER_WORD_ORIGINS))
+    marks = ",".join("?" for _ in words)
+    return database.execute(
+        f"""SELECT 1 FROM messages WHERE trace_id = ? AND agent_id = ? AND role = 'user'
+               AND COALESCE(origin, 'user') IN ({marks}) LIMIT 1""",
+        (trace_id, agent_id, *words)).fetchone() is not None or database.execute(
+        f"""SELECT 1 FROM prompt_admissions WHERE trace_id = ? AND agent_id = ?
+               AND origin IN ({marks}) LIMIT 1""",
+        (trace_id, agent_id, *words)).fetchone() is not None
+
+
 def mark(database, *, agent_id: str, trace_id: str, sender_agent_id: str | None,
          at: int | None = None) -> None:
     """Record that ``trace_id`` was started by another agent. Joins the
-    caller's transaction; a trace already recorded keeps its audience."""
+    caller's transaction; a trace already recorded keeps its audience, and a
+    trace that holds the user's own word is never marked."""
     trace = (trace_id or "").strip()
-    if not agent_id or not trace:
+    if not agent_id or not trace or holds_user_word(database, agent_id, trace):
         return
     stamp = int(at if at is not None else now_ms())
     database.execute(
@@ -127,6 +144,15 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
     if row is None or row["audience"] != AGENTS:
         return None
     return row["sender_agent_id"] or ""
+
+
+# The read side of "a turn the user started is never hidden": a trace marked
+# 'agents' that nonetheless holds a user row with the user's word reads as the
+# user's. Evaluated only for marked rows (a primary-key probe found a mark).
+TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
+        SELECT 1 FROM messages u WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
+           AND u.role = 'user' AND COALESCE(u.origin, 'user') IN ('user', 'oracle'))
+     THEN 'agents' WHEN ct.audience IS NULL THEN NULL ELSE 'mixed' END"""
 
 
 def row_audience(*, kind: str | None, trace_audience: str | None) -> str:

@@ -180,6 +180,10 @@ class SendRoutes:
         except SendRequestError as e:
             return self._send_request_error(e)
         self._trace_id = req.trace_id
+        try:
+            req.require_new_trace()
+        except SendRequestError as e:
+            return self._send_request_error(e)
         # The admission row is filed before the empty-text refusal so a
         # rejected send is still accounted for.
         prompt_admission = req.admit()

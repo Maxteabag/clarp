@@ -310,6 +310,10 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
             # row of the turn it starts, before its mark.
             coordination.mark(database, agent_id=agent_id, trace_id=trace_id,
                               sender_agent_id=sender_agent_id, at=timestamp_ms)
+        elif origin in origins.USER_WORD_ORIGINS and (trace_id or "").strip():
+            # The user's word in a trace that was marked: the turn is the
+            # user's too from now on (it never reads 'agents' again).
+            coordination.loosen(agent_id, trace_id)
         database.execute(
             """INSERT INTO conversation_heads (
                    agent_id, backend_session_id, revision, replace_revision

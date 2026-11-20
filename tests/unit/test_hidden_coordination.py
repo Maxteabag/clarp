@@ -131,7 +131,8 @@ def test_the_mark_survives_every_import_and_the_rows_origin_it_rewrites(world):
         assert world.audiences("t-boss") == ["agents"]
     # The import rewrites a reply's origin from the latest user row; the mark does not follow it.
     with db.conn() as con:
-        con.execute("UPDATE messages SET origin='user', sender_agent_id=NULL WHERE trace_id='t-boss'")
+        con.execute("UPDATE messages SET origin='user', sender_agent_id=NULL"
+                    " WHERE trace_id='t-boss' AND role='assistant'")
     db.close_local()
     assert world.audiences("t-boss") == ["agents"]
 
@@ -545,3 +546,93 @@ def test_a_note_from_a_turn_parked_for_a_retry_is_its_turns(tmp_path, pushes):
     assert parked
     taken = _note("Still on it.", session="mike", token=token)
     assert taken.answer[0] == 200 and taken.answer[1]["trace_id"] == "t-park"
+
+
+# ---- F1: no caller attaches a message to another message's trace -----------------------------
+
+def _agent_send(trace, *, sender, client="c-boss", origin="agent", to="mike"):
+    from lib.send_request import SendRequest, SendRequestError
+    req = SendRequest.from_payload(
+        {"text": "Report", "session": to, "origin": origin, "sender": sender, "trace_id": trace,
+         "client_msg_id": client},
+        default_session=to, trace_id_factory=lambda: "minted", authenticated=True)
+    try:
+        req.require_new_trace()
+    except SendRequestError as refused:
+        return refused.status, str(refused)
+    return 200, ""
+
+
+def _audiences(agent_id, trace):
+    rows = agents.list_messages(agent_id=agent_id, backend_session_id=agents.live_backend_session(agent_id),
+                                limit=500)
+    return sorted({row["audience"] for row in rows if row.get("trace_id") == trace})
+
+
+def test_an_agent_cannot_attach_its_message_to_a_users_turn(tmp_path, pushes):
+    """The reviewer's probe: a user's turn through the real dispatcher, then an agent's send
+    naming that turn's trace. Refused at /send while the turn runs and after it ended."""
+    service, backends, agent_id = _dispatched(tmp_path)
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    _start(service, "t-user")
+    status, words = _agent_send("t-user", sender=boss)
+    assert status == 409 and "trace_id already belongs to another message" in words
+    backends.spawned[-1][1]["on_result"]({"duration_ms": 5})
+    assert _agent_send("t-user", sender=boss)[0] == 409
+    assert _audiences(agent_id, "t-user") == ["user"]
+
+
+def test_a_queued_users_trace_and_the_oracles_are_refused_and_a_retry_is_not(tmp_path, pushes):
+    from lib.turn_dispatch import DispatchCommand
+    service, backends, agent_id = _dispatched(tmp_path)
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    _start(service, "t-run")
+    service.submit(DispatchCommand(text="Next", requested_session="mike", forced_session="mike", trace_id="t-queued",
+                                   client_msg_id="c-queued", synthesize_audio=False, origin="user",
+                                   queue_if_busy=True))
+    assert _agent_send("t-queued", sender=boss)[0] == 409
+    service.submit(DispatchCommand(text="Said aloud", requested_session="mike", forced_session="mike",
+                                   trace_id="t-oracle", client_msg_id="c-oracle", synthesize_audio=False,
+                                   origin="oracle", queue_if_busy=True))
+    assert _agent_send("t-oracle", sender=boss)[0] == 409
+    # The agent's own message, sent again with its own client id, sender and origin: a retry.
+    service.submit(DispatchCommand(text="Report", requested_session="mike", forced_session="mike",
+                                   trace_id="t-boss", client_msg_id="c-boss", synthesize_audio=False,
+                                   origin="agent", sender_agent_id=boss, queue_if_busy=True,
+                                   prompt_admission=__import__("lib.prompt_admissions", fromlist=["x"]).create(
+                                       authenticated_at_admission=True, origin="agent", sender_agent_id=boss,
+                                       channel="chat", observed_at=1, client_admission_id="c-boss",
+                                       trace_id="t-boss", original_text="Report")))
+    assert _agent_send("t-boss", sender=boss) == (200, "")
+    assert _agent_send("t-boss", sender=boss, client="c-other")[0] == 409
+    assert _agent_send("never-seen", sender=boss) == (200, "")
+
+
+def test_the_mark_is_never_written_or_read_for_a_trace_that_holds_the_users_word(tmp_path, pushes):
+    """Past /send (an internal path, a row the import wrote): the mark itself refuses."""
+    from lib.turn_dispatch import DispatchCommand
+    service, backends, agent_id = _dispatched(tmp_path)
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    _start(service, "t-user")
+    backends.spawned[-1][1]["on_result"]({"duration_ms": 5})
+    service.submit(DispatchCommand(text="Mine now", requested_session="mike", forced_session="mike",
+                                   trace_id="t-user", client_msg_id="c-sneak", synthesize_audio=False,
+                                   origin="agent", sender_agent_id=boss))
+    assert db.conn().execute("SELECT 1 FROM messages WHERE message_id='u-c-sneak'").fetchone() is not None
+    assert coordination.audience_of(agent_id, "t-user") == "user"
+    assert _audiences(agent_id, "t-user") == ["user"]
+    backends.spawned[-1][1]["on_result"]({"duration_ms": 5})
+    # The other order: marked first, then the user's word arrives in it.
+    service.submit(DispatchCommand(text="Report", requested_session="mike", forced_session="mike",
+                                   trace_id="t-boss", client_msg_id="c-boss2", synthesize_audio=False,
+                                   origin="agent", sender_agent_id=boss))
+    assert coordination.audience_of(agent_id, "t-boss") == "agents"
+    agents.record_user_message(agent_id=agent_id, backend_session_id=agents.live_backend_session(agent_id),
+                               client_msg_id="c-late-user", text="Me too", trace_id="t-boss", origin="user")
+    assert coordination.audience_of(agent_id, "t-boss") == "user"
+    assert _audiences(agent_id, "t-boss") == ["user"]
+    # And the read guard alone: a mark forced past every writer still reads as the user's.
+    with db.conn() as con:
+        con.execute("UPDATE coordination_traces SET audience='agents' WHERE trace_id='t-boss'")
+    db.close_local()
+    assert _audiences(agent_id, "t-boss") == ["user"]
