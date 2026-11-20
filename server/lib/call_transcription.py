@@ -20,11 +20,13 @@ import re
 
 from . import settings_store, stt_language
 from .group_calls import CallError, REACHABLE
+from .stt_providers import LANGUAGE_SET_PROVIDERS
 
 CALL_LANGUAGES_KEY = "transcription.call_languages"
 CALL_ENGINES_KEY = "transcription.call_engines"
-# Providers that take a bounded language set; every other engine takes one code.
-SET_PROVIDERS = frozenset({"google", "elevenlabs"})
+# Providers that take a bounded language set; every other engine takes one code
+# (the one list the transcription path refuses by, stt_providers).
+SET_PROVIDERS = LANGUAGE_SET_PROVIDERS
 # Providers that accept a set only by dropping it and detecting without bound
 # (Scribe): under a call policy they take one code, and a set skips them.
 SET_DROPPED = frozenset({"elevenlabs"})

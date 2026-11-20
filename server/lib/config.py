@@ -375,6 +375,22 @@ DEFAULT_CATALOG: list[dict[str, str]] = [
 ]
 
 
+# The public GPT-Live models (OpenAI API reference, Live: `session.model` is
+# "gpt-live-1" or "gpt-live-1.1"). BASELINE_LIVE_MODEL is the one every shipped
+# phone accepts on an agent Live call; DEFAULT_LIVE_MODEL the Host's default.
+LIVE_MODELS = ("gpt-live-1", "gpt-live-1.1")
+BASELINE_LIVE_MODEL = "gpt-live-1"
+DEFAULT_LIVE_MODEL = "gpt-live-1.1"
+# An agent Live call runs on the configured model only for a client whose
+# X-Clarp-Client contract reaches its number here (the name exactly as sent;
+# absent or 0 = never); every other client runs on BASELINE_LIVE_MODEL.
+# `[openai] live_model_min_client` overrides a number or names another client.
+# The first builds that accept both names: iOS sends contract 75 (TestFlight
+# 2986); Android 29 (0.1.0, build 993). Kept here, beside its override table's
+# reader; agent_ring_live uses it.
+AGENT_LIVE_MODEL_MIN_CLIENT: dict[str, int] = {"ios": 75, "android": 29}
+
+
 @dataclass(frozen=True)
 class Config:
     _config_path: str = field(default="", repr=False, compare=False)
@@ -456,6 +472,15 @@ class Config:
     oracle_voice_context_file: str = ""
     oracle_voice_backend: str = "api"
     oracle_live_webrtc: bool = False
+    # [openai] live_model: the GPT-Live model of every API-key Live session
+    # (Oracle and agent rings); only the names in oracle_live_wire.LIVE_MODELS.
+    live_model: str = DEFAULT_LIVE_MODEL
+    # [openai] live_idle_timeout_s: standby on the Oracle WebRTC create (API
+    # mode only); 0 = off, else 5 to 60 seconds. Off until a real call shows it.
+    live_idle_timeout_s: int = 0
+    # [openai] live_model_min_client: {platform: client contract} from which an
+    # agent Live call may run on live_model rather than gpt-live-1.
+    live_model_min_client: dict = field(default_factory=dict)
     # [oracle] earcons: short sound cues in Oracle v2 calls (oracle_earcons).
     oracle_earcons: bool = True
     # [oracle] voice_provider: the voice model of Oracle v2 calls, "openai"
@@ -809,6 +834,53 @@ def _oracle_languages(raw: Any) -> tuple[str, ...]:
     return tuple(codes)
 
 
+def _live_model(raw: Any) -> str:
+    """`[openai] live_model`: one of the documented GPT-Live models; anything else is refused."""
+    if raw is None:
+        return DEFAULT_LIVE_MODEL
+    if isinstance(raw, str) and raw.strip() in LIVE_MODELS:
+        return raw.strip()
+    from .log import log
+    log("config.live_model", f"refused {raw!r}: allowed {', '.join(LIVE_MODELS)}; using {DEFAULT_LIVE_MODEL}")
+    return DEFAULT_LIVE_MODEL
+
+
+def _live_idle_timeout(raw: Any) -> int:
+    """`[openai] live_idle_timeout_s`: 0 (off) or whole seconds 5 to 60; anything else is refused (off)."""
+    if raw is None or (type(raw) is int and (raw == 0 or 5 <= raw <= 60)):
+        return raw or 0
+    from .log import log
+    log("config.live_idle_timeout_s", f"refused {raw!r}: 0 or a whole number from 5 to 60; standby stays off")
+    return 0
+
+
+def _live_model_min_client(raw: Any) -> dict[str, int]:
+    """`[openai] live_model_min_client`: {client name: client contract}. A key has the X-Clarp-Client name's own
+    form ([A-Za-z][A-Za-z0-9_-]{0,31}) and matches that name exactly as sent; 0 = never for it (as the
+    render_spec table has it); a negative number, a bool, a float or a string is refused with the log line."""
+    if raw is None:
+        return {}
+    from .log import log
+    if not isinstance(raw, dict):
+        log("config.live_model_min_client", f"refused {raw!r}: expected a table of platform = contract")
+        return {}
+    kept = {key: value for key, value in raw.items()
+            if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", key) and type(value) is int and value >= 0}
+    if len(kept) != len(raw):
+        log("config.live_model_min_client", "refused entries: " + ", ".join(
+            repr(key) for key in raw if key not in kept))
+    # A key that differs from a built-in name only in its case is well formed and is another client: said once
+    # per read, so a slip ('Ios' for 'ios') does not hide.
+    near = [(key, builtin) for key in kept for builtin in AGENT_LIVE_MODEL_MIN_CLIENT
+            if key != builtin and key.lower() == builtin.lower()]
+    if near:
+        log("config.live_model_min_client", "; ".join(
+            f"{key!r} is taken as its own client: it admits only a client that names itself exactly {key!r}; "
+            f"the built-in {builtin!r} keeps its own number ({AGENT_LIVE_MODEL_MIN_CLIENT[builtin]})"
+            for key, builtin in near))
+    return kept
+
+
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
 _ANONYMOUS_SUFFIX = re.compile(r"-[0-9a-f]{4}$")
 
@@ -1107,6 +1179,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_voice_context_file = str(openai.get("oracle_voice_context_file", "")).strip(),
         oracle_voice_backend = str(openai.get("oracle_voice_backend", "api")).strip(),
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
+        live_model = _live_model(openai.get("live_model")),
+        live_idle_timeout_s = _live_idle_timeout(openai.get("live_idle_timeout_s")),
+        live_model_min_client = _live_model_min_client(openai.get("live_model_min_client")),
         oracle_earcons = (data.get("oracle") or {}).get("earcons", True) is not False
             if isinstance(data.get("oracle"), dict) else True,
         oracle_voice_provider = str(_oracle.get("voice_provider", "openai")).strip().lower() or "openai",

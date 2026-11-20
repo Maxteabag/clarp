@@ -165,7 +165,7 @@ def test_context_for_linked_plain_source_is_truncated_at_6000():
 def test_session_config_overrides_instructions_and_seeds_reference_input():
     cfg = pl.session_config("CONTEXT-JSON", stable=True)
     assert cfg["instructions"] == pl.STABLE_PROMPT
-    assert cfg["model"] == oracle_live_stable.MODEL
+    assert cfg["model"] == "gpt-live-1.1"  # the configured default
     assert cfg["audio"]["output"]["voice"] == oracle_live_stable.VOICE
     assert cfg["input"] == [{"type": "message", "role": "user", "content": [
         {"type": "input_text", "text": "Reference data for the paused episode:\nCONTEXT-JSON"}]}]

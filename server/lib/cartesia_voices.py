@@ -73,6 +73,15 @@ def has_cached_catalog() -> bool:
         return _cache is not None
 
 
+def cached_names() -> dict[str, str]:
+    """voice id -> name of the catalogue already fetched; never a fetch (voice_profile)."""
+    with _lock:
+        if not _cache:
+            return {}
+        return {str(row.get("id")): str(row.get("name") or "")
+                for row in _cache[1] if row.get("id") and row.get("name")}
+
+
 def cached_voice_ids() -> list[str]:
     """Return cached English Cartesia voice IDs without performing network I/O."""
     with _lock:

@@ -13,7 +13,7 @@ from lib import agents as agents_db
 from lib import backends, db, message_previews, reconcile, snapshot, turn_dispatch
 
 FULL_KEYS = {"agents", "focus", "roster", "personas", "model_avatars", "available_mcp_servers",
-             "tool_explanations"}
+             "tool_explanations", "voice_defaults", "voice_profile_version"}
 
 
 @pytest.fixture(autouse=True)
