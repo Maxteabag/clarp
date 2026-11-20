@@ -410,6 +410,8 @@ SCRIPTS = [
      + [step for n, client in enumerate(['android/993 contract=29', 'android/992 contract=28', 'iOS/2986 contract=75'], 3)
         for step in (live_ring(event_id=f'evt-{n}'), live_answer(A, request=f'answer-{n}', client=client), close(A),
                      tick(61 * SECOND))]},
+    # Its first case is the exception: `contract=075` is said exactly (leading noughts are digits, the number is
+    # 75), so that client runs gpt-live-1.1 on both Hosts.
     {'name': 'a client that does not say exactly that it accepts the model runs on the one every app accepts',
      'steps': [PHONE_A]
      + [step for n, client in enumerate(['ios/2986 contract=075', 'ios/2986  contract=75', 'ios/2986 contract=75 more',

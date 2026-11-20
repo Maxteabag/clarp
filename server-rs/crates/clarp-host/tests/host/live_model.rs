@@ -63,6 +63,9 @@ fn an_agents_live_call_runs_the_owners_model_only_for_a_client_that_accepts_it()
     const LIVE: &str = "agent_live_v1";
     let owned = "[openai]\nlive_model_min_client = { ios = 80 }\n";
     let older = "[openai]\nlive_model = \"gpt-live-1\"\n";
+    // The table may name any client, by the header's name exactly as written (the release owner's
+    // ruling): `Desktop` admits `Desktop/...`, never `desktop/...`.
+    let named = "[openai]\nlive_model_min_client = { Desktop = 3 }\n";
     for (file, client, runs) in [
         ("", Some("ios/2985 contract=75"), "gpt-live-1.1"),
         ("", Some("ios/2984 contract=74"), "gpt-live-1"),
@@ -76,6 +79,9 @@ fn an_agents_live_call_runs_the_owners_model_only_for_a_client_that_accepts_it()
         (owned, Some("ios/2991 contract=80"), "gpt-live-1.1"),
         (owned, Some("android/120 contract=29"), "gpt-live-1.1"),
         (older, Some("ios/2985 contract=75"), "gpt-live-1"),
+        (named, Some("Desktop/1 contract=3"), "gpt-live-1.1"),
+        (named, Some("Desktop/1 contract=2"), "gpt-live-1"),
+        (named, Some("desktop/1 contract=3"), "gpt-live-1"),
     ] {
         let place = Place::new("live-model-ring");
         let owners = place.root.join("owners.toml");
