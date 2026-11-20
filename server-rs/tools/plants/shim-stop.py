@@ -5,9 +5,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tempfile
 
 import runner
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import scratch as tool_scratch
 
 MAIN = 'clarp-shim/src/main.rs'
 RUNS = {'http': ['test', '-p', 'clarp-shim', '--bin','clarp-shim','loopback_http_reads_chunked_responses'],
@@ -82,7 +84,7 @@ def built_size():
     if excluded or 'minreq' not in packages:
         raise RuntimeError(f'unexpected standalone shim dependencies: {sorted(packages)}')
     print('shim dependencies:', ', '.join(sorted(packages)), flush=True)
-    with tempfile.TemporaryDirectory() as temp:
+    with tool_scratch.directory() as temp:
         stripped = Path(temp) / 'clarp-shim'
         shutil.copyfile(binary, stripped)
         subprocess.run(['strip', '--strip-all', stripped], check=True)

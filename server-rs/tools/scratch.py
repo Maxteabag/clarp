@@ -10,8 +10,16 @@ import tempfile
 def directory(prefix='clarp-'):
     """Own one directory until normal return, an exception, or SystemExit."""
     parent = os.environ.get('TMPDIR') or '/var/tmp'
-    with tempfile.TemporaryDirectory(prefix=prefix, dir=parent) as name:
-        yield name
+    # The reference's Claude session catalog preserves underscores in a cwd,
+    # while Claude encodes them as dashes (R36). Never add such a character
+    # to the path ourselves. Keep TemporaryDirectory's exclusive creation
+    # and cleanup, including for a rejected generated suffix.
+    while True:
+        with tempfile.TemporaryDirectory(prefix=prefix, dir=parent) as name:
+            if not Path(name).name[len(prefix):].isalnum():
+                continue
+            yield name
+            return
 
 
 def case(prefix):

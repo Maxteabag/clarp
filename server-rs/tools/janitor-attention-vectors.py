@@ -18,14 +18,15 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 OUT = HERE.parent / 'crates' / 'clarp-kernel' / 'tests' / 'fixtures' / 'janitor-attention-vectors.json'
-SCRATCH = pathlib.Path('/var/tmp/clarp-janitor-attention-vectors')
 
 # The steps of each janitor's story. A run: (status, outcome, error, how it was frozen, its demand result or None).
 SCHEDULED = {'template_id': 'scheduled-prompt'}
@@ -76,18 +77,17 @@ STORIES = [
 ]
 
 
-def run() -> dict:
-    shutil.rmtree(SCRATCH, ignore_errors=True)
-    SCRATCH.mkdir(parents=True)
+@tool_scratch.case('clarp-janitor-attention-')
+def run(root) -> dict:
     os.environ.update({
-        'CLAUDE_PWA_DB': str(SCRATCH / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(SCRATCH / 'logs'),
-        'CLARP_CONFIG_DIR': str(SCRATCH / 'config'), 'CLARP_SHARE_DIR': str(SCRATCH / 'share'),
-        'CLARP_CACHE_DIR': str(SCRATCH / 'cache'), 'CLAUDE_PWA_CONFIG': str(SCRATCH / 'no-such-config.toml'),
-        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(SCRATCH / 'home'),
+        'CLAUDE_PWA_DB': str(root / 'state.sqlite'), 'CLAUDE_PWA_LOG_DIR': str(root / 'logs'),
+        'CLARP_CONFIG_DIR': str(root / 'config'), 'CLARP_SHARE_DIR': str(root / 'share'),
+        'CLARP_CACHE_DIR': str(root / 'cache'), 'CLAUDE_PWA_CONFIG': str(root / 'no-such-config.toml'),
+        'CLARP_CODE_ROOT': str(REPO / 'server'), 'HOME': str(root / 'home'),
     })
     sys.path.insert(0, str(REPO / 'server'))
     from lib import agents, artifacts, db, janitor_attention, janitors
-    db.reset_for_tests(SCRATCH / 'janitors.sqlite')
+    db.reset_for_tests(root / 'janitors.sqlite')
     con = db.conn()
     con.execute('PRAGMA foreign_keys=OFF')
     clock = [1_800_000_000_000]
@@ -103,7 +103,7 @@ def run() -> dict:
         session = persona.lower()
         # The same ids every time the vectors are written.
         agents._new_agent_id = lambda number=number: f'{number:016x}'
-        agent_id = agents.create_agent(persona=persona, voice_id='', cwd=str(SCRATCH), session=session)
+        agent_id = agents.create_agent(persona=persona, voice_id='', cwd=str(root), session=session)
         con.execute('UPDATE agents SET is_janitor=1 WHERE agent_id=?', (agent_id,))
         con.execute("""INSERT INTO janitor_configs(agent_id,template_id,enabled,revision,generation,created_at,
             updated_at) VALUES(?,?,1,1,1,?,?)""", (agent_id, template, clock[0], clock[0]))
@@ -184,7 +184,7 @@ def main() -> int:
         print(json.dumps(run()))
         return 0
     ran = subprocess.run([sys.executable, '-I', __file__, '--run'], capture_output=True, text=True,
-                         env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, check=False)
+                         env=tool_scratch.child_env({'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}), check=False)
     if ran.returncode != 0:
         print(ran.stderr[-5000:], file=sys.stderr)
         return 1
