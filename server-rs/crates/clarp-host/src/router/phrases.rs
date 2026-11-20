@@ -350,7 +350,7 @@ mod tests {
     // effect to exercise two announcements that actually overlap.
     #[tokio::test]
     async fn concurrent_router_phrases_share_the_primary_and_choose_their_own_fallbacks() {
-        use axum::{Router, extract::OriginalUri, routing::post};
+        use axum::{Router, http::Uri, routing::post};
         use std::sync::{Arc, Mutex as StdMutex};
 
         let place = place("phrase-flight");
@@ -364,7 +364,7 @@ mod tests {
             "[tts]\nprovider='cartesia'\nfallback='deepgram'\n[cartesia]\napi_key='fixture'\n[deepgram]\napi_key='fixture'\n").unwrap();
         let calls = Arc::new(StdMutex::new(Vec::new()));
         let seen = calls.clone();
-        let routes = Router::new().fallback(post(move |OriginalUri(uri): OriginalUri| {
+        let routes = Router::new().fallback(post(move |uri: Uri| {
             let seen = seen.clone();
             async move {
                 seen.lock().unwrap().push(uri.to_string());
