@@ -355,14 +355,19 @@ pub fn again(
     match held {
         None => Ok(false),
         Some(held) if held == text => Ok(true),
-        Some(_) => Err(refused(
-            409,
-            format!(
-                "note_id {note_id} is already a note of {session} with other words; \
-                 send the new words with a new note_id"
-            ),
-        )),
+        Some(_) => Err(other_words(session, note_id)),
     }
+}
+
+/// The words of a note asked under an id its agent has for other words (409).
+pub fn other_words(session: &str, note_id: &str) -> Refusal {
+    refused(
+        409,
+        format!(
+            "note_id {note_id} is already a note of {session} with other words; \
+             send the new words with a new note_id"
+        ),
+    )
 }
 
 /// The words of a note of an agent that has no conversation yet (409).

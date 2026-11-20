@@ -1622,6 +1622,11 @@ fn setup(works: &Works, desk: &delegations::Desk, record: &AgentRecord) -> Resul
         keep_spools: works.config.keep_spools,
         accounts: works.config.accounts,
         epoch: works.hub.epoch().to_string(),
+        hides_coordination: clarp_kernel::coordination::can_leave_note(
+            &record.agent_id,
+            Some(&record.backend),
+            works.turns.has_key(),
+        ),
     };
     Ok(Setup {
         delegation_rejoin: desk.for_worker(),

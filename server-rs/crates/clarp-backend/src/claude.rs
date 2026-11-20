@@ -1120,7 +1120,7 @@ mod tests {
             for (place, step) in case["steps"].as_array().unwrap().iter().enumerate() {
                 let now = step["at"].as_i64().unwrap();
                 let events = if let Some(turn) = step["begin"].as_str() {
-                    hub.begin_turn("claire", "conv-1", turn, None, now)
+                    hub.begin_turn("claire", "conv-1", turn, None, "user", now)
                 } else if let Some(status) = step["end"].as_str() {
                     hub.end_turn(status, None, now)
                 } else if step.get("fire").is_some() {
