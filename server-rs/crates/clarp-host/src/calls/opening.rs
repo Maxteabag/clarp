@@ -18,6 +18,17 @@ use clarp_kernel::{
 };
 use serde_json::{Value, json};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book("opening_audio", crate::kept::Key::Plain, crate::kept::any),
+    crate::kept::Kind::book(
+        "opening_by_token",
+        crate::kept::Key::Secret,
+        // The ring's id, as text.
+        crate::kept::text,
+    ),
+];
+
 #[derive(Clone, Copy)]
 pub(crate) enum Change<'a> {
     Claim(&'a Value),
@@ -560,16 +571,27 @@ impl Desk {
     /// The message journal proves which admission actually got the turn.
     /// Older messages without this receipt keep their ordinary audio.
     pub async fn recover_bindings(&self, app: &App) -> Result<(), Unavailable> {
+        // The whole pass is asked again while the store does not answer, a few times, and then
+        // the start stops, as for any store that does not answer. It may be: what was bound is
+        // passed over.
+        again(|| self.recovery_pass(app)).await
+    }
+
+    /// One pass over every opening: a failure is the agent's (it is held, and the pass goes on)
+    /// or the store's (the pass ends, to be asked again).
+    async fn recovery_pass(&self, app: &App) -> Result<(), Unavailable> {
         let _serial = self.opening_turn.lock().await;
         // Previous releases kept a trace index. It cannot establish turn
         // ownership and must not retain private tokens after their openings go.
-        let old: Vec<(&'static str, String)> = again(|| app.fleet.kept_all("opening_audio"))
+        let old: Vec<(&'static str, String)> = app
+            .fleet
+            .kept_all("opening_audio")
             .await?
             .into_iter()
             .map(|(key, _)| ("opening_audio", key))
             .collect();
-        again(|| app.fleet.change_together(Vec::new(), old.clone())).await?;
-        let mut records = again(|| Self::archived_openings(app)).await?;
+        app.fleet.change_together(Vec::new(), old).await?;
+        let mut records = Self::archived_openings(app).await?;
         {
             let mut held = self.books.lock().await;
             let books = Self::read(&mut held, app).await?;
@@ -599,33 +621,26 @@ impl Desk {
                 }) {
                     continue;
                 }
-                let mut tried = 0;
-                while let Err(why) = self.recover_clip(app, &member, &r.ring_id, kind, id).await {
-                    // An agent that does not answer now opens again by itself, and its lines
-                    // could then be said beside its call: it is held, and its binding is
-                    // recovered when it next hands a line over (`voice/held.rs`). Counted until
-                    // then.
-                    if member.agent.opening_row(id).await.is_err() {
-                        app.fleet.leave_out(UNBOUND, &r.ring_id);
-                        let agent_id = member.record.agent_id.clone();
-                        let entry = (r.ring_id.clone(), kind, id.to_string());
-                        self.unbound
-                            .lock()
-                            .await
-                            .entry(agent_id.clone())
-                            .or_default()
-                            .push(entry);
-                        app.mouth.held.hold(&agent_id);
-                        break;
+                let Err(why) = self.recover_clip(app, &member, &r.ring_id, kind, id).await else {
+                    continue;
+                };
+                // An agent that does not answer now opens again by itself, and its lines could
+                // then be said beside its call: it is held, and its binding is recovered when it
+                // next hands a line over (`voice/held.rs`). Counted until then.
+                if member.agent.opening_row(id).await.is_err() {
+                    app.fleet.leave_out(UNBOUND, &r.ring_id);
+                    let agent_id = member.record.agent_id.clone();
+                    let entry = (r.ring_id.clone(), kind, id.to_string());
+                    let mut unbound = self.unbound.lock().await;
+                    let waiting = unbound.entry(agent_id.clone()).or_default();
+                    if !waiting.contains(&entry) {
+                        waiting.push(entry);
                     }
-                    // The store did not answer: tried again a few times, and then the start
-                    // stops, as for any store that does not answer.
-                    tried += 1;
-                    if tried >= TRIES {
-                        return Err(why);
-                    }
-                    tokio::time::sleep(AGAIN_AFTER * tried).await;
+                    app.mouth.held.hold(&agent_id);
+                    continue;
                 }
+                // The store did not answer: this pass ends, and is asked again.
+                return Err(why);
             }
         }
         Ok(())

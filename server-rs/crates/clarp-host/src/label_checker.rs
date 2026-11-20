@@ -366,6 +366,20 @@ mod site_tests {
 
 use crate::edge::App;
 use clarp_kernel::janitors::{adaptive, label_audit, quota};
+
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(DIAGNOSTIC, crate::kept::Key::Plain, crate::kept::json),
+    crate::kept::Kind::book(CURSOR, crate::kept::Key::Plain, crate::kept::fits::<u64>),
+    crate::kept::Kind::book(
+        CADENCE,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<quota::Lane>,
+    ),
+    crate::kept::Kind::book(LAST, crate::kept::Key::Plain, crate::kept::fits::<i64>),
+    crate::kept::Kind::book(MARK, crate::kept::Key::Plain, crate::kept::fits::<String>),
+];
+
 const ROLE: &str = "label-auditor";
 const CADENCE: &str = "label-checker-cadence";
 const LAST: &str = "label-checker-last-check";

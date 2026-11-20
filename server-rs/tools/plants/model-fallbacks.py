@@ -75,7 +75,7 @@ for why,old,new in [
     plant(P,"vectors",why,old,new)
 
 for file,why,old,new in [
-    (E,"forget interrupted fallback claims",'.kept(KIND, key.clone())','.kept(KIND, format!("other-{key}"))'),
+    (E,"forget interrupted fallback claims",'.kept_book(KIND, key.clone())','.kept_book(KIND, format!("other-{key}"))'),
     (E,"store a failed alternate as cancelled",'Err(e) if e.retry => "failed"','Err(e) if e.retry => "cancelled"'),
     (E,"store a cancelled alternate as completed",'Err(_) => "cancelled"','Err(_) => "completed"'),
     (E,"remove the agent from the claim key","json!([agent, request, index])","json!([request, index])"),

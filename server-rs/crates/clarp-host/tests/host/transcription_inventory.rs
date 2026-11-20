@@ -515,14 +515,20 @@ for line in sys.stdin:
     let log = host.heard.lock().unwrap().clone();
     assert_eq!(
         log.lines()
-            .filter(|s| s.contains("unreadable transcription inventory; using an empty list"))
+            .filter(|s| s.contains("a record of the kind transcription-models could not be read and is set aside as records.unreadable"))
             .count(),
         1
     );
     assert!(!log.contains(sentinel));
     host.kill();
     assert_eq!(stored("records.unreadable"), sentinel.as_bytes());
-    assert_eq!(stored("records"), sentinel.as_bytes());
+    // Moved aside whole: its key is free.
+    let freed = clarp_store_sqlite::SqliteKeyValue
+        .open(&place.root.join("data/fleet.db"))
+        .unwrap()
+        .get("kept.transcription-models", "records")
+        .unwrap();
+    assert_eq!(freed, None);
     let host = place.start_with_token("admin");
     assert_eq!(
         host.ask("POST", ROUTE, Some(&json!({"model_id":ID}))).0,

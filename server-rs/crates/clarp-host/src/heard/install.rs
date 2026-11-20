@@ -12,6 +12,16 @@ use std::os::unix::fs::MetadataExt;
 const KIND: &str = "transcription-model-install";
 const INTENTS: &str = "model-publication";
 
+/// What this desk keeps, declared once (`kept.rs`): a model's publication in flight, read by key
+/// alone and judged when read as the intent it reads. One it cannot read is not rolled back on
+/// its authority (`rollback`).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    INTENTS,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Intent>,
+)
+.when_read()];
+
 fn job_id(model: &str) -> String {
     format!(
         "{KIND}-{}",
@@ -177,8 +187,15 @@ impl Desk {
         id: &str,
         job: Option<&Job>,
     ) -> Result<(), RollbackError> {
-        let Some(bytes) = fleet.kept(INTENTS, id.into()).await? else {
-            return Ok(());
+        let bytes = match fleet.judged(INTENTS, id.into()).await? {
+            crate::kept::Found::Absent => return Ok(()),
+            crate::kept::Found::Read(bytes) => bytes,
+            // Moved aside, unreadable: no path is moved on its authority.
+            crate::kept::Found::Unfit => {
+                return Err(
+                    std::io::Error::other("model publication record cannot be read").into(),
+                );
+            }
         };
         let intent: Intent = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
         let Some(job) = job.filter(|j| j.kind == KIND) else {

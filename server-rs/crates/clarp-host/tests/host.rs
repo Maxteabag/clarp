@@ -3709,10 +3709,10 @@ for line in [
     assert_eq!(begin(&host, "desk", "go"), Value::Null);
     wait_for("the desk's turn to end", || host.state("desk") == "done");
     drop(host);
-    assert_eq!(
-        kept_records(&place, "turn-identity")["key"]["key"],
-        "not a key"
-    );
+    // Moved aside whole, never lost: the key is free, and no new one was drawn over it.
+    let kept = kept_records(&place, "turn-identity");
+    assert_eq!(kept["key.unreadable"]["key"], "not a key");
+    assert!(!kept.contains_key("key"), "{kept:?}");
     // Given its key back, it knows the desk's token again.
     keep_record(&place, "turn-identity", "key", &json!({ "key": key }));
     let host = start();

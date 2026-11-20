@@ -7,6 +7,28 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+/// What this desk keeps, declared once (`kept.rs`). Each kind is read by key alone (its runs and
+/// their traces are audits with no expiry, and a start does not read a history): judged when
+/// read, by the type this desk reads.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(BOOK, crate::kept::Key::Plain, crate::kept::fits::<Book>).when_read(),
+    crate::kept::Kind::book(RUNS, crate::kept::Key::Plain, crate::kept::fits::<Run>).when_read(),
+    crate::kept::Kind::book(COUNTER, crate::kept::Key::Plain, crate::kept::fits::<i64>).when_read(),
+    crate::kept::Kind::book(TRACES, crate::kept::Key::Plain, crate::kept::fits::<i64>).when_read(),
+    crate::kept::Kind::book(
+        SESSIONS,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Session>,
+    )
+    .when_read(),
+    crate::kept::Kind::book(
+        GLOBAL,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Vec<i64>>,
+    )
+    .when_read(),
+];
+
 const BOOK: &str = "vocabulary-book";
 const RUNS: &str = "vocabulary-runs";
 const COUNTER: &str = "vocabulary-counter";
@@ -39,17 +61,27 @@ fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     })
 }
 
+/// A record, judged by its type as it is read (`kept.rs`). One that is not this desk's is set
+/// aside, counted and said, and the desk goes on without it: a book it starts without, a run
+/// that is not there, a session or a page that begins anew. Only the counter is not begun anew,
+/// which would write new runs over the ones kept: no run is recorded until it is mended.
 async fn load<T: DeserializeOwned>(
     fleet: &FleetHandle,
     kind: &'static str,
     key: &str,
 ) -> Result<Option<T>> {
-    fleet
-        .kept(kind, key.to_owned())
+    let found = fleet
+        .judged(kind, key.to_owned())
         .await
-        .map_err(|_| unavailable())?
-        .map(|bytes| decode(&bytes))
-        .transpose()
+        .map_err(|_| unavailable())?;
+    match found {
+        crate::kept::Found::Read(bytes) => decode(&bytes).map(Some),
+        crate::kept::Found::Unfit if kind == COUNTER => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "vocabulary counter could not be read: no run is recorded over the ones kept".into(),
+        )),
+        crate::kept::Found::Absent | crate::kept::Found::Unfit => Ok(None),
+    }
 }
 
 fn encode(value: &impl Serialize) -> Result<Vec<u8>> {

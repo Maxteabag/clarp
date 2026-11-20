@@ -28,6 +28,19 @@ use crate::fleet::FleetHandle;
 use crate::hub::Hub;
 use crate::quota;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    // A turn's use, one for every turn within the longest window, listed after a turn and when
+    // shown, never at the start: judged when read.
+    crate::kept::Kind::book(KIND, crate::kept::Key::Plain, crate::kept::fits::<Used>).when_read(),
+    crate::kept::Kind::book(SINCE, crate::kept::Key::Plain, since_fits),
+];
+
+/// Whether bytes are the moment counting began, as this desk reads it: a number, as text.
+fn since_fits(kept: &[u8]) -> bool {
+    std::str::from_utf8(kept).is_ok_and(|text| text.parse::<i64>().is_ok())
+}
+
 /// The kind of thing a turn's use is, among what is left with the fleet.
 const KIND: &str = "used";
 /// And the kind of the moment from which this Host has counted.
@@ -163,7 +176,7 @@ pub async fn keep(fleet: FleetHandle, mut told: mpsc::UnboundedReceiver<Told>, w
         since_looked = 0;
         let too_old = before(clock.now_ms() - usage::KEPT_FOR_MS);
         // Kept in the order of their names, which begin with when they ended.
-        for (name, _) in fleet.kept_all(KIND).await.unwrap_or_default() {
+        for (name, _) in fleet.kept_listed(KIND).await.unwrap_or_default() {
             if name >= too_old {
                 break;
             }
@@ -206,7 +219,7 @@ pub(crate) async fn view(app: &App, force: bool) -> Value {
     events.extend(left.events);
     let agy = app.limits.asked_agy(with).await;
     let of_claude = app.limits.asked_claude(with).await;
-    let kept = app.fleet.kept_all(KIND).await.unwrap_or_default();
+    let kept = app.fleet.kept_listed(KIND).await.unwrap_or_default();
     let kept: Vec<Used> = kept
         .iter()
         .filter_map(|(_, written)| serde_json::from_slice(written).ok())

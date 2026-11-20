@@ -14,6 +14,15 @@ use crate::edge::App;
 use crate::fleet::AgentRecord;
 use crate::wire;
 
+/// The router's book of clips: one record the Host writes by itself, read whole at the first
+/// sentence the router says and never at the start; judged then by the type the desk reads it as.
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    KIND,
+    crate::kept::Key::Plain,
+    crate::kept::fits::<Vec<Value>>,
+)
+.when_read()];
+
 const KIND: &str = "router-phrase";
 const BOOK: &str = "clips";
 
@@ -103,7 +112,7 @@ fn forget(store: Store<'_>, name: &str) -> bool {
 }
 
 async fn load(store: Store<'_>) -> Option<Vec<Clip>> {
-    let raw = match store.fleet.kept(KIND, BOOK.to_owned()).await {
+    let raw = match store.fleet.kept_book(KIND, BOOK.to_owned()).await {
         Ok(bytes) => bytes,
         Err(why) => {
             store.fleet.unkept(KIND, &why.0);

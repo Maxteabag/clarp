@@ -3,6 +3,13 @@
 use super::*;
 use clarp_kernel::jobs::{Job, JobBook, JobChange, JobCommand, JobRecord};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
+    "computer-jobs",
+    crate::kept::Key::Plain,
+    crate::kept::fits::<ComputerJob>,
+)];
+
 const TABLE: &str = "kept.computer-jobs";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,13 +57,21 @@ impl ComputerJobs {
         store: &dyn KeyValue,
         computer_id: String,
         revisions: &Revisions,
-        log: &crate::unkept::Log,
+        left: &crate::kept::LeftOut,
     ) -> Result<Self, String> {
         let mut jobs = Self {
             computer_id,
             ..Self::default()
         };
         for (id, raw) in store.list(TABLE).map_err(|e| e.to_string())? {
+            // A copy set aside, known by the count, is no job (`kept.rs`); the record it was moved
+            // from keeps its id taken.
+            if left.is_left_out(TABLE, &id) {
+                if let Some(moved_from) = crate::kept::copy_of(&id) {
+                    jobs.unreadable.insert(moved_from.to_string());
+                }
+                continue;
+            }
             let Ok(row) = serde_json::from_slice::<ComputerJob>(&raw) else {
                 jobs.unreadable.insert(id);
                 continue;
@@ -74,12 +89,8 @@ impl ComputerJobs {
             });
             jobs.timelines.insert(id, row.timeline);
         }
-        if !jobs.unreadable.is_empty() {
-            log.line(&format!(
-                "clarp-host: skipped {} unreadable computer job records; original bytes retained",
-                jobs.unreadable.len()
-            ));
-        }
+        // What could not be read was set aside, counted and said by the start's walk; one whose id
+        // is not its key is kept out too, and its id stays taken.
         Ok(jobs)
     }
     pub(super) fn list(&self) -> Vec<Job> {

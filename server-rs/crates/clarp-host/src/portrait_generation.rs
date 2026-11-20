@@ -339,7 +339,7 @@ pub(crate) async fn deliver(
             if len(&name)? == Some(asset.bytes) && len(&picture)? == Some(asset.bytes) {
                 continue;
             }
-            let Some(raw) = fleet.kept(BYTES, asset.asset_id.clone()).await? else {
+            let Some(raw) = fleet.kept_book(BYTES, asset.asset_id.clone()).await? else {
                 return Ok(Delivery::MissingBytes);
             };
             tokio::task::spawn_blocking(move || {

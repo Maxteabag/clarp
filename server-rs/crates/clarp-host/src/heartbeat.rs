@@ -38,6 +38,10 @@ use crate::edge::{self, ApiError, App};
 use crate::fleet::{Amend, Member};
 use crate::{ids, wire};
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] =
+    &[crate::kept::Kind::book(KIND, crate::kept::Key::Plain, fits_book).by_entries(unfit_entries)];
+
 /// The kind of thing the heartbeat's book is, among what is left with the fleet.
 const KIND: &str = "heartbeat";
 const ALL: &str = "all";
@@ -62,6 +66,19 @@ struct Book {
 #[derive(Default)]
 pub struct Desk {
     book: tokio::sync::Mutex<Option<Book>>,
+    /// The entries of its document that are not its book's, put back with every save.
+    carried: std::sync::Mutex<crate::kept::Carried>,
+}
+
+/// The fields of the heartbeat's book read entry by entry.
+const ENTRIES: &[&str] = &["agents", "counted"];
+
+fn fits_book(stored: &[u8]) -> bool {
+    crate::kept::fits_carried::<Book, Value>(stored, ENTRIES)
+}
+
+fn unfit_entries(stored: &[u8]) -> Vec<String> {
+    crate::kept::unfit::<Book, Value>(stored, ENTRIES)
 }
 
 impl Desk {
@@ -69,10 +86,16 @@ impl Desk {
     async fn ask<T>(&self, app: &App, ask: impl FnOnce(&mut Book) -> T) -> Result<T, Unavailable> {
         let mut held = self.book.lock().await;
         if held.is_none() {
-            let kept = app.fleet.kept(KIND, ALL.to_string()).await?;
-            // What cannot be read is a book with nothing in it: nobody is woken on a guess.
-            let book = kept.and_then(|kept| serde_json::from_slice(&kept).ok());
-            *held = Some(book.unwrap_or_default());
+            // Through the loader: a document that is not the book's is set aside, an entry that
+            // is not is carried through (`kept.rs`); nobody is woken on a guess.
+            let (book, carried) = app
+                .fleet
+                .read_book::<Book, Value>(KIND, ALL, ENTRIES)
+                .await?;
+            if let Ok(mut kept) = self.carried.lock() {
+                *kept = carried;
+            }
+            *held = Some(book);
         }
         let Some(book) = held.as_mut() else {
             return Err(Unavailable(
@@ -82,9 +105,11 @@ impl Desk {
         let mut next = book.clone();
         let answer = ask(&mut next);
         if next != *book {
-            let kept = serde_json::to_vec(&next).unwrap_or_default();
+            let carried = self.carried.lock().map(|c| c.clone()).unwrap_or_default();
+            let kept = crate::kept::saved(&next, &carried);
             app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await?;
             *book = next;
+            app.fleet.written_over(KIND, ALL, &self.carried, &*book);
         }
         Ok(answer)
     }
