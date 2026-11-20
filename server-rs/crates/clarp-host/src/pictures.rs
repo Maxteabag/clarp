@@ -133,11 +133,20 @@ fn is_picture(bytes: &[u8]) -> bool {
         || bytes.starts_with(b"RIFF")
 }
 
+/// How long one run of the scaler may take: the reference's thirty seconds
+/// (`_normalize_avatar_jpeg`, `timeout=30`).
+pub const SCALE_BOUND: std::time::Duration = std::time::Duration::from_secs(30);
+/// What a try ends with where a run of the scaler did not end within its bound. In the
+/// Host's own words: nothing of the machine's paths is in them.
+pub const SCALE_TOO_LONG: &str = "the picture could not be scaled in time";
+
 /// A made picture as a contact keeps it (`_normalize_avatar_jpeg`): cut to a square at its
 /// middle and scaled to 512 by 512 as a JPEG by `scaler` (ffmpeg), at a lower quality each
 /// time while it is more than [`KEPT_MOST`]; where that cannot be done, the picture as it
-/// came if it is a JPEG, a PNG or a WebP no larger than that.
-pub fn kept(raw: &[u8], scaler: &str) -> Result<Vec<u8>, String> {
+/// came if it is a JPEG, a PNG or a WebP no larger than that. A run of the scaler that does
+/// not end within `bound` is killed and reaped, and the try fails ([`SCALE_TOO_LONG`]): the
+/// reference's run past its bound fails the try as well.
+pub fn kept(raw: &[u8], scaler: &str, bound: std::time::Duration) -> Result<Vec<u8>, String> {
     // A place of its own for the scaler's two files, taken away after.
     static PLACES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let place = std::env::temp_dir().join(format!(
@@ -145,11 +154,12 @@ pub fn kept(raw: &[u8], scaler: &str) -> Result<Vec<u8>, String> {
         std::process::id(),
         PLACES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let scaled = std::fs::create_dir(&place)
-        .ok()
-        .and_then(|()| scaled(raw, scaler, &place));
+    let scaled = match std::fs::create_dir(&place) {
+        Ok(()) => scaled(raw, scaler, &place, bound),
+        Err(_) => Ok(None),
+    };
     let _ = std::fs::remove_dir_all(&place);
-    if let Some(made) = scaled {
+    if let Some(made) = scaled? {
         return Ok(made);
     }
     if is_picture(raw) && raw.len() <= KEPT_MOST {
@@ -158,37 +168,71 @@ pub fn kept(raw: &[u8], scaler: &str) -> Result<Vec<u8>, String> {
     Err("could not downsample generated avatar to <=512KB JPEG".to_string())
 }
 
-/// The picture scaled in `place`, where `scaler` can do it.
-fn scaled(raw: &[u8], scaler: &str, place: &std::path::Path) -> Option<Vec<u8>> {
-    {
-        let (from, to) = (place.join("raw.img"), place.join("avatar.jpg"));
-        if std::fs::write(&from, raw).is_ok() {
-            for quality in ["3", "6", "10"] {
-                let _ = std::fs::remove_file(&to);
-                let scaled = crate::child::command(scaler)
-                    .args(["-y", "-loglevel", "error", "-i"])
-                    .arg(&from)
-                    .args([
-                        "-vf",
-                        "crop='min(iw,ih)':'min(iw,ih)',scale=512:512:flags=lanczos",
-                    ])
-                    .args(["-frames:v", "1", "-q:v", quality])
-                    .arg(&to)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-                if scaled.is_ok_and(|status| status.success())
-                    && let Ok(made) = std::fs::read(&to)
-                    && !made.is_empty()
-                    && made.len() <= KEPT_MOST
-                {
-                    return Some(made);
-                }
+/// One run of the scaler, ended by itself within `bound` or killed and reaped at it: whether it
+/// ended well, or that it took too long.
+fn run_bounded(
+    mut command: std::process::Command,
+    bound: std::time::Duration,
+) -> Result<bool, String> {
+    let Ok(mut child) = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return Ok(false);
+    };
+    let began = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.success()),
+            Ok(None) if began.elapsed() >= bound => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SCALE_TOO_LONG.to_string());
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(false);
             }
         }
     }
-    None
+}
+
+/// The picture scaled in `place`, where `scaler` can do it; `Ok(None)`: it cannot.
+fn scaled(
+    raw: &[u8],
+    scaler: &str,
+    place: &std::path::Path,
+    bound: std::time::Duration,
+) -> Result<Option<Vec<u8>>, String> {
+    let (from, to) = (place.join("raw.img"), place.join("avatar.jpg"));
+    if std::fs::write(&from, raw).is_err() {
+        return Ok(None);
+    }
+    for quality in ["3", "6", "10"] {
+        let _ = std::fs::remove_file(&to);
+        let mut command = crate::child::command(scaler);
+        command
+            .args(["-y", "-loglevel", "error", "-i"])
+            .arg(&from)
+            .args([
+                "-vf",
+                "crop='min(iw,ih)':'min(iw,ih)',scale=512:512:flags=lanczos",
+            ])
+            .args(["-frames:v", "1", "-q:v", quality])
+            .arg(&to);
+        if run_bounded(command, bound)?
+            && let Ok(made) = std::fs::read(&to)
+            && !made.is_empty()
+            && made.len() <= KEPT_MOST
+        {
+            return Ok(Some(made));
+        }
+    }
+    Ok(None)
 }
 
 /// The kind of the computer's job that makes a contact's picture.
@@ -373,7 +417,7 @@ async fn make(
                 .await
                 .map_err(|_| Some("the picture was not made".to_string()))?
                 .map_err(Some)?;
-        let picture = tokio::task::spawn_blocking(move || kept(&raw, "ffmpeg"))
+        let picture = tokio::task::spawn_blocking(move || kept(&raw, "ffmpeg", SCALE_BOUND))
             .await
             .map_err(|_| Some("the picture was not made".to_string()))?
             .map_err(Some)?;
@@ -527,12 +571,44 @@ mod tests {
     }
 
     #[test]
+    fn a_scaler_that_never_ends_is_ended_at_its_bound_and_the_try_fails_in_the_hosts_words() {
+        let place = std::env::temp_dir().join(format!("clarp-scaler-test-{}", std::process::id()));
+        std::fs::create_dir_all(&place).unwrap();
+        let scaler = place.join("never-ends");
+        std::fs::write(&scaler, "#!/bin/sh\nexec sleep 10\n").unwrap();
+        let mut mode = std::fs::metadata(&scaler).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut mode, 0o755);
+        std::fs::set_permissions(&scaler, mode).unwrap();
+        let began = std::time::Instant::now();
+        let ended = kept(
+            MADE_UP,
+            scaler.to_str().unwrap(),
+            std::time::Duration::from_millis(300),
+        );
+        let took = began.elapsed();
+        let _ = std::fs::remove_dir_all(&place);
+        assert_eq!(
+            ended.unwrap_err(),
+            SCALE_TOO_LONG,
+            "the try fails, though the picture is small"
+        );
+        assert!(
+            took < std::time::Duration::from_secs(5),
+            "ended at its bound, not when the scaler would: {took:?}"
+        );
+        assert!(
+            !SCALE_TOO_LONG.contains('/'),
+            "no path of the machine in the words"
+        );
+    }
+
+    #[test]
     fn a_picture_that_cannot_be_scaled_is_kept_as_it_came_only_where_it_is_small_and_a_picture() {
         let nowhere = "a-program-that-is-not-there";
-        assert_eq!(kept(MADE_UP, nowhere).unwrap(), MADE_UP);
-        assert!(kept(b"no picture at all", nowhere).is_err());
+        assert_eq!(kept(MADE_UP, nowhere, SCALE_BOUND).unwrap(), MADE_UP);
+        assert!(kept(b"no picture at all", nowhere, SCALE_BOUND).is_err());
         let mut large = MADE_UP.to_vec();
         large.resize(KEPT_MOST + 1, 0);
-        assert!(kept(&large, nowhere).is_err());
+        assert!(kept(&large, nowhere, SCALE_BOUND).is_err());
     }
 }
