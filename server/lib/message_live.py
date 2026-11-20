@@ -617,11 +617,14 @@ def _restore_assistant_state_txn(database, *, agent_id: str,
             "message_id", "agent_id", "backend_session_id", "source_file", "seq",
             "role", "timestamp", "text", "kind", "tool_name", "tools_json",
             "display_cells_json", "updated_at", "revision", "origin",
-            "sender_agent_id", "prompt_admission_id")
+            "sender_agent_id", "prompt_admission_id",
+            # What the capture read too (SELECT *): a row put back without its
+            # trace lost its turn (its audience, its summary, a card's place).
+            "trace_id", "phase", "turn_json")
         database.executemany(
             f"INSERT INTO messages ({','.join(message_columns)}) "
             f"VALUES ({','.join('?' for _ in message_columns)})",
-            [tuple(row[column] for column in message_columns)
+            [tuple(row.get(column) for column in message_columns)
              for row in baseline_messages])
         revision = _next_revision(database)
         database.execute(

@@ -116,3 +116,29 @@ def test_the_codex_app_servers_finalize_keeps_a_note(tmp_path):
                                                   trace_id="t-cx", text="Work done.")
     assert [(row["message_id"], row["trace_id"]) for row in _note_row(agent_id)] == [("note-n-cx", "t-cx")]
     assert coordination.audience_of(agent_id, "t-cx") == "user"
+
+
+def test_agys_restore_keeps_each_rows_trace_phase_and_summary(tmp_path):
+    """R153: the restore put rows back without trace_id (and phase, turn_json), so after any
+    later AGY turn a coordination turn's reply read 'user' and a turn lost its summary."""
+    agent_id = agents.create_agent(persona="Ivy", session="ivy", voice_id="v", cwd=str(tmp_path), backend="agy")
+    boss = agents.create_agent(persona="Boss", session="boss", voice_id="v", cwd=str(tmp_path))
+    agents.bind_backend_session(agent_id, "native")
+    agents.record_user_message(agent_id=agent_id, backend_session_id="native", client_msg_id="c-boss",
+                               text="Report", trace_id="t-boss", origin="agent", sender_agent_id=boss)
+    with db.conn() as con:
+        con.execute("""INSERT INTO messages(message_id, agent_id, backend_session_id, source_file, seq, role,
+                       timestamp, text, updated_at, revision, origin, trace_id, phase, turn_json)
+                       VALUES ('reply-1', ?, 'native', 't.jsonl', 0, 'assistant', ?, 'Green.', 1, 1, 'agent',
+                               't-boss', 'final', '{"turn_id":"t-boss","status":"completed"}')""",
+                    (agent_id, clock.iso_from_ms(BASE)))
+    db.close_local()
+    agents.open_turn(agent_id=agent_id, source="pwa", trace_id="t-next")
+    snapshot = message_store.capture_assistant_state(agent_id=agent_id, backend_session_id="native")
+    agents.commit_agy_assistant_turn(agent_id=agent_id, backend_session_id="native", trace_id="t-next",
+                                     snapshot=snapshot, terminal_status="success", text="Next.")
+    row = db.conn().execute("SELECT trace_id, phase, turn_json FROM messages WHERE message_id='reply-1'").fetchone()
+    assert tuple(row) == ("t-boss", "final", '{"turn_id":"t-boss","status":"completed"}')
+    reply = next(r for r in agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50)
+                 if r["id"] == "reply-1")
+    assert reply["audience"] == "agents"
