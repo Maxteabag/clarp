@@ -72,6 +72,15 @@ fn the_picture_display_preference_survives_restart_and_uses_local_art() {
             bytes.as_bytes()
         );
     }
+    // When this specific role loses its bundled JPEG it falls back to the generic art.
+    std::fs::remove_file(root.join("janitor-avatars/delegator-message-dispatcher.jpg")).unwrap();
+    let after = row(&host.get("/agents/snapshot"), "clarp-message-delegator");
+    assert!(
+        after["avatar_url"]
+            .as_str()
+            .unwrap()
+            .starts_with("/static/janitor-avatars/janitor-default.jpg?v=")
+    );
     // The settings belong to a full-access caller. Each refused update preserves the old value.
     let (limited, _) = pair(&host, "Limited", "limited");
     for method in ["GET", "POST"] {
