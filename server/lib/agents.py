@@ -453,7 +453,8 @@ def update_agent(agent_id: str, *, persona: str | None = None,
                  personality: str | None = None,
                  voice_verbosity: int | None = None,
                  avatar_path: str | None = None,
-                 dreaming_last_local_date: str | None = None) -> None:
+                 dreaming_last_local_date: str | None = None,
+                 coordination_visibility: str | None = None) -> None:
     """Update mutable agent metadata without changing its stable agent_id.
 
     `model` / `effort` / `mcp_servers` are per-agent overrides read fresh on the
@@ -497,6 +498,10 @@ def update_agent(agent_id: str, *, persona: str | None = None,
     if personality is not None:
         fields.append("personality = ?")
         values.append(personality)
+    if coordination_visibility is not None:
+        # '' follows the Host's setting; 'show' | 'hide' (lib.coordination).
+        fields.append("coordination_visibility = ?")
+        values.append(coordination_visibility)
     if voice_verbosity is not None:
         fields.append("voice_verbosity = ?")
         values.append(_clamp_voice_verbosity(voice_verbosity))

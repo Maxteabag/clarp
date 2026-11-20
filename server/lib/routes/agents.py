@@ -68,6 +68,32 @@ class AgentRoutes:
                               "notified": bool(notification.get("notify")),
                               "reason": notification.get("reason") or ""})
 
+    def _handle_agent_coordination(self):
+        """POST /agent-coordination {session, visibility: show|hide|default}: one chat's own
+        choice ('default' follows the Host). Answers and broadcasts the chat's effective
+        visibility in the same step."""
+        from lib import coordination
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        session = str(data.get("session") or "").strip()
+        if not session or "visibility" not in data:
+            return self._json_error(400, "session and visibility required")
+        agent = identity.lookup(session)
+        if not agent:
+            return self._json_error(404, "no such agent")
+        try:
+            own = coordination.set_chat(agent["agent_id"], data["visibility"])
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        effective = coordination.effective_visibility(agent["agent_id"])
+        stream = getattr(self.ctx, "stream", None)
+        if stream is not None:
+            events.broadcast(stream, events.agent_roster(
+                coordination.ROSTER_KIND, session=session, coordination_visibility=effective))
+        return self._json_ok({"ok": True, "session": session, "coordination_visibility": effective,
+                              "coordination_override": own or None})
+
     def _handle_agent_assign(self):
         from lib.contact_assignment import assign_contact
         data = self._read_json()
