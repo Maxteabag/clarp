@@ -3,7 +3,7 @@
 import runner
 
 K = 'clarp-kernel/src/controller_actions.rs'
-A = 'clarp-kernel/src/address.rs'
+D = 'clarp-kernel/src/destination.rs'
 H = 'clarp-host/src/controller_actions.rs'
 CLI = 'clarp-host/src/controller_action_tool.rs'
 RUNS = {'vectors':['test','--test','controller_actions_vectors'],
@@ -59,17 +59,33 @@ rules(K,'vectors',[
     ('audit device words not bounded', 'python::first(&word(&data[key]), 128)', 'python::first(&word(&data[key]),129)'),
 ])
 
-# The admission of an address, kept in the kernel's address module since one rule judges every stand-in by it.
-rules(A,'vectors',[
-    ('HTTPS loopback allowed by default', 'address.0.scheme_str() == Some("http")', 'true'),
-    ('IPv6 loopback missing', '"localhost" | "[::1]"', '"localhost"'),
-    ('localhost missing', '"localhost" | "[::1]"', '"[::1]"'),
-    ('IPv4 loopback missing', '"127.0.0.1" | "localhost"', '"localhost"'),
-    ('configured port ignored', 'p != target.port_u16().unwrap_or(default)', 'false'),
-    ('scope admits a different path', 'path.strip_prefix(want)', 'Some("")'),
-    ('path colon accepted after allowed prefix', "tail.starts_with([\'/\', \'?\', \'#\'])", "tail.starts_with([\'/\', \'?\', \'#\', \':\'])"),
-    ('configured trailing slash not a prefix', "want.ends_with('/')", 'false'),
-    ('a normal exact configured path refused', 'tail.is_empty() ||', 'false ||'),
+# Where an action may send (R133): the Python Host's rule (`url_destination.py`), in the kernel's own module.
+rules(D,'vectors',[
+    ('(a) a prefix without a port admits every port', '        if !any_port && self.port != prefix.port {', '        if false {'),
+    ('(a) the loopback prefixes admit their own port alone', '.map(|prefix| (prefix, true));', '.map(|prefix| (prefix, false));'),
+    ("(b) the scheme's own port is named in what is sent", '        let netloc = if self.port == own_port(&self.scheme) {', '        let netloc = if false {'),
+    ('(c) a prefix with a query is taken', "(found.query.is_empty() && !text.contains('#'))", "(!text.contains('#'))"),
+    ('(c) a prefix with a fragment is taken', "(found.query.is_empty() && !text.contains('#'))", '(found.query.is_empty())'),
+    ('(d) a host of any signs is a name', "    raw.split('.').all(label).then(|| raw.to_string())", "    Some(raw.to_string())"),
+    ('(d) a host in capitals is another host', '    let host = host(&hostname.to_lowercase())?;', '    let host = host(hostname)?;'),
+    ('(d) an IPv6 literal keeps its spelling', '        None => parsed.to_string(),', '        None => address.to_string(),'),
+    ('(e) a path that only begins as the prefix\'s is under it', ".is_some_and(|tail| tail.starts_with('/'))", '.is_some()'),
+    ("(e) the prefix's own path is not under it", '            || self.path == base\n', ''),
+    ("(e) a prefix's closing slash is part of its boundary", "        let base = prefix.path.trim_end_matches('/');", '        let base = prefix.path.as_str();'),
+    ('user information is taken', "    if netloc.contains('@') || hostname.is_empty() {", '    if hostname.is_empty() {'),
+    ('a space is taken', '        .any(|sign| python_space(sign) || u32::from(sign) < 32)', '        .any(|sign| u32::from(sign) < 32)'),
+    ('a control sign is taken', '        .any(|sign| python_space(sign) || u32::from(sign) < 32)', '        .any(python_space)'),
+    ('a port with a sign before its digits is taken', '        if !port.chars().all(|sign| sign.is_ascii_digit()) {', '        if false {'),
+    ('another scheme is taken', 'const SCHEMES: [(&str, u16); 2] = [("http", 80), ("https", 443)];',
+     'const SCHEMES: [(&str, u16); 3] = [("http", 80), ("https", 443), ("ftp", 21)];'),
+    ('an empty query is sent', '        if !self.query.is_empty() {', '        if true {'),
+    ('a prefix is not trimmed', '    let found = destination(text.trim_matches(python_space))?;', '    let found = destination(text)?;'),
+    # R139, taken before the reference's PR: held by the rows of the vectors marked as awaiting it.
+    ('R139 a path with a dot segment is taken', '    if dot_segment(&path) {\n        return None;\n    }\n', ''),
+    ('R139 an encoded dot is no dot', '        let dots = segment.replace("%2e", ".").replace("%2E", ".");', '        let dots = segment.to_string();'),
+    ('R139 an encoded dot in capitals is no dot', '        let dots = segment.replace("%2e", ".").replace("%2E", ".");', '        let dots = segment.replace("%2e", ".");'),
+    ('R139 a single dot is no segment', '        dots == "." || dots == ".."', '        dots == ".."'),
+    ('an address of a version to come is refused in brackets', "        return (hex && !after.is_empty() && !after.contains('\\n')).then_some(());", '        return None;'),
 ])
 rules(H,'door',[
     ('limited and full devices can define actions', 'op != "mappings" && principal != Principal::Administrator', 'false'),
@@ -77,7 +93,7 @@ rules(H,'door',[
     ('creation returns 200', 'StatusCode::CREATED', 'StatusCode::OK'),
     ('receipt reuse flag lost', 'result["duplicate"] = true.into()', 'result["duplicate"] = false.into()'),
     ('debounced receipt lost', 'return record_result(app, &request, result, event).await;', 'return Ok(result);'),
-    ('defaults allow-list reused after configuration changes', 'Address::allowed(action["url"].as_str().unwrap_or_default(), &allow_list(app))', 'Address::allowed(action["url"].as_str().unwrap_or_default(), &[])'),
+    ('defaults allow-list reused after configuration changes', 'destination::allowed(action["url"].as_str().unwrap_or_default(), &allow_list(app))', 'destination::allowed(action["url"].as_str().unwrap_or_default(), &[])'),
     ('post uses an empty object', 'python::dumps_ascii(&action["body"])', '"{}".to_string()'),
     ('run result misses title', 'result["title"] = action["title"].clone()', 'result["title"] = Value::Null'),
     ('successful HTTP POST has wrong content type', '"Content-Type", "application/json"', '"Content-Type", "text/plain"'),
@@ -95,7 +111,7 @@ rules(K,'door',[
 ])
 rules('clarp-host/src/edge.rs','door',[('contract is off by one','("controller_actions", 63)','("controller_actions", 64)')])
 rules(H,'door',[
-    ('omit the invalid-entry journal notice','eprintln!("controllerActionAllowedUrlInvalid")','eprintln!("controllerActionConfig")'),
+    ('omit the invalid-entry journal notice','"config.controller_action_urls refused {} allowed URL(s)','"config.controller_action_urls kept {} allowed URL(s)'),
     ('audit uses another bound on reads','.clamp(0, 500)', '.clamp(0, 499)'),
     ('delete the newest audit row instead of the oldest','rows.drain(..rows.len() - rule::AUDIT_KEEP);','rows.truncate(rule::AUDIT_KEEP);'),
     ('failure receipts report success on retry','result["duplicate"] = true.into();','result["ok"] = true.into(); result["duplicate"] = true.into();'),

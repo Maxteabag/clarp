@@ -89,11 +89,10 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
         (400, json!({"error":"url is not allow-listed"}))
     );
     wait_for("invalid configured address logged without its text", || {
-        host.heard
-            .lock()
-            .unwrap()
-            .lines()
-            .any(|line| line == "controllerActionAllowedUrlInvalid")
+        host.heard.lock().unwrap().lines().any(|line| {
+            line == "config.controller_action_urls refused 1 allowed URL(s) that do not \
+                         parse as a plain http(s) destination"
+        })
     });
     assert!(
         !host
@@ -187,6 +186,22 @@ fn controller_actions_are_defined_mapped_and_run_once_through_the_door() {
             json!({"stored":true})
         );
     }
+    // The debounced request repeated after the window is its answer again, with `duplicate`,
+    // and nothing runs a second time (R132, the Python Host's PR 468).
+    std::thread::sleep(Duration::from_millis(1_700));
+    let again = ask(&host, &limited, invoke, json!({"request_id":"bounce"}));
+    assert_eq!(
+        again,
+        (
+            200,
+            json!({"action_id":"line","title":"Line","type":"http_post","ok":true,"duration_ms":0,"debounced":true,"duplicate":true})
+        )
+    );
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        1,
+        "nothing ran a second time"
+    );
     let state = host.get(base);
     let audit = host
         .ask_as(&limited, "GET", "/controller-actions/audit", None)

@@ -12,7 +12,8 @@ use axum::{
     routing::get,
 };
 use clarp_kernel::{
-    controller_actions::{self as rule, Address, Error, Registry},
+    controller_actions::{self as rule, Error, Registry},
+    destination::{self, Destination},
     python,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -70,21 +71,41 @@ async fn audits(app: &App, event: Value) -> Result<Row, Error> {
     }
     row(KIND, "audit", &rows)
 }
-fn allow_list(app: &App) -> Vec<Address> {
+/// The owner's `[controller_actions] allowed_urls`, each parsed once as a prefix
+/// (`destination::prefix`): one that carries user information, a query or a fragment, or does
+/// not parse, admits nothing, and one line says how many there were (R133,
+/// `config._controller_action_urls`).
+fn allow_list(app: &App) -> Vec<Destination> {
     let cfg = app.mouth.owners();
-    cfg.get("controller_actions")
+    let texts: Vec<String> = cfg
+        .get("controller_actions")
         .and_then(|v| v.get("allowed_urls"))
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .filter_map(|v| {
-            let parsed = v.as_str().and_then(|v| Address::parse(v.trim()));
-            if parsed.is_none() {
-                eprintln!("controllerActionAllowedUrlInvalid");
-            }
-            parsed
-        })
-        .collect()
+        // `str(url).strip()`: a text as it is; anything else is no empty text, and no URL: it
+        // is refused (what it is called does not matter).
+        .map(|v| v.as_str().map_or_else(|| format!("{v:?}"), str::to_string))
+        .map(|text| python::strip(&text).to_string())
+        .filter(|text| !text.is_empty())
+        .collect();
+    let kept: Vec<Destination> = texts
+        .iter()
+        .filter_map(|text| destination::prefix(text))
+        .collect();
+    // Said once for a list, as the Python Host says it once when it reads its file.
+    static SAID: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut said = SAID
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if kept.len() != texts.len() && *said != texts {
+        said.clone_from(&texts);
+        eprintln!(
+            "config.controller_action_urls refused {} allowed URL(s) that do not parse as a plain http(s) destination",
+            texts.len() - kept.len()
+        );
+    }
+    kept
 }
 pub(crate) async fn change(app: &App, op: &str, data: &Value, actor: &str) -> Answer {
     let _serial = app.controller_actions.0.lock().await;
@@ -120,8 +141,10 @@ pub(crate) async fn audit(app: &App, limit: &str) -> Answer {
 }
 async fn execute(app: &App, action: &Value) -> Value {
     if action["type"] == "http_post" {
+        // Checked again at every run (an action stored before a rule changed is held to the
+        // rule of now), and what is sent is the parsed destination, not the stored text.
         let Some(uri) =
-            Address::allowed(action["url"].as_str().unwrap_or_default(), &allow_list(app))
+            destination::allowed(action["url"].as_str().unwrap_or_default(), &allow_list(app))
         else {
             return json!({"ok":false,"error":"url is no longer allow-listed"});
         };
