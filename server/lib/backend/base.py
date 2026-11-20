@@ -39,6 +39,21 @@ class Unsupported(Exception):
     """
 
 
+class LaunchRefused(Exception):
+    """``spawn_turn`` refused the turn before anything was sent: no process
+    started, no request written (R121).
+
+    The dispatcher reads it as proof that the turn never launched, so the
+    queue item reads 'unstarted' and is retried or ended, never left
+    'unknown'. Raise it (or a subclass) only from a point that provably comes
+    before the provider can have seen the prompt."""
+
+
+class CliMissing(LaunchRefused, FileNotFoundError):
+    """The backend's CLI is not on PATH: nothing was started. Still a
+    FileNotFoundError, so every handler of a missing binary keeps working."""
+
+
 @dataclass(frozen=True)
 class CompactionStrategy:
     """How the host drives a CLI to compact one session.
@@ -46,11 +61,14 @@ class CompactionStrategy:
     ``launch`` is the interactive argv prefix (the backend session id is
     appended), ``command`` the slash command typed into it, and
     ``watches_transcript`` says whether the host can watch the transcript
-    settle instead of waiting a fixed window.
+    settle instead of waiting a fixed window. ``in_process`` means the Host
+    compacts through the process that already holds the conversation (Codex's
+    shared app-server) instead of a terminal: ``launch`` is then empty.
     """
     launch: tuple[str, ...]
     command: str
     watches_transcript: bool = False
+    in_process: bool = False
 
 
 def _mod(name: str):

@@ -313,7 +313,7 @@ pub fn compact_ascii(value: &Value) -> String {
 }
 
 /// All Unicode decimal digit blocks consist of ten consecutive code points.
-fn decimal_digit(sign: char) -> Option<u32> {
+pub(crate) fn decimal_digit(sign: char) -> Option<u32> {
     if sign.is_ascii() {
         return sign.to_digit(10);
     }

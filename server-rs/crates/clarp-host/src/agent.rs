@@ -107,6 +107,19 @@ pub struct Spoke {
 pub enum DelegationCommand {
     Inspect(Option<String>),
     Baseline(usize),
+    Applied(String, i64),
+    ListenerRead(
+        String,
+        String,
+        i64,
+        Option<clarp_actor::bookkeeping::ActivityVersion>,
+    ),
+    ListenerWrite(
+        String,
+        String,
+        i64,
+        clarp_actor::bookkeeping::ListenerUpdate,
+    ),
     #[cfg(test)]
     Receipt {
         id: String,
@@ -117,13 +130,20 @@ pub enum DelegationCommand {
 
 #[derive(Debug)]
 pub struct DelegationState {
+    pub activity: Option<clarp_kernel::goals::listener::Activity>,
+    pub version: Option<clarp_actor::bookkeeping::ActivityVersion>,
     pub active: Option<clarp_actor::delegation::Binding>,
     pub prior: Option<(clarp_actor::delegation::Transition, i64)>,
     pub accepted: bool,
     pub baseline: i64,
+    pub applied: Option<clarp_actor::bookkeeping::Applied>,
 }
 
 pub enum Ask {
+    Bookkeeping {
+        cmd: crate::bookkeeping::Command,
+        answer: Answer<ToolAnswer>,
+    },
     Delegation {
         command: DelegationCommand,
         answer: mpsc::Sender<Result<DelegationState, Unavailable>>,
@@ -186,6 +206,11 @@ pub enum Ask {
     Standing {
         turn: u64,
         answer: Answer<Standing>,
+    },
+    /// The trace of one of the agent's turns, when it is the running one now.
+    RunningTrace {
+        turn: u64,
+        answer: Answer<Option<String>>,
     },
     /// Everything that is shown of the agent's turn as it runs: what `GET /live` answers.
     Shown {
@@ -309,7 +334,7 @@ pub enum Ask {
     /// The agent published a file: its bytes are kept, and this is what is to be written
     /// of it.
     Publish {
-        asset: Box<Asset>,
+        assets: Vec<Asset>,
         answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
@@ -606,6 +631,11 @@ impl AgentHandle {
     /// as its log says.
     pub async fn standing(&self, turn: u64) -> Result<Standing, Unavailable> {
         self.ask(|answer| Ask::Standing { turn, answer }).await
+    }
+
+    /// The trace of this turn when it is the agent's running turn now (`Actor::running_trace`).
+    pub async fn running_trace(&self, turn: u64) -> Result<Option<String>, Unavailable> {
+        self.ask(|answer| Ask::RunningTrace { turn, answer }).await
     }
 
     /// Everything that is shown of the agent's turn as it runs.
@@ -925,11 +955,29 @@ impl AgentHandle {
 
     /// Writes a file the agent published into its log. Its bytes are kept already.
     pub async fn publish(&self, asset: Asset) -> Result<(), Unavailable> {
-        let asset = Box::new(asset);
-        self.ask(|answer| Ask::Publish { asset, answer }).await
+        self.ask(|answer| Ask::Publish {
+            assets: vec![asset],
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn publish_portraits(&self, assets: [Asset; 2]) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Publish {
+            assets: Vec::from(assets),
+            answer,
+        })
+        .await
     }
 
     /// Answers the goal tool from this agent's goals.
+    pub(crate) async fn bookkeeping(
+        &self,
+        cmd: crate::bookkeeping::Command,
+    ) -> Result<ToolAnswer, Unavailable> {
+        self.ask(|answer| Ask::Bookkeeping { cmd, answer }).await
+    }
+
     pub async fn goal(&self, ask: goaltool::Ask) -> Result<ToolAnswer, Unavailable> {
         self.goal_as(ask, GoalCaller::Default).await
     }
@@ -2410,6 +2458,7 @@ impl Worker {
             Ask::OpeningRow { id, answer } => return read(actor.opening_row(&id), answer),
             Ask::Fate { message_id, answer } => return read(actor.fate_of(&message_id), answer),
             Ask::Standing { turn, answer } => return read(actor.standing_of(turn), answer),
+            Ask::RunningTrace { turn, answer } => return read(actor.running_trace(turn), answer),
             Ask::Shown { answer } => return read(Ok(actor.shown_whole(now)), answer),
             Ask::Import {
                 from,
@@ -2578,9 +2627,9 @@ impl Worker {
                     answer,
                 )?
             }
-            Ask::Publish { asset, answer } => {
+            Ask::Publish { assets, answer } => {
                 let kept = Kept {
-                    media: std::slice::from_ref(&*asset),
+                    media: &assets,
                     ..Kept::default()
                 };
                 answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
@@ -2593,7 +2642,10 @@ impl Worker {
             }
             Ask::Delegation { command, answer } => {
                 let result = (|| -> Result<DelegationState, ActorError> {
+                    let mut version = None;
+                    let mut activity = None;
                     let mut baseline = 0;
+                    let mut applied = None;
                     let (prior, accepted) = match command {
                         #[cfg(test)]
                         DelegationCommand::Receipt { id, caller } => {
@@ -2607,6 +2659,34 @@ impl Worker {
                                 )
                             })?;
                             (None, written.is_some())
+                        }
+                        DelegationCommand::ListenerRead(id, caller, initial, known) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                let progress = actor.applied_bookkeeping(&id, initial)?;
+                                version = Some(actor.activity_version(&progress)?);
+                                if version != known {
+                                    activity = Some(actor.listener_activity(
+                                        &id,
+                                        &caller,
+                                        &progress,
+                                        crate::wire::row,
+                                    )?);
+                                }
+                                applied = Some(progress);
+                            }
+                            (None, accepted)
+                        }
+                        DelegationCommand::ListenerWrite(id, caller, initial, update) => {
+                            let accepted = actor.admits_delegate(&id, Some(&caller));
+                            if accepted {
+                                actor.keep_listener(&id, initial, update, now)?;
+                            }
+                            (None, accepted)
+                        }
+                        DelegationCommand::Applied(id, initial) => {
+                            applied = Some(actor.applied_bookkeeping(&id, initial)?);
+                            (None, true)
                         }
                         DelegationCommand::Baseline(offset) => {
                             baseline = actor.delegation_baseline(offset)?;
@@ -2631,6 +2711,9 @@ impl Worker {
                         }
                     };
                     Ok(DelegationState {
+                        version,
+                        activity,
+                        applied,
                         baseline,
                         active: actor.active_delegation().cloned(),
                         prior,
@@ -2647,6 +2730,9 @@ impl Worker {
                         return Err(error);
                     }
                 }
+            }
+            Ask::Bookkeeping { cmd, answer } => {
+                answered(crate::bookkeeping::execute(actor, cmd, now), answer)?
             }
             Ask::KeeperEvents {
                 plan,
@@ -3760,6 +3846,7 @@ fn refuse_for(
             Ok(Ask::OpeningRow { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Fate { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Standing { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::RunningTrace { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Shown { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Import { answer, .. } | Ask::TakeUp { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
@@ -3782,6 +3869,7 @@ fn refuse_for(
             Ok(Ask::TerminalFacts { answer }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobRecord { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::JobTimeline { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::Bookkeeping { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Delegation { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),

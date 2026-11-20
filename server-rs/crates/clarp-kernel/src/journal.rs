@@ -10,6 +10,8 @@
 //! becomes; what a stretch of a tool's output means, with the position in that output the log
 //! has now reached. There is never one without the other.
 
+mod turn_sessions;
+
 use clarp_ports::log::{AgentLog, Kinds, LogError, NewItem, Seq};
 use serde::{Deserialize, Serialize};
 
@@ -199,6 +201,7 @@ pub enum Reworded {
 
 pub struct Recorder {
     log: Box<dyn AgentLog>,
+    turn_sessions: turn_sessions::TurnSessions,
     agent: Agent,
     cursor: Option<SpoolCursor>,
     /// The position of the newest item. This recorder is the log's one writer, so it knows.
@@ -239,6 +242,7 @@ impl Recorder {
         let mut agent = Agent::new();
         // What changed of a send's delivery before the Host started is not told again.
         agent.deliveries_mut().folding(true);
+        let mut turn_sessions = turn_sessions::TurnSessions::default();
         let mut cursor = None;
         let mut after = 0;
         let mut floor = 0;
@@ -265,6 +269,9 @@ impl Recorder {
                                 seq: item.seq,
                                 transition,
                             })?;
+                        if let Some(turn) = turn_sessions::affected(&event) {
+                            turn_sessions.set(turn, agent.backend_session());
+                        }
                     }
                     kind::SPOOL_CURSOR => {
                         cursor = Some(serde_json::from_slice(&item.body).map_err(corrupt)?);
@@ -282,12 +289,18 @@ impl Recorder {
             .map_or(0, |item| item.seq);
         Ok(Self {
             log,
+            turn_sessions,
             agent,
             cursor,
             last_seq,
             conversation_seq,
             floor,
         })
+    }
+
+    /// Native session of this particular turn, as its own log last bound it.
+    pub fn turn_session(&self, turn: u64) -> Option<&str> {
+        self.turn_sessions.get(turn)
     }
 
     /// The position of the newest item in the log.
@@ -391,6 +404,7 @@ impl Recorder {
             cursor: None,
             failed: None,
             started_again: None,
+            turn_bindings: Vec::new(),
         }
     }
 
@@ -544,6 +558,7 @@ pub struct Batch<'a> {
     failed: Option<JournalError>,
     /// Where in this batch the agent is started again, when it is.
     started_again: Option<usize>,
+    turn_bindings: Vec<(u64, Option<String>)>,
 }
 
 impl Batch<'_> {
@@ -571,6 +586,10 @@ impl Batch<'_> {
             if let Err(transition) = self.work.apply(&event) {
                 self.failed
                     .get_or_insert(JournalError::Illegal { seq: 0, transition });
+            }
+            if let Some(turn) = turn_sessions::affected(&event) {
+                self.turn_bindings
+                    .push((turn, self.work.backend_session().map(str::to_owned)));
             }
             self.events.push(event);
         }
@@ -663,6 +682,9 @@ impl Batch<'_> {
         }
         self.recorder.last_seq = last_seq;
         self.recorder.agent = self.work;
+        for (turn, session) in self.turn_bindings {
+            self.recorder.turn_sessions.set(turn, session.as_deref());
+        }
         if let Some(cursor) = self.cursor {
             self.recorder.cursor = Some(cursor);
         }

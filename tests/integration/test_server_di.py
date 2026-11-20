@@ -4812,6 +4812,31 @@ def test_a_voice_change_writes_only_that_agent(running_server, monkeypatch):
     assert agents_db.get_by_session("claude")["voice_id"] == "fresh-voice"
 
 
+def test_the_snapshot_shows_each_agents_voice_and_changes_are_announced(running_server, monkeypatch):
+    """Issue 475 (feature voice_profile): every agent row shows the voice it is heard with,
+    and a change to it, or to anything every agent's voice depends on, tells open apps."""
+    from lib import events
+    base, _ctx, _srv = running_server
+    sent = []
+    real = events.broadcast
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: (sent.append(dict(event)), real(stream, event)))
+    status, body = _get(base + "/agents/snapshot")
+    snap = json.loads(body)
+    assert status == 200 and snap["voice_profile_version"] and snap["voice_defaults"]["speech"]
+    rows = {row["session"]: row for row in snap["agents"]}
+    assert set(rows["rachel"]["voice_profile"]) == {"speech", "hearing"}
+    assert _post_status(base + "/agent-voice", {
+        "session": "rachel", "voice_id": "c0000000-0000-4000-8000-0000000000ad",
+        "provider": "cartesia"})[0] == 200
+    changed = [e for e in sent if e.get("kind") == "voice-changed"]
+    assert changed and changed[-1]["session"] == "rachel"
+    assert changed[-1]["voice_profile"]["speech"]["provider"]
+    assert _post_status(base + "/transcription-providers", {"language": "no"})[0] == 200
+    assert any(e.get("kind") == "voice-profile" for e in sent)
+    rows = {row["session"]: row for row in json.loads(_get(base + "/agents/snapshot")[1])["agents"]}
+    assert rows["rachel"]["voice_profile"]["hearing"]["language_origin"] == "default"
+
+
 def test_choosing_a_google_voice_accepts_only_the_allowlist_and_keeps_other_providers(
         running_server):
     base, _ctx, _srv = running_server

@@ -90,25 +90,35 @@ def note_handed(language: str | None) -> None:
         seen["language"] = language or "auto"
 
 
-def selected() -> str:
-    value = (settings_store.get_text(LANGUAGE_KEY) or "").strip().lower()
+def parse_language(raw: str | None) -> str:
+    """The stored default language, or DEFAULT_LANGUAGE when unset or invalid."""
+    value = (raw or "").strip().lower()
     return value if _CODE.match(value) else DEFAULT_LANGUAGE
 
 
-def _map(key: str) -> dict[str, str]:
+def selected() -> str:
+    return parse_language(settings_store.get_text(LANGUAGE_KEY))
+
+
+def parse_map(raw: str | None) -> dict[str, str]:
+    """A stored {agent name, persona or session: value} map, keys lowercased."""
     try:
-        raw = json.loads(settings_store.get_text(key) or "{}")
+        parsed = json.loads(raw or "{}")
     except ValueError:
         return {}
-    if not isinstance(raw, dict):
+    if not isinstance(parsed, dict):
         return {}
     return {str(k).strip().lower(): str(v).strip()
-            for k, v in raw.items() if str(k).strip() and str(v).strip()}
+            for k, v in parsed.items() if str(k).strip() and str(v).strip()}
 
 
-def agent_languages() -> dict[str, str]:
+def _map(key: str) -> dict[str, str]:
+    return parse_map(settings_store.get_text(key) or "{}")
+
+
+def parse_agent_languages(raw: str | None) -> dict[str, str]:
     result = {}
-    for key, value in _map(AGENT_LANGUAGES_KEY).items():
+    for key, value in parse_map(raw).items():
         try:
             result[key] = validate_agent(value)
         except ValueError:
@@ -116,17 +126,31 @@ def agent_languages() -> dict[str, str]:
     return result
 
 
+def agent_languages() -> dict[str, str]:
+    return parse_agent_languages(settings_store.get_text(AGENT_LANGUAGES_KEY) or "{}")
+
+
 def agent_engines() -> dict[str, str]:
     return _map(AGENT_ENGINES_KEY)
+
+
+def match(overrides: dict[str, str], agent: dict | None) -> str | None:
+    """The override for this agent row: by name, then persona, then session.
+    The hearing path and the profile (voice_profile) both use this."""
+    if not overrides or not agent:
+        return None
+    for key in (agent.get("name"), agent.get("persona"), agent.get("session")):
+        if key and str(key).strip().lower() in overrides:
+            return overrides[str(key).strip().lower()]
+    return None
 
 
 def _for_session(overrides: dict[str, str], session: str | None) -> str | None:
     if session and overrides:
         from . import agents as agents_db
-        agent = agents_db.get_by_session(session) or {}
-        for key in (agent.get("name"), agent.get("persona"), session):
-            if key and str(key).strip().lower() in overrides:
-                return overrides[str(key).strip().lower()]
+        agent = dict(agents_db.get_by_session(session) or {})
+        agent["session"] = session
+        return match(overrides, agent)
     return None
 
 
@@ -135,14 +159,17 @@ def language_for(session: str | None) -> str:
     return _for_session(agent_languages(), session) or selected()
 
 
+def split_engines(value: str | None) -> list[str]:
+    return [e.strip() for e in (value or "").split(",") if e.strip()]
+
+
 def engines_for(session: str | None) -> list[str]:
     """The agent's own transcription engines in fallback order, or [].
 
     A value may list several engines, comma-separated: the first is used and
     the next ones only when it fails (e.g. "google:chirp_3,elevenlabs:scribe_v2").
     """
-    value = _for_session(agent_engines(), session) or ""
-    return [e.strip() for e in value.split(",") if e.strip()]
+    return split_engines(_for_session(agent_engines(), session))
 
 
 def engine_for(session: str | None) -> str | None:

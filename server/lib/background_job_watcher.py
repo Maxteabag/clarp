@@ -29,6 +29,8 @@ class BackgroundJobWatcher:
         self._last_id = 0
         self._stale_work_due = 0.0
         self._provider_due = 0.0
+        self._voice_due = 0.0
+        self._voice_print: str | None = None
         # (queue_id, queue_seq) -> (not before, the wait that led there),
         # monotonic seconds. A queue id comes again (goal wakes, peer
         # requests); the new row must not inherit the old one's wait.
@@ -53,6 +55,15 @@ class BackgroundJobWatcher:
     def _loop(self) -> None:
         while not self._stop.wait(self.INTERVAL_SEC):
             self._tick()
+            if time.monotonic() >= self._voice_due:
+                self._voice_due = time.monotonic() + self.PROVIDER_INTERVAL_SEC
+                try:
+                    # A hand-edited voice configuration reaches open apps
+                    # (voice_profile); the cached config only, no query.
+                    from . import voice_profile
+                    self._voice_print = voice_profile.watch_config(self.stream, self._voice_print)
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("voiceConfigWatchFail", exc)
             if time.monotonic() >= self._stale_work_due:
                 self._stale_work_due = time.monotonic() + self.STALE_WORK_INTERVAL_SEC
                 try:

@@ -18,6 +18,25 @@ from .turn_command import _TurnSpec, _stop_holds, _park, DispatchError, JanitorD
 from .turn_stop import _record_janitor_cancelled
 
 
+def _working_with(spec: _TurnSpec) -> dict:
+    """The working state's audience: 'agents' when another agent's message
+    started this turn, with that agent when this Host knows it, so an app can
+    say who the agent is working with. Never fails the state it rides on."""
+    from . import coordination
+    try:
+        sender = coordination.sender_of(spec.agent_id, spec.trace_id)
+    except Exception as exc:  # noqa: BLE001
+        log_exception("coordinationStateFail", exc, detail=spec.agent_id)
+        return {}
+    if sender is None:
+        return {"audience": coordination.USER}
+    out = {"audience": coordination.AGENTS}
+    agent = agents_db.get_by_agent_id(sender) if sender else None
+    if agent:
+        out.update(sender_agent_id=sender, sender_name=agent.get("persona") or "")
+    return out
+
+
 class HandoffMixin:
     def _discard_fenced_janitor(self, spec: _TurnSpec) -> None:
         _remove_queued_run(spec.queue_id)
@@ -357,6 +376,7 @@ class HandoffMixin:
                     client_msg_id=spec.client_msg_id,
                     queue_started=bool(spec.queue_id),
                     queue_remaining=turn_queue.pending_count(spec.agent_id),
+                    **_working_with(spec),
                 ))
         except Exception as e:
             log_exception("spawnStateFail", e, detail=spec.session)
