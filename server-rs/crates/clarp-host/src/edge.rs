@@ -2744,11 +2744,13 @@ async fn send_as(
     // (the Python Host's `origins.FOCUS_ORIGINS`).
     let by_a_person =
         origin_is_user || matches!(&origin, Origin::Trigger { name } if name == "oracle");
-    // A message to an agent that is busy waits its turn, as on the Python Host. What differs
-    // is where it waits. A plain message is said: it is in the conversation at once. One sent
-    // with `queue_if_busy` was left for later: it is in the queue until its turn starts, and
-    // when it does not come from a person, a Stop holds it. (The kernel can also take a message
-    // that replaces the running turn; nothing asks for it yet.)
+    // A message to an agent that is busy waits its turn, as on the Python Host, in the queue,
+    // and enters the conversation when its turn starts, whoever sent it (issue 491). What
+    // differs is what is told of it. A plain message was said: it keeps its delivery receipt
+    // while it waits. One sent with `queue_if_busy` was left for later: it goes through the
+    // queue even when nothing is in its way, and when it does not come from a person, a Stop
+    // holds it. (The kernel can also take a message that replaces the running turn; nothing
+    // asks for it yet.)
     // A message from another agent of this Host never takes a running turn's place either:
     // it waits behind it like one left for later, and a Stop that came before does not hold
     // it (the Python Host's rule for a peer's message; one that asks to wait keeps its own).
@@ -2778,6 +2780,7 @@ async fn send_as(
     };
     let message = Message {
         managed_model: None,
+        sent_at_ms: None,
         id,
         marked,
         unminted: own,
@@ -3343,8 +3346,9 @@ fn not_waiting() -> ApiError {
     ApiError::new(StatusCode::NOT_FOUND, "queued message not found")
 }
 
-/// `DELETE /turn-queue/<id>`: its user takes a waiting message back. It never runs, and it
-/// was never in the conversation. A hold that held nothing else is over.
+/// `DELETE /turn-queue/<id>`: its user takes a waiting message back, whether it was said or
+/// left for later. It never runs, and it was never in the conversation: no row of it is left.
+/// A hold that held nothing else is over.
 async fn take_back(
     State(app): State<App>,
     Path(id): Path<String>,
@@ -3361,8 +3365,10 @@ async fn take_back(
 }
 
 /// `PUT /turn-queue/<id>` with `{text}`: its user changes the words of a waiting message. Its
-/// turn answers the new words. A message that waits its turn in the conversation was said,
-/// and what was said stands: on this Host that is every message that was not left for later.
+/// turn answers the new words, and its row, written when that turn starts, holds them: a
+/// rewording either comes before the start or finds nothing waiting. Only a message that a
+/// build before issue 491 put into the conversation while it waited is refused: what is in the
+/// conversation was said, and stands.
 async fn reword(
     State(app): State<App>,
     Path(id): Path<String>,

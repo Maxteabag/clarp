@@ -205,7 +205,8 @@ pub enum Reworded {
     Done,
     /// It does not wait: it ran, was taken back, or never was.
     NotWaiting,
-    /// It waits its turn in the conversation, where it was said: what was said stands.
+    /// It waits its turn in the conversation, where a build before issue 491 wrote it when it
+    /// was said: what was said stands.
     InConversation,
 }
 
@@ -442,8 +443,9 @@ impl Recorder {
         }
     }
 
-    /// Writes the words of a waiting message anew. Only a message that waits outside the
-    /// conversation has words that can change: one that is in the conversation was said.
+    /// Writes the words of a waiting message anew. Every message that waits does so outside the
+    /// conversation, and its words can change; one that an older build wrote into the
+    /// conversation while it waited was said, and stands.
     /// `rewrite` is given the message as it is kept, and answers it as it is to be kept. The
     /// message as it was stays in the log where it is, and nothing reads it there any more.
     pub fn reword(
@@ -543,9 +545,10 @@ impl Recorder {
         }
         let message_seq = self.last_seq + 1;
         let turn = self.agent.next_turn();
-        // A message that starts at once is in the conversation at once, however it was admitted.
-        let outside =
-            message.admission.waits_outside() && !self.agent.starts_at_once(message.admission);
+        // A message enters the conversation when its turn starts, whoever sent it and however
+        // it was admitted: at once when its turn starts at once, and otherwise in the write
+        // that starts it (D14, issue 491).
+        let outside = !self.agent.starts_at_once(message.admission);
         let kind = if outside {
             kind::WAITING
         } else {
@@ -578,6 +581,16 @@ impl Recorder {
             effects: committed.effects,
         })
     }
+}
+
+/// A waiting message's body as its row keeps it: with the moment it was sent
+/// ([`crate::conversation::SENT_AT`]). A body that is no JSON object is kept as it is.
+fn sent(body: Vec<u8>, at_ms: i64) -> Vec<u8> {
+    let Ok(serde_json::Value::Object(mut message)) = serde_json::from_slice(&body) else {
+        return body;
+    };
+    message.insert(crate::conversation::SENT_AT.to_string(), at_ms.into());
+    serde_json::to_vec(&message).unwrap_or(body)
 }
 
 /// Things that happened together, on their way into the log as one append.
@@ -639,7 +652,8 @@ impl Batch<'_> {
     }
 
     /// A turn starts: if its message waited outside the conversation, it enters it now, in the
-    /// same write that starts the turn.
+    /// same write that starts the turn, and stands where the turn starts. Its row keeps when it
+    /// was sent: when its turn was accepted, which a new wording does not move.
     fn enter(&mut self, turn: TurnId, message_seq: Seq, now_ms: i64) {
         if message_seq > self.recorder.last_seq {
             return; // accepted in this very batch: it is in the conversation already
@@ -652,7 +666,10 @@ impl Batch<'_> {
         match waiting {
             Ok(found) => {
                 if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
-                    let mut item = NewItem::new(kind::MESSAGE, now_ms, stored.body).in_turn(turn.0);
+                    let sent_at = self.recorder.agent.waiting().find(|queued| queued.id == turn);
+                    let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);
+                    let body = sent(stored.body, sent_at);
+                    let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
                     item.key = stored.key;
                     self.items.push(item);
                 }
@@ -1263,8 +1280,8 @@ mod tests {
             .accept_message(message("u-2", Admission::Queue), 2)
             .unwrap();
         assert!(
-            said.entered,
-            "said while the agent is busy: in the conversation, and waiting"
+            !said.entered,
+            "said while the agent is busy: waiting, and not in the conversation yet"
         );
         let later = recorder
             .accept_message(message("u-3", Admission::Later), 3)
@@ -1272,8 +1289,8 @@ mod tests {
         assert!(!later.entered);
         assert_eq!(
             rows(&recorder),
-            vec![("u-1".to_string(), Some(1)), ("u-2".to_string(), Some(2))],
-            "what was left for later is in the queue, not in the conversation"
+            vec![("u-1".to_string(), Some(1))],
+            "what waits is in the queue, not in the conversation"
         );
         let before = recorder.conversation_seq();
         assert!(
@@ -1283,18 +1300,18 @@ mod tests {
                 .duplicate,
             "and it is still the same message when it is sent again"
         );
-        // The first turn ends, the second starts: its message was in the conversation already.
+        assert_eq!(recorder.conversation_seq(), before);
+        // The first turn ends, the second starts: its message enters, in the same write.
         let ended = |turn| Command::TurnEnded {
             turn: TurnId(turn),
             outcome: crate::turn::RunOutcome::Completed,
         };
         recorder.handle(ended(1), 5).unwrap();
-        assert_eq!(rows(&recorder).len(), 2);
         assert_eq!(
-            recorder.conversation_seq(),
-            before,
-            "the conversation did not change"
+            rows(&recorder),
+            vec![("u-1".to_string(), Some(1)), ("u-2".to_string(), Some(2))]
         );
+        assert_eq!(recorder.conversation_seq(), recorder.last_seq());
         // The second ends, the third starts: now its message enters, in the same write.
         let effects = recorder.handle(ended(2), 6).unwrap();
         assert_eq!(
@@ -1326,6 +1343,218 @@ mod tests {
                 .is_some_and(|item| item.kind == kind::MESSAGE),
             "the id finds the row, not the waiting copy"
         );
+    }
+
+    /// Issue 491: a message that must wait enters the conversation in the write that starts its
+    /// turn, whoever sent it, and its row keeps when it was sent. One that starts at once is
+    /// written as it always was.
+    #[test]
+    fn a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts() {
+        let engine = MemEngine::new();
+        let mut recorder = open(&engine);
+        let said = |key: &str, text: &str, origin: Origin, admission| Incoming {
+            key: Some(key.to_string()),
+            body: serde_json::to_vec(&serde_json::json!({ "id": key, "text": text })).unwrap(),
+            origin,
+            admission,
+        };
+        let items = |r: &Recorder, key: &str| {
+            let all = r.log().read_after(0, Kinds::ALL, 1_000).unwrap();
+            let of = all.into_iter().filter(|item| item.key.as_deref() == Some(key));
+            of.map(|item| (item.kind, item.ts_ms, item.turn, item.body))
+                .collect::<Vec<_>>()
+        };
+        let rows = |r: &Recorder| {
+            let all = r.log().read_after(0, kind::ROWS, 1_000).unwrap();
+            all.into_iter()
+                .map(|item| item.key.unwrap_or_default())
+                .collect::<Vec<_>>()
+        };
+        let body = |text: &str, key: &str| {
+            serde_json::to_vec(&serde_json::json!({ "id": key, "text": text })).unwrap()
+        };
+        let sent = |text: &str, key: &str, at: i64| {
+            let row = serde_json::json!({ "id": key, "text": text, "sent_at_ms": at });
+            serde_json::to_vec(&row).unwrap()
+        };
+        let ended = |turn| Command::TurnEnded {
+            turn: TurnId(turn),
+            outcome: RunOutcome::Completed,
+        };
+
+        // A free agent: the message starts at once and is written as it always was.
+        let first = recorder
+            .accept_message(said("u-m1", "one", Origin::User, Admission::Queue), 10)
+            .unwrap();
+        assert!(first.entered);
+        assert_eq!(
+            items(&recorder, "u-m1"),
+            vec![(kind::MESSAGE, 10, Some(1), body("one", "u-m1"))],
+            "no send time of its own: its row's time is when it was sent"
+        );
+
+        // The user, a trigger and a nameless agent each say something while it is busy: each
+        // waits outside the conversation, the user's with its delivery receipt.
+        let trigger = Origin::Trigger {
+            name: "schedule".to_string(),
+        };
+        let nameless = Origin::Agent {
+            agent_id: String::new(),
+        };
+        let mut waiting = Vec::new();
+        for (key, origin, at) in [
+            ("u-m2", Origin::User, 20),
+            ("u-t3", trigger, 21),
+            ("u-a4", nameless, 22),
+        ] {
+            let accepted = recorder
+                .accept_message(said(key, key, origin, Admission::Queue), at)
+                .unwrap();
+            assert!(!accepted.entered && !accepted.duplicate, "{key}");
+            assert_eq!(
+                items(&recorder, key),
+                vec![(kind::WAITING, at, accepted.turn.map(|t| t.0), body(key, key))]
+            );
+            waiting.push(accepted);
+        }
+        assert_eq!(rows(&recorder), vec!["u-m1"], "nothing but the first is a row");
+        let ids = |r: &Recorder| r.agent().waiting().map(|q| q.id.0).collect::<Vec<_>>();
+        assert_eq!(ids(&recorder), vec![2, 3, 4]);
+        assert!(
+            recorder.agent().deliveries().holds(2),
+            "what was said keeps its receipt while it waits"
+        );
+        assert!(!recorder.agent().deliveries().holds(3), "a trigger's has none");
+
+        // The same id again: one item, and nothing new.
+        let last = recorder.last_seq();
+        let again = recorder
+            .accept_message(said("u-m2", "u-m2", Origin::User, Admission::Queue), 23)
+            .unwrap();
+        assert!(again.duplicate && !again.entered);
+        assert_eq!(again.message_seq, waiting[0].message_seq);
+        assert_eq!(recorder.last_seq(), last);
+
+        // The user rewords it while it waits, and takes the nameless agent's back.
+        let reworded = recorder
+            .reword(
+                TurnId(2),
+                |_| Ok(body("two, better", "u-m2")),
+                24,
+            )
+            .unwrap();
+        assert_eq!(reworded, Reworded::Done);
+        recorder
+            .handle(
+                Command::Withdraw {
+                    turn: TurnId(4),
+                    by: "user".to_string(),
+                },
+                25,
+            )
+            .unwrap();
+        assert_eq!(rows(&recorder), vec!["u-m1"]);
+
+        // A crash between the acceptance and the start: what waits is still waiting, and no
+        // row of it is there.
+        drop(recorder);
+        let mut recorder = open(&engine);
+        assert_eq!(ids(&recorder), vec![2, 3]);
+        assert_eq!(rows(&recorder), vec!["u-m1"]);
+
+        // The first turn ends: the second starts, and its message enters in that very write,
+        // with the words it was given last and the moment it was sent.
+        let reworded_seq = recorder.agent().waiting().next().unwrap().message_seq;
+        assert_ne!(reworded_seq, waiting[0].message_seq);
+        let before = recorder.last_seq();
+        let effects = recorder.handle(ended(1), 30).unwrap();
+        assert_eq!(
+            effects,
+            vec![Effect::StartTurn {
+                turn: TurnId(2),
+                message_seq: reworded_seq
+            }],
+            "the turn answers the reworded message"
+        );
+        let row = recorder
+            .log()
+            .read_after(before, kind::ROWS, 10)
+            .unwrap();
+        assert_eq!(
+            row.iter()
+                .map(|item| (item.kind, item.ts_ms, item.turn, item.body.clone()))
+                .collect::<Vec<_>>(),
+            vec![(kind::MESSAGE, 30, Some(2), sent("two, better", "u-m2", 20))],
+            "the row stands where its turn starts, and keeps when it was sent"
+        );
+        assert_eq!(recorder.conversation_seq(), recorder.last_seq());
+        assert_eq!(
+            recorder.reword(TurnId(2), |_| Ok(body("too late", "u-m2")), 31).unwrap(),
+            Reworded::NotWaiting,
+            "once its turn has started there is nothing to reword"
+        );
+        assert_eq!(rows(&recorder), vec!["u-m1", "u-m2"]);
+        recorder.handle(ended(2), 40).unwrap();
+        assert_eq!(rows(&recorder), vec!["u-m1", "u-m2", "u-t3"]);
+        let trigger_row = recorder.log().find("u-t3").unwrap().unwrap();
+        assert_eq!(
+            (trigger_row.kind, trigger_row.ts_ms, trigger_row.body),
+            (kind::MESSAGE, 40, sent("u-t3", "u-t3", 21)),
+            "a trigger's the same"
+        );
+
+        // A message the user wants now, while a turn runs: it ends that turn, and enters when
+        // its own starts.
+        let direct = recorder
+            .accept_message(said("u-d5", "now", Origin::User, Admission::Direct), 50)
+            .unwrap();
+        assert!(!direct.entered);
+        assert_eq!(direct.effects, vec![Effect::StopTurn { turn: TurnId(3) }]);
+        assert_eq!(rows(&recorder), vec!["u-m1", "u-m2", "u-t3"]);
+        recorder.handle(ended(3), 55).unwrap();
+        assert_eq!(rows(&recorder), vec!["u-m1", "u-m2", "u-t3", "u-d5"]);
+        recorder.handle(ended(5), 56).unwrap();
+
+        // Held: background work waits, held, outside; what the user says after the hold starts
+        // at once and is written as it always was.
+        recorder
+            .handle(
+                Command::Stop {
+                    by: Control::by("user"),
+                },
+                60,
+            )
+            .unwrap();
+        let background = recorder
+            .accept_message(said("u-b6", "bg", trigger_of("schedule"), Admission::Background), 61)
+            .unwrap();
+        assert!(!background.entered);
+        let after = recorder
+            .accept_message(said("u-m7", "after", Origin::User, Admission::Queue), 62)
+            .unwrap();
+        assert!(after.entered);
+        assert_eq!(
+            items(&recorder, "u-m7"),
+            vec![(kind::MESSAGE, 62, Some(7), body("after", "u-m7"))]
+        );
+        assert_eq!(
+            rows(&recorder),
+            vec!["u-m1", "u-m2", "u-t3", "u-d5", "u-m7"],
+            "the taken back and the held are no rows"
+        );
+        // Each message is a waiting item or a row, never both at once: a row is only ever
+        // written after its waiting copy, in the write that started its turn.
+        for key in ["u-m2", "u-t3", "u-d5"] {
+            let kinds: Vec<u16> = items(&recorder, key).iter().map(|item| item.0).collect();
+            assert_eq!(kinds.last(), Some(&kind::MESSAGE), "{key}");
+            assert_eq!(kinds.iter().filter(|k| **k == kind::MESSAGE).count(), 1, "{key}");
+        }
+    }
+
+    fn trigger_of(name: &str) -> Origin {
+        Origin::Trigger {
+            name: name.to_string(),
+        }
     }
 
     #[test]
