@@ -130,7 +130,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         utterance_id=utterance_id, client_ts=client_ts, record_voice=record_voice)
     if isinstance(ran, TranscriptionOutcome):
         return ran
-    text, ends_terminal, _dur, requested_model = ran
+    text, ends_terminal, _dur, requested_model, engine_fallback = ran
     latency_ms = int((time.monotonic() - started) * 1000)
     return _after_transcript(
         ctx, text=text, ends_terminal=ends_terminal, dur=_dur, requested_model=requested_model,
@@ -138,7 +138,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         ctype=ctype, hands_free=hands_free, trace_id=trace_id, vocab_run_id=vocab_run_id,
         transcription_id=transcription_id, fingerprint=fingerprint,
         utterance_id=utterance_id, client_ts=client_ts, record_voice=record_voice,
-        spawn_voice_metrics=spawn_voice_metrics)
+        spawn_voice_metrics=spawn_voice_metrics, engine_fallback=engine_fallback)
 
 
 def _plan_call(call_scope: dict, requested_model: str, audio_bytes: bytes):
@@ -270,7 +270,9 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                  focus: str, audio_bytes: bytes, ctype: str, prompt, trace_id: str,
                  vocab_run_id: int, utterance_id: str, client_ts, record_voice: RecordVoice):
     """Transcribe on the planned engines, falling back in order. Returns
-    (text, ends_terminal, duration, model that ran) or the error outcome."""
+    (text, ends_terminal, duration, model that ran, engine_fallback or None) or the
+    error outcome."""
+    engine_fallback = None
     try:
         # Authoritative transcript: wait for the whisper lock rather than
         # 429 — best-effort live-transcription partials must yield to it.
@@ -297,7 +299,17 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
                         break
                     except Exception as e:  # noqa: BLE001 - busy, loading or missing too (VP-09)
                         if index == len(agent_fallbacks):
-                            raise
+                            from .stt_providers import LanguageSetUnsupported
+                            if not isinstance(e, LanguageSetUnsupported):
+                                raise
+                            # R152: the engine (often one the device chose) cannot take the
+                            # agent's language set. A choice made in another screen must not
+                            # lose the recording: the Host's chain hears it, and says which.
+                            text, ends_terminal, _dur, ran = _language_set_fallback(
+                                stt, model_transcribe, engine, audio_bytes, ctype, prompt, focus)
+                            engine_fallback = {"from": engine, "to": ran, "reason": "language_set"}
+                            requested_model = ran
+                            break
                         log_exception("sttAgentEngineFallback", e, detail=engine)
         elif requested_model and requested_model != "server-default":
             raise STTUnknownModelError(
@@ -336,7 +348,21 @@ def _run_engines(stt, *, call_stt, call_steps, requested_model: str, agent_fallb
         if call_stt is not None and "report" in call_stt:
             failed.payload["stt"] = call_stt["report"]          # every attempt, not hidden
         return failed
-    return text, ends_terminal, _dur, requested_model
+    return text, ends_terminal, _dur, requested_model, engine_fallback
+
+
+def _language_set_fallback(stt, model_transcribe, engine: str, audio_bytes: bytes, ctype: str,
+                           prompt, focus: str):
+    """Hear a recording whose engine cannot take the agent's language set with
+    one that can (stt_providers.language_set_engine), else the Host's own engine."""
+    from . import stt_providers
+    target = stt_providers.language_set_engine()
+    log("sttLanguageSetFallback", f"session={focus or '-'} {engine} -> {target or 'server-default'}")
+    if target:
+        text, ends_terminal, dur = model_transcribe(target, audio_bytes, ctype, prompt, wait=10.0)
+        return text, ends_terminal, dur, target
+    text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
+    return text, ends_terminal, dur, "server-default"
 
 
 def _after_transcript(ctx, *, text: str, ends_terminal: bool, dur, requested_model: str,
@@ -344,7 +370,8 @@ def _after_transcript(ctx, *, text: str, ends_terminal: bool, dur, requested_mod
                       hands_free: bool, trace_id: str, vocab_run_id: int, transcription_id: str,
                       fingerprint: str, utterance_id: str, client_ts,
                       record_voice: RecordVoice,
-                      spawn_voice_metrics: SpawnVoiceMetrics) -> TranscriptionOutcome:
+                      spawn_voice_metrics: SpawnVoiceMetrics,
+                      engine_fallback: dict | None = None) -> TranscriptionOutcome:
     """Everything a transcript sets off: the heard-audio copy, the vocab run's
     result, herald grants, the trace, events and voice metrics, and the stored
     result the client polls."""
@@ -430,6 +457,9 @@ def _after_transcript(ctx, *, text: str, ends_terminal: bool, dur, requested_mod
     if call_stt is not None:
         # Call-scoped only: what was asked for and what ran, field by field.
         response["stt"] = call_stt["report"]
+    if engine_fallback is not None:
+        # R152: the engine asked for could not take the agent's language set.
+        response["engine_fallback"] = dict(engine_fallback)
     try:
         transcription_results.store(
             transcription_id, fingerprint, response)
