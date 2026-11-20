@@ -416,6 +416,9 @@ pub(crate) mod at_the_port {
         hub: Arc<Hub>,
         refused: Refused,
         pub(crate) said: Arc<Mutex<Vec<String>>>,
+        /// The engine the fleet's store was opened from: a second handle on the same tables, to
+        /// read what no desk reads (a copy set aside).
+        engine: MemKeyValue,
     }
 
     impl Place {
@@ -564,9 +567,10 @@ pub(crate) mod at_the_port {
         };
         let refused: Refused = Arc::default();
         let refused_read: Refused = Arc::default();
+        let engine = MemKeyValue::new();
         let mut store = Refusing {
             refused_read: refused_read.clone(),
-            inner: MemKeyValue::new().open(Path::new(&dir)).unwrap(),
+            inner: engine.open(Path::new(&dir)).unwrap(),
             refused: refused.clone(),
         };
         store
@@ -585,6 +589,7 @@ pub(crate) mod at_the_port {
             hub,
             refused,
             said,
+            engine,
         })
     }
 
@@ -923,7 +928,12 @@ pub(crate) mod at_the_port {
         assert_eq!(place.fleet.kept(key, "records".into()).await.unwrap(), None);
         let counted = place.fleet.left_out().counts();
         assert_eq!(counted.get("transcription-models"), Some(&1));
-        let _ = original;
+        // The copy holds the bytes that were stored, whole.
+        let raw = place.engine.open(&place.dir).unwrap();
+        assert_eq!(
+            raw.get(&fleet::shelf(key), "records.unreadable").unwrap(),
+            Some(original)
+        );
     }
 
     #[tokio::test]
