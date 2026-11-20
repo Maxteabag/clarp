@@ -37,6 +37,7 @@ one of these:
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
 | `managed_skills`, `backend_auth`, `harness_model_providers` | to be built |
+| `compaction_outcome` | to be built: the port of the Python Host's PR 483 (R148), what the user's last compaction of an agent did, on its row (`last_compaction`). The Python Host's contract is 107 with it; this Host's stays 106 until the port |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
