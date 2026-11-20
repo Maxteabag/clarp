@@ -6,7 +6,7 @@ use super::*;
 
 /// A stand-in for Claude Code. Given its own word for compacting as its whole message, it does
 /// what the next of `modes` says: `record` compacts and says so with both sizes, as the tool
-/// does (recorded on 17 Nov 2026); `slow` does the same after a while; `none` ends well without
+/// does (recorded on 17 Nov 2026); `slow` does the same, slowly; `none` ends well without
 /// a record; `stall` says it is compacting and waits to be stopped; `fail` ends on an error
 /// result; `die` ends without a result. Given anything else it answers, and says how much its
 /// conversation holds; given words with `auto` in them it first compacts by itself, as the
@@ -38,7 +38,7 @@ if blocks == ["/compact"]:
     if mode == "stall":
         time.sleep(60)
     if mode == "slow":
-        time.sleep(4)
+        time.sleep(1)
     if mode == "die":
         sys.exit(0)
     if mode == "fail":
@@ -48,6 +48,8 @@ if blocks == ["/compact"]:
     say(type="system", subtype="status", status=None, compact_result="success")
     if mode in ("record", "slow"):
         boundary("manual", 30729, 8957)
+    if mode == "slow":
+        time.sleep(4)
     done()
     sys.exit(0)
 say(type="system", subtype="init", model="stand-in")
@@ -204,11 +206,15 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     let words = "Claude Code ended without saying how it went, so whether it compacted is not known";
     assert_eq!(five, said("unknown", json!(30_729), Value::Null, words, &five["at"]));
 
-    // The Host goes while the tool compacts: the Host that comes back reads what the tool
-    // said, and says what it did.
+    // The Host goes after the tool recorded the compaction and before its turn ended: the Host
+    // that comes back reads again what the tool said, and says what it did.
     compact(&host);
     wait_for("the row to say it is compacting", || {
         row_of(&host, &agent)["compacting"] == true
+    });
+    wait_for("the tool's record to be read", || {
+        let row = row_of(&host, &agent);
+        row["busy"] == true && row["latest_state"] == "thinking"
     });
     host.kill();
     let host = place.start_in("", &[], &world);
