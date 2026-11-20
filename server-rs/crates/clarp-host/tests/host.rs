@@ -25,6 +25,8 @@ mod compaction_outcome;
 mod contacts;
 #[path = "host/controller_actions.rs"]
 mod controller_actions;
+#[path = "host/coordination.rs"]
+mod coordination;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]
