@@ -170,6 +170,9 @@ pub enum Signal {
     Context {
         tokens: u64,
     },
+    /// The tool said how its turn went, in a result of its own: a failure after this is one
+    /// the tool told, not a process that ended without a word.
+    Concluded,
     /// The tool's own record that it made its conversation shorter, with the sizes it says
     /// (`clarp_kernel::compaction::boundary`). What it means is the actor's to say: only of the
     /// turn the user asked for it in.

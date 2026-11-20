@@ -54,6 +54,7 @@ fn stored(signals: &[Signal]) -> Vec<&Signal> {
                     | Signal::Model(_)
                     | Signal::Usage { .. }
                     | Signal::Context { .. }
+                    | Signal::Concluded
                     | Signal::Cost { .. }
             )
         })

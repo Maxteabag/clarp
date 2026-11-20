@@ -47,9 +47,10 @@ fn what_is_said_has_the_python_hosts_shape() {
         ]),
         vectors["outcomes"]
     );
+    // Python writes the ceiling as the fraction it is.
     assert_eq!(
-        json!(compaction::HARD_CAP_SEC as f64),
-        vectors["hard_cap_sec"]
+        vectors["hard_cap_sec"].to_string(),
+        format!("{}.0", compaction::HARD_CAP_SEC)
     );
     assert_eq!(counted, 12);
 }
@@ -112,7 +113,12 @@ fn claude_codes_record_is_read_as_on_the_python_host() {
 /// Host does not: the size after, where Claude Code's record says it.
 #[test]
 fn a_compaction_turns_end_says_what_it_did() {
-    let record = |pre, post| Some(Boundary { pre_tokens: pre, post_tokens: post });
+    let record = |pre, post| {
+        Some(Boundary {
+            pre_tokens: pre,
+            post_tokens: post,
+        })
+    };
     let python = |before, proof, ending| compaction::decide_claude(before, proof, true, ending);
     let stopped = Outcome::Stopped {
         by: "user".to_string(),
@@ -130,7 +136,8 @@ fn a_compaction_turns_end_says_what_it_did() {
     // A record with both sizes: compacted, the size after is the tool's own number, and the
     // words say nothing of a next call.
     for ended in [&Outcome::Completed, &stopped, &failed, &interrupted] {
-        let said = compaction::decide(ended, record(30_729, Some(8_957)), Some(41_250), "");
+        // Whether or not the tool said how it went: the record is its word.
+        let said = compaction::decide(ended, record(30_729, Some(8_957)), Some(41_250), "", false);
         let mut python = python(Some(41_250), Some(30_729), "settled");
         assert_eq!(said.outcome, compaction::COMPACTED);
         assert_eq!(said.after_tokens, Some(8_957));
@@ -142,17 +149,33 @@ fn a_compaction_turns_end_says_what_it_did() {
         counted += 1;
     }
     // A record without a size after: the Python Host's answer as it is.
-    let said = compaction::decide(&Outcome::Completed, record(30_729, None), Some(41_250), "");
+    let said = compaction::decide(
+        &Outcome::Completed,
+        record(30_729, None),
+        Some(41_250),
+        "",
+        true,
+    );
     assert_eq!(said, python(Some(41_250), Some(30_729), "settled"));
     // A record without a size before: the gauge before is the size before.
-    let said = compaction::decide(&Outcome::Completed, record(0, Some(8_957)), Some(41_250), "");
+    let said = compaction::decide(
+        &Outcome::Completed,
+        record(0, Some(8_957)),
+        Some(41_250),
+        "",
+        true,
+    );
     assert_eq!(said.before_tokens, Some(41_250));
-    let said = compaction::decide(&Outcome::Completed, record(0, None), None, "");
+    let said = compaction::decide(&Outcome::Completed, record(0, None), None, "", true);
     assert_eq!(said, python(None, Some(0), "settled"));
     counted += 3;
     // No record.
-    let none = |ended: &Outcome| compaction::decide(ended, None, Some(41_250), "");
-    assert_eq!(none(&Outcome::Completed), python(Some(41_250), None, "settled"));
+    let none = |ended: &Outcome| compaction::decide(ended, None, Some(41_250), "", true);
+    let unsaid = |ended: &Outcome| compaction::decide(ended, None, Some(41_250), "", false);
+    assert_eq!(
+        none(&Outcome::Completed),
+        python(Some(41_250), None, "settled")
+    );
     assert_eq!(none(&stopped), python(Some(41_250), None, "stopped"));
     let expect = |kind: &str, detail: &str| Decided {
         outcome: kind.to_string(),
@@ -182,6 +205,23 @@ fn a_compaction_turns_end_says_what_it_did() {
         kind: String::new(),
     };
     assert_eq!(none(&unkinded), none(&failed));
-    counted += 6;
-    assert_eq!(counted, 13);
+    // A failure without the tool's word: its process ended without a result, and it may have
+    // compacted. One the Host never started did not.
+    assert_eq!(
+        unsaid(&failed),
+        expect(compaction::UNKNOWN, compaction::ENDED_UNSAID)
+    );
+    let never = Outcome::not_started("the tool could not be started".to_string());
+    let told = clarp_kernel::failures::told(
+        clarp_kernel::failures::NOT_STARTED,
+        "the tool could not be started",
+        "",
+        clarp_kernel::failures::Known::default(),
+    );
+    assert_eq!(unsaid(&never), expect(compaction::NOT_COMPACTED, &told.row));
+    assert_eq!(unsaid(&withdrawn), none(&withdrawn));
+    assert_eq!(unsaid(&stopped), none(&stopped));
+    assert_eq!(unsaid(&Outcome::Completed), none(&Outcome::Completed));
+    counted += 11;
+    assert_eq!(counted, 18);
 }
