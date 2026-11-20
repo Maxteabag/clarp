@@ -92,3 +92,35 @@ def test_with_no_id_on_the_imported_line_the_rule_is_unchanged(tmp_path, monkeyp
     live = _stream(aid, "msg_A", "Synthetic words of one message.")
     _import(aid, path)
     assert live["id"] in [row_id for row_id, _ in _rows(aid)]
+
+
+def test_with_no_id_on_the_line_an_unkeyed_live_row_is_kept_as_on_main(tmp_path, monkeypatch):
+    """The reviewer's surviving mutant: an imported line WITHOUT an id beside an UNKEYED live row
+    (agy, grok, opencode and muse stream one row per trace, with no key). With no id there is no
+    identity to match, so the row is kept and nothing asks the clients to reload, as on main."""
+    aid, path, now = _opened_case(tmp_path, monkeypatch, "defaults")
+    _line(path, "Synthetic words of one message.", 200, message_id="")
+    _import(aid, path)
+    now[0] = BASE + 300
+    live = _stream(aid, "", "Synthetic words of one message.")
+    before = _replace_revision(aid)
+    _import(aid, path)
+    assert live["id"] in [row_id for row_id, _ in _rows(aid)]
+    assert _replace_revision(aid) == before
+
+
+def test_each_retraction_of_its_own_stream_is_one_line_without_ids(tmp_path, monkeypatch):
+    lines = []
+    from lib import log as log_module
+    real = log_module.log
+    monkeypatch.setattr(log_module, "log", lambda event, detail="", *a, **k: (
+        lines.append((event, detail)), real(event, detail, *a, **k)))
+    aid, path, now = _opened_case(tmp_path, monkeypatch, "defaults")
+    _line(path, "Synthetic words of one message.", 200, message_id="msg_A")
+    _import(aid, path)
+    now[0] = BASE + 300
+    _stream(aid, "msg_A", "Synthetic words of one message.")
+    _import(aid, path)
+    retracted = [detail for event, detail in lines if event == "importLiveOwnStreamRetracted"]
+    assert retracted == ["backend=claude count=1"]
+    assert "msg_A" not in retracted[0] and aid not in retracted[0]

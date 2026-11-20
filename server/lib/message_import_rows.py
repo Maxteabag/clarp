@@ -238,6 +238,9 @@ class _FinalRows:
                     self._unresolved_peers[start_seq + index] = group
         self._turns = {row["trace_id"]: row for row in turn_index._rows} if turn_index else {}
         self._declined = {}
+        # Live rows this import found to be the stream of a message it imports (R107): the
+        # cleanup retracts them, and counts them in one line (importLiveOwnStreamRetracted).
+        self.own_streams = set()
         self._occupied_adoptions = set()
         self._guard_logged = False
         self._candidate_traces = dict.fromkeys(
@@ -421,6 +424,7 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
             if row["kind"] is None and row["visible"] == visible:
                 matches.append(row)
             elif own and row["message_id"] == own:
+                final_rows.own_streams.add(row["message_id"])
                 continue
             else:
                 final_rows.decline_live(row, trace, seq)
