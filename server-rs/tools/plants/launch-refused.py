@@ -11,6 +11,7 @@ import runner
 
 RUNS = {
     'vectors': ['test', '-p', 'clarp-kernel', '--test', 'launch_refused_vectors'],
+    'unit': ['test', '-p', 'clarp-kernel', '--lib', 'launch_refused::'],
     'actor': ['test', '-p', 'clarp-actor', '--test', 'actor', '--', 'r121_'],
     'host': ['test', '--test', 'host', '--', 'launch_refused::'],
 }
@@ -43,6 +44,9 @@ PLANTS = [
      '    let doubled = 1_i64 << failures.min(16);'),
     (K, 'vectors', 'the longest wait is shorter', 'pub const MAX_MS: i64 = 60_000;', 'pub const MAX_MS: i64 = 59_000;'),
     (K, 'vectors', 'a ninth refusal ends the turn', 'pub const PARK_AFTER: u32 = 8;', 'pub const PARK_AFTER: u32 = 9;'),
+    (K, 'unit', 'refusals that alternate never end the turn', '        if self.identical >= PARK_AFTER || self.failures >= MOST {',
+     '        if self.identical >= PARK_AFTER {'),
+    (K, 'unit', 'a twenty-first refusal ends the turn', 'pub const MOST: u32 = 20;', 'pub const MOST: u32 = 21;'),
     (K, 'vectors', 'another refusal does not begin the count of one again',
      '        self.identical = if signed == self.signature {', '        self.identical = if true {'),
     (K, 'vectors', "the notice keeps a refusal's last dot", "    let error = error.trim_end_matches('.');",
