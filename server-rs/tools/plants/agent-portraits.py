@@ -17,7 +17,7 @@ PLANTS = [
     (K,'settings','ignore on','"yes" | "on"', '"yes" | "no"'),
     (K,'settings','ignore true','"true" | "1"', '"false" | "1"'),
     (P,'host','wrong validation receipt','"model_avatars required"','"model required"'),
-    (P,'host','save into another preference','portraits::MODEL_SETTING.to_owned()', '"other".to_owned()'),
+    (P,'host','save into another preference','clarp_kernel::portraits::MODEL_SETTING.to_owned()', '"other".to_owned()'),
     (H,'host','read a different snapshot preference','directory.setting(clarp_kernel::portraits::MODEL_SETTING)','directory.setting("other")'),
     (H,'host','use another backend default setting','format!("{}_model", view.backend)','format!("{}_effort", view.backend)'),
     (F,'host','omit configured model family','model_files(persona, backend, model, default_model)','model_files(persona, backend, model, "")'),
