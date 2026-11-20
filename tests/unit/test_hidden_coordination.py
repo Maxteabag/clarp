@@ -814,3 +814,42 @@ def test_a_page_of_marked_rows_does_not_walk_the_conversation(world):
     large = steps(1500)             # the same page, in a conversation 1,500 rows longer
     db.close_local()
     assert large < small * 3 + 50, (small, large)
+
+
+def _trace_lookups(read) -> list[str]:
+    """Every statement ``read`` runs that looks ``messages`` up by a trace."""
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        read()
+    finally:
+        con.set_trace_callback(None)
+    return [sql for sql in seen if "FROM messages" in sql and "trace_id =" in sql
+            and sql.lstrip().upper().startswith("SELECT")]
+
+
+def _reads_by_trace(sql: str) -> bool:
+    plan = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql)]
+    return any("USING INDEX idx_messages_trace (trace_id=?)" in step for step in plan) and not any(
+        "idx_messages_agent" in step for step in plan)
+
+
+def test_every_lookup_of_a_turn_s_rows_goes_by_its_trace_never_by_the_agent(world):
+    """The mark wall (inside every agent send's write), a note's conversation, a loosened turn's
+    restamp and a settled turn's stamp each read one turn; none may walk the conversation."""
+    from lib import message_writes
+    world.send("t-user", "the user's own", client="c-user")
+    world.send("t-boss", "from the boss", origin="agent", sender=world.boss, client="c-boss")
+    lookups = {
+        "the mark wall": lambda: coordination.holds_user_word(db.conn(), world.id, "t-boss"),
+        "a note's conversation": lambda: agent_notes._conversation_of(world.id, "t-boss"),
+        "a loosened turn's restamp": lambda: coordination.loosen(world.id, "t-boss"),
+        "a settled turn's stamp": lambda: message_writes.turn_stamp(db.conn(), world.id, "t-boss"),
+    }
+    for name, read in lookups.items():
+        statements = _trace_lookups(read)
+        assert statements, f"{name} ran no lookup of messages by trace"
+        for sql in statements:
+            assert _reads_by_trace(sql), (name, sql)
+    db.close_local()

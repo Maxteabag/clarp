@@ -52,7 +52,7 @@ def _newest_trace(agent_id: str) -> str:
 def _conversation_of(agent_id: str, trace_id: str) -> str:
     """The conversation the turn's rows are in: its prompt's, else the live one."""
     row = db.conn().execute(
-        """SELECT backend_session_id FROM messages
+        """SELECT backend_session_id FROM messages INDEXED BY idx_messages_trace
             WHERE agent_id = ? AND trace_id = ? AND COALESCE(backend_session_id, '') != ''
             ORDER BY seq LIMIT 1""", (agent_id, trace_id)).fetchone()
     return (row["backend_session_id"] if row is not None else "") or agents_db.live_backend_session(agent_id)
