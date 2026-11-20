@@ -2470,12 +2470,9 @@ impl Worker {
                 let left = left.map(|(noted, out)| {
                     // Only a note written now tells the user: one asked again was told.
                     let told = match &noted {
-                        clarp_actor::Noted::Written { id, .. } => Some(wire::note_notification(
-                            &self.setup.record,
-                            id,
-                            &text,
-                            now,
-                        )),
+                        clarp_actor::Noted::Written { id, .. } => {
+                            Some(wire::note_notification(&self.setup.record, id, &text, now))
+                        }
                         _ => None,
                     };
                     ((noted, told), out)
@@ -2493,9 +2490,7 @@ impl Worker {
                                 .unwrap_or("")
                                 .to_string(),
                             preview: told["preview"].as_str().unwrap_or("").to_string(),
-                            needs_response: actor
-                                .artifacts()
-                                .has_pending_decision(now),
+                            needs_response: actor.artifacts().has_pending_decision(now),
                         });
                     }
                     self.setup.hub.publish(told.clone(), now);
