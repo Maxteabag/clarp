@@ -31,6 +31,8 @@ def default_temp_root(environ, *, var_tmp_exists: bool) -> str | None:
 
 
 _TEMP_ROOT = default_temp_root(os.environ, var_tmp_exists=os.path.isdir("/var/tmp"))
+# The voice names worker fetches provider catalogues; a test Host never starts it.
+os.environ["CLARP_VOICE_NAMES_WORKER"] = "0"
 if _TEMP_ROOT:
     # Read lazily by pytest's tmp_path factory, after initial conftests load.
     os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
