@@ -1065,9 +1065,9 @@ fn a_hold_once_held_is_refused_and_a_release_does_no_harm() {
     std::thread::sleep(Duration::from_millis(100));
     assert_ne!(state(pid), Some('T'), "a refused hold signals nothing");
     let lines = hold_lines(&running.dir);
-    let ends: Vec<&str> = lines.iter().map(|line| hold_end(line)).collect();
+    let endings: Vec<&str> = lines.iter().map(|line| hold_end(line)).collect();
     assert_eq!(
-        ends,
+        endings,
         [
             "refused: the turn has been held once already",
             "let go by request",
@@ -1207,11 +1207,11 @@ fn a_tool_killed_from_outside_while_it_is_held_leaves_nothing_standing() {
     let lines = hold_lines(&running.dir);
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(hold_end(&lines[0]), "let go when the tool ended");
-    nix::sys::signal::kill(
+    // It may be gone by now: what is left of it goes.
+    let _ = nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(child),
         nix::sys::signal::Signal::SIGKILL,
-    )
-    .unwrap();
+    );
     std::fs::remove_dir_all(&running.dir).unwrap();
 }
 
