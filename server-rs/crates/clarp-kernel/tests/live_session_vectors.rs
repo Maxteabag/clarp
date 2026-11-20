@@ -259,8 +259,8 @@ fn a_session_goes_as_the_python_hosts_goes_step_by_step() {
             context_digest: head["context_digest"].as_str().unwrap().to_string(),
             snapshot: head["snapshot"].clone(),
             principal: phone.to_string(),
-            // The model every app accepts: the reference's stories are of such a client.
-            model: clarp_kernel::live_call::MODEL.to_string(),
+            // The model the grant named, for the client that answered.
+            model: head["model"].as_str().unwrap().to_string(),
         };
         let mut rings = Rings::kept(vec![ring], Vec::new(), &json!({}), Vec::new());
         let mut calls = Calls::kept(BTreeMap::new());
