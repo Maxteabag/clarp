@@ -62,10 +62,10 @@ def test_the_per_client_minimum_keeps_a_platform_and_a_contract_or_0_for_never(m
     monkeypatch.setattr("lib.log.log", lambda *a, **k: lines.append(a))
     assert config._live_model_min_client({"ios": 75, "android": 30}) == {"ios": 75, "android": 30} and not lines
     assert config._live_model_min_client({"ios": 0, "android": 31}) == {"ios": 0, "android": 31} and not lines
-    assert config._live_model_min_client({"ios": -1, "android": True, "web": 1.0, "desktop": "4", "Android": 3,
-                                          "watch": 29}) == {"watch": 29}
+    assert config._live_model_min_client({"ios": -1, "android": True, "web": 1.0, "desktop": "4", "9tv": 3,
+                                          "a" * 33: 1, "my app": 1, "Desktop": 5, "watch": 29}) == {"Desktop": 5, "watch": 29}
     assert len(lines) == 1
-    for refused in ("'ios'", "'android'", "'web'", "'desktop'", "'Android'"):
+    for refused in ("'ios'", "'android'", "'web'", "'desktop'", "'9tv'", "'my app'"):
         assert refused in lines[0][1]
     assert config._live_model_min_client("ios=75") == {} and len(lines) == 2
 
@@ -82,6 +82,19 @@ def test_the_table_may_name_any_client(tmp_path, header, expected):
     path.write_text('[openai]\nlive_model = "gpt-live-1.1"\n[openai.live_model_min_client]\ndesktop = 5\ntv = 0\n')
     cfg = config.load(path)
     assert cfg.live_model_min_client == {"desktop": 5, "tv": 0}
+    assert live.model_for_client(header, cfg) == expected
+
+
+@pytest.mark.parametrize("header, expected", [
+    ("Desktop/1 contract=5", "gpt-live-1.1"),     # the key as the header sends the name, capitals included
+    ("desktop/1 contract=5", "gpt-live-1"),       # matched exactly: not another spelling
+    ("DESKTOP/1 contract=5", "gpt-live-1"),
+])
+def test_a_table_key_with_capitals_admits_exactly_that_name(tmp_path, header, expected):
+    path = tmp_path / "config.toml"
+    path.write_text('[openai]\nlive_model = "gpt-live-1.1"\n[openai.live_model_min_client]\nDesktop = 5\n')
+    cfg = config.load(path)
+    assert cfg.live_model_min_client == {"Desktop": 5}
     assert live.model_for_client(header, cfg) == expected
 
 

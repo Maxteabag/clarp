@@ -847,7 +847,8 @@ def _live_idle_timeout(raw: Any) -> int:
 
 
 def _live_model_min_client(raw: Any) -> dict[str, int]:
-    """`[openai] live_model_min_client`: {platform: client contract}; 0 = never for that platform (as the
+    """`[openai] live_model_min_client`: {client name: client contract}. A key has the X-Clarp-Client name's own
+    form ([A-Za-z][A-Za-z0-9_-]{0,31}) and matches that name exactly as sent; 0 = never for it (as the
     render_spec table has it); a negative number, a bool, a float or a string is refused with the log line."""
     if raw is None:
         return {}
@@ -856,7 +857,7 @@ def _live_model_min_client(raw: Any) -> dict[str, int]:
         log("config.live_model_min_client", f"refused {raw!r}: expected a table of platform = contract")
         return {}
     kept = {key: value for key, value in raw.items()
-            if isinstance(key, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", key) and type(value) is int and value >= 0}
+            if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}", key) and type(value) is int and value >= 0}
     if len(kept) != len(raw):
         log("config.live_model_min_client", "refused entries: " + ", ".join(
             repr(key) for key in raw if key not in kept))
