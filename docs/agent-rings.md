@@ -141,8 +141,14 @@ pushed as VoIP:
 ## Agent-live rings (feature `agent_ring_live`)
 
 A ring may instead be held as a live voice call on OpenAI GPT-Live
-(`gpt-live-1`, voice `marin`, public API only; never another model, voice or
-provider, never a silent fallback). The wire is WIRE-v2; the compatibility row
+(voice `marin`, public API only; never another voice or provider, never a silent
+fallback). The model is chosen when the grant is made, for the answering client:
+the Host's `[openai] live_model` (default `gpt-live-1.1`) when that client's
+`X-Clarp-Client` contract is at least its platform's number in
+`AGENT_LIVE_MODEL_MIN_CLIENT` (iOS 75; Android unset = never; overridable with
+`[openai] live_model_min_client`), otherwise `gpt-live-1`. The grant, the
+`agent_live.session` frame and the upstream session all name that one model;
+the owner's repeat of the answer keeps it. The wire is WIRE-v2; the compatibility row
 lists every field and fixed string.
 
 - **Ring.** `POST /calls/ring` with `conversation_mode: "agent_live_v1"` and the
@@ -400,7 +406,8 @@ nonempty `user_call_opening`, and pinned `stories.user_call` file keys. It build
 a truthful `user_call` / `user-initiated` context with no event. This returns the
 existing answered Live envelope directly; no answer hop, GET discovery, push,
 chat notice, incoming CallKit or group call. The public ring has `origin:
-"user_call"`; grant fields and gpt-live-1/marin remain unchanged.
+"user_call"`; grant fields and marin remain unchanged, and the model is chosen
+for the requesting client as for a ring.
 
 The principal's request id binds the raw agent and nonce. Exact replays return
 the same grant; conflicts fail before another ring is persisted. Its persisted
