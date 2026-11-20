@@ -40,7 +40,9 @@ fn a_wait_that_times_out_says_what_the_host_under_test_said() {
 /// its path (each leaves a mark under `marks` when it is run), every folder variable set, and a
 /// provider's key in every variable the Host reads one from. Every value of it says `trap`, or
 /// is under `root/the-machine`. Answers the machine's environment.
-fn a_machine_that_has_everything(root: &std::path::Path) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+fn a_machine_that_has_everything(
+    root: &std::path::Path,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     let machine = root.join("the-machine");
     let home = machine.join("home");
     let bin = machine.join("bin");
@@ -73,7 +75,10 @@ fn a_machine_that_has_everything(root: &std::path::Path) -> Vec<(std::ffi::OsStr
             ".local/share/muse/model-catalog/trap.json",
             r#"{"rows":[{"id":"trap-model","label":"Trap"}]}"#,
         ),
-        (".config/clarp-host/config.toml", "[server]\nkind = \"clarp-host\"\nbind_addr = \"127.0.0.1\"\nport = 9\nauth_token = \"trap-token\"\n"),
+        (
+            ".config/clarp-host/config.toml",
+            "[server]\nkind = \"clarp-host\"\nbind_addr = \"127.0.0.1\"\nport = 9\nauth_token = \"trap-token\"\n",
+        ),
     ];
     for (name, text) in files {
         let file = home.join(name);
@@ -105,10 +110,19 @@ fn a_machine_that_has_everything(root: &std::path::Path) -> Vec<(std::ffi::OsStr
     set("SHELL", bin.join("claude").into());
     set("CLAUDE_CONFIG_DIR", home.join(".claude").into());
     set("CODEX_HOME", home.join(".codex").into());
-    set("CLAUDE_PWA_OPENCODE_HOME", home.join(".local/share/opencode").into());
+    set(
+        "CLAUDE_PWA_OPENCODE_HOME",
+        home.join(".local/share/opencode").into(),
+    );
     set("CLAUDE_PWA_GROK_HOME", home.join(".grok").into());
-    set("CLAUDE_PWA_MUSE_HOME", home.join(".local/share/muse").into());
-    set("CLAUDE_PWA_CONFIG", home.join(".config/clarp-host/config.toml").into());
+    set(
+        "CLAUDE_PWA_MUSE_HOME",
+        home.join(".local/share/muse").into(),
+    );
+    set(
+        "CLAUDE_PWA_CONFIG",
+        home.join(".config/clarp-host/config.toml").into(),
+    );
     set("CLARP_CONFIG_DIR", home.join(".config/clarp-host").into());
     set("TRAP_PROVIDER_KEY", "trap-key".into());
     set("LANG", "trap-LANG".into());
@@ -119,7 +133,10 @@ fn a_machine_that_has_everything(root: &std::path::Path) -> Vec<(std::ffi::OsStr
             runner.push((name.to_string(), format!("trap-{name}").into()));
         }
     }
-    runner.into_iter().map(|(name, value)| (name.into(), value)).collect()
+    runner
+        .into_iter()
+        .map(|(name, value)| (name.into(), value))
+        .collect()
 }
 
 /// The rule itself: of a machine full of traps, a process a test starts is given nothing; all
@@ -140,7 +157,9 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
         );
         assert!(
             value.starts_with(&place.root)
-                || constants.iter().any(|constant| value == std::path::Path::new(constant)),
+                || constants
+                    .iter()
+                    .any(|constant| value == std::path::Path::new(constant)),
             "neither in the test's place nor a constant of the rule: {shown}"
         );
     }
@@ -158,7 +177,10 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
     assert_eq!(at("PATH"), Some(sealed::PATH.into()));
     assert_eq!(at("LANG"), Some(clarp_sealed::LANG.into()));
     assert_eq!(at("TZ"), Some(clarp_sealed::TZ.into()));
-    assert_eq!(at("XDG_RUNTIME_DIR"), Some(place.root.join("user-run").into()));
+    assert_eq!(
+        at("XDG_RUNTIME_DIR"),
+        Some(place.root.join("user-run").into())
+    );
     assert_eq!(at("TMPDIR"), Some(place.root.join("tmp").into()));
     // Every program a person installs is a path that is not there.
     let programs = sealed::programs();
@@ -175,7 +197,11 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
     assert_eq!(given.len(), 10 + programs.len(), "{given:?}");
     // What a test names on purpose is the runner's, and only that; a name the runner lacks
     // is not given at all.
-    let named = sealed::sealed(&runner, &place.root, &["HOME", "NOT_ON_THE_MACHINE", "LANG"]);
+    let named = sealed::sealed(
+        &runner,
+        &place.root,
+        &["HOME", "NOT_ON_THE_MACHINE", "LANG"],
+    );
     let named_at = |name: &str| named.get(std::ffi::OsStr::new(name)).cloned();
     assert_eq!(named_at("HOME"), Some(machine.join("home").into()));
     assert_eq!(named_at("NOT_ON_THE_MACHINE"), None);
@@ -211,8 +237,14 @@ fn a_process_a_test_starts_sees_the_rule_and_nothing_else() {
                 )
             })
             .collect();
-    let more: Vec<&String> = seen.keys().filter(|name| !rule.contains_key(*name)).collect();
-    assert!(more.is_empty(), "a process a test starts sees more than the rule: {more:?}");
+    let more: Vec<&String> = seen
+        .keys()
+        .filter(|name| !rule.contains_key(*name))
+        .collect();
+    assert!(
+        more.is_empty(),
+        "a process a test starts sees more than the rule: {more:?}"
+    );
     assert_eq!(seen, rule);
 }
 
@@ -251,7 +283,9 @@ fn a_test_host_on_a_machine_that_has_everything_sees_none_of_it() {
 
     let logins = host.get("/backend-auth?harnesses=all");
     of_the_machine("/backend-auth", &logins);
-    let rows = logins["backends"].as_array().unwrap_or_else(|| panic!("{logins}"));
+    let rows = logins["backends"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{logins}"));
     assert!(!rows.is_empty(), "{logins}");
     for row in rows {
         assert_eq!(row["installed"], false, "{row}");
@@ -271,7 +305,9 @@ fn a_test_host_on_a_machine_that_has_everything_sees_none_of_it() {
     // An engine that speaks has no key: the keys of the machine are not the Host's.
     let speech = host.get("/tts/providers");
     of_the_machine("/tts/providers", &speech);
-    let engines = speech["providers"].as_array().unwrap_or_else(|| panic!("{speech}"));
+    let engines = speech["providers"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{speech}"));
     assert!(engines.len() > 1, "{speech}");
     for engine in engines.iter().filter(|engine| engine["id"] != "none") {
         assert_eq!(engine["available"], false, "{engine}");
@@ -286,7 +322,10 @@ fn a_test_host_on_a_machine_that_has_everything_sees_none_of_it() {
         .flatten()
         .map(|entry| entry.file_name())
         .collect();
-    assert!(marks.is_empty(), "programs of the machine were run: {marks:?}");
+    assert!(
+        marks.is_empty(),
+        "programs of the machine were run: {marks:?}"
+    );
     assert!(
         usage.accept().is_err(),
         "a provider's usage was asked of the stand-in"
@@ -316,12 +355,9 @@ fn every_tool_a_host_knows_has_a_program_the_harness_keeps_from_the_machine() {
     let unkept: Vec<&String> = known
         .iter()
         .filter(|tool| {
-            let program = clarp_backend::PROGRAMS
-                .iter()
-                .find(|(id, _, _)| id == tool);
-            !program.is_some_and(|(_, variable, _)| {
-                pinned.contains_key(std::ffi::OsStr::new(variable))
-            })
+            let program = clarp_backend::PROGRAMS.iter().find(|(id, _, _)| id == tool);
+            !program
+                .is_some_and(|(_, variable, _)| pinned.contains_key(std::ffi::OsStr::new(variable)))
         })
         .collect();
     assert!(
@@ -369,7 +405,9 @@ fn every_variable_the_hosts_crates_read_is_one_the_harness_decided_on() {
             && word
                 .chars()
                 .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-        upper || (word.ends_with("_proxy") && word.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+        upper
+            || (word.ends_with("_proxy")
+                && word.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
     };
     let strings = |text: &str| -> Vec<String> {
         text.split('"')
@@ -383,7 +421,10 @@ fn every_variable_the_hosts_crates_read_is_one_the_harness_decided_on() {
     let mut constants = std::collections::BTreeMap::new();
     for (_, text) in &files {
         for line in text.lines() {
-            let line = line.trim_start().trim_start_matches("pub ").trim_start_matches("pub(crate) ");
+            let line = line
+                .trim_start()
+                .trim_start_matches("pub ")
+                .trim_start_matches("pub(crate) ");
             if let Some(rest) = line.strip_prefix("const ")
                 && let Some((name, value)) = rest.split_once(": &str = \"")
                 && let Some((value, _)) = value.split_once('"')
@@ -439,7 +480,10 @@ fn every_variable_the_hosts_crates_read_is_one_the_harness_decided_on() {
         .chain(sealed::NOT_READ.iter().copied())
         .filter(|name| !read.contains_key(*name))
         .collect();
-    assert!(stale.is_empty(), "named in clarp-sealed, read nowhere: {stale:?}");
+    assert!(
+        stale.is_empty(),
+        "named in clarp-sealed, read nowhere: {stale:?}"
+    );
 }
 
 /// The Host's own tool, run where nobody said which Host it speaks to, on a machine that has an
@@ -467,7 +511,10 @@ fn a_tool_with_no_address_on_a_machine_with_an_installed_host_reaches_nothing_of
     for (tool, words) in [
         ("clarp-admin", &["sessions"][..]),
         ("clarp-agent-bg", &["list"][..]),
-        ("clarp-goal", &["bookkeeping", "observe", "dg0123456789abcdef"][..]),
+        (
+            "clarp-goal",
+            &["bookkeeping", "observe", "dg0123456789abcdef"][..],
+        ),
     ] {
         let out = sealed_command_on(&runner, &place.root, &[], env!("CARGO_BIN_EXE_clarp-host"))
             .arg("tool")
@@ -483,5 +530,8 @@ fn a_tool_with_no_address_on_a_machine_with_an_installed_host_reaches_nothing_of
         );
         assert!(!said.contains("trap"), "{tool}: {said}");
     }
-    assert!(trap.accept().is_err(), "the machine's installed Host was reached");
+    assert!(
+        trap.accept().is_err(),
+        "the machine's installed Host was reached"
+    );
 }
