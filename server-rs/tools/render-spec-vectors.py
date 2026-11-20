@@ -716,6 +716,9 @@ def clients():
     minimums = [None, -1, 0, 1, 74, 75, 999999999, 1000000000,
                 {}, {'ios': 80}, {'ios': 0}, {'android': 30}, {'android': 0}, {'desktop': 1, 'web': 5},
                 {'Watch': 1, 'ios': 74}, {'IOS': 1}]
+    # A table that names each unusual platform above by its own name: whether the header's form
+    # is one a client may send decides then, not the want of a minimum.
+    minimums += [{'1os': 1, 'ios-x_Y9': 1, 'p' * 32: 1, 'p' * 33: 1, '_os': 1, 'i.s': 1, 'a': 1}]
     return headers, minimums
 
 

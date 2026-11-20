@@ -8623,13 +8623,14 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     // nothing on, and the default stands (the Python Host's PR 474 at 01ceed2d).
     std::fs::write(
         &owner,
-        "[artifacts]\nrender_spec_min_contract = { IOS = 1, iOs = 1 }\n",
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Ios = 1, iOs = 1 }\n",
     )
     .unwrap();
     assert!(
         !spec_of("IOS/12 contract=74"),
         "a key in capitals is refused"
     );
+    assert!(!spec_of("Ios/12 contract=74"), "a capital first sign too");
     assert!(
         !spec_of("iOs/12 contract=74"),
         "a capital after the first sign too"
