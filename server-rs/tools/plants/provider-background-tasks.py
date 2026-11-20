@@ -1,10 +1,10 @@
 """Incorrect provider-evidence rules checked against isolated reference stories."""
 import runner
 
-RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"],"output":["test","--lib","a_provider_log_comes_only"]}
+RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","provider_tasks::the_host_observes_native_bash_jobs"],"output":["test","--lib","a_provider_log_comes_only"]}
 # These three mutations change the standalone executable invoked by the Host test.
 # Selecting the shim integration target rebuilds that executable after each change.
-RUNS["hook_binary"] = ["test", "--test", "host", "--test", "shim", "--", "the_host_observes_native_bash_jobs"]
+RUNS["hook_binary"] = ["test", "--test", "host", "--test", "shim", "--", "provider_tasks::the_host_observes_native_bash_jobs"]
 PLANTS=[
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
@@ -170,7 +170,7 @@ PLANTS=[
     ('clarp-host/src/joblog.rs', 'output', 'wrong native task output basename', 'format!("{task}.output")', 'format!("{task}.log")'),
     ('clarp-host/src/joblog.rs', 'output', 'read beyond the tail ceiling', '&[dir], TAIL_BYTES', '&[dir],TAIL_BYTES+65536'),
     ('clarp-host/src/joblog.rs', 'output', 'accept invalid metadata path components', 'filter(|name| valid_id(name))', 'filter(|_|true)'),
-    ('clarp-host/src/edge.rs', 'host', 'cancel a provider job as an ordinary worker', 'if current.provider_owned()', 'if false'),
+    ('clarp-host/src/edge.rs', 'host', 'cancel a provider job as an ordinary worker', '&& current.provider_owned()', '&& false'),
     ('clarp-host/src/edge.rs', 'host', 'claim the expected generation matches', '*generation != current.generation', 'false'),
     ('clarp-host/src/agent.rs', 'host', 'omit managed Claude settings', '"--settings".into(), settings', '"--other-settings".into(),settings'),
     ('clarp-host/src/launcher.rs', 'host', 'register the wrong hook event', '"PreToolUse":[', '"PostToolUse":['),

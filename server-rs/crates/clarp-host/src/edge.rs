@@ -2741,9 +2741,9 @@ async fn cancel_background_job(
     {
         let job = wire::job(&member.record, current, app.clock.now_ms());
         let (status, mut receipt) = clarp_kernel::provider_tasks::cancel_refusal(&job);
-        if let Some(expected) = expected.filter(|generation| *generation != current.generation) {
+        if let Some(wanted) = expected.filter(|generation| *generation != current.generation) {
             receipt["error"] = json!("generation_mismatch");
-            receipt["expected_generation"] = json!(expected);
+            receipt["expected_generation"] = json!(wanted);
             receipt["current_generation"] = json!(current.generation);
         }
         return Ok((
