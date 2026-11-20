@@ -1448,10 +1448,11 @@ fn a_day_without_a_restart_is_what_it_should_be() {
         day.conversation,
         vec![
             pair("u-1", "user: go"),
-            pair("u-2", "user: and again"),
             pair("r-1-1", "agent: Let me look."),
             pair("t1", "Bash Ok Some(\"a.txt\")"),
             pair("r-1-2", "agent: One file.\nDone."),
+            // Said while the first turn ran: it enters when its own turn starts (issue 491).
+            pair("u-2", "user: and again"),
             pair("r-2-1", "agent: Second answer."),
         ]
     );
