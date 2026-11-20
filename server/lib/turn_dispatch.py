@@ -81,7 +81,7 @@ def free_stale_slot(agent_id: str) -> str | None:
 
 
 from .turn_command import (  # noqa: E402,F401  (split_apply: turn-dispatch-module)
-    DispatchResult, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
+    DispatchResult, _turn_protocol, _with_delivery, _resolve_llm, _TurnSpec, _pause_exempt_on_arrival, _stop_holds,
     _park, _park_at_head, DispatchError, _refuse_oversized, JanitorDispatchError,
     _LaunchReceiptUnrecorded, UNCONFIRMED_DELIVERY, _LaunchReceiptRefused, DELIVERY_HINT_BUSY_MS,
     _record_launch_attempt, _can_steer, GoalWakeDispatchError, _validate_goal_dispatch, _janitor_run_active,
@@ -431,6 +431,7 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
+            self._steered_into(spec, active_trace)
             if spec.queue_id:
                 # Delivered into the running turn: its durable queue
                 # receipt is spent and the visible user row is due now.
@@ -442,6 +443,32 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                           detail={"active_trace": _INFLIGHT.get(spec.agent_id)})
             log("turnSteered", f"agent={spec.agent_id} trace={spec.trace_id or '∅'}")
         return accepted
+
+    def _steered_into(self, spec: _TurnSpec, active_trace: str) -> None:
+        """A message that is not coordination, steered into a coordination
+        turn, makes that turn the user's too: it is shown from now on
+        (lib.coordination.loosen), and the open turn says so on the live
+        channel at once. An agent's message steered into a user's turn is a
+        row of its own trace and changes nothing here."""
+        from . import coordination
+        if coordination.is_coordination(agent_id=spec.agent_id, origin=spec.origin,
+                                        sender_agent_id=spec.sender_agent_id):
+            return
+        try:
+            moved = coordination.loosen(spec.agent_id, active_trace)
+        except Exception as exc:  # noqa: BLE001 - a delivered steer never fails on it
+            log_exception("coordinationLoosenFail", exc, detail=spec.agent_id)
+            return
+        if not moved:
+            return
+        from . import live_hub
+        live_hub.report("set_turn_audience", spec.agent_id, active_trace, coordination.USER)
+        if getattr(self.ctx, "stream", None) is not None:
+            for backend_session_id in moved:
+                events.broadcast(self.ctx.stream, events.transcript_updated(
+                    agent_id=spec.agent_id, session=spec.session,
+                    backend_session_id=backend_session_id))
+        log("coordinationMixed", f"agent={spec.agent_id} trace={active_trace}")
 
     def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | bool | None":
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
@@ -465,7 +492,8 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
                 raise DispatchError(409, admission_policy.LEADER_NUDGE_DISABLED)
             digest, inbox_ids = team_store.pending_digest(spec.agent_id)
             spec = replace(spec, team_digest=digest, team_inbox_ids=tuple(inbox_ids),
-                           team_protocol=team_store.team_protocol_instruction(spec.agent_id, turn_origin=spec.origin))
+                           team_protocol=_turn_protocol(spec.agent_id, origin=spec.origin,
+                                                        sender_agent_id=spec.sender_agent_id))
             # Re-arm the Claude pwa-voice source marker for THIS attempt, with a
             # fresh timestamp. The marker is single-use (the UserPromptSubmit hook
             # consumes it), so without re-writing here a retry — or a redispatch

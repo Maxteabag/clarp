@@ -496,6 +496,22 @@ def _backend_invoked(exc: BaseException | None) -> bool:
     return False
 
 
+def _turn_protocol(agent_id: str, *, origin: str, sender_agent_id: str = "") -> str:
+    """The standing per-turn brief: the team protocol, and in a coordination
+    turn of a chat that hides coordination, the line that says so
+    (lib.coordination.reminder). Both ride in the team-context block, which
+    the transcript import takes off the user's row again."""
+    from . import agents as agents_db, coordination, team_store
+    parts = [team_store.team_protocol_instruction(agent_id, turn_origin=origin)]
+    try:
+        parts.append(coordination.reminder(agents_db.get_by_agent_id(agent_id), origin=origin,
+                                           sender_agent_id=sender_agent_id))
+    except Exception as exc:  # noqa: BLE001 - a brief never fails a turn
+        from .log import log_exception
+        log_exception("coordinationReminderFail", exc, detail=agent_id)
+    return "\n\n".join(part for part in parts if part)
+
+
 def _with_team_context(text: str, *, digest: str = "", protocol: str = "") -> str:
     """Wrap a turn's prompt with team context.
 
