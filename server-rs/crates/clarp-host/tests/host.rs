@@ -21554,7 +21554,10 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     let child_row = row_of(&snapshot(), child);
     let profile = &child_row["voice_profile"];
     assert!(profile.is_object());
-    assert_eq!(&told_of("created", child).unwrap()["voice_profile"], profile);
+    assert_eq!(
+        &told_of("created", child).unwrap()["voice_profile"],
+        profile
+    );
 }
 
 #[test]
