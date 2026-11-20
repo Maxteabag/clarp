@@ -148,7 +148,10 @@ mod tests {
     fn a_reply_is_written_as_before_and_a_hold_adds_its_own() {
         assert_eq!(text(&Reply::ok(Some(5))), r#"{"ok":true,"pid":5}"#);
         assert_eq!(text(&Reply::failed("no")), r#"{"ok":false,"error":"no"}"#);
-        assert_eq!(text(&Request::Hold { ms: 250 }), r#"{"op":"hold","ms":250}"#);
+        assert_eq!(
+            text(&Request::Hold { ms: 250 }),
+            r#"{"op":"hold","ms":250}"#
+        );
         assert_eq!(text(&Request::Release), r#"{"op":"release"}"#);
         let held = Reply {
             held: Some(Held {
