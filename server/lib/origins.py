@@ -38,9 +38,10 @@ MARKER_ORIGIN = "system"
 ROUTINE_AUTOMATION_ORIGINS = frozenset({"heartbeat", "leader_tick", "dreaming", "janitor"})
 
 # Visible conversation messages, including peer-delegated work whose replies
-# already appear in the chat overview. This is presentation only: scheduler
-# quiet periods still use strictly user-origin last_real_message_activity.
-CHAT_ACTIVITY_ORIGINS = frozenset({"user", "oracle", "agent"})
+# already appear in the chat overview, and an agent's note to the user
+# (POST /agent-notes). This is presentation only: scheduler quiet periods
+# still use strictly user-origin last_real_message_activity.
+CHAT_ACTIVITY_ORIGINS = frozenset({"user", "oracle", "agent", "note"})
 
 # Origins a client may set on POST /send. ``leader_tick`` and ``janitor``
 # are stamped server-side only, never accepted from a client payload.
