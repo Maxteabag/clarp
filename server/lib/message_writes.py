@@ -1702,6 +1702,7 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                       AND trace_id IN (""" + ",".join("?" for _ in selected) + ")",
                 (agent_id, backend_session_id, *selected),
             ).fetchall())
+    own_streams_retracted = 0
     for live in live_rows:
         if final_rows.keep_declined_live(live):
             continue
@@ -1717,8 +1718,18 @@ def _finish_import(database, agent_id: str, backend_session_id: str, *,
                 "DELETE FROM messages WHERE message_id = ?",
                 (live["message_id"],),
             )
+            if live["message_id"] in getattr(final_rows, "own_streams", ()):
+                own_streams_retracted += 1
             if live["has_turn"] and live_trace:
                 deleted_stamps.add(live_trace)
+    if own_streams_retracted:
+        # Each one is a reload for every client (replace_revision). In a Claude message of
+        # several blocks the stream starts its row again after each import, so this counts
+        # what R108 (adopt instead of retract) would remove. No ids: the backend and a count.
+        from .log import log
+        backend = database.execute("SELECT backend FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        log("importLiveOwnStreamRetracted",
+            f"backend={(backend[0] if backend else '') or 'unknown'} count={own_streams_retracted}")
     if _restore_unadopted_parked(database, agent_id, backend_session_id, source_file):
         skipped_slot_removed = True
     stale = database.execute(
