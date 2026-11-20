@@ -124,14 +124,18 @@ def test_codex_that_never_finishes_is_unknown_not_done(monkeypatch):
             client._notification("turn/started", {"threadId": "thread-c", "turn": {"id": "c-turn"}})
         return {}
     client = _client(monkeypatch, script)
-    monkeypatch.setattr(codex_app_server, "STOP_DETACH_SEC", 3600.0)
+    monkeypatch.setattr(codex_app_server, "STOP_DETACH_SEC", 0.05)
+    monkeypatch.setattr(codex_app_server, "COMPACT_STOP_GRACE_SEC", 0.2)
+    client.recycle_if_quiet = lambda: None
     monkeypatch.setattr(client, "interrupt_active",
                         lambda agent_id, handle=None, by_user=False: interrupted.append(agent_id),
                         raising=False)
     answer = client.compact(_AGENT, "thread-c", timeout=0.05)
     assert answer["status"] == "timeout" and interrupted == ["agent-c"]
-    # Until Codex ends it the agent stays busy: no turn starts on top of it.
-    assert client._actives["agent-c"].handle.is_alive()
+    # Codex never ended it: the agent is detached, so its thread stays held
+    # (turn_holders) and its sends wait until that process is recycled.
+    assert "agent-c" in client.detached_agents
+    assert "did not stop when asked" in answer["error"]
     assert compaction.decide_codex(400_000, answer)["outcome"] == compaction.UNKNOWN
 
 

@@ -109,6 +109,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/codex_app_server.py", "_DRAINING"): JOBS,
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
+    ("lib/compaction.py", "_lingering"): JOBS,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
     # Request threads share which controller-action requests are in flight and
     # when each action last ran; both are meaningless after a restart.
