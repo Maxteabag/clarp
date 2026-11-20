@@ -705,6 +705,30 @@ Acknowledge playback with `POST /clips/ack` `{"clip_id": …, "status":
 `GET /clips/recoverable?session=` returns recent clips a client that was
 suspended may still want to play.
 
+**Oracle standby: `oracle_v2.standby`** (Host contract 110). An Oracle call
+created over WebRTC with an API key may run with GPT-Live standby when the Host
+sets `[openai] live_idle_timeout_s` (5 to 60; it ships at 0, off). The Host then
+relays the provider's `session.paused` and `session.resumed` as one event on
+the call's event stream:
+
+```json
+{"type": "oracle_v2.standby", "active": true}
+```
+
+`active: true` means the provider paused inference after that many seconds
+without an input or output transcript; `active: false` means speech woke it and
+it is ready again (the provider also says this at the first wake). The call stays
+connected throughout and keeps its session: **keep sending microphone audio while
+in standby**, because only speech wakes it (muting the microphone does not pause
+it, and a muted call cannot wake). The first answer after a wake may take a little
+longer. No other path sends this event: the default Oracle and the WebSocket
+Oracle hold a WebSocket, and an agent Live call never uses standby. A client that
+does not know the event ignores it; nothing else in the call changes.
+
+`oracle_v2.usage` adds `active_seconds` and `paused_seconds` (numbers or null):
+present only when the provider reports the breakdown; `voice_estimate_usd` then
+prices active time at $0.05 and standby time at $0.02 a minute.
+
 ### 7. Focus: `POST /select`
 
 `{"session": "rachel"}` makes that agent the server-wide focus (hands-free
