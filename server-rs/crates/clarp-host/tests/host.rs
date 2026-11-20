@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
 #[path = "host/agent_portraits.rs"]
 mod agent_portraits;
+#[path = "host/bounded_close.rs"]
+mod bounded_close;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
