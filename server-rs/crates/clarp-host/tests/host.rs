@@ -8619,6 +8619,40 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     );
     assert!(!spec_of("ios/12 contract=74"));
     assert!(!spec_of("desktop/1 contract=999"));
+    // A key with a capital is no client's name as clients send it: refused, it switches
+    // nothing on, and the default stands (the Python Host's PR 474 at 01ceed2d).
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, iOs = 1 }\n",
+    )
+    .unwrap();
+    assert!(
+        !spec_of("IOS/12 contract=74"),
+        "a key in capitals is refused"
+    );
+    assert!(
+        !spec_of("iOs/12 contract=74"),
+        "a capital after the first sign too"
+    );
+    assert!(spec_of("ios/12 contract=74"), "the default stands");
+    // A minimum is a whole number: true is none, though the Python Host's language counts it 1.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { ios = true }\n",
+    )
+    .unwrap();
+    assert!(!spec_of("ios/12 contract=73"), "the default stands");
+    // Where the table names iOS, it wins over the old number.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_client = 0\nrender_spec_min_contract = { ios = 80 }\n",
+    )
+    .unwrap();
+    assert!(
+        spec_of("ios/12 contract=80"),
+        "the table's 80, not the old 0"
+    );
+    assert!(!spec_of("ios/12 contract=79"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 74\n").unwrap();
     let (status, made) = ask(
         "POST",
