@@ -761,9 +761,14 @@ fn printed_pid(spool: &Path, who: &str) -> Option<i32> {
 
 #[test]
 fn a_hold_counts_everything_printed_before_the_tool_stood_still() {
-    // `yes` prints faster than the shim records: at the hold its pipe is full and its last line
-    // is begun. All of it is counted, and nothing is added while it is held.
-    let mut running = start("hold-count", "exec yes abcdefgh");
+    // Each burst can fill the pipe. Keep the producer finite even when a planted rule
+    // makes the test panic before it can stop the shim.
+    let script = r#"exec python3 -c 'import sys,time
+for _ in range(120):
+    sys.stdout.write("abcdefgh\n"*4096)
+    sys.stdout.flush()
+    time.sleep(0.025)'"#;
+    let mut running = start("hold-count", script);
     wait_for("output", || {
         running.spool.exists() && spool_len(&running.spool) > 100_000
     });
