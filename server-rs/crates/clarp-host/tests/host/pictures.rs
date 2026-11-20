@@ -68,6 +68,15 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
         .unwrap();
     std::fs::write(from.join("SHA256SUMS"), sums.stdout).unwrap();
     let home = place.root.join("home");
+    // A systemd of the test's own, that knows no unit: the tool asks it of the Python Host's
+    // unit on this machine, and a test Host's machine has none.
+    let bin = place.root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    program(
+        &bin.join("systemctl"),
+        "#!/bin/sh\ncase \"$2\" in show) exit 0 ;; *) exit 3 ;; esac\n",
+    );
+    let path = format!("{}:{}", bin.display(), sealed::PATH);
     let unit = home.join(".config/systemd/user/clarp-host.service");
     let kept = home.join(".config/clarp-host/install.conf");
     let install = |words: &[&str]| -> String {
@@ -77,6 +86,7 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
             .args(["--from", from.to_str().unwrap(), "--files-only"])
             .args(words)
             .env("HOME", &home)
+            .env("PATH", &path)
             .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .output()
@@ -120,6 +130,7 @@ fn the_install_tool_starts_the_host_with_contact_pictures_only_where_it_was_told
             "maybe",
         ])
         .env("HOME", &home)
+        .env("PATH", &path)
         .env("XDG_CONFIG_HOME", home.join(".config"))
         .env("XDG_DATA_HOME", home.join(".local/share"))
         .output()
