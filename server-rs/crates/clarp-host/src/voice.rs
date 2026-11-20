@@ -41,8 +41,8 @@ use clarp_kernel::herald::{self, Attempt, Herald, Moment, Play, Taken};
 use clarp_kernel::media::{self, Part};
 use clarp_kernel::python;
 use clarp_kernel::said::{self, Who};
-use clarp_kernel::voice_profile;
 use clarp_kernel::spoken::{self, Line, LineState, Meant};
+use clarp_kernel::voice_profile;
 use clarp_ports::clock::Clock;
 use clarp_speech::cartesia::Cartesia;
 use clarp_speech::gemini::{Gemini, Surface};
@@ -279,7 +279,9 @@ impl Mouth {
         let named = google(&voices.provider)
             || google(&voices.fallback)
             || voices.agents.iter().any(|(_, entry)| {
-                entry.iter().any(|(key, value)| key == "provider" && google(value))
+                entry
+                    .iter()
+                    .any(|(key, value)| key == "provider" && google(value))
             });
         let refusal = named.then(|| self.owner.google_refusal(owners)).flatten();
         speech_view(owners, &|provider| self.has_key(provider, owners), refusal)
@@ -310,7 +312,12 @@ impl Mouth {
             .unwrap_or_else(PoisonError::into_inner);
         let listed = kept.iter().flat_map(|(_, voices)| voices.iter());
         listed
-            .filter_map(|voice| Some((voice["id"].as_str()?.to_string(), voice["name"].as_str()?.to_string())))
+            .filter_map(|voice| {
+                Some((
+                    voice["id"].as_str()?.to_string(),
+                    voice["name"].as_str()?.to_string(),
+                ))
+            })
             .collect()
     }
 
@@ -797,7 +804,8 @@ fn save_outside_clip(
 /// Google's own code for a failure, when an engine's error begins with one.
 fn google_code(why: &str) -> Option<String> {
     let code = why.split(':').next().unwrap_or("").trim().to_lowercase();
-    let known = voice_profile::google_words(&code).is_some() || voice_profile::google_reason(&code).is_some();
+    let known = voice_profile::google_words(&code).is_some()
+        || voice_profile::google_reason(&code).is_some();
     known.then_some(code)
 }
 
@@ -892,7 +900,9 @@ fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) ->
         }
         // The owner turned speech off for the Host: nothing is said, and nobody is told. An
         // agent whose own entry turns it off while the Host speaks is told so.
-        Err(unheard) if unheard.provider == "none" && view.voices.provider == "none" => Chosen::Silent,
+        Err(unheard) if unheard.provider == "none" && view.voices.provider == "none" => {
+            Chosen::Silent
+        }
         Err(unheard) => {
             let persona = python::text(&record.persona);
             let provider = unheard.provider;
@@ -901,7 +911,9 @@ fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) ->
                 voice_profile::NOT_CONFIGURED if !BUILT.contains(&provider.as_str()) => {
                     format!("the engine {provider} is not built into this Host")
                 }
-                voice_profile::NOT_CONFIGURED => format!("the {provider} api_key is not configured"),
+                voice_profile::NOT_CONFIGURED => {
+                    format!("the {provider} api_key is not configured")
+                }
                 _ => format!("no {provider} voice configured for {persona}"),
             };
             Chosen::Nobody {
@@ -1148,7 +1160,11 @@ impl Mouth {
         }
         let code = google_code(why).unwrap_or_default();
         let label = voice_profile::provider_row(&provider).0;
-        let label = if provider.is_empty() { String::new() } else { label };
+        let label = if provider.is_empty() {
+            String::new()
+        } else {
+            label
+        };
         let message = voice_profile::google_words(&code).map_or_else(
             || voice_profile::not_spoken_words(reason, &label, &record.persona, partly),
             str::to_string,
@@ -2308,7 +2324,8 @@ mod tests {
         );
         assert_eq!(pick(&moved, &maximus, &all), by(&[("gemini", "Puck")]));
         // One agent whose own entry turns speech off while the Host speaks: it is told so.
-        let quiet = file("[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"none\"\n");
+        let quiet =
+            file("[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"none\"\n");
         assert_eq!(
             pick(&quiet, &maximus, &all),
             Chosen::Nobody {

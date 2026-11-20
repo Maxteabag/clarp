@@ -51,7 +51,11 @@ pub fn view(mouth: &Mouth, ears: &Ears, directory: &Directory) -> HostView {
 /// re-read the agents. The same inputs, the same version.
 pub fn version(view: &HostView) -> String {
     let digest = Sha256::digest(format!("{view:?}").as_bytes());
-    digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect()
+    digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// A member of the fleet as the sharing of voices counts it: archived or a Janitor, it shares
@@ -65,7 +69,11 @@ fn row(member: &Member) -> Row<'_> {
 
 /// Every member's profile, by its session: the agents and the Janitors, in one pass.
 pub fn all(view: &HostView, directory: &Directory) -> Vec<(String, Value)> {
-    let members: Vec<&Arc<Member>> = directory.members.iter().chain(&directory.janitors).collect();
+    let members: Vec<&Arc<Member>> = directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .collect();
     let rows: Vec<Row<'_>> = members.iter().map(|member| row(member)).collect();
     let made = voice_profile::profiles(view, &rows);
     members
@@ -82,12 +90,27 @@ pub fn head(view: &HostView) -> (Value, String) {
 
 /// One agent's profile outside a snapshot, by its session, its sharing counted over the
 /// Host's agents. `None`: no such agent.
-pub fn of_session(mouth: &Mouth, ears: &Ears, directory: &Directory, session: &str) -> Option<Value> {
-    let members: Vec<&Arc<Member>> = directory.members.iter().chain(&directory.janitors).collect();
-    let member = members.iter().find(|member| member.record.session == session)?;
+pub fn of_session(
+    mouth: &Mouth,
+    ears: &Ears,
+    directory: &Directory,
+    session: &str,
+) -> Option<Value> {
+    let members: Vec<&Arc<Member>> = directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .collect();
+    let member = members
+        .iter()
+        .find(|member| member.record.session == session)?;
     let rows: Vec<Row<'_>> = members.iter().map(|member| row(member)).collect();
     let view = view(mouth, ears, directory);
-    Some(voice_profile::profile_among(&view, row(member).agent, &rows))
+    Some(voice_profile::profile_among(
+        &view,
+        row(member).agent,
+        &rows,
+    ))
 }
 
 /// What adds an agent's profile to the roster's events about it, wherever they are told from.
@@ -106,7 +129,10 @@ impl Profiles {
     /// that carries it and the agent is known. An event is never lost to it.
     pub fn add_to(&self, event: &mut Value) {
         let kind = event["kind"].as_str().unwrap_or("");
-        if event["type"] != "agent-roster" || !CARRIED_BY.contains(&kind) || event.get("voice_profile").is_some() {
+        if event["type"] != "agent-roster"
+            || !CARRIED_BY.contains(&kind)
+            || event.get("voice_profile").is_some()
+        {
             return;
         }
         let Some(session) = event["session"].as_str().map(str::to_string) else {
