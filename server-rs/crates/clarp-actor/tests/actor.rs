@@ -4878,6 +4878,11 @@ fn from_an_agent(id: &str, trace: &str) -> (Message, Marks) {
         origin: Origin::Agent {
             agent_id: "a-boss".to_string(),
         },
+        sender: Some(clarp_kernel::conversation::Sender {
+            agent_id: "a-boss".to_string(),
+            name: "Boss".to_string(),
+            session: "boss".to_string(),
+        }),
         ..message(id, "from an agent")
     };
     let marks = Marks {
@@ -4975,6 +4980,26 @@ fn a_turn_that_answers_another_agent_is_marked_in_its_acceptance_and_its_notes_a
             .unwrap_err(),
         TraceTaken,
         "the same id with another origin is another message"
+    );
+    // The same id and origin from another sender: another message too, no retry.
+    let another = Message {
+        sender: Some(clarp_kernel::conversation::Sender {
+            agent_id: "a-other".to_string(),
+            name: "Other".to_string(),
+            session: "other".to_string(),
+        }),
+        origin: Origin::Agent {
+            agent_id: "a-other".to_string(),
+        },
+        ..asked.clone()
+    };
+    assert_eq!(
+        actor
+            .send_marked(&another, Admission::Queue, None, &named, now)
+            .unwrap()
+            .unwrap_err(),
+        TraceTaken,
+        "the same id and origin from another sender is another message"
     );
     let (retried, _) = actor
         .send_marked(&asked, Admission::Queue, None, &marks, now)
