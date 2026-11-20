@@ -862,3 +862,15 @@ def test_every_lookup_of_a_turn_s_rows_goes_by_its_trace_never_by_the_agent(worl
         for sql in statements:
             assert _reads_by_trace(sql), (name, sql)
     db.close_local()
+
+
+def test_the_working_state_and_live_turn_read_a_mark_on_the_users_turn_as_the_users(world):
+    """audience_of and sender_of (agent-state, the live turn) apply the same wall as /log: a mark
+    forced onto a trace that holds the user's own word reads as the user's."""
+    world.send("t-user", "the user's words")
+    with db.conn() as con:
+        con.execute("INSERT INTO coordination_traces(agent_id, trace_id, sender_agent_id, audience, created_at,"
+                    " updated_at) VALUES (?, 't-user', ?, 'agents', 1, 1)", (world.id, world.boss))
+    db.close_local()
+    assert coordination.audience_of(world.id, "t-user") == "user"
+    assert coordination.sender_of(world.id, "t-user") is None
