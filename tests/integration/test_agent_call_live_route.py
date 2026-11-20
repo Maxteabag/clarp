@@ -18,12 +18,13 @@ from tests.integration.test_server_di import _model_catalog_never_probes_install
 from tests.unit.test_agent_rings import _agent
 
 
-def _req(base, token, method, path, body=None):
+def _req(base, token, method, path, body=None, headers=None):
     target = urlsplit(base)
     client = http.client.HTTPConnection(target.hostname, target.port, timeout=10)
     try:
         client.request(method, path, body=None if body is None else json.dumps(body),
-                       headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+                       headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
+                                **(headers or {})})
         response = client.getresponse()
         return response.status, json.loads(response.read() or b"{}")
     finally:
@@ -67,6 +68,25 @@ def test_a_phone_starts_a_live_call_with_an_opted_in_agent(live_host):
     again = _req(base, phone["token"], "POST", "/calls/live",
                  {"agent": "a-sander", "request_id": "req-216", "client_nonce": "n-216"})
     assert again[0] == 200 and again[1]["live"] == body["live"]          # the same call, no second one
+
+
+@pytest.mark.parametrize("client, model", [("ios/2986 contract=75", "gpt-live-1.1"),
+                                           ("ios/2985 contract=74", "gpt-live-1"), (None, "gpt-live-1")])
+def test_a_live_call_runs_on_the_model_its_client_accepts(live_host, client, model):
+    base, _srv, phone = live_host
+    status, body = _req(base, phone["token"], "POST", "/calls/live",
+                        {"agent": "a-sander", "request_id": "req-473", "client_nonce": "n-473"},
+                        headers={"X-Clarp-Client": client} if client else None)
+    assert status == 200 and (body["live"]["model"], body["live"]["voice"]) == (model, "marin")
+
+
+def test_the_ring_answer_route_hands_the_client_header_to_the_answer(live_host, monkeypatch):
+    base, _srv, phone = live_host
+    seen = []
+    monkeypatch.setattr(agent_rings, "answer", lambda *a, **k: seen.append(k.get("client")) or {"ok": True})
+    status, _body = _req(base, phone["token"], "POST", "/calls/ring/answer", {"ring_id": "rng_x"},
+                         headers={"X-Clarp-Client": "ios/2986 contract=75"})
+    assert status == 200 and seen == ["ios/2986 contract=75"]
 
 
 def test_a_live_refusal_keeps_its_code_and_starts_nothing(live_host, monkeypatch):
