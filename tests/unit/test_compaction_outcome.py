@@ -330,3 +330,57 @@ def test_nothing_compacts_an_agent_except_the_users_request():
     callers = {str(p.relative_to(SERVER)) for p in SERVER.rglob("*.py")
                if "_runtime_client.compact(" in p.read_text()}
     assert callers == {"lib/compaction.py"}
+
+
+# ---- the review's gaps (K1, K3, completed without a replaced history) --------
+
+def test_codex_with_the_same_size_after_is_not_compacted():
+    """K1: after == before is no shrink."""
+    result = compaction.decide_codex(1000, {"status": "completed", "replaced": True, "after": 1000})
+    assert result["outcome"] == compaction.NOT_COMPACTED
+    assert result["detail"] == "the conversation did not shrink"
+
+
+def test_codex_that_finishes_without_replacing_the_history_is_not_compacted(monkeypatch):
+    client = _client(monkeypatch, _compacting_server(status="completed", replace=False))
+    answer = client.compact(_AGENT, "thread-c", timeout=5)
+    assert answer["status"] == "completed" and answer["replaced"] is False
+    result = compaction.decide_codex(402_000, answer)
+    assert result["outcome"] == compaction.NOT_COMPACTED
+    assert result["detail"] == "Codex finished without replacing the conversation's history"
+
+
+def _terminal_run(monkeypatch, tmp_path, transcript: pathlib.Path, *, written_after: str = ""):
+    """compaction._compact_in_terminal for a Claude agent with tmux and the
+    CLI stood in: ``written_after`` is what the transcript gains after the
+    send."""
+    from types import SimpleNamespace
+    from lib.backend.base import CompactionStrategy
+    monkeypatch.setattr(compaction.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(stdout="", returncode=0))
+    monkeypatch.setattr(compaction, "_pane_process", lambda _tmux: None)
+    monkeypatch.setattr(compaction, "_sleep", lambda _s, _stopped: True)
+
+    def settle(_jsonl, _stopped):
+        if written_after:
+            with transcript.open("a") as f:
+                f.write(written_after)
+        return "settled"
+    monkeypatch.setattr(compaction, "_wait_for_settle", settle)
+    runner = SimpleNamespace(find_transcript=lambda _bsid: transcript)
+    monkeypatch.setattr(compaction.backends, "by_id", lambda _b: runner)
+    strategy = CompactionStrategy(("claude", "--resume"), "/compact", watches_transcript=True)
+    return compaction._compact_in_terminal("cee", "agent-c", "claude", "bs", str(tmp_path), strategy)
+
+
+def test_an_earlier_boundary_in_the_transcript_does_not_count(monkeypatch, tmp_path):
+    """K3: the run reads only what was written after /compact was typed."""
+    transcript = tmp_path / "s.jsonl"
+    transcript.write_text(_usage(90_000) + _boundary(300_000) + _usage(480_000))
+    result = _terminal_run(monkeypatch, tmp_path, transcript)
+    assert result["outcome"] == compaction.NOT_COMPACTED
+    assert result["detail"] == "Claude Code recorded no compaction"
+    # The same run, when the CLI does write its record after the send.
+    transcript.write_text(_usage(90_000) + _boundary(300_000) + _usage(480_000))
+    result = _terminal_run(monkeypatch, tmp_path, transcript, written_after=_boundary(481_000))
+    assert result["outcome"] == compaction.COMPACTED and result["before_tokens"] == 481_000

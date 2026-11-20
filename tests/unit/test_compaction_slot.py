@@ -374,3 +374,47 @@ def test_a_second_request_while_the_last_compactions_process_ends_is_refused_in_
     assert answer == {"ok": False, "error": "the last compaction is still ending — try again shortly"}
     stuck.alive = False
     run.join(5)
+
+
+# ---- the review's gaps (K5, Stop with a live handle) -------------------------
+
+def test_a_claim_is_refused_while_work_waits_only_in_memory(tmp_path):
+    """K5: a free slot with a spec queued in memory (no durable row) is not
+    idle: the compaction is refused, and the waiting spec is untouched."""
+    from types import SimpleNamespace
+    world = World(tmp_path)
+    waiting = SimpleNamespace(trace_id="t-mem")
+    td._SLOTS.enqueue(world.agent, waiting)
+    assert td._SLOTS.get(world.agent) == ""
+    assert td.claim_for_compaction(world.agent) == \
+        "messages are waiting for this agent — try again when they have run"
+    assert td._SLOTS.get(world.agent) == ""
+    assert td._SLOTS.take_queued(world.agent) == [waiting]
+
+
+def test_stop_while_the_codex_compactions_handle_stays_live(tmp_path, monkeypatch):
+    """The Stop takes the slot, but the compaction's handle stays live (Codex
+    has not ended it): a new user send waits behind that process and starts
+    only once it has ended, once, so nothing runs on top of the compaction."""
+    world = World(tmp_path)
+    handle = _Live()
+    # The dispatcher's view of the agent's processes: the compaction's handle.
+    monkeypatch.setattr(world.provider, "active_handles",
+                        lambda _b, _a: [handle] if handle.alive else [])
+    monkeypatch.setattr(world.provider, "interrupt", lambda _b, _a: 0)   # it does not end
+    monkeypatch.setattr(td, "_PROCESS_EXIT_POLL_S", 0.01, raising=False)
+    import lib.turn_claim as turn_claim
+    monkeypatch.setattr(turn_claim, "_PROCESS_EXIT_POLL_S", 0.01)
+    run = _run_compaction(world, monkeypatch, result=_TIMED_OUT, handles=[handle], holders=[])
+    world.stop()
+    run.join(5)
+    assert not run.is_alive() and not td.compaction_holds_slot(world.agent)
+    world.send("u1")
+    time.sleep(0.2)
+    world._collect()
+    assert world.started == []                       # nothing on top of the live compaction
+    assert "u1" in _waiting(world) or td._SLOTS.queue_depth(world.agent)
+    handle.alive = False                             # Codex ended it at last
+    assert _wait_for(lambda: (world._collect() or True) and world.started == ["u1"])
+    world.settle()
+    assert world.started == ["u1"]
