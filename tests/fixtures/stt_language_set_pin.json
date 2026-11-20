@@ -1,0 +1,6614 @@
+{
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|local|small.en|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|local|small.en|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|local|small|none|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"cartesia:ink-whisper||no|local|small|set-engines-down|": {
+"received": [
+[
+"cartesia",
+"no"
+]
+],
+"text": "heard-cartesia"
+},
+"cartesia:ink-whisper||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"deepgram:nova-3||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"elevenlabs:scribe_v2||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"elevenlabs:scribe_v2||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|local|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|local|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no,en|local|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no,en|local|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|google:chirp_3|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|local|small.en|none|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|local|small.en|set-engines-down|": {
+"received": [
+[
+"local-variant",
+"faster-whisper:small"
+]
+],
+"text": "local:faster-whisper:small"
+},
+"faster-whisper:small||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|local|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"faster-whisper:small||no|local|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"faster-whisper:small||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|local|small.en|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no,en|local|small|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|google:chirp_3|small|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|local|small.en|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|local|small|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"google:chirp_3||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"google:chirp_3||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no,en|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"|elevenlabs:scribe_v2,deepgram:nova-3|no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"elevenlabs",
+"no"
+],
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no,en|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"||no,en|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+null
+]
+],
+"text": "heard-elevenlabs"
+},
+"||no,en|google:chirp_3|small.en|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"||no,en|google:chirp_3|small|none|": {
+"received": [
+[
+"google",
+"no,en"
+]
+],
+"text": "heard-google"
+},
+"||no,en|local|small.en|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no,en|local|small.en|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no,en|local|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no,en|local|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no|deepgram:nova-3|small.en|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small.en|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small|none|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small|set-engines-down|": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|deepgram:nova-3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|elevenlabs:scribe_v2|small.en|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"||no|elevenlabs:scribe_v2|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|elevenlabs:scribe_v2|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|elevenlabs:scribe_v2|small|none|": {
+"received": [
+[
+"elevenlabs",
+"no"
+]
+],
+"text": "heard-elevenlabs"
+},
+"||no|elevenlabs:scribe_v2|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|elevenlabs:scribe_v2|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|google:chirp_3|small.en|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"||no|google:chirp_3|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|google:chirp_3|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|google:chirp_3|small|none|": {
+"received": [
+[
+"google",
+"no"
+]
+],
+"text": "heard-google"
+},
+"||no|google:chirp_3|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|google:chirp_3|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|local|small.en|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no|local|small.en|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|local|small.en|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no|local|small.en|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|local|small|none|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no|local|small|none|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+},
+"||no|local|small|set-engines-down|": {
+"received": [
+[
+"local",
+null
+]
+],
+"text": "local"
+},
+"||no|local|small|set-engines-down|deepgram:nova-3": {
+"received": [
+[
+"deepgram",
+"no"
+]
+],
+"text": "heard-deepgram"
+}
+}

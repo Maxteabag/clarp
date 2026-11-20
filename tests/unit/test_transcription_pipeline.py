@@ -631,3 +631,31 @@ def test_an_own_engine_still_loading_is_the_loading_answer(monkeypatch):
     assert out.status == 503
     assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
 
+
+def test_a_selected_set_engine_without_its_key_is_never_picked(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config())
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "")
+    assert stt_providers.language_set_engine() == ""
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    assert stt_providers.language_set_engine() == "google:chirp_3"
+
+
+def test_a_fallback_to_chirp_records_the_set_it_was_handed(monkeypatch):
+    import lib.google_stt
+    from lib import config, stt_language
+    handed = []
+    monkeypatch.setattr(lib.google_stt, "transcribe",
+                        lambda **kw: (handed.append(kw.get("language")), ("heard", 1.0))[1])
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_model="small", google_stt_project="p"))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_providers, "selected_engine", lambda: "google:chirp_3")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    out = _run(_ctx(_RealCloudSTT([])), Recorder(), requested_model="deepgram:nova-3",
+               focus="rachel")
+    assert out.status == 200 and out.payload["engine_fallback"] == {
+        "from": "deepgram:nova-3", "to": "google:chirp_3", "reason": "language_set",
+        "languages": ["no", "en"]}
+    assert handed and "," in str(handed[0])
