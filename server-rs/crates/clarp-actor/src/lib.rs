@@ -26,6 +26,7 @@
 //! An error from an actor means its log or its files could not be read or written. The actor is
 //! then in no known state: drop it and open it again. That is the same path as a restart.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -545,6 +546,9 @@ struct LiveTurn {
     /// The same calls as they were told: what is written once more when the turn is
     /// interrupted and they never return.
     calls: Vec<ToolCall>,
+    /// When each call that is a row by itself was first written. Written again (when it
+    /// ends, or is cut off), it keeps that time: a row has one time, whoever reads it.
+    first_written: HashMap<String, i64>,
     /// The spool has said how the tool went. Nothing more will come.
     over: bool,
     /// Which attempt of the turn this is, from 1: whose spool is read.
@@ -957,6 +961,7 @@ fn follow(
 fn cut_off(
     batch: &mut Batch<'_>,
     calls: &mut Vec<ToolCall>,
+    first_written: &HashMap<String, i64>,
     end: &Entry,
     ts_ms: i64,
 ) -> Result<(), ActorError> {
@@ -966,7 +971,12 @@ fn cut_off(
     for mut call in calls.drain(..) {
         call.status = ToolStatus::Interrupted;
         call.ended_at_ms = Some(ts_ms);
-        batch.item(written(&Entry::Tool(call), ts_ms)?);
+        // A call that is a row by itself keeps the time of its first writing.
+        let at = match call.reply {
+            None => first_written.get(&call.id).copied().unwrap_or(ts_ms),
+            Some(_) => ts_ms,
+        };
+        batch.item(written(&Entry::Tool(call), at)?);
     }
     Ok(())
 }
@@ -1156,6 +1166,7 @@ impl Actor {
                 drafts: Vec::new(),
                 tools: Vec::new(),
                 calls: Vec::new(),
+                first_written: HashMap::new(),
                 over: true,
                 attempt,
                 for_account: false,
@@ -2922,10 +2933,13 @@ impl Actor {
             .as_ref()
             .map(|live| live.last_row.clone())
             .unwrap_or_default();
-        let mut calls = self
+        let (mut calls, first_written) = self
             .live
             .as_mut()
-            .map(|live| std::mem::take(&mut live.calls))
+            .map(|live| {
+                let first = std::mem::take(&mut live.first_written);
+                (std::mem::take(&mut live.calls), first)
+            })
             .unwrap_or_default();
         let mut batch = self.recorder.batch();
         for draft in unfinished {
@@ -2971,7 +2985,7 @@ impl Actor {
                 batch.item(written(notice, now_ms)?);
             }
             if let Some(end) = closing(&batch, turn, &closes, facts) {
-                cut_off(&mut batch, &mut calls, &end, now_ms)?;
+                cut_off(&mut batch, &mut calls, &first_written, &end, now_ms)?;
                 batch.item(written(&end, now_ms)?);
             }
         }
@@ -3213,6 +3227,7 @@ impl Actor {
             drafts: Vec::new(),
             tools: Vec::new(),
             calls: Vec::new(),
+            first_written: HashMap::new(),
             over: false,
             attempt,
             for_account: false,
@@ -3292,6 +3307,7 @@ impl Actor {
         let mut drafts = Vec::new();
         let mut tools = Vec::new();
         let mut calls = Vec::new();
+        let mut first_written = HashMap::new();
         let mut signals = Vec::new();
         let mut offset = 0;
         // Those who watch are shown the turn as it stands: its items are made again from the
@@ -3329,8 +3345,10 @@ impl Actor {
                         }
                         Signal::Tool(call) => {
                             follow_tool(&mut tools, &mut calls, &call);
-                            // A use that is a part of a reply is no row: that reply is.
+                            // A use that is a part of a reply is no row: that reply is. A row
+                            // was first written at the time of the record that first told it.
                             if call.reply.is_none() {
+                                first_written.entry(call.id.clone()).or_insert(record.t);
                                 last_row = call.id;
                             }
                         }
@@ -3394,6 +3412,7 @@ impl Actor {
             drafts,
             tools,
             calls,
+            first_written,
             over: false,
             attempt,
             for_account: false,
@@ -3559,7 +3578,13 @@ impl Actor {
             batch.item(written(&notice, now_ms)?);
         }
         if let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
-            cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
+            cut_off(
+                &mut batch,
+                &mut live.calls,
+                &live.first_written,
+                &end,
+                now_ms,
+            )?;
             batch.item(written(&end, now_ms)?);
         }
         let effects = batch.commit()?.effects;
@@ -3831,7 +3856,7 @@ impl Actor {
                                 && let Some(end) =
                                     closing(&batch, turn, &live.last_row, live.facts())
                             {
-                                cut_off(&mut batch, &mut live.calls, &end, t)?;
+                                cut_off(&mut batch, &mut live.calls, &live.first_written, &end, t)?;
                                 batch.item(written(&end, t)?);
                             }
                             continue;
@@ -3931,7 +3956,15 @@ impl Actor {
                     if piece.part_of().is_none() {
                         live.last_row = piece.id().to_string();
                     }
-                    batch.item(written(&piece, t)?);
+                    // A call that is a row by itself and is written again keeps the time of
+                    // its first writing.
+                    let at = match &piece {
+                        Entry::Tool(call) if call.reply.is_none() => {
+                            *live.first_written.entry(call.id.clone()).or_insert(t)
+                        }
+                        _ => t,
+                    };
+                    batch.item(written(&piece, at)?);
                 }
                 // The turn moved on to something else: what was read up to here is written
                 // down by itself, and how the agent stood is noted, before what came after.
@@ -3968,7 +4001,13 @@ impl Actor {
                     batch.item(written(&notice, now_ms)?);
                 }
                 if ended && let Some(end) = closing(&batch, turn, &live.last_row, live.facts()) {
-                    cut_off(&mut batch, &mut live.calls, &end, now_ms)?;
+                    cut_off(
+                        &mut batch,
+                        &mut live.calls,
+                        &live.first_written,
+                        &end,
+                        now_ms,
+                    )?;
                     batch.item(written(&end, now_ms)?);
                 }
             }
