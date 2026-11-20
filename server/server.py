@@ -1738,6 +1738,13 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
         include_tool_details = str(
             qs.get("include_tool_details", ["1"])[0]
         ).lower() not in {"0", "false", "no"}
+        # Coordination between agents (issue 478): auto | hide | show; absent = today's answer.
+        # coordination_read: the policy a delta's cache was read under (its echo's visibility).
+        coordination_mode = (qs.get("coordination", [""])[0] or "").strip().lower()
+        coordination_read = (qs.get("coordination_read", [""])[0] or "").strip().lower()
+        from lib import coordination as _coordination
+        if coordination_mode and coordination_mode not in _coordination.MODES:
+            return self._json_error(400, "coordination must be auto, hide or show")
         from lib import agent_conversations
         from lib.message_previews import UnknownHistoryCursor
         if agent_conversations.is_pair_session(session):
@@ -1758,7 +1765,15 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
                 include_tool_details=include_tool_details,
                 interaction_id=self._interaction_id(),
                 background_import=True,
+                coordination_mode=coordination_mode,
+                coordination_read=coordination_read,
             )
+            if coordination_mode and "coordination" not in body_obj:
+                # A chat with no conversation yet says the policy too (every answer does).
+                agent = agents_db.get_by_session(session)
+                if agent:
+                    policy = _coordination.read_policy(agent["agent_id"], coordination_mode)
+                    body_obj["coordination"] = {key: policy[key] for key in ("hidden", "source", "visibility")}
         except UnknownHistoryCursor:
             return self._json_error(409, "unknown history cursor")
         except OSError as e:

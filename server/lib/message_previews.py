@@ -47,7 +47,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   before_message_id: str = "",
                   limit: int = 100,
                   include_automated: bool = True,
-                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
+                  extra_backend_session_id: str = "",
+                  hide_coordination: bool = False) -> list[dict[str, Any]]:
     params: list[Any] = [agent_id]
     where = "m.agent_id = ?"
     sessions = list(dict.fromkeys(v for v in (backend_session_id, extra_backend_session_id) if v))
@@ -89,6 +90,9 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             )
         )"""
         params.append(team_leader.TICK_PROMPT)
+    if hide_coordination and coordination.can_leave_note(agent_id):
+        # Before LIMIT, as the automated filter: a page of N is N rows the user sees.
+        where += " AND NOT " + coordination.HIDDEN_ROW_SQL
     params.append(max(1, min(limit, 5000)))
     # Display order is by timestamp (tie-break seq). User rows live in a
     # negative seq band and transcript rows in 0..N-1, so ordering by seq would
@@ -186,6 +190,122 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                if row["sent_at"] is not None else {}),
         })
     return out
+
+
+# ---- coordination hidden from the chat: where it was, and how much (issue 478) -------------
+
+_KEY_SQL = "COALESCE(m.timestamp, '')"
+
+
+def _key_cmp(op: str, key: tuple) -> tuple[str, list]:
+    """Rows strictly ``op`` ('<' or '>') the display key (timestamp, seq, message_id)."""
+    t, seq, mid = key
+    return (f"""({_KEY_SQL} {op} ? OR ({_KEY_SQL} = ? AND m.seq {op} ?)
+               OR ({_KEY_SQL} = ? AND m.seq = ? AND m.message_id {op} ?))""",
+            [t, t, seq, t, seq, mid])
+
+
+def _automated_sql() -> tuple[str, list]:
+    return ("""NOT (COALESCE(m.origin, 'user') IN ('watcher', 'heartbeat', 'leader_tick', 'dreaming')
+               OR (m.role = 'user' AND COALESCE(m.origin, 'user') = 'schedule'
+                   AND TRIM(COALESCE(m.text, '')) = ?))""", [team_leader.TICK_PROMPT])
+
+
+def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str, Any]],
+                      include_automated: bool, contiguous: bool,
+                      tail: bool) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+    """Where hidden coordination stood among the rows a page gives, so a client draws the
+    separator where the exchange happened: {row id: hidden_before} counted from the previous
+    VISIBLE row of the chat (not of the page), and hidden_after for what follows the chat's
+    newest visible row (on a tail page or a delta; None otherwise). Each count is
+    {messages, exchanges, agents: [{agent_id, name}]}."""
+    database = conn()
+    scope = "m.agent_id = ?" + (
+        " AND m.backend_session_id IN (" + ",".join("?" for _ in sessions) + ")" if sessions else "")
+    scope_params: list[Any] = [agent_id, *sessions]
+    visible = "NOT " + coordination.HIDDEN_ROW_SQL
+    visible_params: list[Any] = []
+    if not include_automated:
+        sql, extra = _automated_sql()
+        visible += " AND " + sql
+        visible_params += extra
+
+    def previous_visible(key: tuple | None) -> tuple | None:
+        where, params = f"{scope} AND {visible}", [*scope_params, *visible_params]
+        if key is not None:
+            cmp_sql, cmp_params = _key_cmp("<", key)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        row = database.execute(
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id FROM messages m WHERE {where}
+                ORDER BY {_KEY_SQL} DESC, m.seq DESC, m.message_id DESC LIMIT 1""", params).fetchone()
+        return (row["t"], int(row["seq"]), row["message_id"]) if row is not None else None
+
+    def hidden(low: tuple | None, high: tuple | None) -> list:
+        where, params = f"{scope} AND {coordination.HIDDEN_ROW_SQL}", list(scope_params)
+        if low is not None:
+            cmp_sql, cmp_params = _key_cmp(">", low)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        if high is not None:
+            cmp_sql, cmp_params = _key_cmp(">", high)
+            where, params = where + " AND NOT " + cmp_sql, params + cmp_params
+        return database.execute(
+            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, m.trace_id, m.role, m.tool_name, m.text,
+                       hc.sender_agent_id
+                  FROM messages m
+                  LEFT JOIN coordination_traces hc ON hc.agent_id = m.agent_id AND hc.trace_id = m.trace_id
+                 WHERE {where}
+                 ORDER BY {_KEY_SQL}, m.seq, m.message_id""", params).fetchall()
+
+    def count(found: list) -> dict[str, Any] | None:
+        if not found:
+            return None
+        senders = list(dict.fromkeys(r["sender_agent_id"] for r in found if r["sender_agent_id"]))
+        names = {r["agent_id"]: r["persona"] for r in database.execute(
+            "SELECT agent_id, persona FROM agents WHERE agent_id IN (" + ",".join("?" for _ in senders) + ")",
+            senders)} if senders else {}
+        return {"messages": sum(1 for r in found if r["role"] in ("user", "assistant")
+                                and not (r["tool_name"] or "") and (r["text"] or "").strip()),
+                "exchanges": len({r["trace_id"] for r in found}),
+                "agents": [{"agent_id": a, "name": names.get(a, "")} for a in senders]}
+
+    ids = [row["id"] for row in rows]
+    keys: dict[str, tuple] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        for r in database.execute(
+                f"SELECT message_id, COALESCE(timestamp, '') AS t, seq FROM messages WHERE message_id IN ("
+                + ",".join("?" for _ in chunk) + ")", chunk):
+            keys[r["message_id"]] = (r["t"], int(r["seq"]), r["message_id"])
+    ordered = sorted((keys[i] for i in ids if i in keys))
+    before: dict[str, dict[str, Any]] = {}
+    after_tail: dict[str, Any] | None = None
+    if contiguous and ordered:
+        found = hidden(previous_visible(ordered[0]), None if tail else ordered[-1])
+        position = 0
+        groups: dict[str, list] = {}
+        rest: list = []
+        for r in found:
+            key = (r["t"], int(r["seq"]), r["message_id"])
+            while position < len(ordered) and ordered[position] < key:
+                position += 1
+            if position < len(ordered):
+                groups.setdefault(ordered[position][2], []).append(r)
+            else:
+                rest.append(r)
+        before = {mid: c for mid, group in groups.items() if (c := count(group))}
+        if tail:
+            after_tail = count(rest)
+    elif contiguous:
+        if tail:
+            after_tail = count(hidden(None, None))   # nothing visible at all: all of it follows
+    else:
+        for key in ordered:
+            c = count(hidden(previous_visible(key), key))
+            if c:
+                before[key[2]] = c
+        if tail or not contiguous:
+            after_tail = count(hidden(previous_visible(None), None))
+    return before, after_tail
 
 
 def _turn_field(raw: Any) -> dict[str, Any]:

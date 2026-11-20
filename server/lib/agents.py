@@ -1372,7 +1372,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                   before_message_id: str = "",
                   limit: int = 100,
                   include_automated: bool = True,
-                  extra_backend_session_id: str = "") -> list[dict[str, Any]]:
+                  extra_backend_session_id: str = "",
+                  hide_coordination: bool = False) -> list[dict[str, Any]]:
     from .message_store import list_messages as _list
     return _list(
         agent_id=agent_id, backend_session_id=backend_session_id,
@@ -1380,6 +1381,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         before_message_id=before_message_id,
         include_automated=include_automated,
         extra_backend_session_id=extra_backend_session_id,
+        hide_coordination=hide_coordination,
     )
 
 
