@@ -6,8 +6,9 @@
 //! and `fail_refused_launch`): a send that is refused at its own try is tried again from the
 //! queue a second later; every refusal from there on is counted, and the next try waits 1, 2, 4
 //! ... 60 s. Refusals that differ only in ids, counts or times are one refusal ([`signature`]);
-//! another refusal begins the count of one again. At the eighth of one ([`PARK_AFTER`]) the turn
-//! ends. Held by `tests/fixtures/launch-refused-vectors.json`, written by the Python Host's own
+//! another refusal begins the count of one again. At the eighth of one ([`PARK_AFTER`]), or at the
+//! twentieth refusal of the turn in all ([`MOST`], the release owner's ruling of 20 Nov 2026 on
+//! refusals that alternate between two kinds), whichever comes first, the turn ends. Held by `tests/fixtures/launch-refused-vectors.json`, written by the Python Host's own
 //! functions.
 
 use std::sync::LazyLock;
@@ -20,6 +21,9 @@ pub const BASE_MS: i64 = 1_000;
 pub const MAX_MS: i64 = 60_000;
 /// How many tries of one refusal end the turn.
 pub const PARK_AFTER: u32 = 8;
+/// How many counted refusals of a turn in all end it, whatever they were (about a quarter of an
+/// hour at the waits above).
+pub const MOST: u32 = 20;
 /// The wait after a send's own try, before the first counted one: the queue is looked at again
 /// a second later.
 pub const FIRST_WAIT_MS: i64 = 1_000;
@@ -112,12 +116,82 @@ impl Refusals {
         };
         self.signature = signed;
         self.error = brief(text);
-        if self.identical >= PARK_AFTER {
+        if self.identical >= PARK_AFTER || self.failures >= MOST {
             Next::End
         } else {
             Next::Wait {
                 ms: wait_ms(self.failures),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The turn's refusals, by kind: whether each ends the turn, and the words the notice then
+    /// says (the last refusal's).
+    fn run(kinds: &[&str]) -> Vec<(bool, String)> {
+        let mut refusals = Refusals::default();
+        kinds
+            .iter()
+            .enumerate()
+            .map(|(at, kind)| {
+                let next = refusals.failed(kind, &format!("refused by {kind}, try {at}"));
+                (next == Next::End, refusals.error.clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_turn_ends_at_the_eighth_identical_refusal_or_the_twentieth_in_all_whichever_comes_first() {
+        // By table: the refusals' kinds, and at which (from 1) the turn ends.
+        let alternating: Vec<&str> = ["A", "B"].iter().copied().cycle().take(25).collect();
+        let seven_then_other: Vec<&str> = std::iter::repeat_n("A", 7)
+            .chain(["B"])
+            .chain(std::iter::repeat_n("A", 7))
+            .chain(["B"])
+            .chain(std::iter::repeat_n("A", 9))
+            .collect();
+        let identical: Vec<&str> = std::iter::repeat_n("A", 25).collect();
+        let late_run: Vec<&str> = ["A", "B"]
+            .iter()
+            .copied()
+            .cycle()
+            .take(6)
+            .chain(std::iter::repeat_n("C", 10))
+            .collect();
+        for (what, kinds, ends_at) in [
+            ("eight identical in a row", identical.as_slice(), 8),
+            (
+                "two kinds that alternate",
+                alternating.as_slice(),
+                MOST as usize,
+            ),
+            (
+                "seven, another, seven, another: the twentieth",
+                seven_then_other.as_slice(),
+                20,
+            ),
+            (
+                "eight identical after six others: the fourteenth",
+                late_run.as_slice(),
+                14,
+            ),
+        ] {
+            let ran = run(kinds);
+            let first_end = ran.iter().position(|(ends, _)| *ends).map(|at| at + 1);
+            assert_eq!(first_end, Some(ends_at), "{what}");
+            // The notice says the last refusal's words.
+            let (_, said) = &ran[ends_at - 1];
+            assert_eq!(
+                said,
+                &format!("refused by {}, try {}", kinds[ends_at - 1], ends_at - 1),
+                "{what}"
+            );
+        }
+        // Nineteen that alternate do not end it.
+        assert!(run(&alternating[..19]).iter().all(|(ends, _)| !ends));
     }
 }
