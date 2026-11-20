@@ -3,6 +3,7 @@
 These protect admission-before-paid-audio, wire startup/commands, podcast
 receipts and cleanup after failures. No HTTP server or listening socket runs.
 """
+import contextlib
 import io
 import json
 import queue
@@ -294,3 +295,26 @@ def test_podcast_history_records_the_session_the_provider_gets_across_a_config_s
     sent = transport.provider.sent[0]['session']
     assert stored == sent and stored_model == sent['model'] == 'gpt-live-1.1'
     assert sent['instructions'] == podcast_live.STABLE_PROMPT   # the stable session, not the tinkered one
+
+
+def test_a_podcast_session_that_cannot_be_built_still_releases_the_device(transport, monkeypatch):
+    """The stable podcast's session is built after the device's claim (issue 473): a failure there must not
+    leave the device answering 'An Oracle session is already active' until the Host restarts."""
+    from lib import artifacts, config, podcast_history, podcast_live
+    monkeypatch.setattr(mod.config, 'load', lambda *a, **k: config.Config(openai_api_key='fixture', oracle_earcons=False))
+    artifact = {'artifact_id': 'episode', 'session': 's1', 'type': 'audio', 'duration_ms': 120000,
+                'payload': {'podcast': {'revision': 'rev1'}}}
+    monkeypatch.setattr(artifacts, 'get', lambda ident: artifact)
+    monkeypatch.setattr(podcast_history, 'source_artifact', lambda ident: None)
+    monkeypatch.setattr(podcast_live, 'context_for', lambda *args, **kwargs: '{"episode": "Synthetic"}')
+    def unbuildable(*args, **kwargs):
+        raise RuntimeError('synthetic session build failure')
+    monkeypatch.setattr(podcast_live, 'session_config', unbuildable)
+    monkeypatch.setattr(mod, '_connect_voice', lambda *args: pytest.fail('paid audio without a session'))
+    transport.handler.path += '?podcast_artifact=episode&position=12&revision=rev1'
+    with contextlib.suppress(RuntimeError):
+        mod.serve(transport.handler)
+    principal = transport.handler._request_principal
+    token = mod.claim_connection(principal, timeout=0.2)
+    assert token, "the device's Oracle claim leaked"
+    mod.release_connection(principal, token)
