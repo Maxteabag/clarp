@@ -2,9 +2,13 @@
 
 For every agent and every saved contact: the stored voice value, the one stored shape it
 would become (voice.canonical), what it is heard with today and what it would be heard with
-after, under the Host's configured provider AND under its configured fallback alone. A row
-whose two answers differ is an AUDIBLE change: --apply never writes it and names it; it is
-the owner's to decide (V2c). The transcription settings get keys by agent id the same way:
+after, under the Host's configured provider AND under its configured fallback alone, and,
+keys aside, under every provider the Host can speak with (each built-in and each installed
+adapter, on its own): a stored value is read per provider, so a row that sounds the same
+under today's provider may not under another one the Host moves to. A row with any
+difference is an AUDIBLE change: --apply never writes it and names it; it is the owner's to
+decide (V2c). --apply writes only the plan the release owner read: it takes the dry run's
+digest and refuses when the plan has changed since. The transcription settings get keys by agent id the same way:
 each agent's value today is copied under its id; a key that several agents share is listed.
 
 Nothing here calls a provider: the answers come from the resolver the speaking path uses
@@ -13,6 +17,7 @@ Nothing here calls a provider: the answers come from the resolver the speaking p
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 from typing import Any
 
@@ -34,24 +39,45 @@ def _heard(host: voice_profile.HostView, agent: dict) -> dict:
     return out
 
 
-def _row(host, kind: str, ident: dict, agent: dict) -> dict | None:
+def _per_provider_hosts(host: voice_profile.HostView) -> dict[str, voice_profile.HostView]:
+    """For every provider the Host can speak with, a view of the Host as if it were the only
+    one, with its key present (keys aside: what the stored value would give it)."""
+    out = {}
+    for provider in sorted(voice_profile.BUILTIN_PROVIDERS | set(host.adapters)):
+        alone = dataclasses.replace(host.cfg, tts_provider=provider, tts_fallback="none",
+                                    tts_agent_overrides={})
+        out[provider] = dataclasses.replace(host, cfg=alone, keys={**host.keys, provider: True},
+                                            google_refusal=None)
+    return out
+
+
+def _row(host, alone: dict, kind: str, ident: dict, agent: dict) -> dict | None:
     old = str(agent.get("voice_id") or "")
     new = canonical(old)
     if new == old:
         return None
+    moved = {**agent, "voice_id": new}
     today = _heard(host, agent)
-    after = _heard(host, {**agent, "voice_id": new})
+    after = _heard(host, moved)
+    per_provider = {}
+    for provider, view in alone.items():
+        before_sp, after_sp = voice_profile.speech(view, agent), voice_profile.speech(view, moved)
+        before_v = [before_sp["voice_id"], before_sp["silent_reason"]]
+        after_v = [after_sp["voice_id"], after_sp["silent_reason"]]
+        if before_v != after_v:
+            per_provider[provider] = {"today": before_v, "after": after_v}
     return {"kind": kind, **ident, "old": old, "new": new, "today": today, "after": after,
-            "audible": today != after}
+            "per_provider": per_provider, "audible": today != after or bool(per_provider)}
 
 
 def plan(cfg=None) -> dict[str, Any]:
     """The whole report; reads only."""
     from . import agents as agents_db, personas
     host = voice_profile.HostView.build(cfg)
+    alone = _per_provider_hosts(host)
     rows = []
     for agent in agents_db.list_agents():
-        row = _row(host, "agent", {"agent_id": agent["agent_id"], "name": agent["persona"],
+        row = _row(host, alone, "agent", {"agent_id": agent["agent_id"], "name": agent["persona"],
                                    "session": agent["session"]}, agent)
         if row:
             rows.append(row)
@@ -59,12 +85,24 @@ def plan(cfg=None) -> dict[str, Any]:
         # A contact speaks through the agents made from it: judge it as one.
         as_agent = {"agent_id": "", "persona": contact["name"], "session": "",
                     "voice_id": contact.get("voice_id") or ""}
-        row = _row(host, "contact", {"persona_id": contact["persona_id"], "name": contact["name"],
+        row = _row(host, alone, "contact", {"persona_id": contact["persona_id"], "name": contact["name"],
                                      "builtin": bool(contact.get("builtin"))}, as_agent)
         if row:
             rows.append(row)
-    return {"voices": rows, "transcription": _transcription_plan(host, agents_db.list_agents()),
-            "provider": host.cfg.tts_provider, "fallback": host.cfg.tts_fallback}
+    report = {"voices": rows, "transcription": _transcription_plan(host, agents_db.list_agents()),
+              "provider": host.cfg.tts_provider, "fallback": host.cfg.tts_fallback}
+    report["digest"] = digest(report)
+    return report
+
+
+def digest(report: dict[str, Any]) -> str:
+    """What --apply must be handed: the plan the dry run showed, as a short hash."""
+    body = {k: report[k] for k in ("voices", "transcription", "provider", "fallback")}
+    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16]
+
+
+class PlanChanged(Exception):
+    """The plan at apply time is not the one the dry run showed."""
 
 
 def _transcription_plan(host, agent_rows) -> dict:
@@ -90,9 +128,13 @@ def _transcription_plan(host, agent_rows) -> dict:
     return out
 
 
-def apply(report: dict[str, Any]) -> dict[str, Any]:
-    """Write the rows with no audible change; refuse the others by name."""
+def apply(report: dict[str, Any], *, reviewed: str) -> dict[str, Any]:
+    """Write the rows with no audible change; refuse the others by name. ``report`` is the
+    plan made now; ``reviewed`` the digest of the dry run that was read. Nothing is written
+    when they differ (a row changed in between would be written unseen)."""
     from . import agents as agents_db, personas, settings_store, stt_language
+    if not reviewed or digest(report) != reviewed:
+        raise PlanChanged(f"the plan is {digest(report)}, the dry run read was {reviewed or 'none'}")
     written, refused = [], []
     for row in report["voices"]:
         label = f"{row['kind']} {row['name']}"
