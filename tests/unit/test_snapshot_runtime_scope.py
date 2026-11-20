@@ -1,5 +1,6 @@
 """SNAP-N1: freeze snapshot bytes while bounding runtime outage work per build."""
 import json
+import os
 import pathlib
 import sys
 import time
@@ -94,6 +95,9 @@ def test_snapshot_fixed_runtime_json_bytes(fleet):
     runtime = Runtime(status)
     backends.configure_runtime_client(runtime)
     actual = json.dumps(snapshot.build_agent_snapshot(ctx)).encode()
+    if os.environ.get("CLARP_REGEN_SNAPSHOT_GOLDEN") == "1":
+        # Only on purpose, after a reviewed additive change to the snapshot.
+        GOLDEN.write_bytes(actual)
     assert actual == GOLDEN.read_bytes()
 
 

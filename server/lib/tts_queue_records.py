@@ -109,6 +109,35 @@ def mark_failed(queue_id: int, error: str) -> None:
 CANCELLED_PREFIX = "cancelled: "
 
 
+def turn_already_told(*, agent_id: str, trace_id: str, queue_id: int, reason: str,
+                      since_ms: int) -> bool:
+    """Whether another failed clip of this turn already told the user it was not
+    spoken for ``reason`` (its error starts "<reason>: "). Read only on a failure,
+    through the enqueued_at index (feature speech_outcome: once per turn). A clip
+    without a trace is matched with the agent's other trace-less clips (``trace_id``
+    "" matches a missing one); the caller bounds that case by ``since_ms``."""
+    row = conn().execute(
+        """SELECT 1 FROM tts_queue
+            WHERE enqueued_at >= ? AND agent_id = ? AND COALESCE(trace_id, '') = ?
+              AND queue_id <> ? AND status = ? AND error LIKE ? ESCAPE '\\' LIMIT 1""",
+        (int(since_ms), agent_id, trace_id or "", int(queue_id), FAILED,
+         reason.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ": %"),
+    ).fetchone()
+    return row is not None
+
+
+def turn_partly_spoken(*, agent_id: str, trace_id: str, since_ms: int) -> bool:
+    """Whether a clip of this turn was already spoken (read only on a failure)."""
+    if not trace_id:
+        return False
+    row = conn().execute(
+        """SELECT 1 FROM tts_queue
+            WHERE enqueued_at >= ? AND agent_id = ? AND trace_id = ? AND status = ? LIMIT 1""",
+        (int(since_ms), agent_id, trace_id, DONE),
+    ).fetchone()
+    return row is not None
+
+
 def cancel(agent_id: str, trace_id: str | None = None, *, reason: str) -> int:
     """Drop an agent's queued rows (only that trace's when given) so they are
     never synthesized. Returns how many were dropped."""
