@@ -222,6 +222,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `clarp.hotseat-status/1`): served from what was kept, nothing read for it. Listed by
     // every Host, as there: the strict answer of a Host without the owner's tool says so.
     ("accounts_hotseat", 78),
+    ("transcription", 1),
     // What an agent says aloud (`/tts/providers`, `/voices`, `/voice-catalog`,
     // `/voice-preview`, the clips): five built-in engines, among them Google's Chirp 3 HD
     // voices and its refusal of an old adapter that took its id. Custom speech adapters are

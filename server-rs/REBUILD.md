@@ -2323,7 +2323,7 @@ computer registration under the same id replaces the unreadable record and logs 
 generation receipts are in `computer-jobs.json`, and the wrong rules in
 `tools/plants/computer-jobs.py`.
 
-**Installing transcription models on Linux.** An explicit full-access POST to
+**Installing transcription models on Linux (feature `transcription`, contract 1).** An explicit full-access POST to
 `/transcription-models/install` registers a computer-owned job and answers 202 with its generation
 and handle. Repeated requests join that job. Each supported catalog row fixes a repository and
 revision. The speech environment streams the snapshot into checked private staging; the child
