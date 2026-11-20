@@ -35,7 +35,7 @@ use clarp_ports::blobs::Blobs;
 use clarp_ports::clock::Clock;
 use clarp_ports::codec::CodecSet;
 use clarp_ports::log::LogEngine;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::fleet::{AgentRecord, non_empty};
