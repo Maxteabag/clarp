@@ -485,3 +485,63 @@ def test_a_peer_hosts_claim_of_the_users_word_is_an_agents_and_a_devices_is_unto
     assert (req.origin, mark) == ("agent", True)
     req, mark = _boundary(world, origin="user")                     # a device, or the Host's own token
     assert (req.origin, mark) == ("user", False)
+
+
+def _dispatched(tmp_path, *, retry_scheduler=None):
+    from tests.unit.test_turn_dispatch import _make_service
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=retry_scheduler or (lambda d, fn: None))
+    return service, backends, agent_id
+
+
+def _start(service, trace):
+    from lib.turn_dispatch import DispatchCommand
+    service.submit(DispatchCommand(text="Go", requested_session="mike", forced_session="mike", trace_id=trace,
+                                   client_msg_id="c-" + trace, synthesize_audio=False, origin="user"))
+
+
+def test_a_note_with_an_earlier_turns_token_while_a_newer_turn_runs_is_refused(tmp_path, pushes):
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-1")
+    old = _token(agent_id, "t-1")
+    backends.spawned[-1][1]["on_result"]({"duration_ms": 5})
+    _start(service, "t-2")
+    refused = _note("From the old turn.", session="mike", token=old)
+    assert refused.answer[0] == 409
+    taken = _note("From the running turn.", session="mike", token=_token(agent_id, "t-2"))
+    assert taken.answer[0] == 200 and taken.answer[1]["trace_id"] == "t-2"
+
+
+def test_a_note_from_a_failed_turn_is_refused(tmp_path, pushes):
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-fail")
+    token = _token(agent_id, "t-fail")
+    backends.spawned[-1][1]["on_error"]("something nobody recognises went wrong")   # not retried: failed
+    assert db.conn().execute("SELECT outcome FROM turns WHERE trace_id='t-fail'").fetchone()[0] == "failed"
+    assert _note("Too late.", session="mike", token=token).answer[0] == 409
+
+
+def test_a_note_from_a_stopped_turn_is_refused(tmp_path, pushes):
+    """The steps the Host's /stop records (its handler needs an HTTP request): the dispatch
+    state cleared, the backend interrupted, STOP_REQUESTED for the stopped turn."""
+    from lib import turn_dispatch as td
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-stop")
+    token = _token(agent_id, "t-stop")
+    td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True, user_stop=True)
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.STOP_REQUESTED,
+                                  {"source": "user_stop", "message": "Turn stopped", "trace_id": "t-stop"})
+    assert db.conn().execute("SELECT settled_at FROM turns WHERE trace_id='t-stop'").fetchone()[0] is not None
+    assert _note("Stopped.", session="mike", token=token).answer[0] == 409
+
+
+def test_a_note_from_a_turn_parked_for_a_retry_is_its_turns(tmp_path, pushes):
+    """A turn waiting to be delivered again (a dropped connection) has neither ended nor
+    settled: it is still the agent's turn, and a note is a row of it."""
+    parked = []
+    service, backends, agent_id = _dispatched(tmp_path, retry_scheduler=lambda d, fn: parked.append(fn))
+    _start(service, "t-park")
+    token = _token(agent_id, "t-park")
+    backends.spawned[-1][1]["on_error"]("connection reset by peer")
+    assert parked
+    taken = _note("Still on it.", session="mike", token=token)
+    assert taken.answer[0] == 200 and taken.answer[1]["trace_id"] == "t-park"
