@@ -519,6 +519,10 @@ class Config:
     claude_account_switch_command: tuple[str, ...] = ()
     # Opt-in banked-reset adapter; empty means no automated redemption.
     claude_reset_command: tuple[str, ...] = ()
+    codex_reset_command: tuple[str, ...] = ()
+    # At most this many verified automatic Codex reset redemptions in a rolling 24 hours (R145);
+    # 0 switches the Codex reset step off.
+    codex_reset_max_per_day: int = 1
     codex_account_switch_command: tuple[str, ...] = ()
     claude_model: str = ""
     claude_effort: str = "high"          # "" (CLI default) | low | medium | high | xhigh | max
@@ -1116,6 +1120,11 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         claude_reset_command = tuple(agents.get("claude_reset_command", ()))
             if isinstance(agents.get("claude_reset_command", ()), (list, tuple))
             and all(isinstance(arg, str) and arg for arg in agents.get("claude_reset_command", ())) else (),
+        codex_reset_command = tuple(agents.get("codex_reset_command", ()))
+            if isinstance(agents.get("codex_reset_command", ()), (list, tuple))
+            and all(isinstance(arg, str) and arg for arg in agents.get("codex_reset_command", ())) else (),
+        codex_reset_max_per_day = agents.get("codex_reset_max_per_day")
+            if type(agents.get("codex_reset_max_per_day")) is int and agents.get("codex_reset_max_per_day") >= 0 else 1,
         claude_effort   = str(agents.get("claude_effort", "high")),
         helper_archive_grace_hours=_non_negative_float(
             agents.get("helper_archive_grace_hours"), 24.0),

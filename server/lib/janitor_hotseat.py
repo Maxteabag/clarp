@@ -342,6 +342,8 @@ class HotseatProvider:
     auth_repair: HotseatAuthRepair | None = None
     model_scoped: bool = False
     reset_command_field: str = ""
+    # The config key capping verified automatic redemptions per rolling 24 hours ('' = no cap).
+    reset_cap_field: str = ""
     # Flags that go after the read's subcommand when only "which account is in
     # use" is asked (the Hotseat desk, before a switch): they leave out what
     # that question does not need. Codex's quota probe is the slow part.
@@ -358,7 +360,9 @@ PROVIDERS: dict[str, HotseatProvider] = {
                               desk=hotseat_desk_reading.CLAUDE_READING),
     "codex": HotseatProvider("weekly", ("codex", "--json"), 150, parse_codex, "codex_min_remaining",
                              "codex_interval_seconds", lambda alias: ["codex-account", "switch", alias], False,
-                             active_read_flags=("--no-quota",), desk=hotseat_desk_reading.CODEX_READING),
+                             active_read_flags=("--no-quota",), desk=hotseat_desk_reading.CODEX_READING,
+                             reset_command_field="codex_reset_command",
+                             reset_cap_field="codex_reset_max_per_day"),
 }
 WINDOW_LABEL = {provider: spec.window for provider, spec in PROVIDERS.items()}
 
