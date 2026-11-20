@@ -73,7 +73,9 @@ async fn compact(State(app): State<App>, body: Bytes) -> Response {
         return refused("agent is busy \u{2014} try again when idle");
     }
     if !status.waiting.is_empty() {
-        return refused("messages are waiting for this agent \u{2014} try again when they have run");
+        return refused(
+            "messages are waiting for this agent \u{2014} try again when they have run",
+        );
     }
     let request = ids::hex(8);
     let (id, marked) = Message::filed(&format!("compact-{request}"));

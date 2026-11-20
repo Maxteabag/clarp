@@ -44,13 +44,13 @@ pub mod bookkeeping;
 use clarp_kernel::launch_refused;
 pub mod delegation;
 mod goal_ledger;
+use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::goals::ledger::{self, Author, Event as LedgerEvent};
 use clarp_kernel::goals::{Change as GoalChange, GoalBook, GoalRecord};
 use clarp_kernel::jobs::{JobBook, JobChange, JobCommand, JobRecord, JobRefusal};
 use clarp_kernel::journal::{Batch, Incoming, JournalError, Recorder, Reworded, kind};
 use clarp_kernel::live::{self, Hub};
 use clarp_kernel::media::{Asset, MediaBook};
-use clarp_kernel::compaction::{self, Boundary, LastCompaction};
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::{KEPT_FOR_MS, Line as Spoken, Said, SpeechBook, lines_of};
 use clarp_kernel::told::{self, Told};
@@ -963,7 +963,12 @@ struct Facts {
 /// What the user's compaction whose turn ended in this batch did, in the same write: from the
 /// tool's record of it in that turn, else from how the turn ended. Nothing for any other turn.
 fn compaction_said(batch: &mut Batch<'_>, turn: TurnId, facts: &Facts) {
-    let Some(owed) = batch.agent().compaction_owed().filter(|owed| owed.id == turn).cloned() else {
+    let Some(owed) = batch
+        .agent()
+        .compaction_owed()
+        .filter(|owed| owed.id == turn)
+        .cloned()
+    else {
         return;
     };
     let model = facts.model.as_deref().unwrap_or_default();
@@ -4087,7 +4092,8 @@ impl Actor {
                             batch.item(written(&marker, t)?);
                         }
                         if failed
-                            && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
+                            && let Some(end) =
+                                closing(&mut batch, turn, &live.last_row, live.facts())
                         {
                             batch.item(written(&end, t)?);
                         }
@@ -4390,7 +4396,8 @@ impl Actor {
                     live.last_row = notice.id().to_string();
                     batch.item(written(&notice, now_ms)?);
                 }
-                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts()) {
+                if ended && let Some(end) = closing(&mut batch, turn, &live.last_row, live.facts())
+                {
                     cut_off(
                         &mut batch,
                         &mut live.calls,
