@@ -82,6 +82,10 @@ CATALOG: tuple[dict, ...] = (
      )},
 )
 VALID_IDS = frozenset(item["id"] for item in CATALOG)
+# Hosted engines that can be handed a language set such as "no,en". Any other
+# engine refuses a set (transcribe below); the capabilities say so per model
+# (accepts_language_set) and calls plan by it (call_transcription).
+LANGUAGE_SET_PROVIDERS = frozenset({"google", "elevenlabs"})
 
 
 def provider_of(model_id: str) -> str:
@@ -174,6 +178,8 @@ def cloud_models(*, available_only: bool = False) -> list[dict]:
                 "credential": definition["credential"],
                 "turn_detection": definition["turn_detection"],
                 "biasing": model["biasing"],
+                # Whether it can be handed an agent's language set ("no,en").
+                "accepts_language_set": definition["id"] in LANGUAGE_SET_PROVIDERS,
                 "budget": {"unit": budget.unit, "capacity": budget.capacity,
                            "max_term_chars": budget.max_term_chars},
             })
@@ -372,7 +378,7 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     from .focus import current_focus_session
     session = stt_language.current_session() or current_focus_session()
     language = stt_language.current_language() or stt_language.language_for(session)
-    if "," in language and provider not in {"google", "elevenlabs"}:
+    if "," in language and provider not in LANGUAGE_SET_PROVIDERS:
         raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
     # The argument handed to the adapter, as the attempt records it: Scribe
     # drops a set and detects without bound, so it is handed none.

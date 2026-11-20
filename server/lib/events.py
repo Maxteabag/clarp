@@ -82,7 +82,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "released_trace",
     ),
     SSEType.AGENT_ROSTER: (
-        "kind", "session", "persona", "voice_id", "backend", "name",
+        "kind", "session", "persona", "voice_id", "backend", "name", "voice_profile",
     ),
     SSEType.AGENT_FOCUS: ("session", "agent_id"),
     SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session", "backend_session_id"),
@@ -108,7 +108,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "source_message_id", "cause_message_id", "origin", "push", "badge",
         "unread", "muted", "preview", "reason",
     ),
-    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error"),
+    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error", "reason", "provider", "trace_id"),
     SSEType.LOCATION_REQUEST: ("session",),
     SSEType.CALENDAR_REQUEST: (
         "request_id", "session", "title", "start", "end", "time_zone",
@@ -282,8 +282,11 @@ def heartbeat(*, ts: int) -> Event:
 
 def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
                  persona: Any = OMIT, voice_id: Any = OMIT,
-                 backend: Any = OMIT, name: Any = OMIT) -> Event:
-    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge."""
+                 backend: Any = OMIT, name: Any = OMIT,
+                 voice_profile: Any = OMIT) -> Event:
+    """Refetch the snapshot. Without ``kind`` it is the reconnect nudge.
+    ``voice_profile`` is the agent's resolved voice and hearing (feature
+    voice_profile) when the event is about one agent's voice."""
     return _build(SSEType.AGENT_ROSTER, [
         ("kind", kind),
         ("session", session),
@@ -291,6 +294,7 @@ def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
         ("voice_id", voice_id),
         ("backend", backend),
         ("name", name),
+        ("voice_profile", voice_profile),
     ])
 
 
@@ -413,13 +417,19 @@ def user_notification(*, notification_id: str, agent_id: str, session: str,
 
 
 def tts_error(*, session: Any, agent_id: Any, persona: Any, message: str,
-              error: str) -> Event:
+              error: str, reason: Any = OMIT, provider: Any = OMIT,
+              trace_id: Any = OMIT) -> Event:
+    """A reply that is not spoken (feature speech_outcome adds ``reason``,
+    ``provider`` and ``trace_id``: the turn whose reply it is)."""
     return _build(SSEType.TTS_ERROR, [
         ("session", session),
         ("agent_id", agent_id),
         ("persona", persona),
         ("message", message),
         ("error", error),
+        ("reason", reason),
+        ("provider", provider),
+        ("trace_id", trace_id),
     ])
 
 
