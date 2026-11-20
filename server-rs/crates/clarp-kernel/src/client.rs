@@ -42,22 +42,33 @@ pub struct Minimums {
     pub cased: Vec<(String, String)>,
 }
 
+/// Client names used by the built-in apps, including those without a render-spec default.
+pub const BUILT_IN_NAMES: &[&str] = &["ios", "android"];
+
 impl Minimums {
-    /// What the reading of a table says, in the words of the one rule for every such table: the
-    /// keys refused, where there are any, then each key taken that differs from a known name
-    /// only in its case. Whose table it is, the caller says.
+    /// The reference's diagnostics, one for refused keys and one for case variants.
     pub fn lines(&self) -> Vec<String> {
         let mut said = Vec::new();
         if !self.refused.is_empty() {
             said.push(format!(
-                "refused entries (a client's name as its header sends it, and a whole number of at least 0): {}",
+                "refused {}: a key is a client's name as it sends it \
+                 ([A-Za-z][A-Za-z0-9_-]{{0,31}}), a value a whole number of 0 or more",
                 self.refused.join(", ")
             ));
         }
-        for (key, name) in &self.cased {
-            let (key, name) = (as_said(key), as_said(name));
+        if !self.cased.is_empty() {
+            let cased = self
+                .cased
+                .iter()
+                .map(|(key, name)| {
+                    let (key, name) = (as_said(key), as_said(name));
+                    format!("{key} (not {name})")
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
             said.push(format!(
-                "{key} is taken as written: it counts for a client that sends {key}, not for {name}"
+                "{cased}: names are matched exactly as clients send them, so each is \
+                 another client and leaves the built-in one as it is"
             ));
         }
         said
@@ -88,22 +99,7 @@ pub fn minimums<'a>(
     read
 }
 
-/// A key of the owner's as a line of the journal names it: quoted, at most 40 signs, and a
-/// sign a line does not hold as `?`.
-pub fn as_said(key: &str) -> String {
-    let mut said: String = key
-        .chars()
-        .take(40)
-        .map(|sign| {
-            if sign.is_ascii_graphic() || sign == ' ' {
-                sign
-            } else {
-                '?'
-            }
-        })
-        .collect();
-    if key.chars().count() > 40 {
-        said.push_str("...");
-    }
-    format!("'{said}'")
+/// A key shown with Python's `repr` escaping, including control characters.
+fn as_said(key: &str) -> String {
+    crate::python::text(key)
 }
