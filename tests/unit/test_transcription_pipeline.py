@@ -591,3 +591,43 @@ def test_the_engine_that_just_refused_the_set_is_not_asked_again(monkeypatch):
     assert out.status == 200 and out.payload["engine_fallback"]["to"] == "server-default"
     assert [c[0] for c in stt.calls] == ["model", "bytes"]
 
+
+# F4: an own engine that is off or unavailable is never a 500: the typed refusal with words.
+@pytest.mark.parametrize("own_error", [RuntimeError("server transcription is disabled"),
+                                       RuntimeError("configured transcription model is not "
+                                                    "installed: faster-whisper:small")])
+def test_an_own_engine_that_is_off_or_missing_is_the_typed_refusal(monkeypatch, own_error):
+    from lib import stt_language
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(stt_language, "language_for", lambda session: "no,en")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    stt.raise_ = own_error                                     # transcribe_bytes
+    rec = Recorder()
+    out = _run(_ctx(stt), rec, requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["error"] == "language_set_unsupported"
+    assert out.payload["reasons"] == [f"the Host's own engine could not hear it: {own_error}"]
+    assert str(own_error) in out.payload["message"]
+    assert rec.voice[-1][1]["detail"]["message"] == "language_set_unsupported"
+
+
+def test_a_disabled_own_engine_is_never_the_fallback(monkeypatch):
+    from lib import config
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    monkeypatch.setattr(config, "load", lambda path=None: config.Config(
+        whisper_model="small", whisper_enabled=False))
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 422 and out.payload["reasons"] == ["the Host's own engine is off"]
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
+
+def test_an_own_engine_still_loading_is_the_loading_answer(monkeypatch):
+    monkeypatch.setattr(stt_providers, "language_set_engine", lambda: "")
+    _own_model(monkeypatch, "small")
+    stt = PerModelSTT({"deepgram:nova-3": stt_providers.LanguageSetUnsupported("set")})
+    stt.load_done = threading.Event()                          # not loaded yet
+    out = _run(_ctx(stt), Recorder(), requested_model="deepgram:nova-3", focus="rachel")
+    assert out.status == 503
+    assert [c[0] for c in stt.calls if c[0] == "bytes"] == []
+
