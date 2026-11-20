@@ -3850,3 +3850,561 @@ mod follow_by_revision {
         found.none();
     }
 }
+
+/// Imported messages acquire the revisions of the receiving log. Compare the
+/// reference's cursors and citations at the corresponding revision in that log.
+fn bookkeeping_revisions(value: &mut serde_json::Value, revisions: &BTreeMap<i64, i64>) {
+    match value {
+        serde_json::Value::Array(rows) => {
+            for v in rows {
+                bookkeeping_revisions(v, revisions);
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (key, v) in fields {
+                if matches!(
+                    key.as_str(),
+                    "revision" | "current_revision" | "after_message" | "message_through"
+                ) && v.as_i64().is_some_and(|n| revisions.contains_key(&n))
+                {
+                    *v = json!(revisions[&v.as_i64().unwrap()]);
+                } else {
+                    bookkeeping_revisions(v, revisions);
+                }
+            }
+        }
+        serde_json::Value::String(s) => {
+            if let Some(raw) = s.strip_prefix("message:u-note@")
+                && let Ok(n) = raw.parse::<i64>()
+            {
+                // A source pin is relative to the cited row, not to another message.
+                *s = format!("message:u-note@{}", revisions[&1] + n - 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn bookkeeping_imported_row(row: &clarp_actor::conversation::Versioned) -> serde_json::Value {
+    match &row.entry {
+        Entry::Imported(import) => import.row.clone(),
+        _ => panic!("expected imported fixture row"),
+    }
+}
+
+#[test]
+fn a_principals_actor_observes_and_commits_as_the_python_bookkeeper_does() {
+    use clarp_actor::{
+        Kept,
+        bookkeeping::Batch,
+        delegation::{Binding, Transition},
+    };
+    use clarp_kernel::goals::{GoalBook, Owner};
+    use serde_json::Value;
+    let f: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/goal-bookkeeping.json"
+    ))
+    .unwrap();
+    let mut world = World::new("bookkeeping-batches");
+    world.profile.agent_id = "owner".into();
+    let mut actor = world.open();
+    let pid = f["plan"].as_str().unwrap();
+    let did = f["delegation"].as_str().unwrap();
+    let messages = f["messages"].as_array().unwrap();
+    let rows = messages
+        .iter()
+        .map(|row| ImportedRow {
+            id: row["message_id"].as_str().unwrap().into(),
+            ts_ms: 20000,
+            row: row.clone(),
+        })
+        .collect();
+    let (taken, _) = actor
+        .import("fixture", Some("native".into()), rows, 20000)
+        .unwrap();
+    assert_eq!(taken.unwrap(), 3);
+    let mut revisions = messages
+        .iter()
+        .map(|m| {
+            (
+                m["revision"].as_i64().unwrap(),
+                actor
+                    .row(m["message_id"].as_str().unwrap())
+                    .unwrap()
+                    .unwrap()
+                    .revision as i64,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    // The explicit far-future cursor must also lie past every imported local row.
+    revisions.insert(100_000, i64::MAX - 1);
+    let owner = Owner {
+        agent_id: "owner",
+        session: "owner",
+    };
+    let doc = json!({"plan_id":pid,"name":"proof","revision":1,"format":"markdown","content":"fixture","reason":"fixture","updated_at":20000});
+    let change = GoalBook::new()
+        .taken_over(owner, &f["seed"], &[doc])
+        .unwrap();
+    let first: clarp_kernel::goals::ledger::Event =
+        serde_json::from_value(f["observe"][0]["result"]["goal_events"][0].clone()).unwrap();
+    actor
+        .keep(
+            &Kept {
+                goal: Some(&change),
+                imported_events: Some(&[first]),
+                import_high: 2,
+                ..Kept::default()
+            },
+            20000,
+        )
+        .unwrap();
+    actor
+        .change_delegation(
+            Transition::Start {
+                binding: Binding {
+                    delegation_id: did.into(),
+                    delegate_agent_id: "helper".into(),
+                },
+            },
+            21000,
+        )
+        .unwrap();
+    let compare_page = |actor: &Actor, case: &Value| {
+        let mut opts = case["options"].clone();
+        let mut wanted = case["result"].clone();
+        bookkeeping_revisions(&mut opts, &revisions);
+        // Only message revisions change when the transcript is imported.
+        bookkeeping_revisions(&mut wanted["messages"], &revisions);
+        if let Some(n) = wanted["message_through"]
+            .as_i64()
+            .and_then(|n| revisions.get(&n))
+        {
+            wanted["message_through"] = json!(n);
+        }
+        let got = actor
+            .observe_books(did, "helper", 0, &opts, bookkeeping_imported_row)
+            .unwrap()
+            .unwrap();
+        assert_eq!(got, wanted, "options {opts}");
+    };
+    let pages = f["observe"].as_array().unwrap();
+    for page in &pages[..pages.len() - 1] {
+        compare_page(&actor, page);
+    }
+    let mut high = 1;
+    for case in f["record"].as_array().unwrap() {
+        if case["credential"] == false || case["caller"] != "helper" {
+            continue;
+        } // Checked at the signed Host door.
+        let mut data = case["options"].clone();
+        data["entries"] = case["entries"].clone();
+        bookkeeping_revisions(&mut data, &revisions);
+        let b = Batch {
+            id: did,
+            caller: "helper",
+            plan: case["plan"].as_str().unwrap(),
+            wake: case["wake"].as_str().unwrap(),
+            now: case["now"].as_i64().unwrap(),
+            initial_message: 0,
+            created_at: 21000,
+            data: &data,
+        };
+        let before = actor.applied_bookkeeping(did, 0).unwrap();
+        let result = actor.record_books(&b, bookkeeping_imported_row).unwrap();
+        match result {
+            Err(e) => {
+                assert_eq!(case["error"], e.to_string(), "{case}");
+                assert_eq!(case["exit"], e.tool_exit());
+                assert_eq!(
+                    json!(before),
+                    json!(actor.applied_bookkeeping(did, 0).unwrap())
+                );
+            }
+            Ok((applied, state, _)) => {
+                assert!(case["error"].is_null(), "{case}");
+                let expected = &case["result"]["delegation"];
+                assert_eq!(case["result"]["applied"], applied);
+                assert_eq!(json!(state.last_applied_at), expected["last_applied_at"]);
+                assert_eq!(json!(state.unapplied_since), expected["unapplied_since"]);
+                assert_eq!(
+                    json!(state.goal_event_through),
+                    expected["goal_event_through"]
+                );
+                let through = expected["message_through"].as_i64().unwrap();
+                assert_eq!(
+                    state.message_through,
+                    *revisions.get(&through).unwrap_or(&through)
+                );
+            }
+        }
+        let (rows, _) = actor.goal_events(pid, high, 500).unwrap();
+        assert_eq!(rows.len(), case["events"].as_array().unwrap().len());
+        for (row, e) in rows.iter().zip(case["events"].as_array().unwrap()) {
+            let mut expected = e.clone();
+            expected.as_object_mut().unwrap().remove("actor_session");
+            bookkeeping_revisions(&mut expected["source_refs"], &revisions);
+            if let Some(sources) = expected["new"]
+                .get_mut("sources")
+                .and_then(Value::as_array_mut)
+            {
+                for source in sources {
+                    bookkeeping_revisions(source, &revisions);
+                }
+            }
+            assert_eq!(json!(row), expected, "wake {}", b.wake);
+            high = row.event_id;
+        }
+        if b.wake == "propose" {
+            drop(actor);
+            actor = world.open();
+        }
+    }
+    compare_page(&actor, pages.last().unwrap());
+    let mut accounting = f["accounting"].clone();
+    for entry in accounting.as_array_mut().unwrap() {
+        bookkeeping_revisions(&mut entry["source_refs"], &revisions);
+    }
+    assert_eq!(
+        actor.goals().get(pid, 22000).unwrap()["ledger"]["accounting"],
+        accounting
+    );
+}
+
+#[test]
+fn a_cut_bookkeeping_append_keeps_its_ids_sources_and_progress_available_for_retry() {
+    use clarp_actor::{
+        Kept,
+        bookkeeping::Batch,
+        delegation::{Binding, Transition},
+    };
+    use clarp_kernel::goals::{GoalBook, Owner};
+    use clarp_ports::log::{AgentLog, Item, Kinds, LogError, NewItem, Seq};
+    use std::sync::atomic::AtomicBool;
+    struct BookkeepingCut(Box<dyn AgentLog>, Arc<AtomicBool>);
+    impl AgentLog for BookkeepingCut {
+        fn append(&mut self, rows: &[NewItem]) -> Result<Seq, LogError> {
+            if self.1.swap(false, Ordering::SeqCst) {
+                return Err(LogError::Storage("cut bookkeeping commit".into()));
+            }
+            self.0.append(rows)
+        }
+        fn read_after(&self, s: Seq, k: Kinds, n: usize) -> Result<Vec<Item>, LogError> {
+            self.0.read_after(s, k, n)
+        }
+        fn read_before(&self, s: Seq, k: Kinds, n: usize) -> Result<Vec<Item>, LogError> {
+            self.0.read_before(s, k, n)
+        }
+        fn find(&self, key: &str) -> Result<Option<Item>, LogError> {
+            self.0.find(key)
+        }
+        fn last_seq(&self) -> Result<Seq, LogError> {
+            self.0.last_seq()
+        }
+    }
+    let world = World::new("bookkeeping-cut");
+    let dir = &world.profile.dir;
+    let disk = || {
+        world
+            .engine
+            .open(dir, standard_set("none").unwrap())
+            .unwrap()
+    };
+    let cut = Arc::new(AtomicBool::new(false));
+    let open = || {
+        Actor::open(
+            world.profile.clone(),
+            world.backend.clone(),
+            Box::new(BookkeepingCut(disk(), cut.clone())),
+            1,
+        )
+        .unwrap()
+        .0
+    };
+    let mut actor = open();
+    let pid = "a1:plan";
+    let change = GoalBook::new()
+        .taken_over(
+            Owner {
+                agent_id: "a1",
+                session: "owner",
+            },
+            &json!({"agent_id":"a1","plan_id":pid,"status":"active","goal":{"outcome":"Deliver"}}),
+            &[],
+        )
+        .unwrap();
+    actor
+        .keep(
+            &Kept {
+                goal: Some(&change),
+                imported_events: Some(&[]),
+                ..Kept::default()
+            },
+            1,
+        )
+        .unwrap();
+    let binding = Binding {
+        delegation_id: "dg".into(),
+        delegate_agent_id: "helper".into(),
+    };
+    actor
+        .change_delegation(
+            Transition::Start {
+                binding: binding.clone(),
+            },
+            2,
+        )
+        .unwrap();
+    let seq = disk().last_seq().unwrap();
+    let data = json!({"goal_event_through":999,"entries":[{"type":"subgoal_propose","subgoal_id":"test","title":"Test"},{"type":"claim","text":"saw it","source_refs":["goal_event:1"]}]});
+    let batch = Batch {
+        id: "dg",
+        caller: "helper",
+        plan: pid,
+        wake: "wake",
+        created_at: 2,
+        initial_message: 0,
+        now: 3,
+        data: &data,
+    };
+    cut.store(true, Ordering::SeqCst);
+    assert!(
+        actor
+            .record_books(&batch, bookkeeping_imported_row)
+            .is_err()
+    );
+    assert_eq!(disk().last_seq().unwrap(), seq);
+    drop(actor);
+    let mut actor = open();
+    assert_eq!(actor.next_goal_event_id().unwrap(), 1);
+    assert!(actor.goals().plan(pid).unwrap().subgoals.is_empty());
+    assert!(
+        actor
+            .applied_bookkeeping("dg", 0)
+            .unwrap()
+            .last_applied_at
+            .is_none()
+    );
+    let (n, applied, _) = actor
+        .record_books(&batch, bookkeeping_imported_row)
+        .unwrap()
+        .unwrap();
+    assert_eq!(n, 2);
+    assert_eq!(applied.goal_event_through, 2);
+    let (events, _) = actor.goal_events(pid, 0, 5).unwrap();
+    assert_eq!(events[1].new["sources"][0]["status"], "exact");
+    assert_eq!(
+        actor
+            .record_books(&batch, bookkeeping_imported_row)
+            .unwrap()
+            .unwrap()
+            .0,
+        0
+    );
+    actor
+        .change_delegation(
+            Transition::Stop {
+                binding,
+                reason: "done".into(),
+            },
+            4,
+        )
+        .unwrap();
+    assert!(
+        actor
+            .observe_books("dg", "helper", 0, &json!({}), bookkeeping_imported_row)
+            .unwrap()
+            .is_none()
+    );
+    let before = disk().last_seq().unwrap();
+    assert!(
+        actor
+            .record_books(&batch, bookkeeping_imported_row)
+            .unwrap()
+            .is_err()
+    );
+    assert_eq!(disk().last_seq().unwrap(), before);
+}
+
+#[test]
+fn an_import_kept_before_bookkeeping_recovers_its_account_once() {
+    use clarp_kernel::{
+        goals::{GoalBook, Owner},
+        journal::kind,
+    };
+    use clarp_ports::log::NewItem;
+    use serde_json::Value;
+    let mut world = World::new("books-older-import");
+    let f: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/goal-bookkeeping.json"
+    ))
+    .unwrap();
+    let id = f["plan"].as_str().unwrap();
+    let plan = GoalBook::new()
+        .taken_over(
+            Owner {
+                agent_id: "owner",
+                session: "owner",
+            },
+            &f["seed"],
+            &[],
+        )
+        .unwrap();
+    let events: Vec<_> = f["record"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|case| case["events"].as_array().unwrap())
+        .collect();
+    let mut before = json!(GoalBook::new().record(&plan, 10));
+    before.as_object_mut().unwrap().remove("accounting");
+    before["event_count"] = json!(events.len());
+    let item = |kind, key: String, value: &Value| {
+        NewItem::new(kind, 10, serde_json::to_vec(value).unwrap()).keyed(key)
+    };
+    let mut rows = vec![
+        item(kind::GOAL, format!("g-{id}"), &before),
+        item(
+            kind::GOAL_LEDGER,
+            format!("ledger/tail/{id}"),
+            &json!(events.len()),
+        ),
+        item(kind::GOAL_LEDGER, "ledger/installed".into(), &json!(true)),
+    ];
+    for (i, event) in events.into_iter().enumerate() {
+        rows.push(item(
+            kind::GOAL_LEDGER,
+            format!("ledger/event/{id}/{}", i + 1),
+            event,
+        ));
+    }
+    let mut log = world
+        .engine
+        .open(&world.profile.dir, standard_set("zstd").unwrap())
+        .unwrap();
+    log.append(&rows).unwrap();
+    let actor = world.open();
+    assert_eq!(
+        actor.goals().get(id, 20).unwrap()["ledger"]["accounting"],
+        f["accounting"]
+    );
+    drop(actor);
+    let seq = log.last_seq().unwrap();
+    let actor = world.open();
+    assert_eq!(
+        actor.goals().get(id, 30).unwrap()["ledger"]["accounting"],
+        f["accounting"]
+    );
+    assert_eq!(seq, log.last_seq().unwrap());
+}
+
+#[test]
+fn a_bookkeeping_page_counts_only_eligible_rows_before_each_limit() {
+    use clarp_actor::{
+        Kept,
+        delegation::{Binding, Transition},
+    };
+    use clarp_kernel::goals::{GoalBook, Owner, ledger::Event};
+    use serde_json::Value;
+    let f: Value = serde_json::from_str(include_str!(
+        "../../clarp-kernel/tests/fixtures/goal-bookkeeping.json"
+    ))
+    .unwrap();
+    let scale = &f["scale"];
+    let id = f["delegation"].as_str().unwrap();
+    let mut world = World::new("bookkeeping-page");
+    world.profile.agent_id = "owner".into();
+    let mut actor = world.open();
+    let rows = (0..505)
+        .map(|i| {
+            let key = format!("u-scale-{i}");
+            let row = json!({"text": if i==0 {"x".repeat(4001)} else {"row".to_owned()},
+                       "sender_agent_id":if matches!(i,1|128|257) {"helper"} else {""}});
+            ImportedRow {
+                id: key,
+                ts_ms: 20,
+                row,
+            }
+        })
+        .collect();
+    let (taken, _) = actor
+        .import("fixture", Some("native".into()), rows, 20)
+        .unwrap();
+    assert_eq!(taken.unwrap(), 505);
+    for plan in scale["plans"].as_array().unwrap() {
+        let pid = plan[0].as_str().unwrap();
+        let at = plan[1].as_i64().unwrap();
+        let stored=GoalBook::new().taken_over(Owner{agent_id:"owner",session:"owner"},
+            &json!({"agent_id":"owner","plan_id":pid,"status":"active","updated_at":at,"goal":{"outcome":"Fixture"}}),&[]).unwrap();
+        let make_event = |n: &Value, own: bool| {
+            serde_json::from_value::<Event>(json!({"plan_id":pid,"event_id":n,"at":at,
+            "kind":"claim","subject":"goal","actor_kind":if own{"delegate"}else{"owner"},"actor_agent_id":if own{"helper"}else{"owner"},
+            "delegation_id":if own{id}else{""},"basis":"","source_refs":[],"reason":"","new":null,"prior":null,"plan_revision":null})).unwrap()
+        };
+        let mut events = vec![make_event(&plan[2], false)];
+        for extra in scale["extra"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e[0] == pid)
+        {
+            events.push(make_event(&extra[1], extra[2].as_bool().unwrap()));
+        }
+        actor
+            .keep(
+                &Kept {
+                    goal: Some(&stored),
+                    imported_events: Some(&events),
+                    ..Kept::default()
+                },
+                at,
+            )
+            .unwrap();
+    }
+    actor
+        .change_delegation(
+            Transition::Start {
+                binding: Binding {
+                    delegation_id: id.into(),
+                    delegate_agent_id: "helper".into(),
+                },
+            },
+            50,
+        )
+        .unwrap();
+    for page in scale["pages"].as_array().unwrap() {
+        let got = actor
+            .observe_books(
+                id,
+                "helper",
+                0,
+                &json!({"limit":page["limit"],"after_goal_event":scale["after"]}),
+                bookkeeping_imported_row,
+            )
+            .unwrap()
+            .unwrap();
+        for (field, key) in [
+            ("messages", "message_id"),
+            ("goals", "plan_id"),
+            ("goal_events", "event_id"),
+        ] {
+            let keys: Vec<_> = got[field]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| &r[key])
+                .collect();
+            let want = if field == "goal_events" {
+                "events"
+            } else {
+                field
+            };
+            assert_eq!(json!(keys), page[want], "{} {field}", page["limit"]);
+        }
+        assert_eq!(
+            got["messages"][0]["text"].as_str().unwrap().len() as u64,
+            page["excerpt_length"].as_u64().unwrap()
+        );
+        assert_eq!(got["has_more"], page["more"]);
+    }
+}

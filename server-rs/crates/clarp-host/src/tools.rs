@@ -23,13 +23,15 @@ use crate::goaltool::{self, About};
 use crate::{admin_tool, artifact_tool, ids, process};
 
 /// What a tool was called with.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 pub struct ToolCall {
     /// The name it was called by.
     pub tool: String,
     /// Its arguments, without its own name.
     #[serde(default)]
     pub argv: Vec<String>,
+    #[serde(default)]
+    pub bookkeeping_credential: String,
     /// The directory it was called in.
     #[serde(default)]
     pub cwd: String,
@@ -114,6 +116,9 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
 /// `clarp-goal VERB ...`: an agent's goals and plans. The words are in [`goaltool`]; here the
 /// agent is found whose goals they are about.
 async fn goal(app: &App, call: &ToolCall) -> ToolAnswer {
+    if call.argv.first().is_some_and(|s| s == "bookkeeping") {
+        return crate::bookkeeping::run(app, call).await;
+    }
     let ask = match goaltool::parse(&call.argv) {
         Ok(ask) => ask,
         Err(said) => return said,

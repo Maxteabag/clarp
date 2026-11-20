@@ -905,14 +905,90 @@ pub fn tool(mut args: impl Iterator<Item = String>, token: &str) -> ToolOutcome 
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-    let asked = json!({
+    let argv: Vec<String> = args.collect();
+    // Read the capability in the invoking tool's process. The server never
+    // opens an arbitrary path supplied by an HTTP tool caller.
+    let mut credential = String::new();
+    if matches!(name.as_str(), "clarp-goal" | "clarp-agent-tasks")
+        && argv.first().is_some_and(|s| s == "bookkeeping")
+        && match argv.get(1).map(String::as_str) {
+            Some("observe") => {
+                argv.len() == 3
+                    || (argv.len() == 4 && serde_json::from_str::<Value>(&argv[3]).is_ok())
+            }
+            Some("record") => argv.len() == 6 && serde_json::from_str::<Value>(&argv[5]).is_ok(),
+            _ => false,
+        }
+        && let Some(id) = argv.get(2)
+    {
+        let explicit = std::env::var_os("CLARP_DELEGATION_TOKEN_FILE")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let valid_id = id.len() == 18
+            && id.starts_with("dg")
+            && id[2..].bytes().all(|b| b.is_ascii_hexdigit());
+        if !valid_id {
+            return ToolOutcome {
+                exit: 4,
+                stdout: String::new(),
+                stderr: "agent_tasks: unknown delegation or wrong credential\n".into(),
+            };
+        }
+        let path = explicit.unwrap_or_else(|| {
+            let dir = std::env::var_os("CLARP_DELEGATION_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    std::env::var_os("XDG_DATA_HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| crate::config::home().join(".local/share"))
+                        .join("clarp-host/delegations")
+                });
+            dir.join(format!("{id}.token"))
+        });
+        let read = || -> std::io::Result<String> {
+            use std::io::Read as _;
+            let mut text = String::new();
+            use std::os::unix::fs::OpenOptionsExt as _;
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(nix::libc::O_NONBLOCK)
+                .open(&path)?;
+            if !file.metadata()?.is_file() {
+                return Err(std::io::ErrorKind::InvalidInput.into());
+            }
+            file.take(66).read_to_string(&mut text)?;
+            if text.len() >= 66 {
+                return Err(std::io::ErrorKind::InvalidData.into());
+            }
+            Ok(text)
+        };
+        match read() {
+            Ok(value) => {
+                let value = value.trim();
+                if value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    credential = value.into();
+                }
+            }
+            Err(e) => {
+                return ToolOutcome {
+                    exit: 4,
+                    stdout: String::new(),
+                    stderr: format!("agent_tasks: cannot read the delegation credential: {e}\n"),
+                };
+            }
+        }
+    }
+    let mut asked = json!({
         "tool": name,
-        "argv": args.collect::<Vec<_>>(),
+        "argv": argv,
         "cwd": cwd,
         "env": env,
         "ppid": std::os::unix::process::parent_id(),
         "started_ms": started_ms,
     });
+    if !credential.is_empty() {
+        asked["bookkeeping_credential"] = json!(credential);
+    }
     loop {
         let answer = match post(&address, "/tools/run", token, &asked) {
             Ok((200, answer)) => answer,

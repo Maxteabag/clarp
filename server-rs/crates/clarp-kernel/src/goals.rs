@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 
 use crate::jobs::parse_handle;
 
+pub mod bookkeeping;
 pub mod delegation;
 pub mod keeper;
 pub mod ledger;
@@ -288,6 +289,10 @@ impl Grown {
 /// history is not written again for every step.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoalRecord {
+    /// New accounting summaries in event order. An initial empty list also
+    /// distinguishes a known-empty plan from an import made before this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accounting: Option<Vec<Value>>,
     pub at_ms: i64,
     pub plan_id: String,
     pub agent_id: String,
@@ -387,6 +392,8 @@ pub struct World<'a> {
 /// The goals and plans of one agent.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GoalBook {
+    // Bounded projections, shared by readers of the immutable agent view.
+    accounting: BTreeMap<String, std::sync::Arc<std::collections::VecDeque<Value>>>,
     plans: BTreeMap<String, Plan>,
     /// Every version of every document, oldest first.
     documents: Vec<Document>,
@@ -742,6 +749,7 @@ impl GoalBook {
         let old_items = old.map_or(&[][..], |plan| plan.items.as_slice());
         let old_history = old.map_or(&[][..], |plan| plan.history.as_slice());
         GoalRecord {
+            accounting: old.is_none().then(Vec::new),
             at_ms,
             plan_id: new.plan_id.clone(),
             agent_id: new.agent_id.clone(),
@@ -899,6 +907,13 @@ impl GoalBook {
 
     /// Takes a change that is in the log.
     pub fn apply(&mut self, record: &GoalRecord) {
+        if let Some(rows) = record.accounting.as_ref().filter(|rows| !rows.is_empty()) {
+            let kept = std::sync::Arc::make_mut(
+                self.accounting.entry(record.plan_id.clone()).or_default(),
+            );
+            kept.extend(rows.iter().cloned());
+            kept.drain(..kept.len().saturating_sub(500));
+        }
         let known = self.plans.remove(&record.plan_id);
         let order = known.as_ref().map_or(self.made + 1, |plan| plan.order);
         self.made = self.made.max(order);
@@ -1057,7 +1072,7 @@ impl GoalBook {
             data["subgoals"] = json!(*plan.subgoals);
             data["ledger"] = json!({
                 "event_count": plan.event_count, "last_event_at": plan.last_event_at,
-                "delegation": null, "accounting": [],
+                "delegation": null, "accounting": self.accounting_for(&plan.plan_id),
             });
             data["updater"] = json!({
                 "enabled": false, "janitor_agent_id": null, "last_run_at": null,

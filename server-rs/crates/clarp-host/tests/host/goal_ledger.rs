@@ -312,14 +312,33 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
         Some(&json!({"session":"principal","sender":"helper","text":"steer"})),
     );
     assert_eq!(message.0, 403);
-    let fork = host.ask("POST", "/agents/child/fork", Some(&json!({})));
-    assert_eq!(
-        fork,
-        (
-            409,
-            json!({"error":"a bookkeeping delegate does not start helpers or forks"})
-        )
-    );
+    // The Host checks both the named fork source and the caller's signed turn.
+    // Naming the principal cannot let either the delegate or its child fork.
+    for session in ["helper", "child"] {
+        let expected = json!({"error":"a bookkeeping delegate does not start helpers or forks"});
+        let named = format!("/agents/{session}/fork");
+        assert_eq!(
+            host.ask("POST", &named, Some(&json!({}))),
+            (409, expected.clone())
+        );
+        let headers = [
+            ("Content-Type", "application/json"),
+            ("X-Clarp-Turn", tokens[session].as_str()),
+        ];
+        let reply = fetch(
+            &host,
+            &host.token,
+            "POST",
+            "/agents/principal/fork",
+            &headers,
+            b"{}",
+        );
+        assert_eq!(reply.status, 409, "{session}: {}", reply.text());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&reply.body).unwrap(),
+            expected
+        );
+    }
     let refused = host.ask(
         "POST",
         "/agents",
@@ -413,4 +432,220 @@ fn a_delegation_is_reserved_started_enforced_stopped_and_read_back() {
             "{rows}"
         );
     }
+}
+
+#[test]
+fn a_delegate_observes_records_and_replays_without_changing_the_owners_checkpoint() {
+    let place = Place::new("books-apply");
+    let cli = place.root.join("claude");
+    let signed = place.root.join("token");
+    program(
+        &cli,
+        &format!(
+            "#!/bin/sh\nread -r line\nprintf '%s' \"$CLARP_PROVIDER_TURN\" > '{}'\n{}",
+            signed.display(),
+            STAND_IN_ANSWERS
+        ),
+    );
+    let boot = || {
+        place.start_in(
+            "",
+            &[],
+            &[
+                ("HOME", place.root.to_str().unwrap()),
+                ("CLARP_CLAUDE_PROGRAM", cli.to_str().unwrap()),
+            ],
+        )
+    };
+    let host = boot();
+    host.post(
+        "/agents",
+        json!({"name":"Owner","session":"owner","backend":"claude"}),
+    );
+    host.post("/agents",json!({"name":"Helper","session":"helper","parent":"owner","role":"helper","backend":"claude"}));
+    let turn = |session: &str| {
+        if signed.exists() {
+            std::fs::remove_file(&signed).unwrap();
+        }
+        host.send(session, "initial evidence", &format!("first-{session}"));
+        wait_for("the test turn to receive its identity", || {
+            std::fs::read_to_string(&signed).is_ok_and(|s| !s.is_empty())
+        });
+        let identity = std::fs::read_to_string(&signed).unwrap();
+        wait_for(
+            "the fixture turn to bind and its evidence to settle",
+            || {
+                host.get(&format!("/log?session={session}"))["turns"]
+                    .as_array()
+                    .is_some_and(|rows| {
+                        rows.iter()
+                            .any(|row| row["role"] == "assistant" && row["phase"] == "final")
+                    })
+            },
+        );
+        identity
+    };
+    let owner = turn("owner");
+    let helper = turn("helper");
+    let plan = goal(
+        &host,
+        &place.root,
+        &[
+            "create",
+            "owner",
+            "work",
+            "Fixture",
+            "[]",
+            r#"{"outcome":"Deliver","limits":"Local","criteria":["Done"]}"#,
+        ],
+    );
+    let pid = plan["plan_id"].as_str().unwrap();
+    let grant = host.post(
+        "/goal-ledger/delegations",
+        json!({"principal":"owner","delegate":"helper","reason":"Keep"}),
+    );
+    let did = grant["delegation_id"].as_str().unwrap();
+    let credential = std::fs::read_to_string(grant["token_path"].as_str().unwrap()).unwrap();
+    let real = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
+        .arg("tool")
+        .args(["clarp-goal", "bookkeeping", "observe", did])
+        .current_dir(&place.root)
+        .env("CLARP_HOST_ADDR", &host.address)
+        .env("CLARP_HOST_TOKEN", &host.token)
+        .env("CLARP_PROVIDER_TURN", &helper)
+        .env(
+            "CLARP_DELEGATION_TOKEN_FILE",
+            grant["token_path"].as_str().unwrap(),
+        )
+        .ended();
+    assert!(
+        real.status.success(),
+        "{}",
+        String::from_utf8_lossy(&real.stderr)
+    );
+    let observed: Value = serde_json::from_slice(&real.stdout).unwrap();
+    assert_eq!(observed["delegation_id"], did);
+    let call = |h: &Host, who: &str, key: &str, argv: Value| {
+        let env = if who.is_empty() {
+            json!({})
+        } else {
+            json!({"CLARP_PROVIDER_TURN":who})
+        };
+        h.post(
+            "/tools/run",
+            json!({"tool":"clarp-goal","argv":argv,"bookkeeping_credential":key,"env":env}),
+        )
+    };
+    let observe = json!(["bookkeeping", "observe", did]);
+    for (who, key, reason) in [
+        (
+            helper.as_str(),
+            "wrong",
+            "unknown delegation or wrong credential",
+        ),
+        (
+            owner.as_str(),
+            credential.as_str(),
+            "only the delegate's own Clarp turn can keep these books",
+        ),
+        (
+            "",
+            credential.as_str(),
+            "only the delegate's own Clarp turn can keep these books",
+        ),
+    ] {
+        let refused = call(&host, who, key, observe.clone());
+        assert_eq!(refused["exit"], 4);
+        assert_eq!(
+            refused["stderr"].as_str().unwrap().trim(),
+            format!("agent_tasks: {reason}")
+        );
+    }
+    let from_start = json!(["bookkeeping", "observe", did, r#"{"after_message":0}"#]);
+    let read = call(&host, &helper, &credential, from_start);
+    assert_eq!(read["exit"], 0, "{read}");
+    let read: Value = serde_json::from_str(read["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(read["goals"][0]["plan_id"], pid);
+    let event = &read["goal_events"][0];
+    assert_eq!(event["kind"], "created");
+    let msg = read["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"] == "initial evidence")
+        .unwrap();
+    assert_eq!(msg["backend_session_id"], "stand-in");
+    let reference = format!(
+        "message:{}@{}",
+        msg["message_id"].as_str().unwrap(),
+        msg["revision"]
+    );
+    let entry =
+        json!({"type":"claim","subject":"goal","text":"evidence seen","source_refs":[reference]});
+    let apply = |h: &Host, wake: &str, entries: Value| {
+        let batch = json!({"entries":entries,"goal_event_through":read["goal_event_through"],"message_through":read["message_through"]});
+        call(
+            h,
+            &helper,
+            &credential,
+            json!(["bookkeeping", "record", did, pid, wake, batch.to_string()]),
+        )
+    };
+    let rejected = apply(&host, "bad", json!([entry,{"type":"cancel"}]));
+    assert_eq!(rejected["exit"], 4, "{rejected}");
+    assert_eq!(
+        goal(&host, &place.root, &["ledger", pid])["events"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let entries =
+        json!([entry,{"type":"subgoal_propose","subgoal_id":"inspect","title":"Inspect"}]);
+    let mut counts = std::thread::scope(|scope| {
+        let first = scope.spawn(|| apply(&host, "once", entries.clone()));
+        let second = scope.spawn(|| apply(&host, "once", entries.clone()));
+        [first.join().unwrap(), second.join().unwrap()].map(|result| {
+            assert_eq!(result["exit"], 0, "{result}");
+            let applied: Value = serde_json::from_str(result["stdout"].as_str().unwrap()).unwrap();
+            applied["applied"].as_u64().unwrap()
+        })
+    });
+    counts.sort_unstable();
+    assert_eq!(counts, [0, 2]);
+    let whole = goal(&host, &place.root, &["get", pid]);
+    assert_eq!(whole["revision"], 0);
+    assert_eq!(whole["subgoals"][0]["status"], "proposed");
+    assert_eq!(whole["ledger"]["accounting"][0]["text"], "evidence seen");
+    let recorded = goal(&host, &place.root, &["ledger", pid])["events"].clone();
+    assert_eq!(recorded[1]["basis"], "claimed");
+    assert_eq!(recorded[1]["new"]["sources"][0]["status"], "exact");
+    assert_eq!(
+        recorded[1]["new"]["sources"][0]["excerpt"],
+        "initial evidence"
+    );
+    host.kill();
+    let host = boot();
+    let repeat = apply(&host, "once", json!([entry]));
+    assert_eq!(repeat["exit"], 0, "{repeat}");
+    let repeat: Value = serde_json::from_str(repeat["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(repeat["applied"], 0);
+    let summary = &goal(&host, &place.root, &["get", pid])["ledger"]["delegation"];
+    assert_eq!(summary, &repeat["delegation"]);
+    assert_eq!(
+        host.get("/goal-ledger/delegations?session=helper")["delegations"][0],
+        *summary
+    );
+    assert_eq!(
+        goal(&host, &place.root, &["ledger", pid])["events"],
+        recorded
+    );
+    let since = call(&host, &helper, &credential, observe.clone());
+    let since: Value = serde_json::from_str(since["stdout"].as_str().unwrap()).unwrap();
+    assert_eq!(since["goal_events"], json!([]));
+    host.post(
+        "/goal-ledger/delegations/stop",
+        json!({"delegation_id":did,"reason":"finished"}),
+    );
+    assert_eq!(call(&host, &helper, &credential, observe)["exit"], 4);
 }

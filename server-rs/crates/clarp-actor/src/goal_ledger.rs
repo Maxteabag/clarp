@@ -148,6 +148,28 @@ fn at(log: &dyn AgentLog, plan: &str, ordinal: u64) -> Result<Event, ActorError>
     get(log, &event_key(plan, ordinal))?.ok_or_else(|| invalid("missing indexed goal event"))
 }
 
+/// Walk only the first record's imported ordinals, newest first. Later owner
+/// activity cannot add accounting to this historical prefix.
+pub(super) fn imported_accounts(
+    log: &dyn AgentLog,
+    plan: &str,
+    original: i64,
+) -> Result<Vec<serde_json::Value>, ActorError> {
+    let count: u64 = get(log, &tail(plan))?.unwrap_or(0);
+    let mut rows = Vec::new();
+    for ordinal in (1..=count.min(original as u64)).rev() {
+        let event = at(log, plan, ordinal)?;
+        if let Some(row) = clarp_kernel::goals::bookkeeping::accounting_row(&event) {
+            rows.push(row);
+            if rows.len() == 500 {
+                break;
+            }
+        }
+    }
+    rows.reverse();
+    Ok(rows)
+}
+
 pub fn page(
     log: &dyn AgentLog,
     plan: &str,
@@ -226,6 +248,10 @@ pub fn retire(log: &mut dyn AgentLog, now: i64) -> Result<(), ActorError> {
     }
     log.append(&[record_item(kind::GOAL_LEDGER, DONE.into(), &true, now)?])?;
     Ok(())
+}
+
+pub(super) fn contains(log: &dyn AgentLog, id: i64) -> Result<bool, ActorError> {
+    Ok(log.find(&locator(id))?.is_some())
 }
 
 #[cfg(test)]
