@@ -16,6 +16,10 @@ pub const EXIT_TURN_TAKEN: u8 = 125;
 /// The exit code of a shim whose program could not be started.
 pub const EXIT_NOT_STARTED: u8 = 127;
 
+/// The longest a hold lasts, whatever was asked: past it the shim lets the tool go by itself, so a
+/// Host that is gone cannot keep a turn standing (decision D26: a shim never waits for the Host).
+pub const HOLD_MOST_MS: u64 = 2_000;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum Request {
@@ -39,6 +43,14 @@ pub enum Request {
     /// is a hint to read the spool, never the news itself.
     Follow,
     Ping,
+    /// Stop the tool where it stands, every process of its group, and say how far the spool goes
+    /// with everything it printed before it stood still. The shim lets it go by itself after the
+    /// smaller of `ms` and [`HOLD_MOST_MS`]. A turn is held at most once in its shim's life.
+    Hold {
+        ms: u64,
+    },
+    /// Let a held tool go on. A tool that is not held is left as it is.
+    Release,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,6 +60,27 @@ pub struct Reply {
     pub pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The answer to a hold that holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held: Option<Held>,
+    /// The answer to a release: whether it was this release that let the tool go.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub let_go: Option<bool>,
+}
+
+/// What a hold found once the tool stood still and all it had printed was in the spool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Held {
+    /// The spool's length in bytes: the offset after its last whole record, everything the tool
+    /// printed before it stood still included.
+    pub spool: u64,
+    /// The bytes the tool printed on its standard output after its last whole line: it had begun
+    /// to print a line.
+    pub partial_out: u64,
+    /// The same of its standard error.
+    pub partial_err: u64,
+    /// What was left of the hold's bound when the answer was written.
+    pub left_ms: u64,
 }
 
 impl Reply {
@@ -56,6 +89,8 @@ impl Reply {
             ok: true,
             pid,
             error: None,
+            held: None,
+            let_go: None,
         }
     }
 
@@ -64,6 +99,8 @@ impl Reply {
             ok: false,
             pid: None,
             error: Some(error.into()),
+            held: None,
+            let_go: None,
         }
     }
 }
@@ -99,8 +136,42 @@ pub fn take_lines(held: &mut Vec<u8>, max: usize, mut each: impl FnMut(String) -
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn text(value: &impl Serialize) -> String {
+        serde_json::to_string(value).unwrap()
+    }
+
+    #[test]
+    fn a_reply_is_written_as_before_and_a_hold_adds_its_own() {
+        assert_eq!(text(&Reply::ok(Some(5))), r#"{"ok":true,"pid":5}"#);
+        assert_eq!(text(&Reply::failed("no")), r#"{"ok":false,"error":"no"}"#);
+        assert_eq!(text(&Request::Hold { ms: 250 }), r#"{"op":"hold","ms":250}"#);
+        assert_eq!(text(&Request::Release), r#"{"op":"release"}"#);
+        let held = Reply {
+            held: Some(Held {
+                spool: 10,
+                partial_out: 1,
+                partial_err: 2,
+                left_ms: 5,
+            }),
+            ..Reply::ok(Some(5))
+        };
+        assert_eq!(
+            text(&held),
+            r#"{"ok":true,"pid":5,"held":{"spool":10,"partial_out":1,"partial_err":2,"left_ms":5}}"#
+        );
+        let released = Reply {
+            let_go: Some(false),
+            ..Reply::ok(Some(5))
+        };
+        assert_eq!(text(&released), r#"{"ok":true,"pid":5,"let_go":false}"#);
+        // What an older shim answers is still read.
+        let old: Reply = serde_json::from_str(r#"{"ok":true,"pid":5}"#).unwrap();
+        assert_eq!(old, Reply::ok(Some(5)));
+    }
 
     fn lines(held: &mut Vec<u8>, max: usize) -> Vec<String> {
         let mut out = Vec::new();
