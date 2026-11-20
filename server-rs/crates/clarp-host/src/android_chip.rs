@@ -17,6 +17,16 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::Notify;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::book(REGISTER, crate::kept::Key::Plain, crate::kept::json),
+    crate::kept::Kind::book(
+        BUDGET,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<ActivityBudget>,
+    ),
+];
+
 const REGISTER: &str = "android_activity";
 const BUDGET: &str = "android_activity_budget";
 type State = (Value, bool);

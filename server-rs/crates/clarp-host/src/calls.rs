@@ -39,11 +39,32 @@ use crate::ids;
 use crate::pairing::Scope;
 use crate::unkept::RecordFailure;
 
+/// What this desk keeps, declared once (`kept.rs`: the registry walks it at every start).
+pub(crate) const KEPT: &[crate::kept::Kind] = &[
+    crate::kept::Kind::rows(
+        KIND,
+        crate::kept::Key::Plain,
+        crate::kept::fits::<Vec<Call>>,
+    ),
+    crate::kept::Kind::book(RINGS, crate::kept::Key::Plain, crate::kept::json),
+    // The ring's id, as text.
+    crate::kept::Kind::book(
+        "opening_by_call",
+        crate::kept::Key::Plain,
+        crate::kept::text,
+    ),
+    crate::kept::Kind::rows(
+        "opening_history",
+        crate::kept::Key::Plain,
+        crate::kept::fits::<rings::Ring>,
+    ),
+];
+
 pub mod generation;
 pub mod live;
 pub mod opening;
 pub mod opening_launch;
-mod tools;
+pub(crate) mod tools;
 mod transcript;
 
 pub(crate) use live::{Voice, dial};
