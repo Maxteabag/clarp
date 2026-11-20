@@ -198,6 +198,18 @@ HIDDEN_ROW_SQL = """(EXISTS (SELECT 1 FROM coordination_traces hc
                        WHERE hu.trace_id = m.trace_id AND hu.agent_id = m.agent_id
                          AND hu.role = 'user' AND COALESCE(hu.origin, 'user') IN ('user', 'oracle')))"""
 
+# A counted message among the rows HIDDEN_ROW_SQL leaves out (a user or assistant row with words).
+COUNTED_SQL = """(m.role IN ('user', 'assistant') AND COALESCE(m.tool_name, '') = ''
+      AND TRIM(COALESCE(m.text, '')) != '')"""
+
+# A count of what was left out stops at COUNT_CAP messages, or at COUNT_ROW_CAP rows of any kind,
+# nearest the visible row it belongs to, and then says ``capped``: the apps say "100+". A user
+# needs no exact number of a thousand hidden messages, and a page must never wait on counting
+# them (Arnold, 20 Nov). 100 is a page: counting costs at most what reading a page does.
+COUNT_CAP = 100
+COUNT_ROW_CAP = 400
+
+
 MODES = ("auto", "hide", "show")
 
 

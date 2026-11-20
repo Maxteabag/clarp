@@ -222,12 +222,17 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
     separator where the exchange happened: {row id: hidden_before} counted from the previous
     VISIBLE row of the chat (not of the page), and hidden_after for what follows the chat's
     newest visible row (on a tail page or a delta; None otherwise). Each count is
-    {messages, exchanges, agents: [{agent_id, name}]}."""
+    {messages, exchanges, agents: [{agent_id, name}], capped}: it reads at most
+    coordination.COUNT_CAP messages (COUNT_ROW_CAP rows) of the run, nearest the row it belongs
+    to, and says ``capped`` when the run goes on, so no count waits on a long run. Counted from
+    the row, the same run gives the same count on the same row whatever the page size."""
     database = conn()
     scope = "m.agent_id = ?" + (
         " AND m.backend_session_id IN (" + ",".join("?" for _ in sessions) + ")" if sessions else "")
     scope_params: list[Any] = [agent_id, *sessions]
-    visible = "NOT " + coordination.HIDDEN_ROW_SQL
+    hidden_sql = coordination.HIDDEN_ROW_SQL
+    visible = "NOT " + hidden_sql
+    counted_sql = f"({hidden_sql} AND {coordination.COUNTED_SQL})"
     visible_params: list[Any] = []
     if not include_automated:
         sql, extra = _automated_sql()
@@ -244,33 +249,46 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
                 ORDER BY {_KEY_SQL} DESC, m.seq DESC, m.message_id DESC LIMIT 1""", params).fetchone()
         return (row["t"], int(row["seq"]), row["message_id"]) if row is not None else None
 
-    def hidden(low: tuple | None, high: tuple | None) -> list:
-        where, params = f"{scope} AND {coordination.HIDDEN_ROW_SQL}", list(scope_params)
+    def run(low: tuple | None, high: tuple | None, *, from_high: bool) -> dict[str, Any] | None:
+        """The hidden rows strictly between two keys (None: open), read nearest ``high`` (or
+        ``low``) first and at most up to the caps."""
+        where, params = f"{scope} AND {hidden_sql}", list(scope_params)
         if low is not None:
             cmp_sql, cmp_params = _key_cmp(">", low)
             where, params = where + " AND " + cmp_sql, params + cmp_params
         if high is not None:
-            cmp_sql, cmp_params = _key_cmp(">", high)
-            where, params = where + " AND NOT " + cmp_sql, params + cmp_params
-        return database.execute(
-            f"""SELECT {_KEY_SQL} AS t, m.seq, m.message_id, m.trace_id, m.role, m.tool_name, m.text,
-                       hc.sender_agent_id
-                  FROM messages m
-                  LEFT JOIN coordination_traces hc ON hc.agent_id = m.agent_id AND hc.trace_id = m.trace_id
-                 WHERE {where}
-                 ORDER BY {_KEY_SQL}, m.seq, m.message_id""", params).fetchall()
-
-    def count(found: list) -> dict[str, Any] | None:
+            cmp_sql, cmp_params = _key_cmp("<", high)
+            where, params = where + " AND " + cmp_sql, params + cmp_params
+        direction = "DESC" if from_high else "ASC"
+        found = database.execute(
+            f"""SELECT m.trace_id, CASE WHEN {counted_sql} THEN 1 ELSE 0 END AS counted
+                  FROM messages m WHERE {where}
+                 ORDER BY {_KEY_SQL} {direction}, m.seq {direction}, m.message_id {direction}
+                 LIMIT ?""", [*params, coordination.COUNT_ROW_CAP + 1]).fetchall()
         if not found:
             return None
-        senders = list(dict.fromkeys(r["sender_agent_id"] for r in found if r["sender_agent_id"]))
+        messages, traces, capped = 0, [], len(found) > coordination.COUNT_ROW_CAP
+        for r in found[:coordination.COUNT_ROW_CAP]:
+            if messages == coordination.COUNT_CAP:
+                capped = True
+                break
+            messages += int(r["counted"])
+            if r["trace_id"] not in traces:
+                traces.append(r["trace_id"])
+        senders: list[str] = []
+        for start in range(0, len(traces), 500):
+            chunk = traces[start:start + 500]
+            for r in database.execute(
+                    "SELECT trace_id, sender_agent_id FROM coordination_traces WHERE agent_id = ? AND trace_id IN ("
+                    + ",".join("?" for _ in chunk) + ")", [agent_id, *chunk]):
+                if r["sender_agent_id"] and r["sender_agent_id"] not in senders:
+                    senders.append(r["sender_agent_id"])
         names = {r["agent_id"]: r["persona"] for r in database.execute(
             "SELECT agent_id, persona FROM agents WHERE agent_id IN (" + ",".join("?" for _ in senders) + ")",
             senders)} if senders else {}
-        return {"messages": sum(1 for r in found if r["role"] in ("user", "assistant")
-                                and not (r["tool_name"] or "") and (r["text"] or "").strip()),
-                "exchanges": len({r["trace_id"] for r in found}),
-                "agents": [{"agent_id": a, "name": names.get(a, "")} for a in senders]}
+        return {"messages": messages, "exchanges": len(traces),
+                "agents": [{"agent_id": a, "name": names.get(a, "")} for a in senders],
+                "capped": capped}
 
     ids = [row["id"] for row in rows]
     keys: dict[str, tuple] = {}
@@ -283,32 +301,14 @@ def coordination_gaps(*, agent_id: str, sessions: list[str], rows: list[dict[str
     ordered = sorted((keys[i] for i in ids if i in keys))
     before: dict[str, dict[str, Any]] = {}
     after_tail: dict[str, Any] | None = None
-    if contiguous and ordered:
-        found = hidden(previous_visible(ordered[0]), None if tail else ordered[-1])
-        position = 0
-        groups: dict[str, list] = {}
-        rest: list = []
-        for r in found:
-            key = (r["t"], int(r["seq"]), r["message_id"])
-            while position < len(ordered) and ordered[position] < key:
-                position += 1
-            if position < len(ordered):
-                groups.setdefault(ordered[position][2], []).append(r)
-            else:
-                rest.append(r)
-        before = {mid: c for mid, group in groups.items() if (c := count(group))}
-        if tail:
-            after_tail = count(rest)
-    elif contiguous:
-        if tail:
-            after_tail = count(hidden(None, None))   # nothing visible at all: all of it follows
-    else:
-        for key in ordered:
-            c = count(hidden(previous_visible(key), key))
-            if c:
-                before[key[2]] = c
-        if tail or not contiguous:
-            after_tail = count(hidden(previous_visible(None), None))
+    for index, key in enumerate(ordered):
+        # In a contiguous page the previous row of the page is the previous visible row of the chat.
+        low = ordered[index - 1] if contiguous and index else previous_visible(key)
+        if c := run(low, key, from_high=True):
+            before[key[2]] = c
+    if tail or not contiguous:
+        newest = ordered[-1] if contiguous and ordered else previous_visible(None)
+        after_tail = run(newest, None, from_high=False)
     return before, after_tail
 
 
