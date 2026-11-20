@@ -464,7 +464,7 @@ class Config:
     openai_realtime_model: str = "gpt-realtime-2.1"
     openai_realtime_voice: str = "cedar"
     janitor_read_diagnostics: bool = False
-    render_spec_min_client: int | None = None
+    render_spec_min_contract: dict[str, int] | None = None
     oracle_diagnostics: bool = False
     oracle_router_backend: str = "api"
     oracle_delegation_strategy: str = "operator"
@@ -965,6 +965,32 @@ def _controller_action_urls(raw) -> tuple[str, ...]:
                                              "as a plain http(s) destination")
     return kept
 
+def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
+    """[artifacts] overrides of render_spec's minimum client contract, per client (issue 428):
+    ``render_spec_min_contract = {ios = 74, android = 30}``, laid over the default; 0 switches a
+    client off, so ``ios = 0`` switches the kind off on this Host. The old single number
+    (``render_spec_min_client``) is iOS's minimum, never every client's; a line says so. The
+    table's keys follow server_identity.client_minimums: a name as the client sends it."""
+    from .log import log
+    out: dict[str, int] = {}
+    single = artifacts.get("render_spec_min_client")
+    if single is not None:
+        if type(single) is int and single >= 0:
+            out["ios"] = single
+            log("config.render_spec_min_client", "applies to iOS only; name other clients in "
+                "[artifacts] render_spec_min_contract")
+        else:
+            log("config.render_spec_min_client", "ignored: not a whole number")
+    table = artifacts.get("render_spec_min_contract")
+    if isinstance(table, dict):
+        if "ios" in table and "ios" in out:
+            log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
+        from .server_identity import client_minimums
+        out.update(client_minimums(table, setting="config.render_spec_min_contract"))
+    elif table is not None:
+        log("config.render_spec_min_contract", "ignored: expected a table of client = number")
+    return out or None
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -1145,7 +1171,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             openai.get("realtime_voice", "cedar")
         ).strip() or "cedar",
         janitor_read_diagnostics = (data.get("diagnostics", {}).get("janitor_autonomy_reads") is True),
-        render_spec_min_client = (data.get("artifacts") or {}).get("render_spec_min_client"),
+        render_spec_min_contract = _render_spec_minimums(data.get("artifacts") or {}),
         oracle_diagnostics = bool(openai.get("oracle_diagnostics", False)),
         oracle_router_backend = str(openai.get("oracle_router_backend", "api")).strip(),
         oracle_delegation_strategy = str(openai.get("oracle_delegation_strategy", "operator")).strip(),

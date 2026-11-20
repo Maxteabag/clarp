@@ -1086,6 +1086,17 @@ report. Create it with `POST /artifacts`:
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
 
+### Moving a render spec: `GET /artifacts/<id>/export`
+
+For the administrator's token only; any paired device is refused (403), limited or full, and
+the client header plays no part. For a `render_spec` it answers
+`{"kind": "render_spec", "render_spec": {"artifact": ..., "stored": ..., "submission": ...}}`:
+the row as `GET /artifacts` lists it, the stored payload as kept (the spec, its catalog and
+schema identity, its content identity), and the accepted submission or `null` (its
+`submission_id`, `version`, `answers`, `accepted_at`, `payload_hash`, `synthesize_audio`,
+`delivery_status` and `delivered_at`). Another kind is refused with 409 and its `kind`; the body
+is shaped so a kind can be added later. The answers are the user's: no log line carries them.
+
 ### Which turn published an artifact: `source_trace_id`
 
 An artifact row carries `source_trace_id`: the trace of the turn that published it, or `''`.
