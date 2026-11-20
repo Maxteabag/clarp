@@ -61,6 +61,8 @@ mod pictures;
 mod provider_tasks;
 #[path = "host/remote_action.rs"]
 mod remote_action;
+#[path = "host/render_spec_export.rs"]
+mod render_spec_export;
 #[path = "host/router_phrases.rs"]
 mod router_phrases;
 #[path = "host/source_trace.rs"]
@@ -8533,11 +8535,12 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
             .contains(&canary.to_lowercase())
     );
 
-    // Without a threshold, as the reference ships, nobody sees a spec or can answer one.
+    // A client the default does not name (only iOS from 74 is), here the desktop at any
+    // contract, sees no spec and cannot answer one.
     let (status, made) = ask(
         "POST",
         "/artifacts",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&envelope("plain")),
     );
     assert_eq!(status, 201, "{made}");
@@ -8557,19 +8560,24 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         (&row["type"], &row["title"], &row["status"]),
         (&json!("render_spec"), &json!("Decide"), &json!("ready"))
     );
-    let (_, read) = ask("GET", "/artifacts/plain", Some("ios/12 contract=999"), None);
+    let (_, read) = ask(
+        "GET",
+        "/artifacts/plain",
+        Some("desktop/12 contract=999"),
+        None,
+    );
     assert_eq!(read["artifact"], row);
     let (status, said) = ask(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         Some(&json!({})),
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
     let (status, said) = raw(
         "POST",
         "/artifacts/plain/submit",
-        Some("ios/12 contract=999"),
+        Some("desktop/12 contract=999"),
         b"",
     );
     assert_eq!((status, said), (403, refusal("client_contract", "")));
@@ -8582,10 +8590,35 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     keys.sort();
     assert_eq!(keys, ["agent_id", "artifact_id", "session", "type"]);
 
-    // The owner sets a threshold; it is read at every request. Only a whole number counts.
-    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"74\"\n").unwrap();
-    let (_, read) = ask("GET", "/artifacts/plain", capable, None);
-    assert!(read["artifact"].get("spec").is_none());
+    // The owner lays his minimums over the default; they are read at every request. The old
+    // single number is iOS's: 0 switches iOS off; one that is no whole number counts for
+    // nothing, and the default stands.
+    let spec_of = |client: &str| {
+        let (_, read) = ask("GET", "/artifacts/plain", Some(client), None);
+        read["artifact"].get("spec").is_some()
+    };
+    assert!(spec_of("ios/12 contract=74"), "iOS from 74, by default");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 0\n").unwrap();
+    assert!(!spec_of("ios/12 contract=74"), "iOS switched off");
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = \"80\"\n").unwrap();
+    assert!(
+        spec_of("ios/12 contract=74"),
+        "a text is no number: the default stands"
+    );
+    // A table names each client by its name as sent; a name it does not hold keeps the default.
+    std::fs::write(
+        &owner,
+        "[artifacts]\nrender_spec_min_contract = { android = 30, ios = 75 }\n",
+    )
+    .unwrap();
+    assert!(spec_of("android/5 contract=30"));
+    assert!(!spec_of("android/5 contract=29"));
+    assert!(
+        !spec_of("Android/5 contract=30"),
+        "the name as sent, exactly"
+    );
+    assert!(!spec_of("ios/12 contract=74"));
+    assert!(!spec_of("desktop/1 contract=999"));
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 74\n").unwrap();
     let (status, made) = ask(
         "POST",
