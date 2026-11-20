@@ -260,6 +260,7 @@
   "POST /agent-llm": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "POST /agent-mcp": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "POST /agent-mute": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
+  "POST /agent-notes": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "POST /agent-portrait-generation": {"admin": {"body": {"error": "str"}, "status": 409, "type": "application/json"}},
   "POST /agent-portraits": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
   "POST /agent-rename": {"admin": {"body": {"error": "str"}, "status": 400, "type": "application/json"}},
