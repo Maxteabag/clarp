@@ -29,6 +29,8 @@ DEFAULT = "default"
 NO_VOICE = "no_voice"
 PROVIDER_OFF = "provider_off"
 NOT_CONFIGURED = "not_configured"
+PROVIDER_FAILED = "provider_failed"   # an outage: the provider did not make the clip
+HOST_FAILED = "host_failed"           # the Host itself failed while making the clip
 BUILTIN_PROVIDERS = frozenset({CARTESIA, ELEVENLABS, GEMINI, DEEPGRAM, GOOGLE})
 
 
@@ -438,3 +440,42 @@ def watch_config(stream, previous: str | None) -> str:
     if previous is not None and previous != current:
         events.broadcast(stream, events.agent_roster("voice-profile"))
     return current
+
+
+# ---------------------------------------------------------------- a clip that is not spoken
+# (feature speech_outcome). The reasons are the open set of speech.silent_reason plus
+# provider_failed and host_failed; the words are built from the reason and the provider's
+# label, never from an error's text, and carry nothing provider-internal.
+NOT_SPOKEN_WORDS = {
+    NO_VOICE: "Not spoken: {provider} has no voice for {name}.",
+    NOT_CONFIGURED: "Not spoken: {provider} is not set up on this Host.",
+    PROVIDER_OFF: "Not spoken: voice output is off on this Host.",
+    PROVIDER_FAILED: "Not spoken: {provider} did not make the clip.",
+    HOST_FAILED: "Not spoken: the Host could not make the clip.",
+}
+# Google's structured error codes (google_tts.ERROR_CODES) to a reason.
+GOOGLE_REASONS = {
+    "google_credentials_missing": NOT_CONFIGURED, "google_project_missing": NOT_CONFIGURED,
+    "google_auth_failed": NOT_CONFIGURED, "google_id_collision": NOT_CONFIGURED,
+    "google_id_unverifiable": NOT_CONFIGURED, "voice_unavailable": NO_VOICE,
+}
+
+
+def not_spoken_words(reason: str, *, provider_label: str = "", name: str = "") -> str:
+    template = NOT_SPOKEN_WORDS.get(reason)
+    if template is None:
+        return "Not spoken."
+    return template.format(provider=provider_label or "The voice provider",
+                           name=name or "this agent")
+
+
+def clip_failure(cfg, agent: Mapping | None, *, google_code: str | None = None) -> tuple[str, str]:
+    """(reason, provider) for a clip that ended without audio, from the same resolver
+    the profile shows: the profile's silent_reason when it has one, else an outage of
+    the provider that was to speak. A Google structured code decides its own reason."""
+    if agent is None:
+        return HOST_FAILED, ""
+    if google_code:
+        return GOOGLE_REASONS.get(google_code, PROVIDER_FAILED), GOOGLE
+    sp = speech(HostView.build(cfg), agent)
+    return (sp["silent_reason"] or PROVIDER_FAILED), sp["provider"]

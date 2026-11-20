@@ -177,6 +177,9 @@ FEATURES: tuple[str, ...] = (
     # voice_profile on agent rows, the creation answer and roster events; voice_defaults
     # and voice_profile_version on the snapshot head (docs/protocol.md).
     "voice_profile",
+    # tts-error says why a reply was not spoken (reason, provider, trace_id), once per
+    # turn, also when no provider had a voice for the agent (docs/protocol.md).
+    "speech_outcome",
 )
 
 
@@ -243,6 +246,7 @@ FEATURE_CONTRACTS["goal_updater"] = 96  # PROVISIONAL: next free above main's 95
 FEATURE_CONTRACTS["goal_keeper_receipts"] = 97  # PROVISIONAL: next free above main's 96 (14 Nov 2026)
 FEATURE_CONTRACTS["goal_keeper_stalled"] = 98  # PROVISIONAL: next free above main's 97 (14 Nov 2026)
 FEATURE_CONTRACTS["voice_profile"] = 111  # booked by the release owner (109 and 110 are taken)
+FEATURE_CONTRACTS["speech_outcome"] = 111  # same PR and contract as voice_profile
 
 
 # Features that exist only while live events actually flow: the hub runs in

@@ -108,7 +108,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "source_message_id", "cause_message_id", "origin", "push", "badge",
         "unread", "muted", "preview", "reason",
     ),
-    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error"),
+    SSEType.TTS_ERROR: ("session", "agent_id", "persona", "message", "error", "reason", "provider", "trace_id"),
     SSEType.LOCATION_REQUEST: ("session",),
     SSEType.CALENDAR_REQUEST: (
         "request_id", "session", "title", "start", "end", "time_zone",
@@ -412,13 +412,19 @@ def user_notification(*, notification_id: str, agent_id: str, session: str,
 
 
 def tts_error(*, session: Any, agent_id: Any, persona: Any, message: str,
-              error: str) -> Event:
+              error: str, reason: Any = OMIT, provider: Any = OMIT,
+              trace_id: Any = OMIT) -> Event:
+    """A reply that is not spoken (feature speech_outcome adds ``reason``,
+    ``provider`` and ``trace_id``: the turn whose reply it is)."""
     return _build(SSEType.TTS_ERROR, [
         ("session", session),
         ("agent_id", agent_id),
         ("persona", persona),
         ("message", message),
         ("error", error),
+        ("reason", reason),
+        ("provider", provider),
+        ("trace_id", trace_id),
     ])
 
 

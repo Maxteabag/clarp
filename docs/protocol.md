@@ -479,7 +479,7 @@ Event types and payloads:
 | `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, Host contract 78): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay emits only these three fields (plus `type`, `event_id`, `ts`): any older stored `delivery` field is dropped, and a stored event whose identity is missing or invalid is left out of replay entirely (stored history is not rewritten; replay continues past it). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
-| `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
+| `tts-error` | `session`, `agent_id`, `persona`, `message`, `error`, and with the speech_outcome feature `reason`, `provider`, `trace_id` | A reply was not spoken; tell the user instead of playing silence. With speech_outcome: once per turn and reason, `trace_id` names the turn whose reply it is (write the line under that reply), `reason` is an open set (below). |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
 | `provider-limit` | `schema_version`, `provider_limit_event_id`, `episode_id`, `provider_instance_id`, `provider_id`, `window_id`, `kind`, `threshold_id`, `used_percentage`, `resets_at`, `observed_at`, `freshness`, `source`, `dedupe_key` | A provider usage window crossed a threshold, hit its limit, or recovered. `schema_version` precedes `type` on the wire. Extension surface; ignore if not implemented. |
@@ -830,6 +830,24 @@ Freshness: `voice_profile` is also in the `POST /agents` answer's `agent` and in
 `agent-renamed` and `voice-changed` (after `POST /agent-voice`). A change that can alter
 every agent (`POST /tts/providers`, `POST /transcription-providers`, a configuration
 edit) sends `agent-roster` with `kind` `voice-profile`: re-read the snapshot.
+
+### A reply that is not spoken: `tts-error` (feature `speech_outcome`, Host contract 111)
+
+When a reply's speech ends without audio, the Host sends `tts-error` with `reason`, `provider`
+and `trace_id`, also when no provider had a voice for the agent (before this feature that case
+sent nothing). It is sent once per turn and reason, however many clips of that reply fail.
+
+- `reason` is an open set: `no_voice`, `not_configured`, `provider_off` (the same words and causes
+  as `voice_profile.speech.silent_reason`), `provider_failed` (the provider did not make the clip)
+  and `host_failed`. A client shows plain words for a value it does not know.
+- `message` is a sentence built from the reason and the provider's name ("Not spoken: Cartesia
+  has no voice for Rachel."), never from an error's text; Google's own failures keep their
+  words. `error` now carries the reason, not provider-internal text.
+- `trace_id` is the turn whose reply was not spoken: an assistant row of `GET /log` with the same
+  `trace_id` is that reply, so write the line under it ("Not spoken: this agent has no voice").
+  No retry and no notification.
+- Lines spoken outside a turn (announcements, notes) have no reply row and send nothing yet.
+- An older client shows `message` where it shows `tts-error` today (a status line).
 
 ### Inspecting a background process: `GET /background-jobs/<job_id>`
 

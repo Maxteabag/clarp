@@ -88,7 +88,8 @@ FULL_SAMPLES = {
         origin="pwa", push=True, badge=True, unread=True, muted=False,
         preview="hi", reason="done"),
     SSEType.TTS_ERROR: lambda: events.tts_error(
-        session="s", agent_id="a", persona="P", message="m", error="e"),
+        session="s", agent_id="a", persona="P", message="m", error="e",
+        reason="no_voice", provider="cartesia", trace_id="t"),
     SSEType.LOCATION_REQUEST: lambda: events.location_request(session="s"),
     SSEType.CALENDAR_REQUEST: lambda: events.calendar_request(
         request_id="r", session="s", title="t", start="x", end="y",
