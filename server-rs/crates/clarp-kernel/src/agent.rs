@@ -25,8 +25,8 @@ use crate::compaction::LastCompaction;
 use crate::control::Control;
 
 use crate::turn::{
-    Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued, RunOutcome,
-    Settled, StartOutcome, Turn, TurnEvent, TurnId, Wait,
+    Activity, Admission, COMPACTION, IllegalTransition, Origin, Outcome, Parked, Queued,
+    RunOutcome, Settled, StartOutcome, Turn, TurnEvent, TurnId, Wait,
 };
 
 /// Who let a mailbox go that held nothing any more: the last thing that waited left to run.
@@ -106,10 +106,7 @@ pub enum Command {
     StartAgain,
     /// What the user's compaction did, said once its turn has ended (`compaction`): only for
     /// that turn, and only once.
-    RecordCompaction {
-        turn: TurnId,
-        said: LastCompaction,
-    },
+    RecordCompaction { turn: TurnId, said: LastCompaction },
 }
 
 /// What happened to an agent. These, in order, are its history.
@@ -1383,18 +1380,33 @@ mod tests {
         a.send(Command::TurnStarted { turn: TurnId(1) }).unwrap();
         a.finish(1);
         assert_eq!(a.agent.compaction_owed(), None);
-        assert_eq!(a.send(said(1, 5)), Err(Refusal::NoCompactionOwed(TurnId(1))));
+        assert_eq!(
+            a.send(said(1, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(1)))
+        );
         // The compaction: nothing owed while it runs, one outcome once it ended.
         a.send(compaction(2)).unwrap();
-        assert_eq!(a.send(said(2, 5)), Err(Refusal::NoCompactionOwed(TurnId(2))));
+        assert_eq!(
+            a.send(said(2, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(2)))
+        );
         a.send(Command::TurnStarted { turn: TurnId(2) }).unwrap();
         a.finish(2);
-        assert_eq!(a.agent.compaction_owed().map(|owed| owed.id), Some(TurnId(2)));
+        assert_eq!(
+            a.agent.compaction_owed().map(|owed| owed.id),
+            Some(TurnId(2))
+        );
         a.send(said(2, 41_250)).unwrap();
         assert_eq!(a.agent.compaction_owed(), None);
-        assert_eq!(a.send(said(2, 5)), Err(Refusal::NoCompactionOwed(TurnId(2))));
+        assert_eq!(
+            a.send(said(2, 5)),
+            Err(Refusal::NoCompactionOwed(TurnId(2)))
+        );
         let first = a.agent.last_compaction().cloned();
-        assert_eq!(first.as_ref().and_then(|last| last.decided.before_tokens), Some(41_250));
+        assert_eq!(
+            first.as_ref().and_then(|last| last.decided.before_tokens),
+            Some(41_250)
+        );
         // Later turns keep it, and so does a restart (`send` replays the history every time).
         a.user(3);
         a.send(Command::TurnStarted { turn: TurnId(3) }).unwrap();
@@ -1409,9 +1421,22 @@ mod tests {
         })
         .unwrap();
         let owed = a.agent.compaction_owed().cloned().unwrap();
-        assert_eq!((owed.id, &owed.outcome), (TurnId(5), &Outcome::Withdrawn { by: "user".to_string() }));
+        assert_eq!(
+            (owed.id, &owed.outcome),
+            (
+                TurnId(5),
+                &Outcome::Withdrawn {
+                    by: "user".to_string()
+                }
+            )
+        );
         a.send(said(5, 9)).unwrap();
-        assert_eq!(a.agent.last_compaction().and_then(|last| last.decided.before_tokens), Some(9));
+        assert_eq!(
+            a.agent
+                .last_compaction()
+                .and_then(|last| last.decided.before_tokens),
+            Some(9)
+        );
         // An outcome nothing owes cannot be in the log.
         let mut fresh = Agent::new();
         let stray = AgentEvent::Compacted {
