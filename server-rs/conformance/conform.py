@@ -445,7 +445,15 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # fields and events are left out of both sides before the Rust Host is compared: they are not
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
-NOT_YET: dict = {}
+NOT_YET = {
+    # What the user's last compaction of an agent did, from numbers (`last_compaction` on its
+    # row of the snapshot, the Python Host's PR 483, R148): `null` there until the agent is
+    # compacted. The port to the Rust Host is owed; its contract stays 106 until it lands.
+    'compaction_outcome': {
+        'fields': ('last_compaction',),
+        'events': (),
+    },
+}
 # Parts of the contract no feature flag stands for, which the Rust Host does not have yet: it
 # sends them empty. Left out of both sides the same way, and listed in the same document.
 NOT_BUILT = {
