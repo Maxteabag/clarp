@@ -503,7 +503,7 @@ class ClaudeBackend(Backend):
         if agent_id and not isolated:
             try:
                 provider_jobs.turn_started(turn_token, agent_id=agent_id,
-                                           provider=self.id, pid=proc.pid)
+                                           provider=self.id, pid=proc.pid, trace_id=trace_id)
                 recorded = True
             except Exception as e:                        # noqa: BLE001
                 log_exception("providerTurnStartFail", e, detail=trace_id)

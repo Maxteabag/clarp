@@ -36,3 +36,25 @@ def caller_agent_id(environ=None) -> str:
     row = db.conn().execute("SELECT agent_id FROM provider_turns WHERE turn_token=?",
                             (token,)).fetchone()
     return str(row[0]) if row else ""
+
+
+def caller_turn(environ=None) -> tuple[str, str]:
+    """The agent and the trace of the turn that issued this process's token, or ("", "").
+    A token issued before the trace was recorded names its agent and no trace (R102)."""
+    token = (os.environ if environ is None else environ).get(TURN_ENV, "")
+    if not _TOKEN.fullmatch(token or ""):
+        return "", ""
+    row = db.conn().execute("SELECT agent_id, trace_id FROM provider_turns WHERE turn_token=?",
+                            (token,)).fetchone()
+    return (str(row[0]), str(row[1] or "")) if row else ("", "")
+
+
+def running_trace(agent_id: str, trace_id: str) -> bool:
+    """Whether ``trace_id`` is ``agent_id``'s running turn now: its newest turn, not ended.
+    A detached job its turn started, publishing after the turn ended, is not (R102)."""
+    if not (agent_id and trace_id):
+        return False
+    row = db.conn().execute(
+        "SELECT trace_id, ended_at FROM turns WHERE agent_id=? ORDER BY started_at DESC, turn_id DESC LIMIT 1",
+        (agent_id,)).fetchone()
+    return bool(row) and str(row[0]) == trace_id and row[1] is None

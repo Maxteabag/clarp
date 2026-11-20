@@ -291,7 +291,7 @@ class MuseBackend(StreamJsonBackend):
                 proc, original = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
                 handle = _MuseHandle(original)
                 provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                              provider=self.id, pid=proc.pid)
+                                              provider=self.id, pid=proc.pid, trace_id=trace_id)
                 self.register_handle(runtime_agent_id, handle)
 
             def retry_spawn():
@@ -299,7 +299,8 @@ class MuseBackend(StreamJsonBackend):
                 with _RECOVERY_LOCK:
                     replacement = self.launch(cmd, cwd=cwd, session=session, env_extra=retry_identity)
                     provider_jobs.record_identity(token, agent_id=runtime_agent_id,
-                                                  provider=self.id, pid=replacement[0].pid)
+                                                  provider=self.id, pid=replacement[0].pid,
+                                                  trace_id=trace_id)
                     return replacement
             self.start_drain(
                 handle, removing(self._drain_stdout, prompt_file),

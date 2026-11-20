@@ -20,7 +20,8 @@ def _remember(row):
          row['title'], row['summary'], row['updated_at']))
 
 
-def publish(agent, artifact_id, title, summary, status, reference_id, payload, expected_version=None):
+def publish(agent, artifact_id, title, summary, status, reference_id, payload, expected_version=None, *,
+            source_trace_id=""):
     from . import artifacts
     con = db.conn()
     con.execute('BEGIN IMMEDIATE')
@@ -32,7 +33,8 @@ def publish(agent, artifact_id, title, summary, status, reference_id, payload, e
             row = _revise(current, {'payload': payload, 'title': title, 'summary': summary,
                 'expected_version': expected_version}, require_base=True)
         else:
-            row = artifacts._insert_artifact(agent, artifact_id, 'html_form', title, summary, status, reference_id, payload)
+            row = artifacts._insert_artifact(agent, artifact_id, 'html_form', title, summary, status, reference_id, payload,
+                                             source_trace_id=source_trace_id)
             _remember(row)
         con.execute('COMMIT')
         return row

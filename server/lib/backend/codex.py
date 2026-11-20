@@ -333,7 +333,7 @@ class CodexBackend(StreamJsonBackend):
                     stdin.close()       # the child holds its own descriptor
                 prompt_file.remove()
         provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
-                                      provider=self.id, pid=proc.pid)
+                                      provider=self.id, pid=proc.pid, trace_id=trace_id)
         self.register_handle(runtime_agent_id, handle)
         self.start_drain(
             handle, self._drain_stdout,
