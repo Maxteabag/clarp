@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/controller-actions-vectors.json'
@@ -108,10 +110,10 @@ def generate(root):
 
 if __name__=='__main__':
     if '--isolated' in sys.argv:
-        with tempfile.TemporaryDirectory() as tmp:
+        with tool_scratch.directory() as tmp:
             print(json.dumps(generate(Path(tmp)),ensure_ascii=True))
     else:
-        ran=subprocess.run([sys.executable,'-I',__file__,'--isolated'],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'},
+        ran=subprocess.run([sys.executable,'-I',__file__,'--isolated'],env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8'}),
                            capture_output=True,text=True)
         if ran.returncode: sys.exit(ran.stderr)
         rows=json.loads(ran.stdout.splitlines()[-1])
