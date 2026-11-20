@@ -71,3 +71,19 @@ fn eviction_keeps_the_newest_fills_within_both_bounds() {
     rows.rotate_right(1);
     assert_eq!(excess(&rows), 1);
 }
+
+#[test]
+fn only_a_digest_in_the_phrase_namespace_is_audio_from_this_store() {
+    let digest = "0123456789abcdef".repeat(4);
+    assert!(blob_name(&format!("phrase-{digest}.mp3")));
+    for name in [
+        format!("phrase-{}.mp3", &digest[1..]),
+        format!("phrase-{digest}0.mp3"),
+        format!("phrase-{}.mp3", digest.to_uppercase()),
+        format!("phrase-{digest}.wav"),
+        format!("other-{digest}.mp3"),
+        format!("../phrase-{digest}.mp3"),
+    ] {
+        assert!(!blob_name(&name), "{name}");
+    }
+}

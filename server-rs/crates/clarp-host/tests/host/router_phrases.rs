@@ -96,7 +96,15 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
         press(&host, &mike, "free prose", id);
     }
     assert_eq!(primary.asked().len(), 3);
-    wait_for("both free questions announced", || heard.lock().unwrap().iter().filter(|e| e["type"]=="audio").count() >= 6);
+    wait_for("both free questions announced", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "audio")
+            .count()
+            >= 6
+    });
     let before = heard
         .lock()
         .unwrap()
@@ -123,22 +131,34 @@ fn the_router_reuses_only_its_own_words_in_the_voice_that_made_them() {
     host.kill();
     // An absent or modified blob is never sent under its old address.
     use clarp_ports::blobs::BlobEngine as _;
-    let blobs = clarp_store_files::FileBlobs::new().open(&place.root.join("data/media")).unwrap();
+    let blobs = clarp_store_files::FileBlobs::new()
+        .open(&place.root.join("data/media"))
+        .unwrap();
     let blob_name = file.strip_prefix("/audio/").unwrap();
     for damage in ["absent", "modified"] {
         blobs.remove(blob_name).unwrap();
-        if damage == "modified" { blobs.put(blob_name,&vec![9;bytes.len()]).unwrap(); }
+        if damage == "modified" {
+            blobs.put(blob_name, &vec![9; bytes.len()]).unwrap();
+        }
         let host = start();
-        assert_eq!(fetch(&host,"","GET",file,&[],&[]).status,404);
-        assert!(host.heard.lock().unwrap().contains("unreadable phrase clip"));
-        press(&host,&mike,"fixed repair",damage);
-        wait_for("the repaired blob",|| fetch(&host,"","GET",file,&[],&[]).body == bytes);
+        assert_eq!(fetch(&host, "", "GET", file, &[], &[]).status, 404);
+        assert!(
+            host.heard
+                .lock()
+                .unwrap()
+                .contains("unreadable phrase clip")
+        );
+        press(&host, &mike, "fixed repair", damage);
+        wait_for("the repaired blob", || {
+            fetch(&host, "", "GET", file, &[], &[]).body == bytes
+        });
         host.kill();
     }
     let mut stale = stored["clips"].clone();
     stale[0]["text"] = json!("An obsolete phrase.");
     keep_record(&place, "router-phrase", "clips", &stale);
     let host = start();
+    assert_eq!(fetch(&host, "", "GET", file, &[], &[]).status, 404);
     press(&host, &mike, "fixed stale", "p6");
     assert_eq!(primary.asked().len(), 6);
     assert!(!host.heard.lock().unwrap().contains("obsolete phrase"));
@@ -166,61 +186,108 @@ fn router_phrase_eviction_releases_only_unreferenced_audio() {
     use sha2::{Digest, Sha256};
     let place = Place::new("phrase-eviction");
     let words = "I could not do that.";
-    let (_, claude, _) = routing_model(&place, &json!([["fixed", {"kind":"clarify","confidence":0.95,"spoken_text":words}]]));
+    let (_, claude, _) = routing_model(
+        &place,
+        &json!([["fixed", {"kind":"clarify","confidence":0.95,"spoken_text":words}]]),
+    );
     let owners = place.root.join("fixture.toml");
     std::fs::write(&owners,"[tts]\nprovider='cartesia'\nfallback='none'\n[cartesia]\napi_key='fixture'\n[tts.agents.mike]\ncartesia_voice='new'\n").unwrap();
-    let sound = vec![4; 256*1024];
+    let sound = vec![4; 256 * 1024];
     let primary = cartesia_stand_in(sound.clone());
-    let oversized = cartesia_stand_in(vec![5; 256*1024+1]);
-    let start = |engine: &StandInVoice| place.start_in("", &["--speech-keys",owners.to_str().unwrap()], &[
-        ("CLARP_CLAUDE_PROGRAM",claude.to_str().unwrap()),("CLARP_CARTESIA_ENDPOINT",&engine.address),
-        ("CARTESIA_API_KEY",""), ("ELEVEN_API_KEY","")
-    ]);
+    let oversized = cartesia_stand_in(vec![5; 256 * 1024 + 1]);
+    let start = |engine: &StandInVoice| {
+        place.start_in(
+            "",
+            &["--speech-keys", owners.to_str().unwrap()],
+            &[
+                ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+                ("CLARP_CARTESIA_ENDPOINT", &engine.address),
+                ("CARTESIA_API_KEY", ""),
+                ("ELEVEN_API_KEY", ""),
+            ],
+        )
+    };
     let host = start(&primary);
     let mike = host.new_agent("Mike");
-    host.post("/orchestrator/settings", json!({"enabled":true,"fallback_only":false,"provider":"claude"}));
+    host.post(
+        "/orchestrator/settings",
+        json!({"enabled":true,"fallback_only":false,"provider":"claude"}),
+    );
     let press = |host: &Host, id: &str| {
         let (status, body) = host.ask("POST","/send",Some(&json!({"session":mike,"text":format!("fixed {id}"),"client_msg_id":id,"hands_free":true})));
-        assert_eq!(status,200,"{body}");
+        assert_eq!(status, 200, "{body}");
     };
     host.kill();
-    let blobs = clarp_store_files::FileBlobs::new().open(&place.root.join("data/media")).unwrap();
+    let blobs = clarp_store_files::FileBlobs::new()
+        .open(&place.root.join("data/media"))
+        .unwrap();
     let blob = |bytes: &[u8]| {
-        let name = format!("phrase-{:x}.mp3",Sha256::digest(bytes));
-        blobs.put(&name,bytes).unwrap();
+        let name = format!("phrase-{:x}.mp3", Sha256::digest(bytes));
+        blobs.put(&name, bytes).unwrap();
         name
     };
-    for (round, count, size) in [("byte",256,256*1024),("count",1024,1)] {
-        let oldest = blob(&vec![1;size]);
-        let shared = blob(&vec![2;size]);
+    for (round, count, size) in [("byte", 256, 256 * 1024), ("count", 1024, 1)] {
+        let oldest = blob(&vec![1; size]);
+        let shared = blob(&vec![2; size]);
         let rows: Vec<_> = (0..count).map(|i| json!({"key":{"phrase":"command_refused","voice":{"provider":"cartesia","voice":format!("old-{i}"),"model":"synthetic"}},"name":if i==0 {&oldest} else {&shared}, "size":size,"text":words})).collect();
-        keep_record(&place,"router-phrase","clips",&json!(rows));
+        keep_record(&place, "router-phrase", "clips", &json!(rows));
         let host = start(&primary);
-        press(&host,round);
-        let read = |name: &str| fetch(&host,"","GET",&format!("/audio/{name}"),&[("Range","bytes=0-0")],&[]);
-        wait_for("the cold fill to evict the oldest clip",||read(&oldest).status==404);
-        assert_eq!(read(&shared).body,vec![2]);
-        assert_eq!(read(&format!("phrase-{:x}.mp3",Sha256::digest(&sound))).body,vec![4]);
+        press(&host, round);
+        let read = |name: &str| {
+            fetch(
+                &host,
+                "",
+                "GET",
+                &format!("/audio/{name}"),
+                &[("Range", "bytes=0-0")],
+                &[],
+            )
+        };
+        wait_for("the cold fill to evict the oldest clip", || {
+            read(&oldest).status == 404
+        });
+        assert_eq!(read(&shared).body, vec![2]);
+        assert_eq!(
+            read(&format!("phrase-{:x}.mp3", Sha256::digest(&sound))).body,
+            vec![4]
+        );
         host.kill();
-        let kept = kept_records(&place,"router-phrase");
+        let kept = kept_records(&place, "router-phrase");
         let rows = kept["clips"].as_array().unwrap();
-        assert_eq!(rows.len(),count);
-        assert_eq!(rows[0]["key"]["voice"]["voice"],"old-1");
-        assert_eq!(rows.last().unwrap()["key"]["voice"]["voice"],"new");
-        assert_eq!(blobs.len(&oldest).unwrap(),None);
-        assert_eq!(blobs.len(&shared).unwrap(),Some(size as u64));
+        assert_eq!(rows.len(), count);
+        assert_eq!(rows[0]["key"]["voice"]["voice"], "old-1");
+        assert_eq!(rows.last().unwrap()["key"]["voice"]["voice"], "new");
+        assert_eq!(blobs.len(&oldest).unwrap(), None);
+        assert_eq!(blobs.len(&shared).unwrap(), Some(size as u64));
     }
-    let mut kept = kept_records(&place,"router-phrase")["clips"].as_array().unwrap().clone();
+    let mut kept = kept_records(&place, "router-phrase")["clips"]
+        .as_array()
+        .unwrap()
+        .clone();
     kept.pop();
     kept.push(json!({"corrupt":true}));
-    keep_record(&place,"router-phrase","clips",&json!(kept));
+    keep_record(&place, "router-phrase", "clips", &json!(kept));
     let host = start(&oversized);
     let heard = host.listen();
-    press(&host,"large-one");
-    press(&host,"large-two");
-    assert_eq!(oversized.asked().len(),2);
-    wait_for("both oversized clips announced normally",||heard.lock().unwrap().iter().filter(|e| e["type"]=="audio" && e["herald"]==true).count()>=2);
+    press(&host, "large-one");
+    press(&host, "large-two");
+    assert_eq!(oversized.asked().len(), 2);
+    wait_for("both oversized clips announced normally", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "audio" && e["herald"] == true)
+            .count()
+            >= 2
+    });
     assert!(host.heard.lock().unwrap().contains("invalid phrase record"));
     host.kill();
-    assert_eq!(kept_records(&place,"router-phrase")["clips"].as_array().unwrap().len(),1023);
+    assert_eq!(
+        kept_records(&place, "router-phrase")["clips"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1023
+    );
 }

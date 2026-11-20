@@ -412,7 +412,7 @@ pub(crate) mod at_the_port {
         pub(crate) notice: Arc<tokio::sync::Notify>,
         refused_read: Refused,
         dir: PathBuf,
-        fleet: FleetHandle,
+        pub(crate) fleet: FleetHandle,
         hub: Arc<Hub>,
         refused: Refused,
         pub(crate) said: Arc<Mutex<Vec<String>>>,
