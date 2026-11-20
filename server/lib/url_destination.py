@@ -47,8 +47,9 @@ def _host(raw: str) -> str | None:
             return str(ipaddress.IPv6Address(raw))
         except ValueError:
             return None
+    # A trailing dot leaves an empty last label, which the label pattern never matches.
     labels = raw.split(".")
-    if raw.endswith(".") or not all(_LABEL.match(label) for label in labels):
+    if not all(_LABEL.match(label) for label in labels):
         return None
     return raw
 
