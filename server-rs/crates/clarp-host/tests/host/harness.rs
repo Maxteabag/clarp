@@ -414,11 +414,9 @@ fn every_variable_the_hosts_crates_read_is_one_the_harness_decided_on() {
                 && word.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
     };
     let strings = |text: &str| -> Vec<String> {
-        text.split('"')
-            .skip(1)
-            .step_by(2)
+        literals(text)
+            .into_iter()
             .filter(|word| shaped(word))
-            .map(str::to_string)
             .collect()
     };
     // The constants of the workspace that are text: by their names.
@@ -537,5 +535,95 @@ fn a_tool_with_no_address_on_a_machine_with_an_installed_host_reaches_nothing_of
     assert!(
         trap.accept().is_err(),
         "the machine's installed Host was reached"
+    );
+}
+
+/// The string literals of a Rust source, as the compiler reads them: past comments, escaped
+/// quotes, raw strings and character literals (`'"'`), which a split on quotes misreads.
+fn literals(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        let here = chars[at];
+        let next = chars.get(at + 1).copied();
+        if here == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if here == '/' && next == Some('*') {
+            at += 2;
+            while at + 1 < chars.len() && !(chars[at] == '*' && chars[at + 1] == '/') {
+                at += 1;
+            }
+            at += 2;
+        } else if here == 'r'
+            && (next == Some('"') || next == Some('#'))
+            && !chars[..at]
+                .last()
+                .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+        {
+            let hashes = chars[at + 1..].iter().take_while(|c| **c == '#').count();
+            let open = at + 1 + hashes;
+            if chars.get(open) != Some(&'"') {
+                at += 1;
+                continue;
+            }
+            let mut end = open + 1;
+            let mut text = String::new();
+            while end < chars.len() {
+                if chars[end] == '"' && chars[end + 1..].iter().take(hashes).all(|c| *c == '#')
+                    && chars.len() >= end + 1 + hashes
+                {
+                    break;
+                }
+                text.push(chars[end]);
+                end += 1;
+            }
+            found.push(text);
+            at = end + 1 + hashes;
+        } else if here == '"' {
+            let mut end = at + 1;
+            let mut text = String::new();
+            while end < chars.len() && chars[end] != '"' {
+                if chars[end] == '\\' {
+                    end += 1;
+                }
+                if let Some(c) = chars.get(end) {
+                    text.push(*c);
+                }
+                end += 1;
+            }
+            found.push(text);
+            at = end + 1;
+        } else if here == '\'' {
+            // A character literal ('"', '\'', 'x'), else a lifetime ('a).
+            if next == Some('\\') {
+                let mut end = at + 2;
+                while end < chars.len() && chars[end] != '\'' {
+                    end += 1;
+                }
+                at = end + 1;
+            } else if chars.get(at + 2) == Some(&'\'') {
+                at += 3;
+            } else {
+                at += 1;
+            }
+        } else {
+            at += 1;
+        }
+    }
+    found
+}
+
+/// The reader of literals reads what a split on quotes misreads.
+#[test]
+fn the_scans_reader_of_literals_reads_past_what_is_no_literal() {
+    let source = r##"let a = "ONE"; // "NOT_IN_A_COMMENT"
+let b = '"'; let c = "TWO_\"X"; /* "NOR_HERE" */ fn f<'a>(x: &'a str) {}
+let d = r#"RAW_"ONE"#; let e = '\''; let g = "THREE";"##;
+    assert_eq!(
+        literals(source),
+        ["ONE", "TWO_\"X", "RAW_\"ONE", "THREE"]
     );
 }
