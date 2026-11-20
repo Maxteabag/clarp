@@ -249,10 +249,17 @@ impl Mouth {
             .values()
             .fold((0, 0), |(n, a), (p, f)| (n + p, a + f))
     }
+    pub(crate) fn directory(&self) -> Arc<Directory> {
+        self.fleet.directory()
+    }
+
     /// The owner's file as it is now. Nothing named, or nothing readable: an empty one.
     pub(crate) fn owners(&self) -> Table {
+        self.owners_from(&self.fleet.directory())
+    }
+
+    pub(crate) fn owners_from(&self, directory: &Directory) -> Table {
         let mut file = self.owner.read().unwrap_or_default();
-        let directory = self.fleet.directory();
         for (section, key, setting) in [
             ("tts", "provider", "speech.provider"),
             ("tts", "fallback", "speech.fallback"),
@@ -299,7 +306,7 @@ impl Mouth {
         if provider == "google" {
             owner::google_voice_error(owners).is_none()
         } else {
-            self.owner.key(key_of(provider, owners)).is_some()
+            OwnerFile::key_from(Some(owners), key_of(provider, owners)).is_some()
         }
     }
 
@@ -1239,13 +1246,8 @@ impl Mouth {
                 reason,
                 provider,
             } => {
-                let voices = owner::voices(&owners);
-                let route = voices.route(Who {
-                    name: &record.persona,
-                    persona: &record.persona,
-                    session: &record.session,
-                });
-                if route.fallback.is_empty() {
+                let route = view.voices.route(speaker(record).who);
+                if reason == voice_profile::PROVIDER_OFF || route.fallback.is_empty() {
                     let told = Some((reason, provider));
                     return self.unsaid(member, &line, None, &why, told).await;
                 }
@@ -1339,7 +1341,7 @@ impl Mouth {
             .map(|_| std::time::Instant::now());
         let made = tokio::task::spawn_blocking(move || {
             if let Some(why) = unavailable {
-                return (Err(why), 0);
+                return (Err((why, false)), 0);
             }
             let listed: Vec<(&dyn Speaker, &str)> = engines
                 .iter()
@@ -1363,15 +1365,15 @@ impl Mouth {
                 }
             });
             let spoke = match (said, broken) {
-                (_, Some(error)) => Err(format!("the clip could not be written: {error}")),
+                (_, Some(error)) => Err((format!("the clip could not be written: {error}"), true)),
                 (Ok((place, _)), None) => Ok((engines[place].2.clone(), engines[place].1.clone())),
-                (Err(Mute::Unavailable(why) | Mute::Failed { why, .. }), None) => Err(why),
+                (Err(Mute::Unavailable(why) | Mute::Failed { why, .. }), None) => Err((why, false)),
             };
             (spoke, written)
         });
         let (spoke, written) = match made.await {
             Ok(made) => made,
-            Err(_) => (Err("the engine's thread ended".to_string()), 0),
+            Err(_) => (Err(("the engine's thread ended".to_string(), true)), 0),
         };
         if let Some(c) = &self.hub.capture {
             c.synthesis(self.now_ms(), spoke.is_ok(), written, started);
@@ -1399,7 +1401,7 @@ impl Mouth {
                     .line_ended(line.id.clone(), Some(clip), Ok(said))
                     .await;
             }
-            Err(why) => {
+            Err((why, host_failed)) => {
                 // A clip nothing came of is no file before anybody is told so, and is not
                 // played later either.
                 let mut heralding = self.herald.lock().await;
@@ -1410,10 +1412,14 @@ impl Mouth {
                 }
                 // Why, as the agent's profile says it, or an outage of the engine; Google's
                 // own code decides for itself.
-                let code = google_code(&why);
-                let view = self.speech_view(&self.owners());
-                let failed = voice_profile::clip_failure(&view, speaker(record), code.as_deref());
-                let told = Some((failed.reason, failed.provider));
+                let told = if host_failed {
+                    Some((voice_profile::HOST_FAILED, String::new()))
+                } else {
+                    let code = google_code(&why);
+                    let failed =
+                        voice_profile::clip_failure(&view, speaker(record), code.as_deref());
+                    Some((failed.reason, failed.provider))
+                };
                 self.unsaid(member, &line, Some(clip), &why, told).await;
             }
         }
