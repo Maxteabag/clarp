@@ -25,7 +25,7 @@ from .log import log, log_exception
 from .oracle_calls import AgentTools, session_config as realtime_config
 from .oracle_context import context_chunks, result_context
 from .oracle_live_usage import LiveUsage
-from .oracle_live_wire import LiveWire
+from .oracle_live_wire import API_VOICE, BASELINE_LIVE_MODEL, LiveWire
 from .oracle_progress import ProgressCadence, progress_context, valid_interval
 from .oracle_realtime import claim_session, release_session, _send_http_error
 
@@ -108,8 +108,6 @@ def release_connection(principal, token):
         _CLOSING_CONDITION.notify_all()
 
 
-MODEL = "gpt-live-1"
-VOICE = "marin"
 # Append ids retained for rejection matching. Two orders of magnitude above
 # the largest observed single injection burst (148 chunks, 2026-09-23).
 APPEND_LEDGER_LIMIT = 2048
@@ -166,6 +164,15 @@ capture time and distinguish a captured image from current live state.
 """
 
 
+# GPT-Live standby (WebRTC only): the provider paused or resumed inference.
+# Relayed as oracle_v2.standby {active}: true while the session is on standby.
+STANDBY_EVENTS = ("session.paused", "session.resumed")
+
+
+def standby_event(kind):
+    return {"type": "oracle_v2.standby", "active": kind == "session.paused"}
+
+
 def live_config(*, wire=None, webrtc=False, history=(), delegation_strategy="operator", voice_context=None):
     prompt = oracle_strategy.DIRECT_INSTRUCTIONS if delegation_strategy == "direct_contact" else PROMPT
     return (wire or LiveWire()).session(prompt + oracle_voice_context.instructions(voice_context), webrtc=webrtc, history=history)
@@ -173,7 +180,7 @@ def live_config(*, wire=None, webrtc=False, history=(), delegation_strategy="ope
 
 def router_tools():
     from .oracle_realtime import _tool
-    tools = realtime_config(model=MODEL, voice=VOICE)["tools"]
+    tools = realtime_config(model=BASELINE_LIVE_MODEL, voice=API_VOICE)["tools"]  # only its tool list
     if not any(t["name"] == "get_agent_status" for t in tools):
         tools.append(_tool("get_agent_status", "Read what one Clarp agent is doing right now: state, current step, last thing it said.",
                            {"agent": {"type": "string"}}, ["agent"]))
@@ -563,6 +570,8 @@ class Conversation:
                     self.seen.add(ident)
                     self.routing += 1
                     self.pool.submit(self.route, ident)
+        elif kind in STANDBY_EVENTS:
+            self.downstream(standby_event(kind))
         elif kind == "session.closed":
             self.closed.set()
             self.downstream(event)
@@ -880,6 +889,7 @@ def serve(handler):
             handler.wfile.flush()
     try:
         fallback = selected_contact
+        wire = LiveWire()  # this session's one read of the configured model
         tools = AgentTools(handler.ctx, principal, fallback,
             lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
         memory = oracle_memory.open_thread(principal, fallback, connection_id=token,
@@ -889,7 +899,8 @@ def serve(handler):
             # Persist the exact source/configuration before opening paid audio.
             history_id = podcast_history.create(artifact=artifact,
                 position=float(query.get("position", ["0"])[0]), context=podcast_context,
-                source=podcast_source, model=MODEL, voice=VOICE)
+                source=podcast_source, model=wire.model, voice=wire.voice,
+                configuration=podcast_live.session_config(podcast_context, wire=wire))
         import websocket
         upstream = websocket.create_connection("wss://api.openai.com/v1/live/sessions",
             header={"Authorization": "Bearer "+key}, suppress_origin=True, timeout=20)
@@ -903,13 +914,13 @@ def serve(handler):
             media_dir = getattr(handler.ctx, "media_dir", None) or RuntimePaths.from_home(pathlib.Path.home()).media_dir
             conversation = podcast_live.PodcastConversation(upstream, downstream, key,
                 podcast_context, images=query.get("images", ["0"])[0] == "1",
-                history_id=history_id, media_dir=media_dir, tools=tools,
+                history_id=history_id, media_dir=media_dir, tools=tools, wire=wire,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
                 delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
             downstream({"type": "podcast.history", "conversation_id": history_id,
                         "saved": True, "position": float(query.get("position", ["0"])[0])})
         else:
-            conversation = Conversation(upstream, downstream, tools, key,
+            conversation = Conversation(upstream, downstream, tools, key, wire=wire,
                 router_backend=getattr(cfg, "oracle_router_backend", "api"), memory=memory,
                 delegation_strategy=strategy, router_reuse=getattr(cfg, "oracle_router_reuse", False))
         # Legacy operator clients expect session.started as their first frame.
@@ -922,11 +933,11 @@ def serve(handler):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
             conversation.journal.record("session.open", {
-                "model": MODEL, "voice": VOICE, "transport": "clarp-live-v2",
+                "model": wire.model, "voice": wire.voice, "transport": "clarp-live-v2",
                 "podcast": podcast_context is not None,
                 "voice_context_sha256": (voice_context or {}).get("sidecar_sha256")})
         opened_at = time.monotonic()
-        log("oracleV2Open", f"model={MODEL} voice={VOICE} podcast={podcast_context is not None}"
+        log("oracleV2Open", f"model={wire.model} voice={wire.voice} podcast={podcast_context is not None}"
             + (f" journal={conversation.journal.session_id}" if conversation.journal else ""))
 
         def stop_session():
@@ -970,7 +981,8 @@ def serve(handler):
                     conversation.stop.set()
         threading.Thread(target=pump, daemon=True, name="oracle-v2-receive").start()
         threading.Thread(target=poll, daemon=True, name="oracle-v2-results").start()
-        initial = podcast_live.session_config(podcast_context) if podcast_context is not None else live_config(delegation_strategy=strategy, voice_context=voice_context)
+        initial = (podcast_live.session_config(podcast_context, wire=wire) if podcast_context is not None
+                   else live_config(wire=wire, delegation_strategy=strategy, voice_context=voice_context))
         saved = memory.startup_history(roster=tools.execute("list_agents", {}, "startup"))
         initial["input"] = saved + initial.get("input", [])
         conversation.send({"type": "session.start", "session": initial})
