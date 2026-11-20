@@ -358,15 +358,25 @@ async fn avatar_settings(State(app): State<App>) -> Json<Value> {
 
 async fn set_avatar_settings(State(app): State<App>, body: Bytes) -> Result<Json<Value>, ApiError> {
     let value = serde_json::from_slice::<Value>(&body).ok();
-    let on = value.as_ref().and_then(|v| v["model_avatars"].as_bool())
+    let on = value
+        .as_ref()
+        .and_then(|v| v["model_avatars"].as_bool())
         .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "model_avatars required"))?;
-    app.fleet.set(vec![(clarp_kernel::portraits::MODEL_SETTING.to_owned(), on.to_string())]).await?;
+    app.fleet
+        .set(vec![(
+            clarp_kernel::portraits::MODEL_SETTING.to_owned(),
+            on.to_string(),
+        )])
+        .await?;
     Ok(Json(json!({"model_avatars":on})))
 }
 
 pub fn routes() -> Router<App> {
     Router::new()
-        .route("/avatar-settings", get(avatar_settings).post(set_avatar_settings))
+        .route(
+            "/avatar-settings",
+            get(avatar_settings).post(set_avatar_settings),
+        )
         .route("/agent-portraits", get(portraits).post(change_portraits))
         .route("/agent-portraits/{id}/content", get(portrait))
         .route("/notification-avatars/{agent}", get(pushed_face))
