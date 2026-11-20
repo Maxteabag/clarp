@@ -106,7 +106,13 @@ impl Faces {
 
     /// Where the picture of an agent on the model it runs is fetched, for a name that has
     /// one drawn for that family of model. Empty: it has none.
-    pub fn on_model(&self, persona: &str, backend: &str, model: &str, default_model: &str) -> String {
+    pub fn on_model(
+        &self,
+        persona: &str,
+        backend: &str,
+        model: &str,
+        default_model: &str,
+    ) -> String {
         let files = portraits::model_files(persona, backend, model, default_model);
         match self.first("avatars/models", files) {
             Some((file, version)) => format!("{}/{file}?v={version}", portraits::MODEL_AVATARS),
@@ -245,7 +251,10 @@ mod tests {
                 .on_model("Claire", "claude", "claude-opus-5-5", "")
                 .starts_with("/static/avatars/models/claire.opus.png?v=")
         );
-        assert_eq!(faces.on_model("Claire", "claude", "claude-sonnet-5-5", ""), "");
+        assert_eq!(
+            faces.on_model("Claire", "claude", "claude-sonnet-5-5", ""),
+            ""
+        );
         assert_eq!(
             faces.on_model("Claire", "claude", "", ""),
             "",

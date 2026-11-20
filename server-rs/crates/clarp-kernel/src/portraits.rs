@@ -16,7 +16,12 @@ pub const MODEL_SETTING: &str = "avatars.model_variants";
 
 /// How the stored display preference is read by the apps' snapshot and settings route.
 pub fn model_avatars(stored: Option<&str>) -> bool {
-    stored.is_some_and(|s| matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+    stored.is_some_and(|s| {
+        matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "on"
+        )
+    })
 }
 
 /// Where the pictures of names are fetched from.

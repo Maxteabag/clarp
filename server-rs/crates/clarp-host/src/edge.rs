@@ -1218,7 +1218,7 @@ pub(crate) fn agent_row(
             let field = format!("{}_model", view.backend);
             let default = crate::owner::text_at(owners, &["agents", &field]).unwrap_or_default();
             faces.on_model(&record.persona, view.backend, &record.model, &default)
-        },
+        }
     });
     row["avatar_url"] = json!(match own {
         Some(own) => own,
@@ -1671,7 +1671,14 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
         .map(|member| {
             // Whether its tool's account is used up is none of the fields of this answer.
             let (families, unasked) = (Families::of(&directory), crate::quota::UsedUp::new());
-            agent_row(&directory, &families, member, &app.faces, &app.mouth.owners(), &unasked)
+            agent_row(
+                &directory,
+                &families,
+                member,
+                &app.faces,
+                &app.mouth.owners(),
+                &unasked,
+            )
         })
         .unwrap_or_default();
     // Three of them the Python Host answers as it stores them: a number, 0 or 1.
