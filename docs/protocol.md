@@ -114,7 +114,9 @@ Rules:
   {"session": …}` is the only way the Host compacts an agent: it never does so
   by itself, on a timer, at a threshold or at launch. It answers at once
   (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
-  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  `{"ok": false, "error": "<reason in words>"}`; 409). When it cannot start
+  at all it still answers in that shape: 503 with `"retryable": true` while
+  the runtime is unreachable, 500 otherwise; `compacting` is true while it
   runs, and a send that arrives meanwhile waits and runs after it, in order.
   When it ends, `last_compaction` is `{"outcome", "before_tokens",
   "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
