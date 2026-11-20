@@ -201,52 +201,6 @@ async fn no_oracle(uri: Uri) -> ApiError {
     not_built_at(&uri, "The Oracle is")
 }
 
-// ---- the tools' logins and what they use ------------------------------------------------------
-
-/// `GET /backend-auth` (`?harnesses=all` for an app that lists every harness): whether each
-/// tool this Host runs is installed and has a login, read off the file the tool keeps it in.
-async fn logins(State(app): State<App>, Query(asked): Asked) -> Answered {
-    let every = asked.get("harnesses").is_some_and(|said| said == "all");
-    let now = app.clock.now_ms();
-    let read = move || {
-        let home = crate::config::home();
-        let mut told = crate::logins::told(&home, every, now);
-        if app.config.ask_usage
-            && let Some(rows) = told["backends"].as_array_mut()
-        {
-            for row in rows.iter_mut() {
-                if row["state"] == "unverified"
-                    && row["id"]
-                        .as_str()
-                        .is_some_and(|tool| app.limits.login_verified(tool, &home, now))
-                {
-                    row["state"] = json!("valid");
-                    row["logged_in"] = json!(true);
-                }
-            }
-        }
-        told
-    };
-    let told = tokio::task::spawn_blocking(read).await;
-    let mut told = told.map_err(|_| {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "the logins could not be read",
-        )
-    })?;
-    if let Some(row) = told["backends"].as_array_mut().and_then(|rows| {
-        rows.iter_mut()
-            .find(|row| row["id"] == "grok" && row["installed"] == true)
-    }) {
-        crate::logins::probe_grok(row).await;
-    }
-    Ok(Json(told))
-}
-
-async fn no_logins(uri: Uri) -> ApiError {
-    not_built_at(&uri, "Signing a tool in or out from an app is")
-}
-
 // ---- the Host's own software and the skills of its agents' tools -----------------------------
 
 /// `GET /server-update`: who this Host is and whether a newer one is to be had. It is: who
@@ -318,8 +272,11 @@ pub fn routes() -> Router<App> {
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))
-        .route("/backend-auth", get(logins))
-        .route("/backend-auth/{action}", post(no_logins))
+        .route("/backend-auth", get(crate::logins::sign_in::read))
+        .route(
+            "/backend-auth/{action}",
+            post(crate::logins::sign_in::change),
+        )
         .route("/agent-dreaming", post(set_dreaming))
         .route("/agent-goal", get(agent_goal).post(no_agent_goal))
         .route("/agent-goal/{action}", post(no_agent_goal))
