@@ -46,7 +46,6 @@ import asyncio
 import fractions
 import io
 import json
-import os
 import pathlib
 import sys
 import threading
@@ -55,6 +54,7 @@ import wave
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
+from live_key import key_env_name, key_from, scrub  # noqa: E402 - beside this script
 from lib.oracle_live_wire import LiveWire  # noqa: E402 - the Host's own session builder
 
 API = "https://api.openai.com/v1/live/sessions"
@@ -67,17 +67,6 @@ INSTRUCTIONS = ("Du er en kort og vennlig norsk assistent i en test. Svar på no
                 "Når du får et resultat fra bakgrunnsarbeid, si det til brukeren.")
 RESULT_COMMENTARY = "Resultat fra bakgrunnsarbeid: rapporten er ferdig, tre funn."
 RESULT_INSTRUCTIONS = "Si nå til brukeren, på norsk: «Rapporten er ferdig, og den har tre funn.»"
-
-
-def key_from(env):
-    value = os.environ.get(env, "")
-    if not value.strip():
-        sys.exit(f"Set the OpenAI key in the environment variable {env} (it is read from there only).")
-    return value.strip()
-
-
-def scrub(text, key):
-    return str(text).replace(key, "[key]") if key else str(text)
 
 
 def session_body(model, idle):
@@ -328,7 +317,8 @@ def main():
     parser.add_argument("--idle", type=int, default=20, help="session.idle_timeout_s, 5 to 60 (default 20)")
     parser.add_argument("--first-wait", type=float, default=10, help="seconds of silence before the first speech")
     parser.add_argument("--wake-audio", nargs=2, metavar="WAV", help="two WAV files of someone speaking")
-    parser.add_argument("--key-env", default="OPENAI_API_KEY", help="the environment variable holding the key")
+    parser.add_argument("--key-env", default="OPENAI_API_KEY", type=key_env_name,
+                        help="the environment variable holding the key (its name must start with OPENAI_)")
     parser.add_argument("--out", default=f"/var/tmp/live-standby-walk-{time.strftime('%Y%m%d-%H%M%S')}")
     parser.add_argument("--plan", action="store_true", help="print the create body and the steps; call nothing")
     args = parser.parse_args()
