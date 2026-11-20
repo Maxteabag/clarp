@@ -479,6 +479,15 @@ NOT_BUILT = {
         'fields': ('tool_explanations',),
         'events': (),
     },
+    # Whom a row, a live turn and a dispatch's working state are for (`audience`: 'agents' for a
+    # turn another agent's message started, else 'user'), the coordination between agents of the
+    # Python Host's PR 482 (its contract 108); no feature stands for it until `hidden_coordination`
+    # is advertised. A name no other answer carries. The port to the Rust Host is owed; its
+    # contract stays 106 until it lands.
+    'coordination between agents': {
+        'fields': ('audience',),
+        'events': (),
+    },
 }
 # What the reference Host's stand-in for an engine that listens says by fiat, whatever was heard
 # (`StubSTT(ends_terminal=True)` in tests/replay/host.py): whether what was said ends as a
