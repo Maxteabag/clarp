@@ -750,7 +750,8 @@ class AdmissionMixin:
             raise DispatchError(503, UNCONFIRMED_DELIVERY)
         return status == "retryable"
 
-    def _start_queued_row(self, spec: _TurnSpec, *, steered: bool = False) -> _TurnSpec | None:
+    def _start_queued_row(self, spec: _TurnSpec, *, steered: bool = False,
+                          start_item: bool = False) -> _TurnSpec | None:
         """Write the conversation row of a queue item whose turn starts now (or
         that was steered into the running turn) and mark the item shown, in ONE
         transaction (issue 491): a reader finds the message in the queue or in
@@ -762,7 +763,12 @@ class AdmissionMixin:
 
         Returns the spec to run (its text the row's), or None when the item was
         deleted or retired before its turn could start: nothing is written and
-        it must not run. A spec without a queue item records its row as before."""
+        it must not run. A spec without a queue item records its row as before.
+
+        ``start_item``: an accepted steer, whose item is delivered now: its
+        receipt is started in the same transaction, so a crash after the row
+        can never leave the item queued behind it (``turn_queue.start_receipt``;
+        the pause step runs after the commit)."""
         if not spec.queue_id or _is_call_opening(spec):
             self._record_user_message(spec)
             return spec
@@ -784,6 +790,7 @@ class AdmissionMixin:
             appended = self._record_user_message(spec, deferred=deferred, sent_at=sent_at)
             if appended is not None:
                 turn_queue.show(spec.queue_id, con=database)
+            started_row = turn_queue.start_receipt(spec.queue_id) if start_item else None
             database.execute("COMMIT")
         except BaseException:
             if database.in_transaction:
@@ -794,6 +801,8 @@ class AdmissionMixin:
                 events.broadcast(self.ctx.stream, events.as_event(event))
             except Exception as e:  # noqa: BLE001 - a projection of a durable row
                 log_exception("queuedRowBroadcastFail", e, detail=spec.session)
+        if start_item:
+            turn_queue.after_start(spec.queue_id, started_row)
         return spec
 
     def _record_user_message(self, spec: _TurnSpec, *,

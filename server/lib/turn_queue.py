@@ -915,40 +915,58 @@ def mark_started(queue_id: str) -> None:
     The receipt is ``started`` while its turn runs; settle_receipt ends it.
     """
     if queue_id:
-        with _receipt_write("start", (queue_id,)):
-            row = db.conn().execute(
-                "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
-                (queue_id,),
-            ).fetchone()
-            started = _cas("start", "queue_id = ?", (queue_id,),
-                           values={"text": "", "sender_agent_id": ""})  # stamps started_at
-            if started and row:
-                _bump_revision(str(row["agent_id"]))
-                # A fast backend may settle its turn before the dispatcher gets
-                # here; the receipt then ends at once.
-                settled = db.conn().execute(
-                    """SELECT outcome FROM turns
-                        WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
-                          AND NOT EXISTS (
-                              SELECT 1 FROM turns o
-                               WHERE o.agent_id = turns.agent_id
-                                 AND o.trace_id = turns.trace_id
-                                 AND o.settled_at IS NULL AND o.ended_at IS NULL)
-                        ORDER BY settled_at DESC LIMIT 1""",
-                    (row["agent_id"], row["trace_id"])).fetchone()
-                if settled:
-                    settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
-                                   str(settled["outcome"] or ""))
+        row = start_receipt(queue_id)
+        after_start(queue_id, row)
+
+
+def start_receipt(queue_id: str):
+    """The receipt's start: joins a caller's open transaction (issue 491: an
+    accepted steer starts its item in the same transaction that writes its row
+    and shows it, so no crash can leave it queued behind a shown row). Returns
+    the started row, or None when nothing moved. ``after_start`` follows once
+    the transaction is committed."""
+    if not queue_id:
+        return None
+    with _receipt_write("start", (queue_id,)):
+        row = db.conn().execute(
+            "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
+            (queue_id,),
+        ).fetchone()
+        started = _cas("start", "queue_id = ?", (queue_id,),
+                       values={"text": "", "sender_agent_id": ""})  # stamps started_at
         if started and row:
-            # A listen-first opening passes a pause that existed when the
-            # call was answered (agent_rings); it never ends that pause.
-            if (not queue_id.startswith("call-open:")
-                    and pending_count(str(row["agent_id"])) == 0
-                    and set_paused(str(row["agent_id"]), False)):
-                # Nothing is held any more, so a Stop's pause ends here. Say
-                # which item ended it: a peer message or goal wake can do so.
-                log("queuePauseEndedByDrain",
-                    f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
+            _bump_revision(str(row["agent_id"]))
+            # A fast backend may settle its turn before the dispatcher gets
+            # here; the receipt then ends at once.
+            settled = db.conn().execute(
+                """SELECT outcome FROM turns
+                    WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM turns o
+                           WHERE o.agent_id = turns.agent_id
+                             AND o.trace_id = turns.trace_id
+                             AND o.settled_at IS NULL AND o.ended_at IS NULL)
+                    ORDER BY settled_at DESC LIMIT 1""",
+                (row["agent_id"], row["trace_id"])).fetchone()
+            if settled:
+                settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
+                               str(settled["outcome"] or ""))
+            return row
+    return None
+
+
+def after_start(queue_id: str, row) -> None:
+    """After a committed start: a Stop's pause ends when nothing is held any more."""
+    if row:
+        # A listen-first opening passes a pause that existed when the
+        # call was answered (agent_rings); it never ends that pause.
+        if (not queue_id.startswith("call-open:")
+                and pending_count(str(row["agent_id"])) == 0
+                and set_paused(str(row["agent_id"]), False)):
+            # Nothing is held any more, so a Stop's pause ends here. Say
+            # which item ended it: a peer message or goal wake can do so.
+            log("queuePauseEndedByDrain",
+                f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
 
 
 # R120: a plain send that met a busy agent of a backend that cannot be steered

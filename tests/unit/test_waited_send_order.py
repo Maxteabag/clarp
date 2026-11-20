@@ -534,3 +534,37 @@ def test_the_invariant_survives_a_crash_around_the_write_that_starts_the_turn(
             if t["id"] == "u-two"]
     assert len(rows) == 1 and rows[0]["sent_at"] == _iso(7_600)
     assert not any(c == "two" for c, _t, _k in _queue(world))
+
+
+def test_an_accepted_steer_starts_its_item_with_its_row_so_a_crash_leaves_nothing_behind(
+        tmp_path, clock, monkeypatch):
+    """Review of 493: a steer accepted, then a crash after the write of the row and the show
+    and before the item was started, left the item 'queued' and hidden for good. The accepted
+    steer now starts the item in that same transaction: after a restart the item is started
+    (settled with its turn), never relaunched, the row there once."""
+    world = _SteeredWorld(tmp_path)
+    clock.at(0)
+    _send(world, "one")
+    world._collect()
+    real = td.TurnDispatchService._broadcast_queue_state
+
+    def crash_after_the_write(self, spec, *, started):
+        if started and spec.client_msg_id == "two":
+            assert turn_queue.status("two") == "started"      # one transaction: already started
+            raise _Crash()
+        return real(self, spec, started=started)
+
+    monkeypatch.setattr(td.TurnDispatchService, "_broadcast_queue_state", crash_after_the_write)
+    clock.at(7_600)
+    with pytest.raises(_Crash):
+        _send(world, "two")
+    monkeypatch.setattr(td.TurnDispatchService, "_broadcast_queue_state", real)
+    assert world.provider.steered == ["two"]
+    clock.at(9_000)
+    world.restart()
+    assert turn_queue.status("two") != "queued"
+    assert "two" not in world.started                       # delivered by the steer, never rerun
+    rows = [t for t in message_store.list_messages(agent_id=world.agent, limit=500)
+            if t["id"] == "u-two"]
+    assert len(rows) == 1
+    assert not any(c == "two" for c, _t, _k in _queue(world))
