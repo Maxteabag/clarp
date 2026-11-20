@@ -1237,6 +1237,10 @@ class Handler(SendRoutes, VoiceTimelineRoutes, VoiceRoutes, OracleRoutes, CallRo
     )
 
     def _limited_get_allowed(self, path: str) -> bool:
+        # An artifact's export (/artifacts/<id>/export) is the administrator's: the whole stored
+        # request, refused to a limited device though the family is on the list.
+        if path.startswith("/artifacts/") and path.rstrip("/").endswith("/export"):
+            return False
         return path in self._LIMITED_DEVICE_GET_EXACT or path.startswith(self._LIMITED_DEVICE_GET_PREFIXES)
 
     def _device_forbidden(self, path: str, method: str) -> bool:

@@ -42,7 +42,7 @@ REFUSED = [
     "/background-jobs/j1", "/agent-conversations", "/archived-agents", "/schedules",
     "/transcription-capabilities", "/transcription-providers", "/agent-portraits", "/paired-devices",
     "/backend-auth", "/settings", "/podcast-history", "/dreaming", "/janitor-runs/r1",
-    "/a-path-no-route-serves", "/server-info/extra", "/statusx", "/logs",
+    "/a-path-no-route-serves", "/server-info/extra", "/statusx", "/logs", "/artifacts/a1/export",
 ]
 
 
