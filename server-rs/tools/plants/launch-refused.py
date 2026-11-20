@@ -76,6 +76,9 @@ PLANTS = [
     (A, 'actor', "a user's send asks for the agent again on the count it had",
      '        if asks_again && waits_on_refusal {\n            self.refused = None;\n',
      '        if asks_again && waits_on_refusal {\n'),
+    (A, 'actor', 'a turn that waits on a refused launch names no trace, as one waiting for an account',
+     'Some(Turn::Parked(live)) if live.id.0 == turn && !live.wait.is_for_an_account() => {',
+     'Some(Turn::Parked(live)) if live.id.0 == turn && !live.wait.is_for_an_account() && live.kind != failures::NOT_STARTED => {'),
     (A, 'actor', 'a Host that starts again waits out the wait it had',
      '            Some(Turn::Parked(parked)) if self.refusal_uncounted(parked) => Some(parked.since_ms),\n', ''),
     # ---- what the apps are told
