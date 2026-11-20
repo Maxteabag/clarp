@@ -79,6 +79,9 @@ pub struct Held {
     pub partial_out: u64,
     /// The same of its standard error.
     pub partial_err: u64,
+    /// The reports of the tool's hooks begun and not whole: a hook stands still in the middle of
+    /// one, and it had begun to act.
+    pub partial_reports: u64,
     /// What was left of the hold's bound when the answer was written.
     pub left_ms: u64,
 }
@@ -158,13 +161,14 @@ mod tests {
                 spool: 10,
                 partial_out: 1,
                 partial_err: 2,
+                partial_reports: 3,
                 left_ms: 5,
             }),
             ..Reply::ok(Some(5))
         };
         assert_eq!(
             text(&held),
-            r#"{"ok":true,"pid":5,"held":{"spool":10,"partial_out":1,"partial_err":2,"left_ms":5}}"#
+            r#"{"ok":true,"pid":5,"held":{"spool":10,"partial_out":1,"partial_err":2,"partial_reports":3,"left_ms":5}}"#
         );
         let released = Reply {
             let_go: Some(false),
