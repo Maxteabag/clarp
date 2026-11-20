@@ -51,9 +51,13 @@ CASES = [
     ('a token that is none', 'a text that is no token of this Host'),
     ('a token of a turn nobody has', "a token of the Host's own form whose turn no agent has"),
     ("another agent's token", 'the token of a turn of another agent, which runs'),
-    ('the turn ended', 'its own agent, in a turn that ended (a job it started that publishes later)'),
+    ('the turn ended', 'its own agent, in a turn that was closed (a Stop, a drain, a cancel or a hand-over)'),
     ('an older turn', 'its own agent, in a turn that ended while a newer one runs'),
     ('a running turn without a trace', 'its own agent, in its turn that runs, which has no trace'),
+    ('the turn completed normally', 'its own agent, in a turn that completed normally (settled by the '
+     "lifecycle's own event, its row not closed), no newer turn begun: a job it started that publishes later"),
+    ('the turn is parked for its account', 'its own agent, its newest turn open and unsettled, parked '
+     "waiting for an account by the lifecycle's own event"),
 ]
 KINDS = ('document', 'render_spec', 'report')
 
@@ -92,6 +96,10 @@ def generate(place: pathlib.Path) -> int:
         provider_jobs.turn_started(token, agent_id=agent, provider='claude', pid=os.getpid(), trace_id=trace)
         return token
 
+    def row_of(agent: str, trace: str):
+        return db.conn().execute('SELECT ended_at, settled_at, outcome FROM turns WHERE agent_id=? AND trace_id=?',
+                                 (agent, trace)).fetchone()
+
     def staged(case: str) -> tuple[str, str]:
         """An agent, and the token the request presents, as the case has them."""
         agent = fresh('ivy')
@@ -126,6 +134,29 @@ def generate(place: pathlib.Path) -> int:
         if case == 'a running turn without a trace':
             turn_lifecycle.open_turn(agent_id=agent, source='pwa', trace_id='')
             return agent, token_of(agent, '')
+        if case == 'the turn completed normally':
+            # As the dispatcher ends a turn at its provider's result (turn_launcher): settled_at and
+            # outcome written together; ended_at stays empty, since nothing closed the row.
+            turn_lifecycle.open_turn(agent_id=agent, source='pwa', trace_id='trace-a')
+            token = token_of(agent, 'trace-a')
+            turn_lifecycle.transition(agent, turn_lifecycle.TurnEvent.SPAWN_STARTED, {'trace_id': 'trace-a'})
+            turn_lifecycle.transition(agent, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK, {'trace_id': 'trace-a'})
+            row = row_of(agent, 'trace-a')
+            assert row['ended_at'] is None and row['settled_at'] is not None and row['outcome'] == 'completed', \
+                dict(row)
+            return agent, token
+        if case == 'the turn is parked for its account':
+            # As the dispatcher parks a turn whose account is out (turn_launcher._pause_for_account).
+            turn_lifecycle.open_turn(agent_id=agent, source='pwa', trace_id='trace-a')
+            token = token_of(agent, 'trace-a')
+            turn_lifecycle.transition(agent, turn_lifecycle.TurnEvent.SPAWN_STARTED, {'trace_id': 'trace-a'})
+            turn_lifecycle.transition(agent, turn_lifecycle.TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+                'dispatch': 'claude', 'trace_id': 'trace-a', 'account_recovery': 'waiting',
+                'message': 'waiting for an account'})
+            row = row_of(agent, 'trace-a')
+            assert row['ended_at'] is None and row['settled_at'] is None, dict(row)
+            assert (agents_db.latest_state(agent) or {}).get('detail', {}).get('account_recovery') == 'waiting'
+            return agent, token
         raise AssertionError(case)
 
     def published(agent: str, token: str, kind: str) -> dict:
