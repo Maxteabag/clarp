@@ -22,25 +22,75 @@ import scratch
 TOOLS = Path(__file__).resolve().parent
 SERVER = TOOLS.parent
 REPO = SERVER.parent
-# Deferred until their full mutation and Conformance runs prove the migration.
-DEFERRED = {'conformance/conform.py', 'tools/plants/runner.py', 'tools/plants/shim-stop.py'}
 FORBIDDEN = {'mkdtemp', 'mkstemp', 'TemporaryDirectory'}
 
 
+def fixed_scratch(tree, *, generator):
+    """Recognize literal temporary paths used as directory creation/removal targets.
+
+    A logical path in a fixture is data. It becomes a scratch hazard only
+    when used to create or clear the directory itself.
+    """
+    names = {}
+
+    def literal(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return Path(node.value)
+        if isinstance(node, ast.Name):
+            return names.get(node.id)
+        if isinstance(node, ast.Call) and node.args and ast.unparse(node.func) in ('Path', 'pathlib.Path'):
+            return literal(node.args[0])
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+            parent, child = literal(node.left), literal(node.right)
+            if parent is not None and child is not None:
+                return parent / child
+        return None
+
+    for node in sorted(ast.walk(tree), key=lambda n: getattr(n, 'lineno', 0)):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names[target.id] = literal(node.value)
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr == 'mkdir' and ast.unparse(func.value) != 'os':
+                target = literal(func.value)
+            elif ast.unparse(func) in ('os.mkdir', 'os.makedirs', 'shutil.rmtree') and node.args:
+                target = literal(node.args[0])
+            else:
+                continue
+            # A long-lived tool may own a fixed output or lock directory.
+            # A generator's mkdir, or any tool clearing a fixed temp tree,
+            # is different: two concurrent runs would share that work area.
+            if not generator and ast.unparse(func) != 'shutil.rmtree':
+                continue
+            if target and any(target.is_relative_to(root) for root in ('/var/tmp', '/tmp')):
+                return node.lineno
+    return None
+
+
 def source_check():
+    for example in ("ROOT = Path('/var/tmp/clarp-shared'); ROOT.mkdir()",
+                    "shutil.rmtree(pathlib.Path('/tmp') / 'shared')"):
+        if not fixed_scratch(ast.parse(example), generator=True):
+            raise SystemExit('scratch guard failed its fixed-directory self-check')
+    if fixed_scratch(ast.parse("label = Path('/var/tmp/fixture'); print(label)"), generator=True):
+        raise SystemExit('scratch guard mistook a fixture label for an allocation')
     examined = 0
     for path in sorted(SERVER.rglob('*.py')):
         relative = path.relative_to(SERVER)
-        if path == TOOLS / 'scratch.py' or relative.as_posix() in DEFERRED or 'target' in relative.parts:
+        if path == TOOLS / 'scratch.py' or 'target' in relative.parts:
             continue
         tree = ast.parse(path.read_bytes(), filename=str(path))
+        if line := fixed_scratch(tree, generator=path.name.endswith("-vectors.py")):
+            raise SystemExit(f'{relative}:{line}: fixed scratch path; use tools/scratch.py')
         for node in ast.walk(tree):
             if ((isinstance(node, ast.Attribute) and node.attr in FORBIDDEN)
                     or (isinstance(node, ast.ImportFrom) and node.module == 'tempfile'
                         and any(n.name in FORBIDDEN or n.name == '*' for n in node.names))):
                 raise SystemExit(f'{path.relative_to(REPO)}:{node.lineno}: use tools/scratch.py')
         examined += 1
-    print(f"scratch guard: {examined} Python files checked; no direct temporary allocation; deferred: {', '.join(sorted(DEFERRED))}", flush=True)
+    print(f'scratch guard: {examined} Python files checked; no direct allocation or fixed scratch directory; no deferred files', flush=True)
 
 
 def unchanged(generator):

@@ -44,11 +44,13 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+import scratch as tool_scratch
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -70,7 +72,6 @@ import contract_scenarios as scenarios  # noqa: E402
 FAKE_CLAUDE = HERE / 'fake_claude.py'
 # The agents the reference Host has besides the scenarios' own (tests/replay/host.py, SESSIONS).
 OTHER_AGENTS = ('rachel', 'mike')
-SCRATCH = Path(os.environ.get('CLARP_CONFORM_SCRATCH', '/var/tmp/cfm'))
 HTTP_OPS = ('get', 'post', 'put', 'delete', 'patch')
 # How long a conversation must stay as it is before it counts as settled. The Python Host goes on
 # working after a turn has ended: it imports the tool's own transcript and folds it into the rows
@@ -1140,13 +1141,10 @@ def comparable(seen: dict) -> dict:
 
 
 class Run:
-    """One run's own scratch directory. Nothing in it is reused, and it is removed at the end
-    unless the run failed or was asked to keep it."""
+    """A fresh store for the lifetime of one conformance run."""
 
-    def __init__(self):
-        SCRATCH.mkdir(parents=True, exist_ok=True)
-        self.path = SCRATCH / f'{int(time.time())}-{os.getpid()}'
-        self.path.mkdir()
+    def __init__(self, path: Path):
+        self.path = path
         self.labels = 0
 
     def label(self, name: str) -> Path:
@@ -1154,12 +1152,6 @@ class Run:
         path = self.path / f'{self.labels:02d}-{name}'
         path.mkdir()
         return path
-
-    def close(self, keep: bool):
-        if keep:
-            print(f'kept: {self.path}')
-        else:
-            shutil.rmtree(self.path, ignore_errors=True)
 
 
 def corpus(make_host, chosen, where: Path, jobs: int) -> dict:
@@ -1609,7 +1601,7 @@ def asking_tried(stamped) -> int:
     assert ok and asked == [(attempt, [s['id'] for s in some]) for attempt in range(1, MORE_TRIES + 1)], asked
     tried += 1
     # What was written down is judged again the same way: the answers as `load_asked` gives them.
-    with tempfile.TemporaryDirectory() as where:
+    with tool_scratch.directory() as where:
         first = Path(where) / 'golden'
         for attempt, answers in ((1, {'s': common}), (2, {'s': rare})):
             write_golden(asked_dir(first, attempt), answers)
@@ -2400,7 +2392,7 @@ def main(argv=None) -> int:
                         help='cross: the planted changes are tried beside this run, each in a run of its own '
                              '(conformance.yml), of which there are N: refused unless the suite has N')
     parser.add_argument('--jobs', type=int, default=4)
-    parser.add_argument('--keep', action='store_true', help='keep the scratch directory')
+    parser.add_argument('--keep', action='store_true', help='export the run files next to the report (or to CLARP_CONFORM_SCRATCH)')
     args = parser.parse_args(argv)
     chosen = choose(args.scenarios)
     if args.out is not None:
@@ -2428,9 +2420,9 @@ def main(argv=None) -> int:
                            load_asked(args.golden, chosen))
         print('\n'.join(lines))
         return 0 if ok else 1
-    run = Run()
-    ok, lines = True, []
-    try:
+    with tool_scratch.directory('cfm-') as place:
+        run = Run(Path(place))
+        ok, lines = True, []
         if args.mode in ('record', 'cross'):
             # The tool's own rule is tried before the tool judges with it.
             selftest()
@@ -2519,8 +2511,12 @@ def main(argv=None) -> int:
             lines += ['', *proof, '', *rust_lines]
             ok = ok and proved and conforms
             (args.out / 'report.txt').write_text('\n'.join(lines) + '\n')
-    finally:
-        run.close(args.keep or not ok)
+        if args.keep:
+            archive = Path(os.environ.get('CLARP_CONFORM_SCRATCH') or args.out or Path.cwd())
+            archive.mkdir(parents=True, exist_ok=True)
+            destination = archive / run.path.name
+            shutil.move(str(run.path), str(destination))
+            print(f'kept: {destination}')
     print('\n'.join(lines))
     return 0 if ok else 1
 

@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "server-rs/crates/clarp-kernel/tests/fixtures/diagnostics.json"
@@ -83,9 +85,9 @@ def record(root):
 
 if __name__ == '__main__':
     if '--record' in sys.argv:
-        with tempfile.TemporaryDirectory() as scratch:
+        with tool_scratch.directory() as scratch:
             print(json.dumps(record(Path(scratch))))
     else:
-        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env={'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'}))
+        data=json.loads(subprocess.check_output([sys.executable,'-I',__file__,'--record'],env=tool_scratch.child_env({'PATH':'/usr/bin:/bin','LANG':'C.UTF-8','TZ':'UTC'})))
         OUT.write_text(json.dumps(data,ensure_ascii=True,sort_keys=False,separators=(',',':'))+'\n',encoding='ascii')
         print({k:len(v) for k,v in data.items()})

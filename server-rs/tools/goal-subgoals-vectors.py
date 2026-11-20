@@ -3,9 +3,11 @@
 import json
 import runpy
 import sys
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch as tool_scratch
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / 'server-rs/crates/clarp-kernel/tests/fixtures/goal-subgoals.json'
@@ -103,5 +105,5 @@ def reference(root):
 
 
 if __name__ == '__main__':
-    with tempfile.TemporaryDirectory() as place:
+    with tool_scratch.directory() as place:
         OUT.write_text(json.dumps(reference(Path(place)),ensure_ascii=True,separators=(',',':'))+'\n')
