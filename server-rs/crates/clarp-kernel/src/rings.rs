@@ -245,6 +245,9 @@ pub struct Answer<'a> {
     /// call.
     pub request_id: &'a Value,
     pub client_nonce: &'a Value,
+    /// Who the answering client says it is (`X-Clarp-Client`): what a live call's model is
+    /// chosen by.
+    pub client: Option<&'a str>,
 }
 
 /// A notice for the conversation of the agent that rang: quiet, never spoken.
@@ -1148,6 +1151,8 @@ mod tests {
             host_id: "host-1",
             has_key: false,
             runs_tools: false,
+            live_model: crate::live_call::LIVE_MODEL_DEFAULT,
+            live_model_min_client: &[],
         }
     }
 

@@ -47,6 +47,8 @@ mod janitor_attention;
 mod launch_directories;
 #[path = "host/launch_refused.rs"]
 mod launch_refused;
+#[path = "host/live_model.rs"]
+mod live_model;
 #[path = "host/managed_skills.rs"]
 mod managed_skills;
 #[path = "host/move_janitors.rs"]
@@ -39797,7 +39799,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
         json!({
             "context_memory": true, "context_reset": true, "direct_contact": true,
             "direct_contact_available": true, "available": true,
-            "model": words::model(), "voice": words::voice(),
+            "model": clarp_kernel::live_call::LIVE_MODEL_DEFAULT, "voice": words::voice(),
             "podcast": false, "podcast_history": false,
             "voice_provider": "openai", "voice_providers": ["openai"],
         })
@@ -39900,7 +39902,7 @@ fn a_call_of_the_oracle_is_carried_between_a_phone_a_voice_and_the_fleet() {
             &begun["delegation"]
         ),
         (
-            &json!(words::model()),
+            &json!(clarp_kernel::live_call::LIVE_MODEL_DEFAULT),
             &json!(words::voice()),
             &json!({ "type": "client" })
         )
