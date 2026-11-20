@@ -140,6 +140,11 @@ fn as_position(seq: Seq) -> i64 {
 }
 
 impl AgentLog for SqliteLog {
+    fn at_rest(&self) {
+        // Advisory only: the durable turn has already been committed.
+        let _ = self.conn.execute_batch("PRAGMA shrink_memory");
+    }
+
     fn append(&mut self, items: &[NewItem]) -> Result<Seq, LogError> {
         let transaction = self.conn.transaction().map_err(storage)?;
         let mut seq: i64 = transaction

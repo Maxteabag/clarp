@@ -1643,7 +1643,7 @@ impl Worker {
             .engine
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
-        let (mut actor, mut out) = Actor::open(
+        let (mut actor, mut out) = Actor::open_for_recovery(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
             log,
@@ -1752,6 +1752,9 @@ impl Worker {
         self.after(out);
         // An answer that was given and not yet told when the Host went away is told now.
         self.settle_requests().map_err(|error| error.to_string())?;
+        if let Some(actor) = self.actor.as_mut() {
+            actor.finish_opening();
+        }
         Ok(())
     }
 

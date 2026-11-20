@@ -2571,3 +2571,111 @@ fn the_delegates_baseline_is_the_revision_at_the_requested_message_offset() {
     }
     assert_eq!(actor.delegation_baseline(301).unwrap(), 0);
 }
+
+/// Count rest notifications at the memory log's port while retaining its ordinary behavior.
+struct RestCountLog {
+    inner: Box<dyn clarp_ports::log::AgentLog>,
+    notices: Arc<AtomicU64>,
+}
+
+impl clarp_ports::log::AgentLog for RestCountLog {
+    fn at_rest(&self) {
+        self.inner.at_rest();
+        self.notices.fetch_add(1, Ordering::SeqCst);
+    }
+    fn append(&mut self, items: &[clarp_ports::log::NewItem]) -> Result<u64, clarp_ports::log::LogError> {
+        self.inner.append(items)
+    }
+    fn last_seq(&self) -> Result<u64, clarp_ports::log::LogError> {
+        self.inner.last_seq()
+    }
+    fn find(&self, key: &str) -> Result<Option<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.find(key)
+    }
+    fn read_before(&self, seq: u64, kinds: clarp_ports::log::Kinds, limit: usize) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.read_before(seq,kinds,limit)
+    }
+    fn read_after(&self, seq: u64, kinds: clarp_ports::log::Kinds, limit: usize) -> Result<Vec<clarp_ports::log::Item>, clarp_ports::log::LogError> {
+        self.inner.read_after(seq,kinds,limit)
+    }
+}
+
+fn counted_rest_open(world: &mut World, notices: &Arc<AtomicU64>, deferred: bool) -> Actor {
+    let log = RestCountLog {
+        inner: world.engine.open(&world.profile.dir,standard_set("none").unwrap()).unwrap(),
+        notices: notices.clone(),
+    };
+    let open = if deferred { Actor::open_for_recovery } else { Actor::open };
+    let (mut actor,out) = open(world.profile.clone(),world.backend.clone(),Box::new(log),world.tick()).unwrap();
+    world.carry_out(&mut actor,out);
+    actor
+}
+
+#[test]
+fn log_at_rest_only_after_idle_opening_and_a_terminal_turn() {
+    let mut world=World::new("log-at-rest");
+    let notices=Arc::new(AtomicU64::new(0));
+    let count=|| notices.load(Ordering::SeqCst);
+    let mut actor=counted_rest_open(&mut world,&notices,true);
+    let _=actor.tail(10).unwrap();
+    assert_eq!(count(),0,"the worker still has opening reads");
+    actor.finish_opening();
+    actor.finish_opening();
+    assert_eq!(count(),1);
+    let _=actor.tail(10).unwrap();
+    world.hint(&mut actor);
+    world.send(&mut actor,"u-1","first",Admission::Queue);
+    world.says(1,"working");
+    world.hint(&mut actor);
+    world.send(&mut actor,"u-2","second",Admission::Queue);
+    drop(actor);
+    let mut actor=counted_rest_open(&mut world,&notices,false);
+    assert_eq!(count(),1,"a running turn rejoined its shim");
+    world.exits(1,Some(0),None);
+    world.hint(&mut actor);
+    assert_eq!(world.took,vec![1,2]);
+    assert_eq!(count(),1,"the next turn already owns the log");
+    world.says(2,"done");
+    world.exits(2,Some(0),None);
+    world.hint(&mut actor);
+    assert_eq!(count(),2);
+    world.hint(&mut actor);
+    let _=actor.tail(10).unwrap();
+    actor.stop("user",world.tick()).unwrap();
+    assert_eq!(count(),2);
+    drop(actor);
+    let _actor=counted_rest_open(&mut world,&notices,false);
+    assert_eq!(count(),3,"standalone idle opening ends with the same notice");
+}
+
+#[test]
+fn log_at_rest_waits_for_the_end_of_a_parked_turn_and_for_recovery_reads() {
+    let mut world=World::new("parked-log-at-rest");
+    world.profile.accounts=clarp_kernel::recovery::Accounts::Select;
+    let notices=Arc::new(AtomicU64::new(0));
+    let mut actor=counted_rest_open(&mut world,&notices,false);
+    actor.pooled(Arc::new(Pool::default()));
+    world.send(&mut actor,"u-1","go",Admission::Queue);
+    world.write(1, Line::Err("This model is not available on your current plan".into()));
+    world.exits(1,Some(1),None);
+    world.hint(&mut actor);
+    assert!(actor.waits_for_an_account().is_some());
+    drop(actor);
+    let mut actor=counted_rest_open(&mut world,&notices,false);
+    assert_eq!(notices.load(Ordering::SeqCst),1);
+    actor.stop("user",world.tick()).unwrap();
+    assert_eq!(notices.load(Ordering::SeqCst),2);
+    actor.stop("user",world.tick()).unwrap();
+    assert_eq!(notices.load(Ordering::SeqCst),2);
+    let mut other=World::new("recover-ended-at-rest");
+    let mut actor=counted_rest_open(&mut other,&notices,false);
+    other.send(&mut actor,"u-2","go",Admission::Queue);
+    drop(actor);
+    other.says(1,"done");
+    other.exits(1,Some(0),None);
+    let mut actor=counted_rest_open(&mut other,&notices,true);
+    assert!(actor.status().live.is_none());
+    assert_eq!(notices.load(Ordering::SeqCst),3,"a terminal record was recovered during the fold");
+    actor.finish_opening();
+    assert_eq!(notices.load(Ordering::SeqCst),4);
+}
