@@ -63,7 +63,7 @@ class ArtifactRoutes:
         """The trace an artifact is published under (R102): the trace of the turn whose token the
         request carries, only when that turn belongs to the artifact's own agent and is that
         agent's running turn now. Anything else, a job its turn started publishing after the turn
-        ended included, gets '' and the apps place the card by time. Nothing the caller writes is
+        was completed, stopped or closed included, gets '' and the apps place the card by time. Nothing the caller writes is
         taken: the token is the Host's own proof. A lookup that fails is the retryable 503 the
         turn identity gives (HTTP-N5)."""
         from lib import agents, turn_identity

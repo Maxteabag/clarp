@@ -50,11 +50,26 @@ def caller_turn(environ=None) -> tuple[str, str]:
 
 
 def running_trace(agent_id: str, trace_id: str) -> bool:
-    """Whether ``trace_id`` is ``agent_id``'s running turn now: its newest turn, not ended.
-    A detached job its turn started, publishing after the turn ended, is not (R102)."""
+    """Whether ``trace_id`` is ``agent_id``'s running turn now: its newest turn, neither settled
+    (a turn that completes normally is settled and keeps ended_at empty) nor ended (stopped or
+    closed), nor parked waiting for an account. A detached job its turn started, publishing after the turn is over, is not (R102).
+    Settled is the lifecycle's own reading (turn_lifecycle.trace_settled), the one the import's
+    running-turn guard shares: settled_at and outcome are only ever written together."""
     if not (agent_id and trace_id):
         return False
     row = db.conn().execute(
         "SELECT trace_id, ended_at FROM turns WHERE agent_id=? ORDER BY started_at DESC, turn_id DESC LIMIT 1",
         (agent_id,)).fetchone()
-    return bool(row) and str(row[0]) == trace_id and row[1] is None
+    if not row or str(row[0]) != trace_id or row[1] is not None:
+        return False
+    from .turn_lifecycle import trace_settled
+    if trace_settled(agent_id, trace_id):
+        return False
+    # Parked waiting for an account (TurnEvent.ACCOUNT_RECOVERY_WAIT): its row stays open and
+    # unsettled, but the turn makes no progress and its process may still hold the token. Not
+    # running, as the Rust Host reads it; a hand-over to an update closes the row already.
+    from .agents import latest_state
+    state = latest_state(agent_id) or {}
+    detail = state.get("detail") if isinstance(state.get("detail"), dict) else {}
+    return not (detail.get("account_recovery") == "waiting"
+                and str(detail.get("trace_id") or trace_id) == trace_id)
