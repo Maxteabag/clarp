@@ -208,6 +208,10 @@ fn what_a_test_gives_a_process_holds_nothing_of_a_machine_full_of_traps() {
     assert_eq!(named_at("LANG"), Some("trap-LANG".into()));
     assert_eq!(named_at("CODEX_HOME"), None);
     assert_eq!(named.len(), given.len(), "{named:?}");
+    // A name the test takes and the runner lacks is not given at all, not even the default.
+    let lacking = sealed::sealed(&[], &place.root, &["HOME"]);
+    assert_eq!(lacking.get(std::ffi::OsStr::new("HOME")), None);
+    assert_eq!(lacking.len(), given.len() - 1, "{lacking:?}");
 }
 
 /// What a process the harness starts really sees is the rule and nothing more: the runner's own

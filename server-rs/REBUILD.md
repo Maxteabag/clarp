@@ -3410,6 +3410,24 @@ Gallery pages seek by creation or favorite time and asset id. Tombstone pages re
 at or before their cursor, and include all rows that share the last millisecond of the
 page. They tell a reconnecting device what it must evict even when it missed the event.
 
+**A test Host sees nothing of the machine (20 Nov 2026).** Every process the Host's and the shim's tests start (the
+Host, the Host's own program as a tool, a script of the tools, the shim) is given an environment built from nothing
+by one rule, `crates/clarp-sealed`, a crate only tests depend on. Its home and its XDG folders, its runtime folder and
+its scratch folder are inside the test's own place; its path is `/usr/bin:/bin`, its language `C.UTF-8` and its time
+zone UTC; every program a person installs that the Host can start is pinned to a path that is not there, taken from
+the product's own table (`clarp_backend::PROGRAMS`, and `launch_directories::PROGRAM` for zoxide), so that a tool
+added later is pinned without a word in the tests. Nothing of the runner's own environment comes through, unless a
+test names it on purpose: only the three ignored tests that run a real Claude Code, Codex or systemd do. A test's own
+world goes over the rule, as before. The rule is not the runner's environment less a list of what harms: the Host
+reads names that only a file tells it at run time (the variables OpenCode's catalogue says a provider's key is in).
+`tests/host/harness.rs` holds it: the rule against a machine full of traps, what a started process really sees, a
+Host started on a machine that has every tool signed in and every key set (no tool found or run, no login, no store of
+OpenCode's, no key of a speaking engine, no provider asked), a tool run without an address beside an installed Host's
+file of settings (refused in words, the installed Host never reached), every tool a Host knows having a pinned
+program, and a scan of what the crates read from the environment, each name decided on in `clarp-sealed` (set,
+absent with its kind, or no variable). The unit tests that run themselves again as a child give the child nothing of
+the runner's either.
+
 ## 7. Stages and gates
 
 | Stage | Content | Gate |
