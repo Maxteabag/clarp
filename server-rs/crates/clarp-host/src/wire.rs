@@ -817,7 +817,13 @@ pub fn audio_kept(record: &AgentRecord, line: &Line) -> Option<Value> {
 /// A reply that was not spoken (feature `speech_outcome`): words for the user made from the
 /// reason and the provider's name, the reason (also as `error`), the provider that was to
 /// speak and the turn whose reply it is, each left out when there is none.
-pub fn tts_error(record: &AgentRecord, message: &str, reason: &str, provider: &str, trace: &str) -> Value {
+pub fn tts_error(
+    record: &AgentRecord,
+    message: &str,
+    reason: &str,
+    provider: &str,
+    trace: &str,
+) -> Value {
     let mut told = json!({
         "type": "tts-error",
         "session": record.session,
