@@ -4814,3 +4814,47 @@ fn r121_a_restart_in_the_middle_keeps_the_turn_and_counts_from_nothing() {
     r121_no_shim(&mut actor, &fourth, reopened);
     assert_eq!(actor.retry_at(), Some(reopened + 1_000));
 }
+
+/// A turn whose launch was refused waits for a retry, not for an account (R121): it is the same
+/// turn going on in a moment, so it names its trace while it waits, as a turn between two
+/// attempts after a dropped connection does; and none once its refusals end it.
+#[test]
+fn r121_a_turn_that_waits_on_a_refused_launch_names_its_trace() {
+    let mut world = World::new("r121-trace");
+    let mut actor = world.open();
+    let sent_at = world.tick();
+    let traced = Message {
+        trace_id: Some("trace-r".to_string()),
+        ..message("u-1", "go")
+    };
+    let (_, out) = actor.send(&traced, Admission::Queue, sent_at).unwrap();
+    let order = r121_launch(&out).cloned().unwrap();
+    assert_eq!(actor.running_trace(1).unwrap(), Some("trace-r".to_string()));
+    // The shim could not start the tool: the turn waits a second for its next try.
+    r121_no_tool(&mut actor, &order, sent_at);
+    assert_eq!(actor.retry_at(), Some(sent_at + 1_000));
+    assert_eq!(actor.waits_for_an_account(), None, "not for an account");
+    assert_eq!(
+        actor.running_trace(1).unwrap(),
+        Some("trace-r".to_string()),
+        "a turn that waits on a refused launch of the tool"
+    );
+    // The launcher could not start the shim of the next try: the same.
+    world.now_ms = sent_at + 1_000;
+    let out = actor.retry_due(world.now_ms).unwrap();
+    let second = r121_launch(&out).cloned().unwrap();
+    assert_eq!((second.turn, second.attempt), (TurnId(1), 2));
+    r121_no_shim(&mut actor, &second, world.now_ms);
+    assert!(actor.retry_at().is_some());
+    assert_eq!(
+        actor.running_trace(1).unwrap(),
+        Some("trace-r".to_string()),
+        "a turn that waits on a refused launch of the shim"
+    );
+    // Refused until its count ends it, at the eighth refusal of the tool in a row (the shim's
+    // was another refusal): it runs no more, and names no trace.
+    let tried = r121_refuse_all(&mut world, &mut actor, Outputs::default(), sent_at, r121_no_tool);
+    assert_eq!(tried.len(), 8, "{tried:?}");
+    assert_eq!(actor.status().live, None);
+    assert_eq!(actor.running_trace(1).unwrap(), None);
+}
