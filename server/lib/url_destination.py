@@ -61,11 +61,12 @@ _DECODED = {"2e": ".", "2f": "/", "5c": "\\"}
 def _dot_segment(path: str) -> bool:
     """Whether the path, read as a server might read it, has a segment '.' or '..': the encoded
     dot, slash and backslash decoded once (in either case; never twice, so an encoded '%' stays
-    what it is), a backslash read as a slash. A receiving server that resolves dot segments would
-    serve a path outside the one judged (R139). Only the test reads it so: what is sent is the
-    path as given."""
+    what it is), a backslash read as a slash, and each segment cut at its first ';' (a server that
+    drops a segment's parameters before resolving sees '..;x' as '..'). A receiving server that
+    resolves dot segments would serve a path outside the one judged (R139). Only the test reads
+    it so: what is sent is the path as given."""
     read = _ENCODED_SEPARATOR.sub(lambda m: _DECODED[m.group(1).lower()], path).replace("\\", "/")
-    return any(segment in (".", "..") for segment in read.split("/"))
+    return any(segment.split(";", 1)[0] in (".", "..") for segment in read.split("/"))
 
 
 def destination(url: str) -> Destination | None:
