@@ -37,6 +37,8 @@ mod move_janitors;
 mod pictures;
 #[path = "host/provider_tasks.rs"]
 mod provider_tasks;
+#[path = "host/stand_ins.rs"]
+mod stand_ins;
 #[path = "host/start_tolerance.rs"]
 mod start_tolerance;
 #[path = "host/transcription_inventory.rs"]
@@ -24356,7 +24358,10 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
         .ended();
     assert!(!elsewhere.status.success());
     let said = String::from_utf8_lossy(&elsewhere.stderr).into_owned();
-    assert!(said.contains("an address on this machine"), "{said}");
+    assert!(
+        said.contains("CLARP_RELAY_DIAL: a socket on this machine"),
+        "{said}"
+    );
 }
 
 // ---- the heartbeat ---------------------------------------------------------------------------
