@@ -267,10 +267,16 @@ impl Ears {
     /// `spoken_to`.
     pub(crate) fn as_profiled(&self, directory: &Directory) -> (String, String, String) {
         let default_engine = self.default_engine(directory);
-        let stands_in = heard::is_cloud(&default_engine) || self.inventory.path(&default_engine).is_some();
-        let cloud = if stands_in { default_engine } else { String::new() };
+        let stands_in =
+            heard::is_cloud(&default_engine) || self.inventory.path(&default_engine).is_some();
+        let cloud = if stands_in {
+            default_engine
+        } else {
+            String::new()
+        };
         let own = self.own_id().unwrap_or_default();
-        let language = languages::selected(directory.setting(languages::LANGUAGE_KEY), &self.language);
+        let language =
+            languages::selected(directory.setting(languages::LANGUAGE_KEY), &self.language);
         (cloud, own, language)
     }
 
@@ -1266,7 +1272,8 @@ async fn set_providers(
     }
     app.fleet.set(settings).await?;
     // Every agent's hearing may have changed: open apps re-read the agents.
-    app.hub.publish(crate::profile::changed_for_all(), app.clock.now_ms());
+    app.hub
+        .publish(crate::profile::changed_for_all(), app.clock.now_ms());
     let mut told = status(&app);
     told["ok"] = json!(true);
     Ok(Json(told))

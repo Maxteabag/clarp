@@ -406,21 +406,30 @@ pub fn provider_row(provider: &str) -> Option<(String, bool)> {
 
 /// The names of the voices the Host ships with, by provider and voice: ElevenLabs' (the
 /// label before its description), Deepgram's, and Google's (the last part of its id).
-pub fn shipped_labels() -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
+pub fn shipped_labels()
+-> std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> {
     let lists = lists();
     let mut named = std::collections::BTreeMap::new();
-    let eleven = lists["elevenlabs"].as_array().into_iter().flatten().filter_map(|row| {
-        let label = row["label"].as_str()?;
-        let name = label.split(" \u{2014} ").next().unwrap_or(label);
-        Some((row["id"].as_str()?.to_string(), name.to_string()))
-    });
+    let eleven = lists["elevenlabs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| {
+            let label = row["label"].as_str()?;
+            let name = label.split(" \u{2014} ").next().unwrap_or(label);
+            Some((row["id"].as_str()?.to_string(), name.to_string()))
+        });
     named.insert(ELEVENLABS.to_string(), eleven.collect());
     let deepgram = ["flux", "aura2"].into_iter().flat_map(|list| {
         let rows = lists[list].as_array().into_iter().flatten();
         rows.filter_map(|row| Some((row[0].as_str()?.to_string(), row[1].as_str()?.to_string())))
     });
     named.insert("deepgram".to_string(), deepgram.collect());
-    let google = lists["google"].as_array().into_iter().flatten().filter_map(Value::as_str);
+    let google = lists["google"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
     let google = google.map(|voice| {
         let name = voice.rsplit_once('-').map_or(voice, |(_, name)| name);
         (voice.to_string(), name.to_string())

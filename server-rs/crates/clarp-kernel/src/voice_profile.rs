@@ -138,16 +138,22 @@ pub fn provider_voice(view: &HostView, agent: Agent<'_>, route: &Route, provider
     let saved = said::voice_for(stored, route, provider);
     let voices = &view.voices;
     match provider {
-        CARTESIA => Choice::own(saved.or_else(|| voices.cartesia_voice_for(persona).map(str::to_string))),
+        CARTESIA => {
+            Choice::own(saved.or_else(|| voices.cartesia_voice_for(persona).map(str::to_string)))
+        }
         // A stored value without an ElevenLabs entry is handed over as it is.
-        ELEVENLABS => Choice::own(saved.or_else(|| stored.filter(|s| !s.is_empty()).map(str::to_string))),
+        ELEVENLABS => {
+            Choice::own(saved.or_else(|| stored.filter(|s| !s.is_empty()).map(str::to_string)))
+        }
         GEMINI => {
             let cartesia = provider_voice(view, agent, route, CARTESIA).voice;
             let own = saved
                 .or_else(|| voices.gemini_voice_for(persona).map(str::to_string))
                 .or_else(|| {
                     let cartesia = cartesia.as_deref().unwrap_or("");
-                    voices.gemini_voice_for_cartesia(cartesia).map(str::to_string)
+                    voices
+                        .gemini_voice_for_cartesia(cartesia)
+                        .map(str::to_string)
                 });
             if own.is_some() {
                 return Choice::own(own);
@@ -158,14 +164,17 @@ pub fn provider_voice(view: &HostView, agent: Agent<'_>, route: &Route, provider
                 .rev()
                 .find(|(key, _)| key == "provider")
                 .is_some_and(|(_, provider)| provider == GEMINI);
-            let default = (moved && !voices.gemini_voice.is_empty()).then(|| voices.gemini_voice.clone());
+            let default =
+                (moved && !voices.gemini_voice.is_empty()).then(|| voices.gemini_voice.clone());
             Choice::default(default)
         }
         GOOGLE => {
             if saved.is_some() {
                 return Choice::own(saved);
             }
-            let bare = stored.map(str::trim).filter(|voice| voices::google_has(voice));
+            let bare = stored
+                .map(str::trim)
+                .filter(|voice| voices::google_has(voice));
             match bare {
                 Some(voice) => Choice::own(Some(voice.to_string())),
                 None => Choice::default(Some(voices::GOOGLE_DEFAULT_VOICE.to_string())),
@@ -178,7 +187,10 @@ pub fn provider_voice(view: &HostView, agent: Agent<'_>, route: &Route, provider
             // An empty model is handed over as it is, and shown so (the reference's way).
             let model = view.deepgram_model.clone();
             let origin = (!model.is_empty()).then_some(DEFAULT);
-            Choice { voice: Some(model), origin }
+            Choice {
+                voice: Some(model),
+                origin,
+            }
         }
         // An engine this Host does not have: only a voice of the agent's own names one.
         _ => Choice::own(saved),
@@ -199,9 +211,14 @@ fn voice_label(view: &HostView, provider: &str, voice: Option<&str>) -> Option<S
     let label = if provider == GEMINI {
         (!voice.starts_with("voice_")).then(|| voice.to_string())
     } else {
-        view.labels.get(provider).and_then(|named| named.get(voice)).cloned()
+        view.labels
+            .get(provider)
+            .and_then(|named| named.get(voice))
+            .cloned()
     };
-    label.map(|label| label.trim().to_string()).filter(|label| !label.is_empty())
+    label
+        .map(|label| label.trim().to_string())
+        .filter(|label| !label.is_empty())
 }
 
 /// What `provider` would say for this agent, or why it would be silent.
@@ -293,7 +310,10 @@ pub struct Unheard {
 pub fn speaking_order(view: &HostView, agent: Agent<'_>) -> Result<Vec<(String, String)>, Unheard> {
     let route = view.voices.route(agent.who);
     if off(view, &route) {
-        return Err(Unheard { reason: PROVIDER_OFF, provider: "none".into() });
+        return Err(Unheard {
+            reason: PROVIDER_OFF,
+            provider: "none".into(),
+        });
     }
     let made = attempts(view, agent, &route);
     let by: Vec<(String, String)> = made
@@ -317,7 +337,9 @@ pub fn engine_label(id: &str) -> String {
     if let Some((_, model)) = heard::cloud_model(id) {
         return model.name.to_string();
     }
-    let listed = heard::inventory::CATALOG.iter().find(|model| model.id() == id);
+    let listed = heard::inventory::CATALOG
+        .iter()
+        .find(|model| model.id() == id);
     listed.map_or_else(|| id.to_string(), |model| model.name().to_string())
 }
 
@@ -327,7 +349,10 @@ fn engine_row(id: &str) -> Value {
 }
 
 fn codes(set: &str) -> Vec<String> {
-    set.split(',').filter(|code| !code.is_empty()).map(str::to_string).collect()
+    set.split(',')
+        .filter(|code| !code.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// The engines a recording for this agent is tried with, in order, and the languages the
@@ -337,7 +362,11 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
         .map(languages::engines)
         .unwrap_or_default();
     let plan = heard::plan("", &own_engines, &view.cloud_engine, "", false);
-    let first = if plan.model.is_empty() { view.own_engine.clone() } else { plan.model };
+    let first = if plan.model.is_empty() {
+        view.own_engine.clone()
+    } else {
+        plan.model
+    };
     let engines: Vec<String> = std::iter::once(first)
         .chain(plan.fallbacks)
         .filter(|engine| !engine.is_empty())
@@ -351,7 +380,11 @@ pub fn hearing(view: &HostView, who: Who<'_>) -> Value {
     if !first.is_empty() && !heard::is_cloud(first) {
         // A local model's language is fixed when it loads: English for a .en model, found
         // by the model otherwise; the agent's is not used.
-        spoken = if first.ends_with(".en") { vec!["en".into()] } else { Vec::new() };
+        spoken = if first.ends_with(".en") {
+            vec!["en".into()]
+        } else {
+            Vec::new()
+        };
         language_origin = DEFAULT;
     } else if heard::provider_of(first) == "elevenlabs" && spoken.len() > 1 {
         // Scribe is handed no language for a set: it finds it itself.
@@ -380,7 +413,11 @@ pub fn profile(view: &HostView, agent: Agent<'_>) -> (Speech, Value) {
 pub fn defaults(view: &HostView) -> Value {
     let provider = view.voices.provider.as_str();
     let (provider_label, streaming) = provider_row(provider);
-    let nobody = Who { name: "", persona: "", session: "" };
+    let nobody = Who {
+        name: "",
+        persona: "",
+        session: "",
+    };
     json!({
         "speech": {
             "provider": provider, "provider_label": provider_label, "voice_id": null,
@@ -403,7 +440,12 @@ pub struct Row<'a> {
 /// active agents speak with the same provider and voice (0: its own). One pass.
 pub fn profiles(view: &HostView, rows: &[Row<'_>]) -> Vec<Value> {
     let made: Vec<(Speech, Value)> = rows.iter().map(|row| profile(view, row.agent)).collect();
-    let key = |speech: &Speech| speech.voice_id.clone().map(|voice| (speech.provider.clone(), voice));
+    let key = |speech: &Speech| {
+        speech
+            .voice_id
+            .clone()
+            .map(|voice| (speech.provider.clone(), voice))
+    };
     let mut users: BTreeMap<(String, String), usize> = BTreeMap::new();
     for ((speech, _), row) in made.iter().zip(rows) {
         if let (false, Some(key)) = (row.inactive, key(speech)) {
@@ -414,7 +456,11 @@ pub fn profiles(view: &HostView, rows: &[Row<'_>]) -> Vec<Value> {
         .zip(rows)
         .map(|((speech, hearing), row)| {
             let shared = key(&speech).map_or(0, |key| users.get(&key).copied().unwrap_or(0));
-            let shared = if row.inactive { shared } else { shared.saturating_sub(1) };
+            let shared = if row.inactive {
+                shared
+            } else {
+                shared.saturating_sub(1)
+            };
             let mut told = speech.told();
             told.insert("shared_with".into(), json!(shared));
             json!({ "speech": told, "hearing": hearing })
@@ -431,7 +477,9 @@ pub fn profile_among(view: &HostView, agent: Agent<'_>, rows: &[Row<'_>]) -> Val
         .copied()
         .collect();
     let at = all.len();
-    let inactive = rows.iter().any(|row| row.agent.who.session == agent.who.session && row.inactive);
+    let inactive = rows
+        .iter()
+        .any(|row| row.agent.who.session == agent.who.session && row.inactive);
     all.push(Row { agent, inactive });
     profiles(view, &all).swap_remove(at)
 }
@@ -439,7 +487,11 @@ pub fn profile_among(view: &HostView, agent: Agent<'_>, rows: &[Row<'_>]) -> Val
 /// The words of a clip that was not spoken; `partly` when an earlier clip of the same reply
 /// was, so the reply is not shown as wholly silent.
 pub fn not_spoken_words(reason: &str, provider_label: &str, name: &str, partly: bool) -> String {
-    let provider = if provider_label.is_empty() { "The voice provider" } else { provider_label };
+    let provider = if provider_label.is_empty() {
+        "The voice provider"
+    } else {
+        provider_label
+    };
     let name = if name.is_empty() { "this agent" } else { name };
     let words = match reason {
         NO_VOICE => format!("Not spoken: {provider} has no voice for {name}."),
@@ -464,8 +516,11 @@ pub fn not_spoken_words(reason: &str, provider_label: &str, name: &str, partly: 
 /// The reason Google's own code for a failure stands for.
 pub fn google_reason(code: &str) -> Option<&'static str> {
     match code {
-        "google_credentials_missing" | "google_project_missing" | "google_auth_failed"
-        | "google_id_collision" | "google_id_unverifiable" => Some(NOT_CONFIGURED),
+        "google_credentials_missing"
+        | "google_project_missing"
+        | "google_auth_failed"
+        | "google_id_collision"
+        | "google_id_unverifiable" => Some(NOT_CONFIGURED),
         "voice_unavailable" => Some(NO_VOICE),
         _ => None,
     }
@@ -501,7 +556,10 @@ pub fn clip_failure(view: &HostView, agent: Agent<'_>, google_code: Option<&str>
         };
     }
     let shown = speech(view, agent);
-    Unheard { reason: shown.silent_reason.unwrap_or(PROVIDER_FAILED), provider: shown.provider }
+    Unheard {
+        reason: shown.silent_reason.unwrap_or(PROVIDER_FAILED),
+        provider: shown.provider,
+    }
 }
 
 /// The names of voices the Host ships with: ElevenLabs', Deepgram's and Google's.
@@ -527,7 +585,11 @@ pub struct Outcomes {
 }
 
 fn window(trace: &str) -> i64 {
-    if trace.is_empty() { UNTRACED_TOLD_MS } else { TURN_TOLD_MS }
+    if trace.is_empty() {
+        UNTRACED_TOLD_MS
+    } else {
+        TURN_TOLD_MS
+    }
 }
 
 impl Outcomes {
@@ -548,9 +610,13 @@ impl Outcomes {
     /// [`UNTRACED_TOLD_MS`]. Remembered when it is.
     pub fn tell(&mut self, agent: &str, trace: &str, reason: &'static str, now_ms: i64) -> bool {
         self.prune(now_ms);
-        let known = self.told.iter().any(|(a, t, r, _)| a == agent && t == trace && *r == reason);
+        let known = self
+            .told
+            .iter()
+            .any(|(a, t, r, _)| a == agent && t == trace && *r == reason);
         if !known {
-            self.told.push_back((agent.to_string(), trace.to_string(), reason, now_ms));
+            self.told
+                .push_back((agent.to_string(), trace.to_string(), reason, now_ms));
             self.prune(now_ms);
         }
         !known
@@ -559,7 +625,8 @@ impl Outcomes {
     /// A clip of this agent's turn was spoken.
     pub fn spoke(&mut self, agent: &str, trace: &str, now_ms: i64) {
         self.spoke.retain(|(a, t, _)| !(a == agent && t == trace));
-        self.spoke.push_back((agent.to_string(), trace.to_string(), now_ms));
+        self.spoke
+            .push_back((agent.to_string(), trace.to_string(), now_ms));
         self.prune(now_ms);
     }
 
@@ -583,12 +650,30 @@ mod tests {
     fn a_turn_is_told_once_a_reason_and_what_is_remembered_is_bounded() {
         let mut outcomes = Outcomes::default();
         assert!(outcomes.tell("a", "t1", NO_VOICE, 0));
-        assert!(!outcomes.tell("a", "t1", NO_VOICE, 1_000), "once a turn and reason");
-        assert!(outcomes.tell("a", "t1", PROVIDER_FAILED, 1_000), "another reason is told");
-        assert!(outcomes.tell("b", "t1", NO_VOICE, 1_000), "another agent is told");
-        assert!(outcomes.tell("a", "t2", NO_VOICE, 1_000), "another turn is told");
-        assert!(!outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS), "within the turn's window");
-        assert!(outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS + 1), "past it, told again");
+        assert!(
+            !outcomes.tell("a", "t1", NO_VOICE, 1_000),
+            "once a turn and reason"
+        );
+        assert!(
+            outcomes.tell("a", "t1", PROVIDER_FAILED, 1_000),
+            "another reason is told"
+        );
+        assert!(
+            outcomes.tell("b", "t1", NO_VOICE, 1_000),
+            "another agent is told"
+        );
+        assert!(
+            outcomes.tell("a", "t2", NO_VOICE, 1_000),
+            "another turn is told"
+        );
+        assert!(
+            !outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS),
+            "within the turn's window"
+        );
+        assert!(
+            outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS + 1),
+            "past it, told again"
+        );
         // A clip of no turn: once in ten minutes.
         assert!(outcomes.tell("a", "", NO_VOICE, 0));
         assert!(!outcomes.tell("a", "", NO_VOICE, UNTRACED_TOLD_MS));
@@ -598,7 +683,11 @@ mod tests {
         outcomes.tell("a", "", NO_VOICE, 0);
         outcomes.tell("a", "t", NO_VOICE, 0);
         outcomes.tell("b", "t", NO_VOICE, UNTRACED_TOLD_MS + 1);
-        assert_eq!(outcomes.kept().0, 2, "the untraced one is pruned when the next is written");
+        assert_eq!(
+            outcomes.kept().0,
+            2,
+            "the untraced one is pruned when the next is written"
+        );
         for n in 0..(OUTCOMES_KEPT + 10) {
             let trace = format!("t{n}");
             outcomes.tell("a", &trace, NO_VOICE, 5);
@@ -607,6 +696,10 @@ mod tests {
         assert_eq!(outcomes.kept(), (OUTCOMES_KEPT, OUTCOMES_KEPT));
         assert!(!outcomes.partly("a", "t0", 5), "the oldest went first");
         assert!(outcomes.partly("a", &format!("t{}", OUTCOMES_KEPT + 9), 5));
-        assert!(!outcomes.partly("a", &format!("t{}", OUTCOMES_KEPT + 9), 5 + TURN_TOLD_MS + 1));
+        assert!(!outcomes.partly(
+            "a",
+            &format!("t{}", OUTCOMES_KEPT + 9),
+            5 + TURN_TOLD_MS + 1
+        ));
     }
 }
