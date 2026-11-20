@@ -165,6 +165,14 @@ pub async fn caller(app: &App, token: &str) -> Result<Option<Arc<Member>>, Unava
     Ok(current.then(|| member.clone()))
 }
 
+/// The agent and the turn a presented token names, when it is a token this Host made: whatever
+/// became of the turn since, and whether or not the Host still has the agent (`None` for a
+/// token it did not make). A key that cannot be read is no answer ([`UNAVAILABLE`]).
+pub async fn claim(app: &App, token: &str) -> Result<Option<(String, u64)>, Unavailable> {
+    let key = app.turns.key_or_read(&app.fleet).await?;
+    Ok(turn_identity::read(&key, token).map(|claim| (claim.agent_id, claim.turn)))
+}
+
 /// The trace an artifact is published under (R102, the Python Host's `_publishing_trace`): the
 /// trace of the turn whose token the request presents, only when that turn is `agent_id`'s own
 /// and is that agent's running turn now; the empty text otherwise: no token, a token this Host

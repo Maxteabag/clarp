@@ -22,6 +22,7 @@ use clarp_actor::{ByHand, ImportedRow};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::contacts::{self, Launch};
+use clarp_kernel::coordination;
 use clarp_kernel::conversation::{Message, Sender};
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
@@ -592,6 +593,7 @@ pub fn router(app: App) -> Router {
         .route("/log", get(log))
         .route("/events", get(events))
         .route("/send", post(send))
+        .route("/agent-notes", post(crate::coordination::agent_note))
         .route("/orchestrator/route-delegation", post(route_delegation))
         .route("/stop", post(stop))
         .route("/repair-slot", post(repair_slot))
@@ -2190,17 +2192,47 @@ fn client_name(given: &str) -> Option<String> {
     fits.then_some(name)
 }
 
-/// Who wrote a message that says it comes from another agent.
-pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
-    let directory = app.fleet.directory();
-    let name = match named? {
-        Value::String(name) => name.as_str(),
+/// The name of the sender a message names: its session or id.
+fn sender_named(named: Option<&Value>) -> Option<&str> {
+    match named? {
+        Value::String(name) => Some(name.as_str()),
         Value::Object(fields) => fields
             .get("session")
             .or_else(|| fields.get("agent_id"))
-            .and_then(Value::as_str)?,
-        _ => return None,
+            .and_then(Value::as_str),
+        _ => None,
+    }
+}
+
+/// The id of the sender a message names, when it is an agent of this Host (or a janitor);
+/// empty otherwise: an agent of another Host, or none.
+fn sender_known(app: &App, named: Option<&Value>) -> String {
+    let Some(name) = sender_named(named).map(python::strip) else {
+        return String::new();
     };
+    let directory = app.fleet.directory();
+    directory
+        .anyone(name)
+        .map(|member| member.record.agent_id.clone())
+        .unwrap_or_default()
+}
+
+/// The agent of this Host with this id, as the sender of a message.
+fn sender_by_id(app: &App, agent_id: &str) -> Option<Sender> {
+    let directory = app.fleet.directory();
+    let mut everyone = directory.members.iter().chain(directory.janitors.iter());
+    let member = everyone.find(|member| member.record.agent_id == agent_id)?;
+    Some(Sender {
+        agent_id: member.record.agent_id.clone(),
+        name: member.record.persona.clone(),
+        session: member.record.session.clone(),
+    })
+}
+
+/// Who wrote a message that says it comes from another agent.
+pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
+    let directory = app.fleet.directory();
+    let name = sender_named(named)?;
     // An agent of the roster, or a janitor: a janitor's own turn may write to an agent.
     let known = directory.anyone(name);
     Some(match known {
@@ -2221,9 +2253,27 @@ pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
 async fn send(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Json(request): Json<SendRequest>,
 ) -> Response {
-    sent_from(&app, &principal, request).await
+    let made = match made_by(&app, &headers, &request).await {
+        Ok(made) => made,
+        Err(why) => return why.into_response(),
+    };
+    sent_from(&app, &principal, request, &made).await
+}
+
+/// Who made a send beyond what its body says: the turn whose token it presents, a peer Host
+/// that names itself, and whether it named its trace (the Python Host's PR 482).
+async fn made_by(
+    app: &App,
+    headers: &HeaderMap,
+    request: &SendRequest,
+) -> Result<crate::coordination::Made, ApiError> {
+    let named = request.trace_id.as_deref().map(python::strip);
+    let trace_named = named.is_some_and(|trace| !trace.is_empty());
+    let peer = crate::coordination::from_a_peer(headers);
+    crate::coordination::made(app, turn_of(headers), peer, trace_named).await
 }
 
 /// `POST /orchestrator/route-delegation`: a message the app could not tell the agent of. It
@@ -2231,15 +2281,25 @@ async fn send(
 async fn route_delegation(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
     Json(mut request): Json<SendRequest>,
 ) -> Response {
     request.orchestrator_fallback = Some(true);
-    sent_from(&app, &principal, request).await
+    let made = match made_by(&app, &headers, &request).await {
+        Ok(made) => made,
+        Err(why) => return why.into_response(),
+    };
+    sent_from(&app, &principal, request, &made).await
 }
 
 /// A message from an app: one that carries its call goes to the agent of the call that can
 /// take speech, whoever it names; then it is a message like any other.
-async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -> Response {
+async fn sent_from(
+    app: &App,
+    principal: &Principal,
+    mut request: SendRequest,
+    made: &crate::coordination::Made,
+) -> Response {
     let voice = crate::voice_timeline::Sent::read(&request);
     let call_id: String = python::strip(request.call_id.as_deref().unwrap_or(""))
         .chars()
@@ -2296,7 +2356,7 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
                 result["opening"]["epoch"].as_u64().unwrap_or(1),
             )
         });
-        let sent = send_as(app, request, false, binding).await;
+        let sent = send_as(app, request, false, binding, made).await;
         if result["route"] == "greeting"
             && let Some(id) = result["opening"]["ring_id"].as_str()
         {
@@ -2380,7 +2440,7 @@ async fn sent_from(app: &App, principal: &Principal, mut request: SendRequest) -
             Err(refused) => return refused.into_response(),
         }
     }
-    match send_message(app, request).await {
+    match send_as(app, request, false, None, made).await {
         Ok(sent) => {
             if let Some(voice) = &voice {
                 voice.posted(app, &sent);
@@ -2397,14 +2457,24 @@ pub(crate) async fn send_message(
     app: &App,
     request: SendRequest,
 ) -> Result<SendResponse, ApiError> {
-    send_as(app, request, false, None).await
+    send_as(app, request, false, None, &crate::coordination::Made::default()).await
+}
+
+/// Takes a message for an agent from whoever made it: the turn of an agent's own tool that
+/// sends it, as `clarp-admin prompt` does.
+pub(crate) async fn send_from(
+    app: &App,
+    request: SendRequest,
+    made: &crate::coordination::Made,
+) -> Result<SendResponse, ApiError> {
+    send_as(app, request, false, None, made).await
 }
 
 /// Takes a message the Host sends by itself: a heartbeat, a prompt at a set time, the task
 /// of a fork. It is a message like any other, but for this: no app gave it an id, and the
 /// apps are told of it under none.
 pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
-    send_as(app, request, true, None).await
+    send_as(app, request, true, None, &crate::coordination::Made::default()).await
 }
 
 async fn send_as(
@@ -2412,6 +2482,7 @@ async fn send_as(
     request: SendRequest,
     own: bool,
     binding: Option<(&str, &str, u64)>,
+    made: &crate::coordination::Made,
 ) -> Result<SendResponse, ApiError> {
     // What the Python Host refuses a send with, in its order and its words (plain text).
     let text = python::strip(&request.text).to_string();
@@ -2496,7 +2567,25 @@ async fn send_as(
     // (issue 360 of the repository). Without a sender: the origin it names, when that is one
     // a client may name; otherwise the user. What the Host stamps itself (a janitor, a
     // leader's tick) nobody may claim.
-    let sender = sender(app, request.sender.as_ref());
+    //
+    // Who made it decides too (the Python Host's `SendRequest.from_payload`, its PR 482): a
+    // send made from another agent's own turn (the token it presents) is that agent's, its
+    // sender where it names none, and never the user's word; a turn of one agent may not name
+    // another as its sender; a peer Host forwards only its agents' messages; and an agent
+    // waking itself from its own turn is automation.
+    let (caller, caller_session) = made.turn.clone().unwrap_or_default();
+    let principal = coordination::principal(
+        &member.record.agent_id,
+        &sender_known(app, request.sender.as_ref()),
+        &caller,
+        caller_session.as_deref(),
+    )
+    .map_err(crate::coordination::refused)?;
+    let sender = sender(app, request.sender.as_ref()).or_else(|| {
+        (!principal.sender_agent_id.is_empty())
+            .then(|| sender_by_id(app, &principal.sender_agent_id))
+            .flatten()
+    });
     if let Some(sender) = &sender
         && app
             .fleet
@@ -2522,11 +2611,17 @@ async fn send_as(
             .map(|sender| sender.agent_id.clone())
             .unwrap_or_default(),
     };
-    let named = request
-        .origin
-        .as_deref()
-        .map(|origin| origin.trim().to_lowercase())
-        .unwrap_or_default();
+    let named = coordination::origin(request.origin.as_deref(), &principal, made.peer);
+    // Another agent addressing this one: its turn is marked so, with that agent (none for an
+    // agent of a peer Host). Decided from the origin as it was claimed and who made it, before
+    // this Host maps the origin to its own kinds: the user's word never is, whatever sender it
+    // names (`coordination::is_coordination`).
+    let coordination = coordination::is_coordination(
+        &member.record.agent_id,
+        Some(&named),
+        Some(&principal.sender_agent_id),
+    )
+    .then(|| principal.sender_agent_id.clone());
     if named == "heartbeat" && app.config.heartbeats_disabled {
         // A Host whose heartbeats are off takes none from outside either: the Python Host's
         // words for it.
@@ -2625,10 +2720,26 @@ async fn send_as(
     };
     let proof = binding
         .map(|(ring, _, epoch)| json!({"ring_id":ring,"kind":"greeting_reply","epoch":epoch}));
+    let marks = clarp_actor::Marks {
+        coordination,
+        trace_named: made.trace_named,
+    };
     let sent = member
         .agent
-        .send_reserved(message, admission, proof)
+        .send_marked(message, admission, proof, marks)
         .await?;
+    let sent = match sent {
+        Ok(sent) => sent,
+        // A trace another message of the agent has: no caller attaches its words, and the
+        // mark with them, to that message's turn.
+        Err(clarp_actor::TraceTaken) => {
+            drop(guard);
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                clarp_actor::TRACE_TAKEN,
+            ));
+        }
+    };
     if let (Some((ring, id, epoch)), Some(turn)) = (binding, sent.turn) {
         app.calls
             .bind_clip(
