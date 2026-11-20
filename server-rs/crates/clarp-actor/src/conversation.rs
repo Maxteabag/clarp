@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
-use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
 use clarp_kernel::agent::AgentEvent;
+use clarp_kernel::conversation::{Commentary, Entry, Reply, ToolCall, TurnEnd};
 use clarp_kernel::journal::{coordination_key, kind};
 use clarp_kernel::turn::{Origin, TurnEvent, left_out_of_chats};
 use clarp_ports::log::{AgentLog, Item, Seq};
@@ -174,7 +174,8 @@ pub fn mark_of(log: &dyn AgentLog, turn: u64) -> Result<Option<String>, ActorErr
     let Some(stored) = log.find(&coordination_key(turn))? else {
         return Ok(None);
     };
-    let event: AgentEvent = serde_json::from_slice(&stored.body).map_err(|error| corrupt(&stored, error))?;
+    let event: AgentEvent =
+        serde_json::from_slice(&stored.body).map_err(|error| corrupt(&stored, error))?;
     Ok(match event {
         AgentEvent::Turn {
             change: TurnEvent::Accepted { coordination, .. },
