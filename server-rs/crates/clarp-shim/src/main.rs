@@ -1716,6 +1716,22 @@ mod tests {
     }
 
     #[test]
+    fn a_group_with_zombies_and_stopped_tasks_stands_still() {
+        let proc = std::env::temp_dir().join(format!("clarp-zombie-{}", std::process::id()));
+        for (pid, state) in [(12, 'Z'), (13, 'T')] {
+            let process = proc.join(pid.to_string());
+            let task = process.join("task").join(pid.to_string());
+            std::fs::create_dir_all(&task).unwrap();
+            let stat = format!("{pid} (tool) {state} 1 12 12 0");
+            std::fs::write(process.join("stat"), &stat).unwrap();
+            std::fs::write(task.join("stat"), &stat).unwrap();
+        }
+        let still = stands_still(&proc, 12);
+        std::fs::remove_dir_all(proc).unwrap();
+        assert!(still);
+    }
+
+    #[test]
     fn the_last_spool_record_discards_a_kill_already_queued_behind_it() {
         let file = std::env::temp_dir().join(format!("clarp-closed-spool-{}", std::process::id()));
         let writer = SpoolWriter::create(&file).unwrap();
