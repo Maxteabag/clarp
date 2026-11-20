@@ -277,16 +277,6 @@ async fn no_update() -> ApiError {
     not_built("Updating this Host from an app is")
 }
 
-/// `GET /managed-skills`: the skills this Host keeps installed for its agents' tools. It
-/// keeps none: the skills a tool finds on this machine are whoever's put them there.
-async fn skills() -> Json<Value> {
-    Json(json!({ "skills": [] }))
-}
-
-async fn no_skills() -> ApiError {
-    not_built("Keeping skills installed is")
-}
-
 /// `GET /harness-providers?harness=`: the providers of models a harness can be signed in
 /// to. This Host runs no harness that takes one: none is installed, none is listed.
 async fn model_providers(Query(asked): Asked) -> Json<Value> {
@@ -328,7 +318,6 @@ pub fn routes() -> Router<App> {
         .route("/agent-mcp", post(no_servers))
         .route("/team-nudging", post(no_teams))
         .route("/server-update", get(software).post(no_update))
-        .route("/managed-skills", get(skills).post(no_skills))
         .route("/backend-auth", get(logins))
         .route("/backend-auth/{action}", post(no_logins))
         .route("/agent-dreaming", post(set_dreaming))

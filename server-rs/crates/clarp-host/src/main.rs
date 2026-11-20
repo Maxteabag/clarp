@@ -253,6 +253,7 @@ async fn serve(config: Config) -> Result<(), String> {
         capture,
         turns,
         form_event_writer: Arc::default(),
+        skill_links: Arc::default(),
         controller_actions: Arc::default(),
         android_chip: Arc::default(),
         android,
@@ -309,6 +310,9 @@ async fn serve(config: Config) -> Result<(), String> {
             std::time::Duration::from_millis(config.logins_checked_every_ms),
         );
     }
+    // Where this Host keeps the machine's tools, the chosen skills are linked to its release
+    // before it answers; anywhere else this writes nothing.
+    clarp_host::managed_skills::at_start(&app).await;
     // The Host answers when it knows its agents: what they are doing, what runs for them. A
     // request that comes earlier waits at the door for that moment, it is not given half a view.
     let opened_by = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
