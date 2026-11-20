@@ -36,5 +36,22 @@ for module, book in [('heartbeat', 'book'), ('schedules', 'schedules')]:
         (file, 'cache', 'write only when nothing changed', f'if next != *{book}', f'if next == *{book}'),
         (file, 'cache', 'turn a failed write into a success', keep, 'drop(app.fleet.keep(KIND, ALL.to_string(), Some(kept)).await);'),
     ])
+RUNS['ring'] = ['test', '--lib', 'ring_timers_report_a_refusal_and_retry_until_the_store_answers']
+RUNS['chip'] = ['test', '--lib', 'an_unread_chip_arms_a_timed_look_until_its_store_recovers']
+RUNS['expiry'] = ['test', '--test', 'host', 'a_ring_nobody_takes_is_missed']
+RUNS['restore'] = ['test', '--test', 'host', 'a_ring_that_rang_when_the_host_was_killed']
+CALLS = 'clarp-host/src/calls.rs'
+CHIP = 'clarp-host/src/chip.rs'
+PLANTS += [
+    (CALLS, 'ring', 'a ring read failure is silent', 'Err(why) => app.fleet.unkept(RINGS, &why.0),', 'Err(_) => (),'),
+    (CALLS, 'ring', 'a refused read loses the retry', 'after = Duration::from_secs(1);', 'return;'),
+    (CALLS, 'ring', 'a ring retry is delayed too long', 'after = Duration::from_secs(1);', 'after = Duration::from_secs(2);'),
+    (CALLS, 'ring', 'startup always sleeps before it looks', 'if !after.is_zero() {', 'if true {'),
+    (CALLS, 'expiry', 'a newly placed ring has no expiry alarm', 'timer(app, placed.ring.expires_at);', ''),
+    (CALLS, 'restore', 'a restored ringing call loses its alarm', 'timer(app, ring.expires_at);', 'let _ = ring;'),
+    (CHIP, 'chip', 'a refused chip read goes unsaid', 'app.fleet.unkept(KIND, &why.0);\n                return Some(Duration::from_secs(60));', 'let _ = why;\n                return Some(Duration::from_secs(60));'),
+    (CHIP, 'chip', 'an unread chip sleeps indefinitely', 'return Some(Duration::from_secs(60));', 'return None;'),
+    (CHIP, 'chip', 'an unread chip retries on every loop', 'return Some(Duration::from_secs(60));', 'return Some(Duration::ZERO);'),
+]
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))

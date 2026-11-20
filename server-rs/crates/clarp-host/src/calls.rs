@@ -792,31 +792,42 @@ async fn note(directory: &Directory, agent_id: &str, id: &str, text: String) {
 /// The Host has started: what it kept of calls and rings is read now. A ring that rang when
 /// the Host stopped is given its timer again; one that is overdue by now is missed now.
 pub fn resume(app: &App) {
-    let app = app.clone();
-    tokio::spawn(async move {
-        let desk = app.calls.clone();
-        let _ = desk
-            .rings(&app, |rings, _, with, (out, _)| {
-                rings.timer(with.at.now_ms, out)
-            })
-            .await;
-    });
+    tokio::spawn(look_at_rings(
+        app.clone(),
+        Duration::ZERO,
+        tokio::time::sleep,
+    ));
 }
 
-/// When a ring is overdue, it is missed: the apps, the phones and the agent are told then,
-/// and not only when somebody next looks.
+/// When a ring is overdue, the apps, the phones and the agent are told.
 fn timer(app: &App, expires_at: i64) {
-    let app = app.clone();
-    tokio::spawn(async move {
-        let left = u64::try_from(expires_at - app.clock.now_ms()).unwrap_or(0);
-        tokio::time::sleep(Duration::from_millis(left) + TIMER_SLACK).await;
-        let desk = app.calls.clone();
-        let _ = desk
+    let left = u64::try_from(expires_at.saturating_sub(app.clock.now_ms())).unwrap_or(0);
+    let after = Duration::from_millis(left) + TIMER_SLACK;
+    tokio::spawn(look_at_rings(app.clone(), after, tokio::time::sleep));
+}
+
+/// A failed timer keeps its obligation. Space retries so an unavailable store can recover.
+async fn look_at_rings<F: std::future::Future<Output = ()>>(
+    app: App,
+    mut after: Duration,
+    mut sleep: impl FnMut(Duration) -> F,
+) {
+    loop {
+        if !after.is_zero() {
+            sleep(after).await;
+        }
+        match app
+            .calls
             .rings(&app, |rings, _, with, (out, _)| {
                 rings.timer(with.at.now_ms, out)
             })
-            .await;
-    });
+            .await
+        {
+            Ok(_) => return,
+            Err(why) => app.fleet.unkept(RINGS, &why.0),
+        }
+        after = Duration::from_secs(1);
+    }
 }
 
 /// How many of the newest things of each agent's conversation are looked at for what was
@@ -1250,4 +1261,50 @@ pub fn routes() -> Router<App> {
         };
         router.route(&path, post(change))
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod due_work_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ring_timers_report_a_refusal_and_retry_until_the_store_answers() {
+        for (name, initial) in [
+            ("startup", Duration::ZERO),
+            ("expiry", Duration::from_millis(700)),
+        ] {
+            let place = crate::unkept::at_the_port::place(name);
+            let app = place.app();
+            place.refuse_reads(RINGS);
+            let mut delays = Vec::new();
+            let tick = look_at_rings(app.clone(), initial, |delay| {
+                delays.push(delay);
+                if delays
+                    .iter()
+                    .filter(|d| **d == Duration::from_secs(1))
+                    .count()
+                    == 2
+                {
+                    place.allow_reads();
+                }
+                assert!(delays.len() <= 3);
+                std::future::ready(())
+            });
+            tick.await;
+            let mut expected = Vec::new();
+            if !initial.is_zero() {
+                expected.push(initial);
+            }
+            expected.extend([Duration::from_secs(1); 2]);
+            assert_eq!(delays, expected);
+            assert!(app.calls.books.lock().await.is_some());
+            assert_eq!(
+                *place.said.lock().unwrap(),
+                [
+                    "clarp-host: a record of the kind ring was not kept: storage failed: read refused here"
+                ]
+            );
+        }
+    }
 }
