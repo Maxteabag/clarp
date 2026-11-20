@@ -2153,8 +2153,10 @@ mod tests {
         for turn in turns {
             assert_eq!(fields(&turns[0]), fields(turn), "{}", turn["id"]);
         }
-        assert_eq!(fields(&turns[0]).len(), 20);
+        assert_eq!(fields(&turns[0]).len(), 21);
         assert_eq!(turns[0]["trace_id"], "t-1");
+        // None of them is of a turn another agent began: each is the user's.
+        assert!(turns.iter().all(|turn| turn["audience"] == "user"));
         assert_eq!(turns[0]["timestamp"], "1970-01-01T00:00:00.000Z");
         // A message of the agent is one row: what it said, and a card for each tool it calls.
         assert_eq!(
