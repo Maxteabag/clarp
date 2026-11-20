@@ -28,7 +28,7 @@ from .clip_delivery.chunked_file import ChunkedFileDelivery
 from .config import load as load_config
 from .log import log_exception
 from .paths import RuntimePaths
-from .voice_profile import NO_VOICE, provider_voice
+from .voice_profile import no_voice_reason, provider_voice
 from .tts_service import event_context as _event_context, emit_event as _emit
 from . import tts_mode
 from .voice import (
@@ -107,7 +107,8 @@ def synth_one(*,
                           detail={"provider": clip_route.provider})
                     # It used to end here unseen: say so, once for the turn.
                     _publish_tts_error(stream, row, agent, result.error, cfg=voice_config,
-                                       reason=NO_VOICE, provider=clip_route.provider)
+                                       reason=no_voice_reason(voice_config, agent, clip_route),
+                                       provider=clip_route.provider)
                     return True
                 else:
                     _emit("tts_worker", "route",
