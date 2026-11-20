@@ -134,7 +134,7 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens
     (tokens, release, holds)
 }
 
-fn start_host(place: &Place) -> Host {
+fn start_host(place: &Place, args: &[&str]) -> Host {
     let home = place.root.join("home");
     let config = home.join(".config");
     let data = home.join(".local/share");
@@ -144,7 +144,7 @@ fn start_host(place: &Place) -> Host {
     let codex = place.root.join("codex");
     place.start_without(
         "",
-        &[],
+        args,
         &[
             ("HOME", home.to_str().unwrap()),
             ("XDG_CONFIG_HOME", config.to_str().unwrap()),
@@ -159,6 +159,7 @@ fn start_host(place: &Place) -> Host {
             "CODEX_HOME",
             "CLAUDE_PWA_CONFIG",
             "CLARP_CONFIG_DIR",
+            "CLARP_PUSH_CREDENTIAL",
         ],
     )
 }
@@ -227,7 +228,11 @@ fn lose_the_first_tool_answer(host: &Host) -> (String, std::thread::JoinHandle<V
 fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_note_from_it() {
     let place = Place::new("coordination");
     let (tokens, release, holds) = stand_in(&place);
-    let host = start_host(&place);
+    let relay = StandInRelay::start();
+    let host = start_host(
+        &place,
+        &["--push-relay", &format!("http://{}", relay.address)],
+    );
     for (name, session, backend) in [
         ("Ivy", "ivy", "claude"),
         ("Oak", "oak", "claude"),
@@ -240,6 +245,18 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         );
         assert_eq!(made["session"], session, "{made}");
     }
+    let (phone, _) = pair(&host, "Note phone", "full");
+    let grant = format!(
+        "pg1.{}.{}.{}",
+        "1".repeat(64),
+        "2".repeat(16),
+        "3".repeat(64)
+    );
+    let device = json!({ "token": "a1".repeat(32), "session": "oak", "push_grant": grant });
+    assert_eq!(
+        host.ask_as(&phone, "POST", "/devices", Some(&device)),
+        (200, json!({ "ok": true }))
+    );
     let ids = ids_of(&host);
     let heard = host.listen();
     let token_of =
@@ -404,7 +421,7 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     assert_eq!(status, 200);
     // From Oak's own running turn: written into the turn's trace, and the user is told at once
     // (lower-cased id), although the turn is for the agents.
-    let told_before = told_of("oak").len();
+    let written_after = now_ms();
     let (status, written) = note(&oak_turn, green.clone());
     let green_id = format!("note-{}-green", ids["oak"]);
     assert_eq!(
@@ -415,10 +432,25 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
                     "created": true, "notified": true, "reason": "agent-note" })
         )
     );
+    let notification = || {
+        told_of("oak")
+            .into_iter()
+            .find(|event| event["source_message_id"] == green_id)
+    };
     wait_for("the user to be told of the note", || {
-        told_of("oak").len() > told_before
+        notification().is_some()
     });
-    let told = told_of("oak").last().cloned().unwrap();
+    let told = notification().unwrap();
+    wait_for("the note to reach the push relay", || {
+        relay.taken().iter().any(|(path, _, body)| {
+            path == "/v1/push/send"
+                && body["notifications"][0]["payload"]["notification_id"] == told["notification_id"]
+        })
+    });
+    assert!(
+        (written_after..=now_ms()).contains(&told["done_ts"].as_i64().unwrap()),
+        "{told}"
+    );
     assert_eq!(
         (
             &told["notification_id"],
@@ -565,8 +597,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     );
 
     // THE SEND. The user's own word is never coordination, whatever sender it names.
+    // An empty peer header still leaves it the user's word.
     let (status, sent) = send(
-        &[],
+        &[("X-Clarp-Peer", "")],
         json!({ "session": "oak", "text": "from me", "client_msg_id": "c-2", "sender": "ivy",
                 "origin": "user" }),
     );
@@ -579,6 +612,18 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     }
     let mine = dispatched(&heard, "oak", "c-2");
     assert_eq!(mine["audience"], "user", "{mine}");
+    // A sender the Host does not know cannot mark another kind of message as coordination.
+    let (status, scheduled) = send(
+        &[],
+        json!({ "session": "oak", "text": "scheduled", "client_msg_id": "unknown-sender",
+                "sender": "absent-agent", "origin": "schedule" }),
+    );
+    assert_eq!(status, 200, "{scheduled}");
+    wait_for("the scheduled turn", || {
+        answered(&host, "oak", &scheduled["trace_id"])
+    });
+    let scheduled_row = &rows_of(&host, "oak")["u-unknown-sender"];
+    assert_eq!(scheduled_row["audience"], "user", "{scheduled_row}");
     // A sender named by whoever may name one, with an agent's origin: another agent's message.
     let (_, named) = send(
         &[],
@@ -792,13 +837,7 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
 fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     let place = Place::new("coordination-no-key");
     let (tokens, release, holds) = stand_in(&place);
-    keep_record(
-        &place,
-        "turn-identity",
-        "key",
-        &json!({ "key": "not a key" }),
-    );
-    let host = start_host(&place);
+    let host = start_host(&place, &[]);
     for (name, session) in [("Ivy", "ivy"), ("Oak", "oak")] {
         let made = host.post(
             "/agents",
@@ -806,6 +845,26 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
         );
         assert_eq!(made["session"], session, "{made}");
     }
+    let saved = host.post(
+        "/send",
+        json!({ "session": "oak", "text": "remember this", "client_msg_id": "saved",
+                "sender": "ivy", "origin": "agent" }),
+    );
+    wait_for("the marked turn to finish", || {
+        answered(&host, "oak", &saved["trace_id"])
+    });
+    assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "agents");
+    drop(host);
+    std::fs::remove_file(tokens.join("oak")).unwrap();
+    keep_record(
+        &place,
+        "turn-identity",
+        "key",
+        &json!({ "key": "not a key" }),
+    );
+    let host = start_host(&place, &[]);
+    // A read immediately after restart must also use the current capability, before any send.
+    assert_eq!(rows_of(&host, "oak")["u-saved"]["audience"], "user");
     let heard = host.listen();
     std::fs::write(holds.join("oak"), "").unwrap();
     let (status, sent) = asked(
@@ -831,18 +890,20 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     assert!(working.get("sender_agent_id").is_none(), "{working}");
     let body = json!({ "session": "oak", "text": "A note." });
     assert_eq!(asked(&host, "/agent-notes", &[], &body).0, 403);
-    assert_eq!(
-        asked(
-            &host,
-            "/agent-notes",
-            &[("X-Clarp-Turn", "any-token")],
-            &body
-        ),
-        (
-            503,
-            json!({ "error": "turn identity unavailable", "retryable": true })
-        )
-    );
+    for body in [body, json!([])] {
+        assert_eq!(
+            asked(
+                &host,
+                "/agent-notes",
+                &[("X-Clarp-Turn", "any-token")],
+                &body
+            ),
+            (
+                503,
+                json!({ "error": "turn identity unavailable", "retryable": true })
+            )
+        );
+    }
     std::fs::write(release.join("oak"), "").unwrap();
     wait_for("Oak's turn to end", || host.state("oak") == "done");
     let reply = rows_of_trace(&host, "oak", sent["trace_id"].as_str().unwrap());
