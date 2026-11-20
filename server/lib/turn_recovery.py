@@ -222,14 +222,16 @@ class RecoveryMixin:
         positive pre-invoke proof may publish a never-launched marker.
         """
         agent_id = str(row["agent_id"])
+        refused = _launch_refused(exc)
         backoff = _RECOVERY_BACKOFF.failed(
-            agent_id, str(row["queue_id"]), exc, self.now())
+            agent_id, str(row["queue_id"]), exc, self.now(), refused=refused)
         if backoff.failures == 1:
             log_exception("queuedRecoveryFail", exc, detail=row["session"])
-        if backoff.parked and _launch_refused(exc):
-            # Refused before anything was sent, the same way PARK_AFTER times:
-            # the row ends failed and its sender is told; parked, it would
-            # stay queued for good unless someone sent again (R121).
+        if refused and (backoff.parked or backoff.refusals >= recovery_backoff.REFUSED_IN_ALL):
+            # Refused before anything was sent, the same way PARK_AFTER times
+            # in a row, or REFUSED_IN_ALL times of any kinds (refusals that
+            # alternate never park): the row ends failed and its sender is
+            # told; it would otherwise stay queued for good (R121).
             if self._end_refused_launch(row, backoff):
                 return dataclasses.replace(backoff, parked=False, retry_at=self.now())
         if backoff.parked:

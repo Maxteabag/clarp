@@ -158,3 +158,88 @@ def test_a_pass_writes_the_deferred_line_once(capsys):
     # The caller hears of it on every pass that examines it; the journal once.
     assert len(told) >= 2 and set(told) == {"waiting"} and len(lines) == 1
 
+
+
+class _Alternating(_Refusing):
+    """Refusals of two kinds in turn (a held thread, a missing command), so no eight are identical;
+    from ``clears_at`` on (the n-th refusal of a trace) the launch goes through."""
+    def __init__(self, clears_at=None):
+        super().__init__()
+        self.clears_at = clears_at
+        self.launched = []
+
+    def spawn_turn(self, backend, **kwargs):
+        trace = kwargs["trace_id"]
+        if kwargs["agent_id"] in self.broken and (
+                self.clears_at is None or self.refused.count(trace) + 1 < self.clears_at):
+            self.refused.append(trace)
+            if self.refused.count(trace) % 2:
+                raise CodexSessionStuck(STUCK)
+            raise CliMissing("codex: command not found")
+        self.launched.append(trace)
+        return _Backends.spawn_turn(self, backend, **kwargs)
+
+
+def _alternating_service(tmp_path, monkeypatch, clears_at=None):
+    service, _backends, clock, timers, agent_id = _refusing_service(tmp_path, monkeypatch)
+    backends = _Alternating(clears_at)
+    backends.broken.add(agent_id)
+    service.backends = backends
+    return service, backends, clock, timers, agent_id
+
+
+def _notices(queue_id):
+    return db.conn().execute("SELECT COUNT(*) FROM messages WHERE message_id=?",
+                             (f"notice:{turn_queue.REFUSED_LAUNCH}:{queue_id}",)).fetchone()[0]
+
+
+def test_refusals_that_alternate_end_the_row_at_the_twentieth_with_one_notice(tmp_path, monkeypatch):
+    """Two kinds in turn never make eight identical; the second bound ends the row (R121)."""
+    service, backends, clock, timers, agent_id = _alternating_service(tmp_path, monkeypatch)
+    _send(service, "t1", origin="user")
+    queue_id = str(_row("t1")["queue_id"])
+    _run_until(clock, timers, clock.t + 6 * 3600)
+    # The send's own attempt, then REFUSED_IN_ALL by recovery.
+    assert backends.refused.count("t1") == 1 + recovery_backoff.REFUSED_IN_ALL
+    assert _row("t1")["status"] == "failed" and _notices(queue_id) == 1
+
+
+def test_a_refusal_that_clears_at_the_nineteenth_runs_once(tmp_path, monkeypatch):
+    service, backends, clock, timers, agent_id = _alternating_service(
+        tmp_path, monkeypatch, clears_at=recovery_backoff.REFUSED_IN_ALL)   # 1 + 18 refused, then it runs
+    _send(service, "t1", origin="user")
+    queue_id = str(_row("t1")["queue_id"])
+    _run_until(clock, timers, clock.t + 6 * 3600)
+    assert backends.refused.count("t1") == recovery_backoff.REFUSED_IN_ALL - 1
+    assert backends.launched == ["t1"] and _notices(queue_id) == 0
+    assert _row("t1")["status"] != "failed"
+
+
+def test_the_count_is_the_rows_own(tmp_path, monkeypatch):
+    """The next row of the agent starts at nought."""
+    service, backends, clock, timers, agent_id = _alternating_service(tmp_path, monkeypatch)
+    _send(service, "t1", origin="user")
+    _send(service, "t2", origin="user")
+    _run_until(clock, timers, clock.t + 12 * 3600)
+    assert backends.refused.count("t1") == 1 + recovery_backoff.REFUSED_IN_ALL
+    assert backends.refused.count("t2") == 1 + recovery_backoff.REFUSED_IN_ALL
+    assert _row("t1")["status"] == _row("t2")["status"] == "failed"
+
+
+def test_a_restart_starts_the_count_again(tmp_path, monkeypatch):
+    """What is true: the counts are kept in the dispatcher's memory, not with the row, so a Host
+    restart between refusals starts them at nought. The row still ends, REFUSED_IN_ALL refusals
+    after the restart."""
+    from lib.turn_dispatch_state import _RECOVERY_BACKOFF
+    service, backends, clock, timers, agent_id = _alternating_service(tmp_path, monkeypatch)
+    _send(service, "t1", origin="user")
+    while backends.refused.count("t1") < 1 + 10:
+        when, fn = min(timers, key=lambda timer: timer[0])
+        timers.remove((when, fn))
+        clock.t = max(clock.t, when)
+        fn()
+    assert _row("t1")["status"] == "queued"
+    _RECOVERY_BACKOFF.reset_for_tests()                                  # what a restart loses
+    _run_until(clock, timers, clock.t + 6 * 3600)
+    assert backends.refused.count("t1") == 1 + 10 + recovery_backoff.REFUSED_IN_ALL
+    assert _row("t1")["status"] == "failed"
