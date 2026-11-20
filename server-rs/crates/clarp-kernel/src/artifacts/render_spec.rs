@@ -252,41 +252,21 @@ pub const DEFAULT_MINIMUMS: &[(&str, i64)] = &[("ios", 74)];
 /// exactly, and its contract is at least the minimum for that name, as sent: the default
 /// ([`DEFAULT_MINIMUMS`]) with what the owner set laid over it (`overrides`; 0: never).
 pub fn capable(header: Option<&str>, overrides: Option<&BTreeMap<String, i64>>) -> bool {
-    let Some(header) = header else {
+    let Some((name, contract)) = header.and_then(crate::client::named) else {
         return false;
     };
-    let Some((platform, rest)) = header.split_once('/') else {
-        return false;
-    };
-    let mut signs = platform.chars();
-    let platform_ok = signs
-        .next()
-        .is_some_and(|first| first.is_ascii_alphabetic())
-        && platform.len() <= 32
-        && signs.all(|sign| sign.is_ascii_alphanumeric() || sign == '_' || sign == '-');
-    let Some((build, contract)) = rest.split_once(' ') else {
-        return false;
-    };
-    let build_ok = (1..=80).contains(&build.len())
-        && build
-            .chars()
-            .all(|sign| sign.is_ascii_alphanumeric() || matches!(sign, '.' | '_' | '-'));
-    let Some(number) = contract.strip_prefix("contract=") else {
-        return false;
-    };
-    let number_ok = (1..=9).contains(&number.len()) && number.bytes().all(|b| b.is_ascii_digit());
     // The name as sent, exactly: what the owner set for it, else the default.
-    let named = overrides.and_then(|set| set.get(platform).copied());
+    let named = overrides.and_then(|set| set.get(name).copied());
     let defaulted = || {
         DEFAULT_MINIMUMS
             .iter()
-            .find(|(name, _)| *name == platform)
+            .find(|(known, _)| *known == name)
             .map(|(_, minimum)| *minimum)
     };
-    let Some(minimum) = named.or_else(defaulted).filter(|minimum| *minimum >= 1) else {
-        return false;
-    };
-    platform_ok && build_ok && number_ok && number.parse::<i64>().is_ok_and(|n| n >= minimum)
+    named
+        .or_else(defaulted)
+        .filter(|minimum| *minimum >= 1)
+        .is_some_and(|minimum| contract >= minimum)
 }
 
 /// Whether a submission id is one (`[A-Za-z0-9-]{16,80}`).
