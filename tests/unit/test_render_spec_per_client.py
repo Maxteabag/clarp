@@ -38,22 +38,52 @@ def test_the_old_single_number_is_ios_only_and_said_so(monkeypatch):
     assert lines == ["config.render_spec_min_client"]
 
 
-def test_the_table_takes_whole_numbers_per_client_name(monkeypatch):
+def test_the_table_refuses_a_malformed_key_or_value_in_one_line_naming_the_keys(monkeypatch):
     lines = []
-    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append(event))
-    table = {"ios": 0, "android": 30, "bad name!": 5, "web": "x", "desk": True}
+    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append((event, detail)))
+    table = {"ios": 0, "android": 30, "bad name!": 5, "web": "x", "desk": True, "9lives": 3, "x" * 33: 1}
     assert config._render_spec_minimums({"render_spec_min_contract": table}) == {"ios": 0, "android": 30}
-    assert lines.count("config.render_spec_min_contract") == 3
+    assert len(lines) == 1 and lines[0][0] == "config.render_spec_min_contract"
+    for key in ("bad name!", "web", "desk", "9lives", "x" * 33):
+        assert repr(key) in lines[0][1]
+    assert "'ios'" not in lines[0][1] and "'android'" not in lines[0][1]
     assert config._render_spec_minimums({}) is None
 
 
-def test_a_client_name_in_capitals_is_refused_with_its_line(monkeypatch):
-    """Clients send their names in lower case and the name is matched exactly: an 'IOS' key would
-    silently switch nothing on, so it is refused and said."""
+def test_a_name_is_matched_exactly_as_the_client_sends_it():
+    """One rule for a client's name in every per-client table (server_identity.client_minimums):
+    the header name's own form, capitals included, matched exactly."""
+    table = server_identity.client_minimums({"Desktop": 5}, setting="test")
+    assert table == {"Desktop": 5}
+    assert server_identity.render_spec_capable("Desktop/1 contract=5", table)
+    assert not server_identity.render_spec_capable("desktop/1 contract=5", table)
+    assert not server_identity.render_spec_capable("DESKTOP/1 contract=5", table)
+    assert not server_identity.render_spec_capable("Desktop/1 contract=4", table)
+
+
+def test_a_key_differing_from_a_built_in_name_only_in_case_is_another_client_and_said_once(monkeypatch):
     lines = []
-    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append(event))
-    assert config._render_spec_minimums({"render_spec_min_contract": {"IOS": 74}}) is None
-    assert lines == ["config.render_spec_min_contract"]
+    monkeypatch.setattr("lib.log.log", lambda event, detail="", *a, **k: lines.append((event, detail)))
+    table = config._render_spec_minimums({"render_spec_min_contract": {"IOS": 1, "Android": 2}})
+    assert table == {"IOS": 1, "Android": 2}
+    assert len(lines) == 1 and "'IOS' (not 'ios')" in lines[0][1] and "'Android' (not 'android')" in lines[0][1]
+    assert server_identity.render_spec_capable("IOS/1 contract=1", table)            # another client
+    assert not server_identity.render_spec_capable("ios/2980 contract=73", table)    # ios keeps 74
+    assert server_identity.render_spec_capable("ios/2981 contract=74", table)
+
+
+def test_the_strict_reader_gives_the_name_as_sent_and_the_number_of_its_own_match():
+    read = server_identity.strict_client
+    assert read("Desktop/1.2 contract=000000074") == ("Desktop", 74)
+    for header in ("ios/1 contract=74 ", " ios/1 contract=74", "ios /1 contract=74", "ios/1  contract=74",
+                   "ios/1\tcontract=74", "ios/1 contract=74\n", "ios/1 contract=74x", "ios/1 contract=0740000000",
+                   "i\u0130s/1 contract=74", "ios\x00/1 contract=74", "ios/1", None, 74):
+        assert read(header) is None, header
+    assert server_identity.render_spec_capable("ios/2981 contract=074")
+
+
+def test_a_minimum_of_nought_is_never():
+    assert not server_identity.render_spec_capable("Desktop/1 contract=99", {"Desktop": 0})
 
 
 def test_the_table_wins_over_the_old_key_and_says_so(monkeypatch):

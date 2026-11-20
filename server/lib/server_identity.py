@@ -54,13 +54,56 @@ CLIENT_HEADER = "X-Clarp-Client"
 # its number), the desktop, the web app, the Watch, an unknown or absent name. 0: never.
 RENDER_SPEC_MIN_CONTRACT: dict[str, int] = {"ios": 74}  # iOS TestFlight 2981, the first to send 74
 
+# A client's name: the form of the X-Clarp-Client header's name, and of the keys of every Host table
+# that admits clients by name (render_spec's minimums, the live model's). It is matched EXACTLY as
+# sent, capitals included: a key 'Desktop' admits a client that sends 'Desktop' and no other.
+CLIENT_NAME = r"[A-Za-z][A-Za-z0-9_-]{0,31}"
+_STRICT_CLIENT_HEADER = re.compile(rf"({CLIENT_NAME})/[A-Za-z0-9._-]{{1,80}} contract=([0-9]{{1,9}})")
+# The names the Host's own clients send. A table key that differs from one only in case is another
+# client, and the configuration says so once when it is read.
+BUILT_IN_CLIENTS: tuple[str, ...] = ("ios", "android")
+
+
+def strict_client(header) -> tuple[str, int] | None:
+    """The one strict reader of X-Clarp-Client for a per-client decision: (the name as sent, the
+    contract) when the whole header is ``<name>/<build> contract=<n>``, else None. Every per-client
+    table is looked up with this, never with the lenient parse_client_header (which lowers the name)."""
+    if not isinstance(header, str):
+        return None
+    found = _STRICT_CLIENT_HEADER.fullmatch(header)
+    return (found.group(1), int(found.group(2))) if found else None
+
+
+def client_minimums(table, *, setting: str) -> dict[str, int]:
+    """The valid entries of a per-client table of minimum contracts (``setting`` names it in the
+    log). A key is a client's name as it sends it (CLIENT_NAME) and a value a whole number of 0 or
+    more (0: never; a TOML boolean is not a number). Every other entry is refused, all of them in
+    one log line that names their keys. A valid key that differs from a built-in client's name only
+    in case is taken as another client, and one line says what that means."""
+    from .log import log
+    kept: dict[str, int] = {}
+    refused: list[str] = []
+    for name, value in table.items():
+        if isinstance(name, str) and re.fullmatch(CLIENT_NAME, name) and type(value) is int and value >= 0:
+            kept[name] = value
+        else:
+            refused.append(repr(name))
+    if refused:
+        log(setting, f"refused {', '.join(refused)}: a key is a client's name as it sends it "
+                     f"({CLIENT_NAME}), a value a whole number of 0 or more")
+    cased = [f"{name!r} (not {builtin!r})" for name in kept for builtin in BUILT_IN_CLIENTS
+             if name != builtin and name.casefold() == builtin]
+    if cased:
+        log(setting, f"{', '.join(cased)}: names are matched exactly as clients send them, so each is "
+                     "another client and leaves the built-in one as it is")
+    return kept
+
 
 def render_spec_capable(header, minimums=None):
     """Whether the client that sent ``header`` draws and answers a render_spec. ``minimums``
     overrides the default per client: a mapping of client name to minimum contract (0: never),
     laid over RENDER_SPEC_MIN_CONTRACT; a single number is iOS's minimum (the old development
     key, which never meant every client)."""
-    import re
     from collections.abc import Mapping
     if minimums is None:
         table = RENDER_SPEC_MIN_CONTRACT
@@ -70,14 +113,14 @@ def render_spec_capable(header, minimums=None):
         table = {**RENDER_SPEC_MIN_CONTRACT, **minimums}
     else:
         return False
-    if not isinstance(header, str):
+    client = strict_client(header)
+    if client is None:
         return False
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,31}/[A-Za-z0-9._-]{1,80} contract=[0-9]{1,9}", header):
-        return False
-    minimum = table.get(header.split("/", 1)[0])                 # the name as sent, exactly
+    name, contract_number = client
+    minimum = table.get(name)                                     # the name as sent, exactly
     if type(minimum) is not int or minimum < 1:
         return False
-    return parse_client_header(header)["contract"] >= minimum
+    return contract_number >= minimum
 
 FEATURES: tuple[str, ...] = (
     "decision_on_behalf",
