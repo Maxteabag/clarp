@@ -6,8 +6,10 @@ Realtime/WebRTC endpoints are unchanged.
 
 Oracle v2 requires an updated HTTPS Host and its existing OpenAI API key. The
 additive `v2` object in `/oracle/status` advertises availability, model and voice.
-`/oracle/v2` is a full-device-authenticated WebSocket endpoint. It pins
-`gpt-live-1`, Marin and the Host-owned Luna router. Client commands are limited to
+`/oracle/v2` is a full-device-authenticated WebSocket endpoint. It runs the
+Host's configured GPT-Live model (`[openai] live_model`: `gpt-live-1.1` by
+default, or `gpt-live-1`; the one `v2.model` advertises), Marin and the
+Host-owned Luna router. Client commands are limited to
 bounded PCM16 audio, interruption and close; the client cannot change prompts,
 models, tools or inject arbitrary results.
 
@@ -31,6 +33,24 @@ input/output quiet gate reduces timing pressure but is not a proven complete
 solution. Keep the original Oracle available while collecting native-device
 feedback. Provider/controlled-audio tests are separate from microphone,
 Bluetooth, vehicle and physical playback verification.
+
+## Standby
+
+Standby is built for the WebRTC call creation (`POST /oracle/v2/calls`) in API
+mode only and ships off: `[openai] live_idle_timeout_s = 0`. Set to 5 to 60, it
+sends `session.wake_policy {type: speech}` and `session.idle_timeout_s`; the
+provider then pauses the session after that many idle seconds and the app gets
+`oracle_v2.standby {active: true}` (and `{active: false}` on waking, see
+docs/protocol.md). The Host's own idle close is unchanged: 180 s after the last
+audible input, output or transcript it closes the session (`oracle_v2.idle`). So
+standby pays the standby rate ($0.02 a minute) from the timeout to 180 s, then
+the Host closes. No WebSocket path and no agent Live call sends standby.
+
+Cost and limits of the WebRTC path: the provider bills a WebRTC create for at
+least 15 seconds, credited against the duration once the session runs, so a call
+shorter than that, or a create whose sideband never attaches, costs 15 s that
+the Host's usage estimate does not show. The provider cuts a connected call at
+2 hours, and one still ringing at 3 minutes.
 
 ## Connection lifecycle
 

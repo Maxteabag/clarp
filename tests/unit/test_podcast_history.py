@@ -22,7 +22,7 @@ def saved(tmp_path):
         payload={"content": "Original budget is a proposal."})
     context = podcast_live.context_for(episode, 5, 10, source=source)
     ident = history.create(artifact=artifact, position=5, context=context, source=source,
-                           model="gpt-live-1", voice="marin")
+                           model="gpt-live-1.1", voice="marin")
     return ident, artifact, source
 
 
