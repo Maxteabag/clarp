@@ -366,10 +366,12 @@ async fn say(app: &App, say: &Say) {
     if let Some(speaker) = speaker {
         if let Some(phrase) = clarp_kernel::router::flow::phrase_key(&say.text) {
             let owners = app.mouth.owners();
-            if let Some(voice) = crate::voice::phrase_voice(&owners, &speaker) {
-                app.router.phrases.say(app, speaker, say.text.clone(), phrase, voice, owners).await;
-                return;
+            for (voice,primary) in crate::voice::phrase_voices(&owners,&speaker) {
+                if !app.router.phrases.say(app, &speaker, &say.text, phrase, (voice,primary), &owners).await {
+                    break;
+                }
             }
+            return;
         }
         app.mouth.announce(&speaker, &say.text).await;
     }

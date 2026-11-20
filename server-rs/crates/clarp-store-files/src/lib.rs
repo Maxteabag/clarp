@@ -128,7 +128,9 @@ impl Blobs for Directory {
         for entry in entries {
             let entry = entry.map_err(|e| failed(&dir, &e))?;
             if let Some(name) = entry.file_name().to_str()
-                && name.starts_with(prefix) && is_name(name) {
+                && name.starts_with(prefix)
+                && is_name(name)
+            {
                 names.push(name.to_owned());
             }
         }
@@ -136,7 +138,9 @@ impl Blobs for Directory {
     }
 
     fn remove(&self, name: &str) -> Result<(), StoreError> {
-        if !is_name(name) { return Err(not_a_name(name)); }
+        if !is_name(name) {
+            return Err(not_a_name(name));
+        }
         let file = self.place(name);
         match fs::remove_file(&file) {
             Ok(()) => Ok(()),
