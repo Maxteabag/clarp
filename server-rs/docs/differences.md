@@ -38,6 +38,7 @@ one of these:
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
 | `managed_skills`, `backend_auth`, `harness_model_providers` | to be built |
 | `compaction_outcome` | to be built: the port of the Python Host's PR 483 (R148), what the user's last compaction of an agent did, on its row (`last_compaction`). The Python Host's contract is 107 with it; this Host's stays 106 until the port |
+| `voice_profile`, `speech_outcome` | to be built: the port of the Python Host's PR 485, what an agent sounds like and how it is heard as the Host resolves them (`voice_profile` on an agent's row, the creation answer and the roster's events, `voice_defaults` and `voice_profile_version` on the snapshot's head, the roster's `voice-changed` and `voice-profile` events, `accepts_language_set` on the hosted transcription models) and why a reply was not spoken (`reason`, `provider` and `trace_id` on `tts-error`, once a turn). The Python Host's contract is 109 with them; this Host's stays 106 until the port |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
