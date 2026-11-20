@@ -200,8 +200,12 @@ enum Ask {
         shelf: Arc<Shelf>,
         reply: Option<oneshot::Sender<Answer>>,
     },
-    /// Whether this asker may ask OpenCode for its sign-in methods: one at a time.
+    /// Whether this asker may ask OpenCode for its sign-in methods: one at a time, and only
+    /// while nothing fresh is remembered. `fresh` reads what is remembered when the desk
+    /// decides, not when the asker asked: a prober keeps what it found before it says
+    /// `Probed`, so an asker decided after that sees it.
     Probe {
+        fresh: Box<dyn FnOnce() -> bool + Send>,
         reply: oneshot::Sender<bool>,
     },
     Probed,
@@ -386,9 +390,10 @@ impl Actor {
             } => {
                 self.closed(&provider, attempt, state, &error, &shelf, reply);
             }
-            Ask::Probe { reply } => {
-                let _ = reply.send(!self.probing);
-                self.probing = true;
+            Ask::Probe { fresh, reply } => {
+                let granted = !self.probing && !fresh();
+                self.probing |= granted;
+                let _ = reply.send(granted);
             }
             Ask::Probed => self.probing = false,
         }
@@ -782,19 +787,26 @@ fn probe(program: &str, home: &Path) -> Option<(String, Map<String, Value>)> {
 }
 
 /// Asks OpenCode again for its sign-in methods when what was remembered is old, on a task of
-/// its own: the listing does not wait for it.
-fn refresh(app: &App, desk: &Arc<Desk>, remembered: Option<&str>) {
+/// its own: the listing does not wait for it. Whether it is old is the desk's to decide, in
+/// the same turn as whether a probe runs (see [`Ask::Probe`]); the question is at the desk
+/// before the listing is answered.
+fn refresh(app: &App, desk: &Arc<Desk>) {
     let Some(program) = program() else {
         return;
     };
-    #[allow(clippy::cast_precision_loss)]
-    let now = app.clock.now_ms() as f64 / 1000.0;
-    if rules::fresh(rules::remembered(remembered).at, now) {
+    let reading = app.clone();
+    let fresh = Box::new(move || {
+        #[allow(clippy::cast_precision_loss)]
+        let now = reading.clock.now_ms() as f64 / 1000.0;
+        rules::fresh(rules::remembered(remembered(&reading).as_deref()).at, now)
+    });
+    let (reply, granted) = oneshot::channel();
+    if desk.asks.send(Ask::Probe { fresh, reply }).is_err() {
         return;
     }
     let (app, desk) = (app.clone(), desk.clone());
     tokio::spawn(async move {
-        if desk.ask(|reply| Ask::Probe { reply }).await != Some(true) {
+        if granted.await != Ok(true) {
             return;
         }
         let home = desk.home.clone();
@@ -842,7 +854,7 @@ async fn listed(
     let Some(listing) = desk
         .ask(|reply| Ask::List {
             harness,
-            remembered: kept.clone(),
+            remembered: kept,
             reply,
         })
         .await
@@ -851,7 +863,7 @@ async fn listed(
     };
     // Only the Host that keeps the tools asks OpenCode anything.
     if app.config.accounts == Accounts::Select {
-        refresh(&app, &desk, kept.as_deref());
+        refresh(&app, &desk);
     }
     answer((200, listing))
 }
@@ -985,6 +997,51 @@ mod tests {
         let left: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
         assert_eq!(left.len(), 1, "nothing is left beside the store");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The interleaving the train's gate once met by chance, written out: an asker whose
+    /// listing read what was remembered before a probe's result was kept, and whose question
+    /// reaches the desk after that probe was given back, is decided by what is kept by then.
+    #[test]
+    fn a_probe_runs_one_at_a_time_and_never_once_a_fresh_result_is_kept() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (asks, _inbox) = mpsc::channel();
+        let mut actor = Actor {
+            asks,
+            tasks: Map::new(),
+            sessions: HashMap::new(),
+            attempts: 0,
+            probing: false,
+            home: PathBuf::new(),
+            timeout: Duration::ZERO,
+        };
+        let kept = Arc::new(AtomicBool::new(false));
+        let asker = || {
+            let kept = kept.clone();
+            Box::new(move || kept.load(Ordering::SeqCst))
+        };
+        let decide = |actor: &mut Actor, fresh: Box<dyn FnOnce() -> bool + Send>| {
+            let (reply, mut answered) = oneshot::channel();
+            actor.handle(Ask::Probe { fresh, reply });
+            answered.try_recv().unwrap()
+        };
+        assert!(
+            decide(&mut actor, asker()),
+            "nothing is kept: the first asker probes"
+        );
+        assert!(!decide(&mut actor, asker()), "one probe at a time");
+        // Asked while that probe ran, decided after its result was kept and it was given back.
+        let late = asker();
+        kept.store(true, Ordering::SeqCst);
+        actor.handle(Ask::Probed);
+        assert!(!decide(&mut actor, late), "what is kept by then decides");
+        assert!(!decide(&mut actor, asker()), "and every asker after");
+        assert!(!actor.probing, "a probe refused holds nothing");
+        // Old again, or nothing kept by a probe that failed: the next asker probes.
+        kept.store(false, Ordering::SeqCst);
+        assert!(decide(&mut actor, asker()));
+        actor.handle(Ask::Probed);
+        assert!(decide(&mut actor, asker()));
     }
 
     #[test]
