@@ -16,7 +16,6 @@ use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::launch_refused;
 use clarp_kernel::notify;
 use clarp_kernel::recovery;
-use clarp_kernel::said;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
@@ -815,17 +814,26 @@ pub fn audio_kept(record: &AgentRecord, line: &Line) -> Option<Value> {
     }))
 }
 
-/// An agent could not be heard: a few words for the user, and what went wrong.
-pub fn tts_error(record: &AgentRecord, error: &str) -> Value {
-    let error: String = error.chars().take(300).collect();
-    json!({
+/// A reply that was not spoken (feature `speech_outcome`): words for the user made from the
+/// reason and the provider's name, the reason (also as `error`), the provider that was to
+/// speak and the turn whose reply it is, each left out when there is none.
+pub fn tts_error(record: &AgentRecord, message: &str, reason: &str, provider: &str, trace: &str) -> Value {
+    let mut told = json!({
         "type": "tts-error",
         "session": record.session,
         "agent_id": record.agent_id,
         "persona": record.persona,
-        "message": said::failure_told(&error),
-        "error": error,
-    })
+        "message": message,
+        "error": reason,
+        "reason": reason,
+    });
+    if !provider.is_empty() {
+        told["provider"] = json!(provider);
+    }
+    if !trace.is_empty() {
+        told["trace_id"] = json!(trace);
+    }
+    told
 }
 
 /// How many requests wait for the user changed, or may have.

@@ -20636,10 +20636,12 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
         }),
     );
     answered(&session, "m3");
-    // An agent nobody gave a voice stays silent without a word.
+    // An agent nobody gave a voice is not heard, nothing is announced, and the apps are told
+    // why once for its turn, however many of its clips are not spoken (feature speech_outcome).
     let stranger = host.new_agent("Stranger");
-    host.send(&stranger, "<speak>Unheard.</speak>", "s1");
+    host.send(&stranger, "<speak>Unheard.</speak> and <speak>Nor this.</speak>", "s1");
     answered(&stranger, "s1");
+    wait_for("the silence to be told", || !told("tts-error").is_empty());
     std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
         (
@@ -20647,27 +20649,47 @@ fn what_an_agent_says_aloud_becomes_a_clip_the_apps_fetch_and_play() {
             voice.asked().len(),
             told("tts-error").len()
         ),
-        (3, 3, 0)
+        (3, 3, 1)
     );
+    let silent = told("tts-error")[0].clone();
+    assert_eq!(
+        (
+            &silent["session"],
+            &silent["message"],
+            &silent["error"],
+            &silent["reason"],
+            &silent["provider"]
+        ),
+        (
+            &json!(stranger),
+            &json!("Not spoken: Cartesia Sonic has no voice for Stranger."),
+            &json!("no_voice"),
+            &json!("no_voice"),
+            &json!("cartesia")
+        )
+    );
+    assert!(silent["trace_id"].as_str().is_some_and(|trace| !trace.is_empty()), "{silent}");
 
     // The engine is down: the clip that was announced is over, and the apps are told why
     // nothing is heard.
     voice.down.store(true, Ordering::SeqCst);
     host.send(&session, "<speak>Into the void.</speak>", "m4");
-    wait_for("the failure to be told", || !told("tts-error").is_empty());
-    let failed = told("tts-error")[0].clone();
+    wait_for("the failure to be told", || told("tts-error").len() == 2);
+    let failed = told("tts-error")[1].clone();
     assert_eq!(
         (
             &failed["session"],
             &failed["persona"],
             &failed["message"],
-            &failed["error"]
+            &failed["error"],
+            &failed["provider"]
         ),
         (
             &json!("maximus"),
             &json!("Maximus"),
-            &json!("Voice synthesis failed."),
-            &json!("HTTP 500: the stand-in is down")
+            &json!("Not spoken: Cartesia Sonic did not make the clip."),
+            &json!("provider_failed"),
+            &json!("cartesia")
         )
     );
     let lost = told("audio")[3]["clip_id"].as_u64().unwrap();

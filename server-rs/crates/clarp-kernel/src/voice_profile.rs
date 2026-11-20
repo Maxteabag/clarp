@@ -508,3 +508,105 @@ pub fn clip_failure(view: &HostView, agent: Agent<'_>, google_code: Option<&str>
 pub fn shipped_labels() -> BTreeMap<String, BTreeMap<String, String>> {
     voices::shipped_labels()
 }
+
+/// How long a turn is told once of a reason it was not spoken for.
+pub const TURN_TOLD_MS: i64 = 6 * 3600 * 1000;
+/// How long a clip of no turn is told once, by agent and reason.
+pub const UNTRACED_TOLD_MS: i64 = 10 * 60 * 1000;
+/// The most of each kind the Host remembers; the oldest go first.
+pub const OUTCOMES_KEPT: usize = 1024;
+
+/// What the apps were told of clips not spoken, and which turns had a clip spoken: so that a
+/// turn is told once a reason, and a reply partly spoken is said to be so. Kept in memory
+/// only, at most [`OUTCOMES_KEPT`] of each, pruned of what is older than its window at every
+/// write; a restart forgets it.
+#[derive(Debug, Default)]
+pub struct Outcomes {
+    told: std::collections::VecDeque<(String, String, &'static str, i64)>,
+    spoke: std::collections::VecDeque<(String, String, i64)>,
+}
+
+fn window(trace: &str) -> i64 {
+    if trace.is_empty() { UNTRACED_TOLD_MS } else { TURN_TOLD_MS }
+}
+
+impl Outcomes {
+    fn prune(&mut self, now_ms: i64) {
+        let old = |trace: &str, at: i64| now_ms - at > window(trace);
+        self.told.retain(|(_, trace, _, at)| !old(trace, *at));
+        self.spoke.retain(|(_, trace, at)| !old(trace, *at));
+        while self.told.len() > OUTCOMES_KEPT {
+            self.told.pop_front();
+        }
+        while self.spoke.len() > OUTCOMES_KEPT {
+            self.spoke.pop_front();
+        }
+    }
+
+    /// Whether the apps are to be told that a clip of this agent's turn was not spoken for
+    /// this reason: the first time in the turn, and for a clip of no turn the first time in
+    /// [`UNTRACED_TOLD_MS`]. Remembered when it is.
+    pub fn tell(&mut self, agent: &str, trace: &str, reason: &'static str, now_ms: i64) -> bool {
+        self.prune(now_ms);
+        let known = self.told.iter().any(|(a, t, r, _)| a == agent && t == trace && *r == reason);
+        if !known {
+            self.told.push_back((agent.to_string(), trace.to_string(), reason, now_ms));
+            self.prune(now_ms);
+        }
+        !known
+    }
+
+    /// A clip of this agent's turn was spoken.
+    pub fn spoke(&mut self, agent: &str, trace: &str, now_ms: i64) {
+        self.spoke.retain(|(a, t, _)| !(a == agent && t == trace));
+        self.spoke.push_back((agent.to_string(), trace.to_string(), now_ms));
+        self.prune(now_ms);
+    }
+
+    /// Whether a clip of this agent's turn was spoken within its window.
+    pub fn partly(&self, agent: &str, trace: &str, now_ms: i64) -> bool {
+        let found = self.spoke.iter().find(|(a, t, _)| a == agent && t == trace);
+        found.is_some_and(|(_, trace, at)| now_ms - at <= window(trace))
+    }
+
+    /// How many of each are remembered.
+    pub fn kept(&self) -> (usize, usize) {
+        (self.told.len(), self.spoke.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_turn_is_told_once_a_reason_and_what_is_remembered_is_bounded() {
+        let mut outcomes = Outcomes::default();
+        assert!(outcomes.tell("a", "t1", NO_VOICE, 0));
+        assert!(!outcomes.tell("a", "t1", NO_VOICE, 1_000), "once a turn and reason");
+        assert!(outcomes.tell("a", "t1", PROVIDER_FAILED, 1_000), "another reason is told");
+        assert!(outcomes.tell("b", "t1", NO_VOICE, 1_000), "another agent is told");
+        assert!(outcomes.tell("a", "t2", NO_VOICE, 1_000), "another turn is told");
+        assert!(!outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS), "within the turn's window");
+        assert!(outcomes.tell("a", "t1", NO_VOICE, TURN_TOLD_MS + 1), "past it, told again");
+        // A clip of no turn: once in ten minutes.
+        assert!(outcomes.tell("a", "", NO_VOICE, 0));
+        assert!(!outcomes.tell("a", "", NO_VOICE, UNTRACED_TOLD_MS));
+        assert!(outcomes.tell("a", "", NO_VOICE, UNTRACED_TOLD_MS + 1));
+        // Pruned at every write: what is past its window is gone, and never more than the bound.
+        let mut outcomes = Outcomes::default();
+        outcomes.tell("a", "", NO_VOICE, 0);
+        outcomes.tell("a", "t", NO_VOICE, 0);
+        outcomes.tell("b", "t", NO_VOICE, UNTRACED_TOLD_MS + 1);
+        assert_eq!(outcomes.kept().0, 2, "the untraced one is pruned when the next is written");
+        for n in 0..(OUTCOMES_KEPT + 10) {
+            let trace = format!("t{n}");
+            outcomes.tell("a", &trace, NO_VOICE, 5);
+            outcomes.spoke("a", &trace, 5);
+        }
+        assert_eq!(outcomes.kept(), (OUTCOMES_KEPT, OUTCOMES_KEPT));
+        assert!(!outcomes.partly("a", "t0", 5), "the oldest went first");
+        assert!(outcomes.partly("a", &format!("t{}", OUTCOMES_KEPT + 9), 5));
+        assert!(!outcomes.partly("a", &format!("t{}", OUTCOMES_KEPT + 9), 5 + TURN_TOLD_MS + 1));
+    }
+}
