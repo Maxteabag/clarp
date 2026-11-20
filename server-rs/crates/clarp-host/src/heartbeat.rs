@@ -525,7 +525,7 @@ mod due_work_tests {
     #[tokio::test]
     async fn the_cached_book_matches_what_the_store_accepted() {
         let place = crate::unkept::at_the_port::place("heartbeat-kept");
-        let app = place.app();
+        let app = place.app().await;
         let desk = &app.heartbeat;
         let read = |book: &mut Book| book.settings.interval_sec;
         desk.ask(&app, |book| book.settings.interval_sec = 600)

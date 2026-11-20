@@ -127,7 +127,7 @@ impl Desk {
 
 /// Name the failed read without the contents of its record. The fleet coalesces repeats.
 fn failed(app: &App, what: &str, why: &crate::agent::Unavailable) {
-    app.fleet.unkept(ROLE, &format!("{what}: {}", why.0));
+    app.fleet.unread(ROLE, &format!("{what}: {}", why.0));
 }
 
 /// The keeper that is on, as a look reads it.

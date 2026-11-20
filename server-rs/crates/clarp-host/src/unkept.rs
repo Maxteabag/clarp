@@ -30,9 +30,11 @@ struct Held {
 pub struct Log {
     say: Arc<dyn Fn(&str) + Send + Sync>,
     clock: Arc<dyn Clock + Send + Sync>,
-    /// By kind and words.
-    held: Arc<Mutex<HashMap<(String, String), Held>>>,
+    writes: Failures,
+    reads: Failures,
 }
+
+type Failures = Arc<Mutex<HashMap<(String, String), Held>>>;
 
 impl Log {
     /// The Host's own log: its standard error, beside its other lines.
@@ -48,7 +50,8 @@ impl Log {
         Self {
             say: Arc::new(said),
             clock,
-            held: Arc::default(),
+            writes: Arc::default(),
+            reads: Arc::default(),
         }
     }
 
@@ -59,10 +62,19 @@ impl Log {
     /// The one way a failed write is said: the kind and the store's words. The first is said
     /// at once; the same again only a minute after, with how often it happened since.
     pub fn unkept(&self, kind: &str, why: &str) {
-        let now = self.clock.now_ms();
         let line = format!("clarp-host: a record of the kind {kind} was not kept: {why}");
+        self.report(&self.writes, kind, why, line);
+    }
+
+    pub fn unread(&self, kind: &str, why: &str) {
+        let line = format!("clarp-host: the records of the kind {kind} could not be read: {why}");
+        self.report(&self.reads, kind, why, line);
+    }
+
+    fn report(&self, failures: &Failures, kind: &str, why: &str, line: String) {
+        let now = self.clock.now_ms();
         let said = {
-            let mut held = self.held.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut held = failures.lock().unwrap_or_else(PoisonError::into_inner);
             held.retain(|_, failure| now - failure.said_at < FORGOTTEN_AFTER_MS);
             match held.get_mut(&(kind.to_string(), why.to_string())) {
                 None => {
@@ -98,6 +110,29 @@ impl Log {
 impl std::fmt::Debug for Log {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Log")
+    }
+}
+
+/// Keep the operation with its failure when one pass both reads and writes records.
+pub(crate) enum RecordFailure {
+    Read(crate::agent::Unavailable),
+    Write(crate::agent::Unavailable),
+}
+
+impl RecordFailure {
+    pub(crate) fn report(self, fleet: &crate::fleet::FleetHandle, kind: &str) {
+        match self {
+            Self::Read(why) => fleet.unread(kind, &why.0),
+            Self::Write(why) => fleet.unkept(kind, &why.0),
+        }
+    }
+}
+
+impl From<RecordFailure> for crate::agent::Unavailable {
+    fn from(failure: RecordFailure) -> Self {
+        match failure {
+            RecordFailure::Read(why) | RecordFailure::Write(why) => why,
+        }
     }
 }
 
@@ -221,6 +256,31 @@ mod tests {
         assert_eq!(
             *line.lock().unwrap(),
             ["clarp-host: a record of the kind used was not kept: disk full"]
+        );
+    }
+
+    #[test]
+    fn reads_and_writes_coalesce_independently() {
+        let clock = Arc::new(ManualClock::starting_at(1000));
+        let lines = Arc::new(Mutex::new(Vec::new()));
+        let said = lines.clone();
+        let log = super::Log::to(
+            move |text| said.lock().unwrap().push(text.to_owned()),
+            clock.clone(),
+        );
+        log.unread("ring", "busy");
+        log.unkept("ring", "busy");
+        clock.advance_ms(59_999);
+        log.unread("ring", "busy");
+        clock.advance_ms(1);
+        log.unread("ring", "busy");
+        assert_eq!(
+            *lines.lock().unwrap(),
+            [
+                "clarp-host: the records of the kind ring could not be read: busy",
+                "clarp-host: a record of the kind ring was not kept: busy",
+                "clarp-host: the records of the kind ring could not be read: busy (2 times since it was last said)",
+            ]
         );
     }
 
@@ -372,7 +432,7 @@ pub(crate) mod at_the_port {
         }
 
         /// A desk can use the real fleet and its refusing port without starting any timers.
-        pub(crate) fn app(&self) -> crate::edge::App {
+        pub(crate) async fn app(&self) -> crate::edge::App {
             let config = self.config.clone();
             let clock = self.clock.clone();
             let fleet = self.fleet.clone();
@@ -388,7 +448,8 @@ pub(crate) mod at_the_port {
             crate::edge::App {
                 capture: crate::diagnostics::Capture::start(
                     Box::new(clarp_store_files::diagnostics::HourFiles::new(
-                        self.dir.join("diagnostics"), crate::diagnostics::CAP,
+                        self.dir.join("diagnostics"),
+                        crate::diagnostics::CAP,
                     )),
                     clock.clone(),
                     Default::default(),
@@ -396,7 +457,7 @@ pub(crate) mod at_the_port {
                 ),
                 controller_actions: Arc::default(),
                 connector: Arc::new(crate::connector::Connector::told(&config)),
-                ears: Arc::new(crate::heard::Ears::new(&config)),
+                ears: Arc::new(crate::heard::Ears::new(&config, &fleet).await.unwrap()),
                 seats: Arc::new(crate::seats::Desk::new("", false)),
                 faces: Arc::new(crate::faces::Faces::new(None)),
                 android: Arc::new(crate::fcm::Sender::new(

@@ -352,7 +352,7 @@ mod due_work_tests {
     #[tokio::test]
     async fn the_cached_book_matches_what_the_store_accepted() {
         let place = crate::unkept::at_the_port::place("schedules-kept");
-        let app = place.app();
+        let app = place.app().await;
         let desk = &app.schedules;
         let made = Made {
             agent: Some(("agent-id", "agent")),

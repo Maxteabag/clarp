@@ -1062,6 +1062,10 @@ impl FleetHandle {
         self.log.unkept(kind, why);
     }
 
+    pub fn unread(&self, kind: &str, why: &str) {
+        self.log.unread(kind, why);
+    }
+
     /// Keeps as [`Self::keep`] does, for a caller that waits on nothing: a failure is said.
     pub async fn keep_said(&self, kind: &'static str, key: String, value: Option<Vec<u8>>) {
         if let Err(why) = self.keep(kind, key, value).await {

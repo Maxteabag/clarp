@@ -446,7 +446,14 @@ async fn pass(app: &App, now: i64) -> Result<i64, Unavailable> {
                 ),
             ))
         })
-        .await?;
+        .await;
+    let owner = match owner {
+        Ok(owner) => owner,
+        Err(why) => {
+            app.fleet.unread(ROLE, &why.0);
+            return Ok(now + 15_000);
+        }
+    };
     when_enabled(owner, |owner| active_pass(app, now, owner)).await
 }
 
