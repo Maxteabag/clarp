@@ -603,10 +603,16 @@ def _restore_assistant_state_txn(database, *, agent_id: str,
         # re-derives it — but a dream digest was written by an isolated
         # backend session that appears in no transcript, so deleting it here
         # would erase it permanently on the agent's very next turn.
+        # An agent's note to the user (POST /agent-notes) is the Host's own row
+        # too, written while the turn ran: it stays where it is, never deleted
+        # here and never put back from the snapshot (that would be a second copy).
         database.execute(
             "DELETE FROM messages WHERE agent_id=? AND backend_session_id=? "
-            "AND role='assistant' AND source_file NOT LIKE 'dream:%'",
+            "AND role='assistant' AND source_file NOT LIKE 'dream:%' "
+            "AND source_file NOT LIKE 'note:%'",
             (agent_id, backend_session_id))
+        baseline_messages = [row for row in baseline_messages
+                             if not str(row.get("source_file") or "").startswith("note:")]
         message_columns = (
             "message_id", "agent_id", "backend_session_id", "source_file", "seq",
             "role", "timestamp", "text", "kind", "tool_name", "tools_json",
