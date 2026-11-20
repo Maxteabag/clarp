@@ -692,6 +692,21 @@ async fn automation_settings() -> Json<Value> {
     Json(json!({ "special_treatment": false }))
 }
 
+async fn remote_post(State(app): State<App>, body: axum::body::Bytes) -> Result<Json<Value>, ApiError> {
+    let now = app.clock.now_ms();
+    let event = clarp_kernel::remote_action::post(&body,now,|| ids::secret(12)).map_err(|why| bad(&why))?;
+    let receipt = clarp_kernel::remote_action::receipt(&event);
+    app.hub.ephemeral(event,now);
+    Ok(Json(receipt))
+}
+
+async fn remote_get(State(app): State<App>, axum::extract::RawQuery(query): axum::extract::RawQuery) -> Result<impl axum::response::IntoResponse,ApiError> {
+    let now = app.clock.now_ms();
+    let event = clarp_kernel::remote_action::get(query.as_deref().unwrap_or_default(),now).map_err(|why| bad(&why))?;
+    app.hub.ephemeral(event,now);
+    Ok(([(axum::http::header::CONTENT_TYPE, "text/html")],clarp_kernel::remote_action::PAGE))
+}
+
 pub fn routes() -> Router<App> {
     Router::new()
         .route("/status", get(status))
@@ -715,5 +730,6 @@ pub fn routes() -> Router<App> {
         )
         .route("/tool-explanations", post(explain))
         .route("/tool-explanations/stats", get(explained_how))
+        .route("/remote-action",get(remote_get).post(remote_post))
         .merge(crate::controller_actions::routes())
 }

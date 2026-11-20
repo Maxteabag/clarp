@@ -36,7 +36,7 @@ one of these:
 | `dreaming` | left out by the owner's decision of 18 Nov 2026 |
 | `agent_goals` | absent on purpose: it is Codex's own goal, kept by Codex's app server, which this Host does not run |
 | `agent_creation_details` | a dead name the reference still lists; to be removed (the release owner's word of 19 Nov 2026). Nothing reads it |
-| `managed_skills`, `agent_portraits`, `backend_auth`, `goal_ledger`, `harness_model_providers`, `remote_action` | to be built |
+| `managed_skills`, `agent_portraits`, `backend_auth`, `goal_ledger`, `harness_model_providers` | to be built |
 
 Parts of the contract that no feature stands for, which the Rust Host sends empty for now
 (`NOT_BUILT` in `conformance/conform.py`):
