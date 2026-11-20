@@ -880,6 +880,19 @@ def _resolve_contact_avatar_generation(data: dict[str, Any]) -> bool:
     return DEFAULT_CONTACT_AVATAR_GENERATION
 
 
+def _controller_action_urls(raw) -> tuple[str, ...]:
+    """[controller_actions] allowed_urls, each parsed once (lib.url_destination.prefix): one
+    that carries user information, a query or a fragment, or does not parse, is refused here,
+    with one line saying how many (R133)."""
+    from . import url_destination
+    from .log import log
+    texts = [str(url).strip() for url in (raw or []) if str(url).strip()]
+    kept = tuple(text for text in texts if url_destination.prefix(text) is not None)
+    if len(kept) != len(texts):
+        log("config.controller_action_urls", f"refused {len(texts) - len(kept)} allowed URL(s) that do not parse "
+                                             "as a plain http(s) destination")
+    return kept
+
 def load(path: pathlib.Path | None = None) -> Config:
     """Read TOML config; return a Config with defaults filled in. Cached.
 
@@ -1019,9 +1032,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         local_tls_port  = int(network.get("local_tls_port", 7683)),
         relay_enabled   = bool(network.get("relay_enabled", False)),
         relay_config_path = str(path.parent / "relay.json"),
-        controller_action_urls = tuple(
-            str(url).strip() for url in controller_actions.get("allowed_urls", []) or []
-            if str(url).strip()),
+        controller_action_urls = _controller_action_urls(controller_actions.get("allowed_urls", [])),
         # Only a literal `false` turns the desk off: a typo must not remove it.
         hotseat_desk_enabled = hotseat.get("desk", True) is not False,
         default_session = str(server.get("default_session", "claude")),
