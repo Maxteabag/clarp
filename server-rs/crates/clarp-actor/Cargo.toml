@@ -16,6 +16,7 @@ serde_json.workspace = true
 [dev-dependencies]
 clarp-codec.workspace = true
 clarp-store-mem.workspace = true
+clarp-store-sqlite.workspace = true
 
 [lints]
 workspace = true
