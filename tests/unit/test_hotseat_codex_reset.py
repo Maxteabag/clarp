@@ -535,3 +535,59 @@ def test_a_reconcile_of_an_attempt_stored_before_the_aliases_uses_the_keepers_re
     state = json.loads(settings_store.get_text("hotseat-reset.codex.state"))
     assert state["result"]["verified"] is True
 
+
+# ---- the other survivors: a negative count; the stop told again after it cleared -------------------
+
+def test_a_negative_count_of_resets_left_is_not_told(tmp_path, monkeypatch):
+    """(M8) A receipt saying -1 resets are left: the notice says no count, never '-1 banked resets'."""
+    class Process:
+        pid = 123
+        returncode = 0
+        def communicate(self, **kwargs):
+            return json.dumps({"status": "redeemed", "verified": True, "account": "work", "resets_left": -1}), ""
+    with patch.object(janitor_reset.config, "load", return_value=SimpleNamespace(codex_reset_command=("broker",))), \
+            patch.object(janitor_reset.subprocess, "Popen", return_value=Process()), \
+            patch.object(janitor_reset, "_kill_group"):
+        result = janitor_reset.attempt("codex_reset_command", [], accounts=("work",), provider="codex")
+    assert result["verified"] is True and result["resets_left"] is None
+
+
+def _cap_told(sent):
+    return [n["preview"] for n in sent].count("Codex: no automatic banked reset now: the cap of 1 in 24 hours is reached.")
+
+
+def test_the_cap_is_told_again_after_an_account_had_room(switcher, tmp_path, monkeypatch):  # noqa: F811
+    """(M11) Cap told; then an account has room (the stop is over); then all are spent again the same
+    day: the cap is told again, once."""
+    owner, worker, readings, calls, sent = switcher
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=1)
+    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "work"}))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    spent = _codex(("work", True, 0.0), ("home", False, 0.0))
+    for reading in (spent, spent, spent, _codex(("work", True, 0.0), ("home", False, 0.8)), spent, spent):
+        readings["codex"] = reading
+        _keeper_run(worker, clock)
+        clock[0] += 20 * 60_000
+    assert len(_requests(requests)) == 1 and _cap_told(sent) == 2
+
+
+def test_the_cap_is_told_again_after_a_redemption(switcher, tmp_path, monkeypatch):  # noqa: F811
+    """(M12) A redemption, the cap told; the next day another redemption, and the cap again: told
+    again, because a redemption ends the stop."""
+    owner, worker, readings, calls, sent = switcher
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=1)
+    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "work"}))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    readings["codex"] = _codex(("work", True, 0.0), ("home", False, 0.0))
+    for _ in range(3):
+        _keeper_run(worker, clock)
+        clock[0] += 20 * 60_000
+    clock[0] += 24 * 60 * 60_000
+    for _ in range(3):
+        _keeper_run(worker, clock)
+        clock[0] += 20 * 60_000
+    assert len(_requests(requests)) == 2 and _cap_told(sent) == 2
