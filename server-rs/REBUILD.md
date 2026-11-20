@@ -3336,10 +3336,9 @@ deleted parent and its helper. The wrong rules are in `tools/plants/bounded-clos
 looks in `/proc` until every thread of every process whose group is the tool's is stopped or a zombie; while one is
 not, the group is told again, so a process forked while the signal went out is stopped too. Then it takes everything
 the group printed: nothing waits in either pipe, neither pump has a chunk in hand (each pump reads and records under
-a turn of its own), no hook's report is half taken (a request on the socket is read and carried out under its
-connection's turn, and a connection is taken from the listener under the list of connections) and no connection
-waits to be taken, all at once. The spool's one writer then says how long the spool is after every record sent to it
-before. The answer gains `held`: `spool` (that length, the offset after the last whole record), `partial_out` and
+a turn of its own), every complete hook report is handled under its connection's turn, and no connection waits to
+be accepted. The spool's one writer then says how long the spool is after every record sent to it before. If the
+writer missed a record or cannot answer in time, the shim refuses the hold. The answer gains `held`: `spool` (that length, the offset after the last whole record), `partial_out` and
 `partial_err` (the bytes of a line each pump holds that is not whole: it had begun to print), `partial_reports` (the
 hooks' reports begun and not whole: a hook stopped halfway through one cannot finish it, so it is said and not waited
 for; to the Host it is something begun, as a half line is) and `left_ms` (what is left of the bound). The bound is the smaller of what was asked and two seconds (`HOLD_MOST_MS`), counted from the
