@@ -1429,10 +1429,30 @@ async fn snapshot(State(app): State<App>, Query(query): Query<SnapshotQuery>) ->
             }
         }
     }
+    // How each agent sounds and is heard, from one view of the Host and one pass over its
+    // agents; an archived agent speaks to nobody and has none.
+    let voices = crate::profile::view(&app.mouth, &app.ears, &directory);
+    let profiles: HashMap<String, Value> = crate::profile::all(&voices, &directory).into_iter().collect();
+    let archived: HashSet<&str> = directory
+        .members
+        .iter()
+        .chain(&directory.janitors)
+        .filter(|member| put_away(member))
+        .map(|member| member.record.session.as_str())
+        .collect();
+    for row in &mut agents {
+        let session = row["session"].as_str().unwrap_or("").to_string();
+        if let (false, Some(profile)) = (archived.contains(session.as_str()), profiles.get(&session)) {
+            row["voice_profile"] = profile.clone();
+        }
+    }
+    let (voice_defaults, voice_profile_version) = crate::profile::head(&voices);
     let mut body = json!({
         "agents": agents,
         "focus": directory.focus,
         "roster": roster,
+        "voice_defaults": voice_defaults,
+        "voice_profile_version": voice_profile_version,
         "personas": personas,
         "available_mcp_servers": [],
         "model_avatars": clarp_kernel::portraits::model_avatars(directory.setting(clarp_kernel::portraits::MODEL_SETTING)),
@@ -1767,6 +1787,11 @@ fn made_as(app: &App, record: &AgentRecord) -> Value {
             ((*field).to_string(), value)
         })
         .collect();
+    let mut agent = agent;
+    // How it sounds and is heard, as the snapshot will show it (feature voice_profile).
+    if let Some(profile) = crate::profile::of_session(&app.mouth, &app.ears, &directory, &record.session) {
+        agent.insert("voice_profile".into(), profile);
+    }
     json!({
         "ok": true,
         "session": record.session,

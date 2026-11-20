@@ -301,6 +301,19 @@ impl Mouth {
         }
     }
 
+    /// The names of Cartesia's voices as this Host last listed them, by id, without asking
+    /// anybody: what a profile calls a voice of Cartesia's. Never listed: none.
+    pub(crate) fn cartesia_names(&self) -> std::collections::BTreeMap<String, String> {
+        let kept = self
+            .cartesia_voices
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let listed = kept.iter().flat_map(|(_, voices)| voices.iter());
+        listed
+            .filter_map(|voice| Some((voice["id"].as_str()?.to_string(), voice["name"].as_str()?.to_string())))
+            .collect()
+    }
+
     /// The ids of Cartesia's voices as this Host last listed them, however long ago, without
     /// asking anybody: what a voice for a new persona is picked from first.
     pub(crate) fn cartesia_known(&self) -> Vec<String> {
