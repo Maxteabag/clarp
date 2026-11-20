@@ -134,8 +134,8 @@ def call(principal):
     return {'do': 'call', 'principal': principal}
 
 
-def user_call(principal, agent='a-theo', request='call-1', nonce='nonce-1'):
-    return {'do': 'user_call', 'principal': principal, 'agent': agent, 'request_id': request, 'client_nonce': nonce}
+def user_call(principal, agent='a-theo', request='call-1', nonce='nonce-1', **more):
+    return {'do': 'user_call', 'principal': principal, 'agent': agent, 'request_id': request, 'client_nonce': nonce, **more}
 
 
 def join(principal, at=-1, **change):
@@ -398,6 +398,26 @@ SCRIPTS = [
                close(A), tick(61 * SECOND),
                call_push(A, 500, 'InternalServerError'), call_push(D, raises=True), live_ring(event_id='evt-2'), cancel(''),
                tick(61 * SECOND), callkit(False), live_ring('a-mike', event_id='evt-3'), decline(A)]},
+    # The model a live call runs on is chosen for the client that answers (its X-Clarp-Client, exactly as sent), when
+    # the grant is made, and kept with the call: a repeat of the answer, the join and the session name the same one
+    # (the reference's PR 479). With the owner's file naming none: gpt-live-1.1 from ios 75 and android 29.
+    {'name': 'the model of a live call is the one for the client that answered, kept with the call',
+     'steps': [PHONE_A, voip(B, TOKEN_B, [LIVE]), live_ring(), live_answer(A, client='ios/2985 contract=74'),
+               live_answer(A, client='ios/2986 contract=75'), join(A), close(A), tick(61 * SECOND),
+               live_ring(event_id='evt-2'), live_answer(B, request='answer-b', client='ios/2986 contract=75'),
+               live_answer(B, request='answer-b'), live_answer(B, request='answer-b', client='ios/2985 contract=74'), join(B),
+               close(B), tick(61 * SECOND)]
+     + [step for n, client in enumerate(['android/993 contract=29', 'android/992 contract=28', 'iOS/2986 contract=75'], 3)
+        for step in (live_ring(event_id=f'evt-{n}'), live_answer(A, request=f'answer-{n}', client=client), close(A),
+                     tick(61 * SECOND))]},
+    {'name': 'a client that does not say exactly that it accepts the model runs on the one every app accepts',
+     'steps': [PHONE_A]
+     + [step for n, client in enumerate(['ios/2986 contract=075', 'ios/2986  contract=75', 'ios/2986 contract=75 more',
+                                         'desktop/3 contract=99', '', None], 1)
+        for step in (live_ring(event_id=f'evt-{n}'), live_answer(A, request=f'answer-{n}', client=client), close(A),
+                     tick(61 * SECOND))]
+     + [taking(), user_call(A, client='ios/2986 contract=75'), user_call(A), close(A), user_call(A, request='call-2'),
+        close(A)]},
     {'name': 'rings are kept, and a live one keeps what it was told',
      'steps': [PHONE_A, voip(B, TOKEN_B, [LIVE, LIVE]), voip(C, TOKEN_C), voip(D, 'd' * 64, [CLASSIC, CLASSIC])]
      + [step for n in range(3) for step in (live_ring(event_id=f'evt-{n}'), live_answer(A, request=f'answer-{n}'),
@@ -632,7 +652,8 @@ def run(root) -> dict:
                 return agent_rings.ring(caller_agent_id=step['turn'], agent=step['agent'], reason=step['reason'],
                                         opening_line=step['opening_line'], **more)
             if do == 'user_call':
-                return agent_rings.user_call_live(step['principal'], step['agent'], step['request_id'], step['client_nonce'])
+                return agent_rings.user_call_live(step['principal'], step['agent'], step['request_id'], step['client_nonce'],
+                                                  **({'client': step['client']} if 'client' in step else {}))
             ring_id = which(step)
             if do == 'look':
                 principal = step['principal']
@@ -644,7 +665,7 @@ def run(root) -> dict:
                     raise agent_rings.CallError(404, 'unknown call')
                 return {'ring': record, 'settings': agent_rings.settings()}
             if do == 'answer':
-                more = {name: step[name] for name in ('conversation_mode', 'opening_mode', 'request_id', 'client_nonce')
+                more = {name: step[name] for name in ('conversation_mode', 'opening_mode', 'request_id', 'client_nonce', 'client')
                         if name in step}
                 return agent_rings.answer(step['principal'], ring_id, **more)
             if do == 'decline':
