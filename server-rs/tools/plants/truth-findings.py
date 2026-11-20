@@ -29,7 +29,8 @@ for label,old,new in [
     ('the Oracle not asked','not_built_at(&uri, "The Oracle is")','not_built("The Oracle is")'),
     # 'the logins not asked' lives in backend-auth.py since the sign-ins were built ('every way under the door is a
     # change'): /backend-auth/ answers only its three changes, and anything else under it is no route.
-    ('the harness not asked','not_built_at(&uri, "Signing a harness in to a provider of models is")','not_built("Signing a harness in to a provider of models is")'),
+    # 'the harness not asked': the doors under /harness-providers/ are built; that any other
+    # action there is no route is planted in harness-providers.py ('any action is a change').
     ('the old goal not asked','not_built_at(&uri, "A goal of this kind is")','not_built("A goal of this kind is")'),
 ]:
     PLANTS.append((S,'wire',label,old,new))

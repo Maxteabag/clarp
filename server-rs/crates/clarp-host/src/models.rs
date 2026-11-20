@@ -250,6 +250,16 @@ async fn row_of(
 }
 
 impl Shelf {
+    /// Forgets what was found, so that the next who asks has the tools asked again: a
+    /// provider was signed in or out, and OpenCode may run other models
+    /// (`harness_providers`).
+    pub fn forget(&self) {
+        *self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
         if !matches!(tool, "codex" | "agy") {
             return None;
