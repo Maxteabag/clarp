@@ -1186,7 +1186,7 @@ advances. `since` is a Host time: when `next_since` is `null`, keep the answer's
 `server_now` for the next time (use `since=0` on the very first call). Every image deleted
 after `server_now` comes in a later answer; one deleted in the millisecond of the read may
 come twice. The Host keeps the record of a deleted image for good. `400` for a missing or
-negative `since` or a `limit` that is not a number. Any device that may read `GET /media`
+negative `since` or a `limit` that is not a number from 1 to 1,000. Any device that may read `GET /media`
 may read this.
 
 **Freshness.** `media-changed` (see the event table) is sent for an image published
