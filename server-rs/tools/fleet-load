@@ -31,8 +31,12 @@ def records(path):
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
 
+SESSION_PREFIX = "smp-"
+
+
 def session(i):
-    return f"sample-{i:04d}"
+    # The whole worker name must fit Linux TASK_COMM_LEN to identify its CPU counters.
+    return f"{SESSION_PREFIX}{i:04d}"
 
 
 def row_id(i, k):
@@ -285,17 +289,26 @@ def verify_limit():
         raise RuntimeError("benchmark memory limit missing")
 
 
-def counters(pid):
-    # CPU is process-wide. Context switches on /proc/PID/status alone cover only its main thread.
+def counters(pid, classes):
+    """Process CPU plus per-worker scheduled time and context-switch counts."""
     proc=Path("/proc")/str(pid)
     stat=(proc/"stat").read_text().rsplit(")",1)[1].split()
     hz=os.sysconf("SC_CLK_TCK")
     totals={"cpu":(int(stat[11])+int(stat[12]))/hz,"voluntary":0,"involuntary":0}
     for tid in (proc/"task").iterdir():
         try:
+            name=(tid/"comm").read_text().strip()
+            group=classes.get(name,"other")
+            time_ns=int((tid/"schedstat").read_text().split()[0])
+            key=group+"_sched_ns"
+            totals[key]=totals.get(key,0)+time_ns
             for line in (tid/"status").read_text().splitlines():
-                if line.startswith("voluntary_ctxt_switches:"):totals["voluntary"]+=int(line.split()[1])
-                elif line.startswith("nonvoluntary_ctxt_switches:"):totals["involuntary"]+=int(line.split()[1])
+                label,_,value=line.partition(":")
+                if label in ("voluntary_ctxt_switches","nonvoluntary_ctxt_switches"):
+                    column="voluntary" if label=="voluntary_ctxt_switches" else "involuntary"
+                    totals[column]+=int(value)
+                    key=group+"_"+column
+                    totals[key]=totals.get(key,0)+int(value)
         except FileNotFoundError:
             continue
     return totals
@@ -348,21 +361,22 @@ def observe(root,shape,env,deadline,stage):
             for _ in range(11):
                 snap,elapsed=get(host.port,path)
                 got={a["session"] for a in snap["agents"]}
-                assert {s for s in got if s.startswith("sample-")}==set(expected_return)
+                assert {s for s in got if s.startswith(SESSION_PREFIX)}==set(expected_return)
                 samples[key].append(elapsed)
         # No sampling traffic or client requests during the idle accounting interval.
         host.stop.set()
         host.sampler.join()
         duration=min(stage["idle_seconds"],max(0,deadline-NOW()-12))
-        before=counters(host.proc.pid)
+        classes={"agent-"+session(i): "archived" if s.get("archived") else "live" for i,s in enumerate(shape[:target])}
+        before=counters(host.proc.pid,classes)
         at=NOW()
         time.sleep(duration)
-        after=counters(host.proc.pid)
+        after=counters(host.proc.pid,classes)
         result=dict(limit=target,first_line=host.first_line,bound=host.bound,ready=host.ready,http=host.http,
                     initial_missing=len(absent),early_log=early,sentinels=observed,visible=len(host.snapshot["agents"]),
                     janitors=sum(bool(a.get("is_janitor")) for a in host.snapshot["agents"]),
                     backend_counts={b:sum(a.get("backend")==b for a in host.snapshot["agents"]) for b in sorted({str(a.get("backend")) for a in host.snapshot["agents"]})},
-                    samples=samples,idle_elapsed=NOW()-at,counters={k:after[k]-before[k] for k in before},
+                    samples=samples,idle_elapsed=NOW()-at,counters={k:after.get(k,0)-v for k,v in before.items()},
                     settled=memory(host.proc.pid),peak=host.peak,disk=footprint(root))
         if stage.get("turn") and target and NOW()+10<deadline:
             stamp="benchmark-write-"+str(time.time_ns())
