@@ -3604,12 +3604,13 @@ mod follow_by_revision {
         walk.end_turn();
         walk.check("the turn ends");
 
-        // A message while a reply is being written: stored after the reply took its revision.
+        // A message while a reply is being written, before anyone caught up: it is stored
+        // after the reply took its revision, and one page gives both, in revision order.
         walk.send(Admission::Queue, Origin::User);
+        walk.check("a message");
         walk.say();
-        walk.check("a reply being written");
         walk.send(Admission::Queue, Origin::User);
-        walk.check("a message while it is written");
+        walk.check("a reply being written, and a message while it is");
         walk.say();
         walk.end_turn();
         walk.check("the turn ends; the message's begins");
