@@ -538,16 +538,138 @@ fn a_tool_with_no_address_on_a_machine_with_an_installed_host_reaches_nothing_of
     );
 }
 
-/// The string literals of a Rust source, as the compiler reads them: past comments, escaped
-/// quotes, raw strings and character literals (`'"'`), which a split on quotes misreads.
-fn literals(text: &str) -> Vec<String> {
+/// The commands of the Host's that speak to a running Host and, told no address, take a fixed
+/// one (`127.0.0.1:7690`), which no variable of the rule moves: on a runner with a Host of its
+/// own on that port, a test that leaves the address out speaks to that Host.
+const AT_A_FIXED_ADDRESS: &[&str] = &["import", "peer", "network", "pair"];
+
+/// Every start of one of those commands in `text`: its line, the command, and whether it names
+/// `--host`. A start is a call `.args([` or `.arg(` whose first word is the command; it is read
+/// to the end of its statement (the `;` after it, or the bracket that closes around it, as in a
+/// closure that answers the command), so an address given in a later `.args(` of the same chain
+/// counts.
+fn starts_at_a_fixed_address(text: &str) -> Vec<(usize, String, bool)> {
+    let read = tokens(text);
+    let mut starts = Vec::new();
+    for at in 0..read.len() {
+        let command = match &read[at..read.len().min(at + 5)] {
+            [(_, Token::Mark('.')), (_, Token::Word(call)), (_, Token::Mark('(')), (_, Token::Mark('[')), (_, Token::Text(first))]
+                if call == "args" =>
+            {
+                first
+            }
+            [(_, Token::Mark('.')), (_, Token::Word(call)), (_, Token::Mark('(')), (_, Token::Text(first)), ..]
+                if call == "arg" =>
+            {
+                first
+            }
+            _ => continue,
+        };
+        if !AT_A_FIXED_ADDRESS.contains(&command.as_str()) {
+            continue;
+        }
+        let mut depth = 0i32;
+        let mut named = false;
+        for (_, token) in &read[at..] {
+            match token {
+                Token::Mark('(' | '[' | '{') => depth += 1,
+                Token::Mark(')' | ']' | '}') => {
+                    depth -= 1;
+                    if depth < 0 {
+                        break;
+                    }
+                }
+                Token::Mark(';') if depth == 0 => break,
+                Token::Text(word) if word == "--host" => named = true,
+                _ => {}
+            }
+        }
+        let line = text.chars().take(read[at].0).filter(|c| *c == '\n').count() + 1;
+        starts.push((line, command.clone(), named));
+    }
+    starts
+}
+
+/// Every start of `import`, `peer`, `network` or `pair` in the Host's tests names the Host it
+/// speaks to with `--host`. Told none, each takes a fixed address that no variable of the rule
+/// moves, and on a runner whose own Host listens there (a person's machine does) the test
+/// would speak to that Host, with whatever the test sends.
+///
+/// What the scan sees: in every source file under this crate's `tests`, a call `.args([` or
+/// `.arg(` whose first word is one of the four, read to the end of its statement. What it
+/// cannot see: a command whose word comes from a variable or a function, and a test that hands
+/// its arguments to a helper elsewhere; such a start is written so the scan sees it.
+#[test]
+fn every_start_of_a_command_at_a_fixed_address_in_the_tests_names_its_host() {
+    // The scan reads a start to its end, past what is no start.
+    let sample = r#####"
+        let a = place.host_command().args(["import", "--from", x]).args(["--host", y]).ended();
+        let b = place.host_command().args(["peer", "list"]).ended(); // .args(["pair"])
+        let c = |more: &[&str]| { place.host_command().arg("network").args(more).ended() };
+        let d = place.host_command().args(["pair", "--relay"]).ended(); let e = ["--host"];
+        let f = place.host_command().args(["tool", "import"]).ended();
+        let g = "import";
+    "#####;
+    assert_eq!(
+        starts_at_a_fixed_address(sample),
+        [
+            (2, "import".to_string(), true),
+            (3, "peer".to_string(), false),
+            (4, "network".to_string(), false),
+            (5, "pair".to_string(), false),
+        ]
+    );
+    let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut dirs = vec![tests.clone()];
+    let mut found = 0;
+    let mut unnamed = Vec::new();
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (line, command, named) in starts_at_a_fixed_address(&text) {
+                    found += 1;
+                    if !named {
+                        let file = path.strip_prefix(&tests).unwrap().display();
+                        unnamed.push(format!("{command} at {file}:{line}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        unnamed.is_empty(),
+        "starts of a command that, told no Host, speaks to whatever listens at 127.0.0.1:7690 \
+         on the runner: give each --host {unnamed:?}"
+    );
+    // The tests had thirteen starts when the scan was written: fewer is a scan that reads none.
+    assert!(found >= 13, "the scan found {found} starts");
+}
+
+/// What the scans read of a Rust source, as the compiler reads it: its words, its marks and its
+/// string literals, past comments, escaped quotes, raw strings and character literals (`'"'`),
+/// which a split on quotes misreads. Each with where it begins (in characters).
+#[derive(Debug, PartialEq)]
+enum Token {
+    Word(String),
+    Mark(char),
+    Text(String),
+}
+
+fn tokens(text: &str) -> Vec<(usize, Token)> {
     let chars: Vec<char> = text.chars().collect();
     let mut found = Vec::new();
     let mut at = 0;
     while at < chars.len() {
         let here = chars[at];
         let next = chars.get(at + 1).copied();
-        if here == '/' && next == Some('/') {
+        let hashes = chars[at + 1..].iter().take_while(|c| **c == '#').count();
+        if here.is_whitespace() {
+            at += 1;
+        } else if here == '/' && next == Some('/') {
             while at < chars.len() && chars[at] != '\n' {
                 at += 1;
             }
@@ -557,32 +679,26 @@ fn literals(text: &str) -> Vec<String> {
                 at += 1;
             }
             at += 2;
-        } else if here == 'r'
-            && (next == Some('"') || next == Some('#'))
-            && !chars[..at]
-                .last()
-                .is_some_and(|c| c.is_alphanumeric() || *c == '_')
-        {
-            let hashes = chars[at + 1..].iter().take_while(|c| **c == '#').count();
+        } else if here == 'r' && chars.get(at + 1 + hashes) == Some(&'"') {
             let open = at + 1 + hashes;
-            if chars.get(open) != Some(&'"') {
-                at += 1;
-                continue;
-            }
             let mut end = open + 1;
             let mut text = String::new();
             while end < chars.len() {
-                if chars[end] == '"'
-                    && chars[end + 1..].iter().take(hashes).all(|c| *c == '#')
-                    && chars.len() >= end + 1 + hashes
-                {
+                if chars[end] == '"' && chars[end + 1..].iter().take(hashes).all(|c| *c == '#') {
                     break;
                 }
                 text.push(chars[end]);
                 end += 1;
             }
-            found.push(text);
+            found.push((at, Token::Text(text)));
             at = end + 1 + hashes;
+        } else if here.is_alphanumeric() || here == '_' {
+            let mut end = at;
+            while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+                end += 1;
+            }
+            found.push((at, Token::Word(chars[at..end].iter().collect())));
+            at = end;
         } else if here == '"' {
             let mut end = at + 1;
             let mut text = String::new();
@@ -595,7 +711,7 @@ fn literals(text: &str) -> Vec<String> {
                 }
                 end += 1;
             }
-            found.push(text);
+            found.push((at, Token::Text(text)));
             at = end + 1;
         } else if here == '\'' {
             // A character literal ('"', '\'', 'x'), else a lifetime ('a).
@@ -611,10 +727,22 @@ fn literals(text: &str) -> Vec<String> {
                 at += 1;
             }
         } else {
+            found.push((at, Token::Mark(here)));
             at += 1;
         }
     }
     found
+}
+
+/// The string literals of a Rust source, as the compiler reads them.
+fn literals(text: &str) -> Vec<String> {
+    tokens(text)
+        .into_iter()
+        .filter_map(|(_, token)| match token {
+            Token::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The reader of literals reads what a split on quotes misreads.
