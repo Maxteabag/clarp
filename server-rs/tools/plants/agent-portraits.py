@@ -145,5 +145,11 @@ change(W,'generation',[
     ('lose alternative number in caption','Generated portrait alternative {index}','Generated portrait alternative'),
 ])
 PLANTS.append((H,'generation','wrong feature contract','("agent_portraits", 1)', '("agent_portraits", 2)'))
+RUNS['startup'] = ['test','--test','host','startup_keeps_unreadable_portrait_publications']
+change(W,'startup',[
+    ('a pending publication that cannot be read stops the start',
+     'app.fleet.unread(PENDING, &key);\n            continue;',
+     'return Err(Unavailable("invalid portrait publication".into()));'),
+])
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
