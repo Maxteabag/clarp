@@ -275,7 +275,7 @@ mod tests {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-mod at_the_port {
+pub(crate) mod at_the_port {
     use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
 
@@ -300,9 +300,17 @@ mod at_the_port {
     struct Refusing {
         inner: Box<dyn KeyValue>,
         refused: Refused,
+        refused_read: Refused,
     }
 
     impl Refusing {
+        fn reads(&self, table: &str) -> Result<(), StoreError> {
+            if self.refused_read.lock().unwrap().as_deref() == Some(table) {
+                return Err(StoreError("read refused here".into()));
+            }
+            Ok(())
+        }
+
         fn refuses(&self, table: &str) -> Result<(), StoreError> {
             if self.refused.lock().unwrap().as_deref() == Some(table) {
                 return Err(StoreError("refused here".into()));
@@ -314,6 +322,7 @@ mod at_the_port {
     impl KeyValue for Refusing {
         fn get(&self, table: &str, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
             self.refuses(&format!("read:{table}"))?;
+            self.reads(table)?;
             self.inner.get(table, key)
         }
         fn put(&mut self, table: &str, key: &str, value: &[u8]) -> Result<(), StoreError> {
@@ -332,16 +341,98 @@ mod at_the_port {
         }
         fn list(&self, table: &str) -> Result<Vec<(String, Vec<u8>)>, StoreError> {
             self.refuses(&format!("list:{table}"))?;
+            self.reads(table)?;
             self.inner.list(table)
         }
     }
 
-    struct Place {
+    pub(crate) struct Place {
+        config: Arc<Config>,
+        pub(crate) clock: Arc<clarp_ports::clock::ManualClock>,
+        pub(crate) notice: Arc<tokio::sync::Notify>,
+        refused_read: Refused,
         dir: PathBuf,
         fleet: FleetHandle,
         hub: Arc<Hub>,
         refused: Refused,
-        said: Arc<Mutex<Vec<String>>>,
+        pub(crate) said: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Place {
+        pub(crate) fn refuse_reads(&self, kind: &str) {
+            *self.refused_read.lock().unwrap() = Some(fleet::shelf(kind));
+        }
+
+        /// A desk can use the real fleet and its refusing port without starting any timers.
+        pub(crate) fn app(&self) -> crate::edge::App {
+            let config = self.config.clone();
+            let clock = self.clock.clone();
+            let fleet = self.fleet.clone();
+            let hub = self.hub.clone();
+            let keys = || OwnerFile::new(Some(self.dir.join("absent.toml")));
+            let direct = Arc::new(crate::direct::Direct::new(keys(), "", clock.clone()));
+            let mouth = crate::voice::mouth().1.run(crate::voice::Works {
+                config: config.clone(),
+                fleet: fleet.clone(),
+                hub: hub.clone(),
+                clock: clock.clone(),
+            });
+            crate::edge::App {
+                capture: crate::diagnostics::Capture::start(
+                    Box::new(clarp_store_files::diagnostics::HourFiles::new(
+                        self.dir.join("diagnostics"), crate::diagnostics::CAP,
+                    )),
+                    clock.clone(),
+                    Default::default(),
+                    self.dir.clone(),
+                ),
+                controller_actions: Arc::default(),
+                connector: Arc::new(crate::connector::Connector::told(&config)),
+                ears: Arc::new(crate::heard::Ears::new(&config)),
+                seats: Arc::new(crate::seats::Desk::new("", false)),
+                faces: Arc::new(crate::faces::Faces::new(None)),
+                android: Arc::new(crate::fcm::Sender::new(
+                    keys(),
+                    Arc::new(crate::fcm::Http::new(None)),
+                    clock.clone(),
+                )),
+                chip: Arc::new(crate::chip::Chip::new(
+                    None,
+                    direct,
+                    tokio::sync::mpsc::unbounded_channel().0,
+                )),
+                config,
+                clock,
+                fleet,
+                hub,
+                mouth,
+                pusher: crate::pusher::pusher().0,
+                blobs: MemBlobs::new().open(&self.dir).unwrap(),
+                form_event_writer: Arc::default(),
+                turns: Arc::default(),
+                server_id: "test-host".into(),
+                revisions: Arc::default(),
+                android_chip: Arc::default(),
+                desks: Arc::default(),
+                activity: Arc::default(),
+                calls: Arc::default(),
+                schedules: Arc::default(),
+                heartbeat: Arc::default(),
+                fallbacks: Arc::default(),
+                janitors: Arc::default(),
+                router: Arc::default(),
+                explain: Arc::default(),
+                oracle: Arc::default(),
+                keeper: Arc::default(),
+                label_checker: Arc::default(),
+                quota_keeper: Arc::default(),
+                audio: Arc::default(),
+                limits: Arc::default(),
+                pools: Vec::new(),
+                models: Arc::default(),
+                door: Arc::default(),
+            }
+        }
     }
 
     impl Drop for Place {
@@ -350,7 +441,7 @@ mod at_the_port {
         }
     }
 
-    fn place(name: &str) -> Place {
+    pub(crate) fn place(name: &str) -> Place {
         seeded_place(name, |_| {}, None).unwrap()
     }
 
@@ -363,18 +454,26 @@ mod at_the_port {
         std::fs::create_dir_all(&dir).unwrap();
         let at = dir.to_str().unwrap();
         let config = ["--data", at, "--run", at, "--cwd", at].map(String::from);
-        let config = Config::from_args(config.into_iter()).unwrap();
+        let mut config = Config::from_args(config.into_iter()).unwrap();
+        config.whisper_python.clear();
+        config.speech_keys = Some(dir.join("absent.toml"));
+        let config = Arc::new(config);
+        let clock = Arc::new(clarp_ports::clock::ManualClock::starting_at(
+            1_795_000_000_000,
+        ));
+        let notice = Arc::new(tokio::sync::Notify::new());
+        let notify = notice.clone();
         let said: Arc<Mutex<Vec<String>>> = Arc::default();
         let heard = said.clone();
         let hub = Arc::new(Hub::new(0));
         let works = fleet::Works {
             runtime: tokio::runtime::Handle::current(),
             opening_gate: crate::calls::opening_launch::channel().0,
-            config: Arc::new(config),
+            config: config.clone(),
             engine: Arc::new(MemEngine::new()),
             codecs: clarp_codec::standard_set("zstd").unwrap(),
             launcher: Arc::new(Launcher::by_name("direct", dir.join("unused-shim")).unwrap()),
-            clock: Arc::new(SystemClock),
+            clock: clock.clone(),
             hub: hub.clone(),
             revisions: Arc::default(),
             tool_env: Vec::new(),
@@ -386,12 +485,17 @@ mod at_the_port {
             turns: Arc::default(),
             pools: Vec::new(),
             log: Log::to(
-                move |line| heard.lock().unwrap().push(line.to_string()),
-                Arc::new(SystemClock),
+                move |line| {
+                    heard.lock().unwrap().push(line.to_string());
+                    notify.notify_one();
+                },
+                clock.clone(),
             ),
         };
         let refused: Refused = Arc::default();
+        let refused_read: Refused = Arc::default();
         let mut store = Refusing {
+            refused_read: refused_read.clone(),
             inner: MemKeyValue::new().open(Path::new(&dir)).unwrap(),
             refused: refused.clone(),
         };
@@ -402,6 +506,10 @@ mod at_the_port {
         *refused.lock().unwrap() = refuse;
         let fleet = fleet::start(works, Box::new(store))?;
         Ok(Place {
+            refused_read,
+            config,
+            clock,
+            notice,
             dir,
             fleet,
             hub,

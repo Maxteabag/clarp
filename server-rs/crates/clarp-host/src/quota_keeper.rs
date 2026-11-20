@@ -105,8 +105,6 @@ pub struct Desk {
     /// When a look is due next, and the count of the janitors' book's writes it was armed at:
     /// known once a look ended. Nothing: the next look of the runner finds out.
     armed: std::sync::Mutex<Option<(i64, u64)>>,
-    /// What could not be read at the last look, said once in the Host's log.
-    failing: std::sync::Mutex<Option<String>>,
     /// One look at a time.
     looking: Arc<tokio::sync::Mutex<()>>,
     /// The receipts, by their ids: read where they are kept by the first look.
@@ -125,28 +123,11 @@ impl Desk {
             .lock()
             .map_or(true, |armed| quota::due(*armed, now_ms, changes))
     }
+}
 
-    /// A read of a look failed: said once, by what failed and never by what it held.
-    fn failed(&self, what: &str, why: &crate::agent::Unavailable) {
-        let said = format!("{what}: {}", why.0);
-        let mut failing = self
-            .failing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if failing.as_deref() != Some(said.as_str()) {
-            eprintln!("clarp-host: the Quota keeper could not read {said}");
-            *failing = Some(said);
-        }
-    }
-
-    /// The reads of a look went through.
-    fn read_well(&self) {
-        let mut failing = self
-            .failing
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *failing = None;
-    }
+/// Name the failed read without the contents of its record. The fleet coalesces repeats.
+fn failed(app: &App, what: &str, why: &crate::agent::Unavailable) {
+    app.fleet.unkept(ROLE, &format!("{what}: {}", why.0));
 }
 
 /// The keeper that is on, as a look reads it.
@@ -275,19 +256,18 @@ async fn pass(app: &App) {
         .read(app, |book, world, _| keeper_of(book, world));
     let keeper = match keeper.await {
         Ok(keeper) => keeper,
-        Err(why) => return desk.failed("the janitors' book", &why),
+        Err(why) => return failed(app, "the janitors' book", &why),
     };
     let Some(keeper) = keeper else {
         // Nobody keeps: nothing is due until a janitor changes.
         desk.arm(i64::MAX, changes);
-        desk.read_well();
         return;
     };
     let mut receipts = desk.receipts.lock().await;
     if receipts.is_none() {
         let kept = match app.fleet.kept_all(RECEIPTS).await {
             Ok(kept) => kept,
-            Err(why) => return desk.failed("its receipts", &why),
+            Err(why) => return failed(app, "its receipts", &why),
         };
         let read = kept.iter().filter_map(|(id, written)| {
             let receipt: Receipt = serde_json::from_slice(written).ok()?;
@@ -303,7 +283,7 @@ async fn pass(app: &App) {
     ask_cards(app, &keeper, receipts).await;
     let lane = match app.fleet.kept(LANE, THE_LANE.to_string()).await {
         Ok(lane) => lane,
-        Err(why) => return desk.failed("its lane", &why),
+        Err(why) => return failed(app, "its lane", &why),
     };
     let lane = lane.and_then(|kept| serde_json::from_slice::<Lane>(&kept).ok());
     let mut lane = Lane::of(lane, &keeper.agent_id, keeper.generation);
@@ -312,7 +292,6 @@ async fn pass(app: &App) {
     let next = lane.next_run(base);
     if now < next {
         desk.arm(next, changes);
-        desk.read_well();
         return;
     }
     lane.start((base, longest), now);
@@ -333,7 +312,7 @@ async fn pass(app: &App) {
                 }
                 let kept = match app.fleet.kept(WINDOWS, name.clone()).await {
                     Ok(kept) => kept,
-                    Err(why) => return desk.failed("what it remembers of a window", &why),
+                    Err(why) => return failed(app, "what it remembers of a window", &why),
                 };
                 if let Some(kept) = kept.and_then(|kept| serde_json::from_slice(&kept).ok()) {
                     windows.kept.insert(name, kept);
@@ -357,7 +336,7 @@ async fn pass(app: &App) {
     let acted: std::collections::BTreeSet<String> = if accepted {
         match app.fleet.kept_all(APPROVALS).await {
             Ok(kept) => kept.into_iter().map(|(id, _)| id).collect(),
-            Err(why) => return desk.failed("the cards a recovery ran by", &why),
+            Err(why) => return failed(app, "the cards a recovery ran by", &why),
         }
     } else {
         std::collections::BTreeSet::new()
@@ -519,7 +498,6 @@ async fn pass(app: &App) {
         // A write that failed is said as the Host says every one (`FleetHandle::unkept`).
         Err(why) => return app.fleet.unkept(LOOK, &why.0),
     };
-    desk.read_well();
     // The keeper changed while it looked: the next look finds out how it stands.
     let Some(next) = next else {
         return;
