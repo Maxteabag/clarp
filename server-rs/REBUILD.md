@@ -2542,11 +2542,14 @@ key came twice (refused as `invalid_object`). Both catalog files are in the prog
 not pass its checks refuses render specs alone (503, `catalog_unavailable`). The Host (`render_spec.rs`
 beside `library.rs`) publishes, revises (a whole new payload that names the version it follows) and only
 checks (`?validate_only=1`); a spec is never in a row of a list, a search, the pins, Updates or an event.
-Who sees it is said by each request: a client whose `X-Clarp-Client` says `<platform>/<build>
-contract=<n>` at or above the owner's threshold (`[artifacts] render_spec_min_client` in his file, read at
-every request; unset, as the reference ships, nobody) is shown what was left out (`content_omitted`, with
-`element_count`) and reads the spec, and once it was answered the answers, from the artifact itself; any
-other client sees a plain row and cannot answer (403, `client_contract`). The first answers that are taken
+A client sees the full spec when its exact `X-Clarp-Client` name and contract meet its minimum. The
+default is `ios` from 74. `[artifacts] render_spec_min_contract` overrides it per exact client name, with
+0 disabling that name. The legacy `render_spec_min_client` integer applies to `ios` alone and the table
+wins when both name it. Unknown or malformed headers see a generic row and cannot submit (403,
+`client_contract`). The Rust Host reads the owner's file for each request and writes each distinct
+configuration diagnostic once. `GET /artifacts/<id>/export` (R137) gives the administrator the public
+row, stored payload and accepted submission. On an authenticated Host it takes the token only from the
+Authorization header. Another artifact kind gets a 409 with its kind. The first answers that are taken
 close the spec (`already_answered`); they are told to its agent once, through the same delivery as a
 form's answers, and the same answers under the same id get the same receipt. `GET
 /artifact-catalogs/clarp.form/1` serves the catalog's bytes, and the agent's tool sends a whole request as
