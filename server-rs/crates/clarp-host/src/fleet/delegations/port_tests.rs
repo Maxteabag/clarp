@@ -363,7 +363,7 @@ async fn a_damaged_reservation_never_stops_the_host_or_grants_the_delegate_autho
         let created = fleet.goal_delegation(enable_pair()).await.unwrap();
         let id = created["delegation_id"].as_str().unwrap();
         for m in &fleet.directory().members {
-            m.agent.close();
+            m.agent.close(crate::agent::CLOSE_WITHIN);
         }
         drop(fleet);
         let mut store = hosts.roster.open(&hosts.root).unwrap();
@@ -472,7 +472,7 @@ async fn a_damaged_reservation_never_stops_the_host_or_grants_the_delegate_autho
         );
         drop(log);
         for m in &members.members {
-            m.agent.close();
+            m.agent.close(crate::agent::CLOSE_WITHIN);
         }
     }
 }
@@ -511,7 +511,7 @@ async fn a_silent_principal_cannot_hold_the_fleet_mailbox() {
         "a timed-out START may still commit"
     );
     for m in &fleet.directory().members {
-        m.agent.close();
+        m.agent.close(crate::agent::CLOSE_WITHIN);
     }
 }
 
@@ -577,7 +577,7 @@ async fn the_owner_rejoins_while_its_delegation_index_cannot_be_repaired() {
         );
         drop(notes);
         for m in &fleet.directory().members {
-            m.agent.close();
+            m.agent.close(crate::agent::CLOSE_WITHIN);
         }
     }
 }
