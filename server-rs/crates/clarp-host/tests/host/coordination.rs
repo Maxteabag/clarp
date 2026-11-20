@@ -62,9 +62,9 @@ fn rows_of_trace(host: &Host, session: &str, trace: &str) -> Vec<Value> {
 fn answered(host: &Host, session: &str, trace: &Value) -> bool {
     let trace = trace.as_str().unwrap_or_default();
     let rows = rows_of_trace(host, session, trace);
-    let replied = rows
-        .iter()
-        .any(|row| row["role"] == "assistant" && row["kind"] != "note" && row.get("turn").is_some());
+    let replied = rows.iter().any(|row| {
+        row["role"] == "assistant" && row["kind"] != "note" && row.get("turn").is_some()
+    });
     replied && host.state(session) == "done"
 }
 
@@ -253,7 +253,10 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         )
     );
     // A text that is no token is no turn.
-    assert_eq!(note(&[("X-Clarp-Turn", "not-a-token")], green.clone()).0, 403);
+    assert_eq!(
+        note(&[("X-Clarp-Turn", "not-a-token")], green.clone()).0,
+        403
+    );
     // The body, in the Python Host's order, before whose turn it is.
     for (body, status, words) in [
         (json!([1]), 400, "bad json".to_string()),
@@ -379,7 +382,11 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     assert_eq!(told["exit"], 0, "{told}");
     let by_tool: Value = serde_json::from_str(told["stdout"].as_str().unwrap()).unwrap();
     assert_eq!(
-        (&by_tool["created"], &by_tool["notified"], &by_tool["trace_id"]),
+        (
+            &by_tool["created"],
+            &by_tool["notified"],
+            &by_tool["trace_id"]
+        ),
         (&json!(true), &json!(true), &json!(trace))
     );
     assert!(
@@ -408,7 +415,10 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
     // the turn's summary counts them (three).
     let_go("oak");
     let turn_rows = rows_of_trace(&host, "oak", &trace);
-    let notes: Vec<&Value> = turn_rows.iter().filter(|row| row["kind"] == "note").collect();
+    let notes: Vec<&Value> = turn_rows
+        .iter()
+        .filter(|row| row["kind"] == "note")
+        .collect();
     assert_eq!(notes.len(), 3, "{turn_rows:?}");
     for row in &notes {
         assert_eq!(
@@ -448,7 +458,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
                 "origin": "user" }),
     );
     assert_eq!(status, 200, "{sent}");
-    wait_for("Oak's second turn", || answered(&host, "oak", &sent["trace_id"]));
+    wait_for("Oak's second turn", || {
+        answered(&host, "oak", &sent["trace_id"])
+    });
     for row in rows_of_trace(&host, "oak", sent["trace_id"].as_str().unwrap()) {
         assert_eq!(row["audience"], "user", "{row}");
     }
@@ -460,7 +472,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         json!({ "session": "oak", "text": "named", "client_msg_id": "c-3", "sender": "ivy",
                 "origin": "agent" }),
     );
-    wait_for("Oak's third turn", || answered(&host, "oak", &named["trace_id"]));
+    wait_for("Oak's third turn", || {
+        answered(&host, "oak", &named["trace_id"])
+    });
     let named_rows = rows_of_trace(&host, "oak", named["trace_id"].as_str().unwrap());
     assert!(named_rows.len() >= 2, "{named_rows:?}");
     for row in &named_rows {
@@ -473,7 +487,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         json!({ "session": "oak", "text": "as if the user", "client_msg_id": "c-4",
                 "origin": "user" }),
     );
-    wait_for("Oak's fourth turn", || answered(&host, "oak", &claimed["trace_id"]));
+    wait_for("Oak's fourth turn", || {
+        answered(&host, "oak", &claimed["trace_id"])
+    });
     let claimed_row = &rows_of(&host, "oak")["u-c-4"];
     assert_eq!(
         (
@@ -521,7 +537,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         &ivy_turn,
         json!({ "session": "cody", "text": "review", "client_msg_id": "c-6" }),
     );
-    wait_for("Cody's turn", || answered(&host, "cody", &to_cody["trace_id"]));
+    wait_for("Cody's turn", || {
+        answered(&host, "cody", &to_cody["trace_id"])
+    });
     for row in rows_of_trace(&host, "cody", to_cody["trace_id"].as_str().unwrap()) {
         assert_eq!(row["audience"], "agents", "{row}");
     }
@@ -531,7 +549,9 @@ fn a_turn_another_agent_began_is_for_the_agents_and_an_agent_leaves_its_user_a_n
         json!({ "session": "ivy", "text": "remind me", "client_msg_id": "i-2", "origin": "user" }),
     );
     std::fs::write(release.join("ivy"), "").unwrap();
-    wait_for("Ivy's second turn", || answered(&host, "ivy", &woken["trace_id"]));
+    wait_for("Ivy's second turn", || {
+        answered(&host, "ivy", &woken["trace_id"])
+    });
     let self_row = &rows_of(&host, "ivy")["u-i-2"];
     assert_eq!(
         (&self_row["origin"], &self_row["audience"]),
@@ -662,7 +682,12 @@ fn a_host_that_cannot_read_its_key_hides_nothing_and_takes_no_note() {
     let body = json!({ "session": "oak", "text": "A note." });
     assert_eq!(asked(&host, "/agent-notes", &[], &body).0, 403);
     assert_eq!(
-        asked(&host, "/agent-notes", &[("X-Clarp-Turn", "any-token")], &body),
+        asked(
+            &host,
+            "/agent-notes",
+            &[("X-Clarp-Turn", "any-token")],
+            &body
+        ),
         (
             503,
             json!({ "error": "turn identity unavailable", "retryable": true })
