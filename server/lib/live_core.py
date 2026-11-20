@@ -109,8 +109,22 @@ class LiveHub:
             started = int(started_at_ms or self._clock_ms())
             self._emit(state, [{"op": "turn", "conv": conv, "turn": {
                 "turn_id": turn_id, "status": "running", "started_at_ms": started,
-                "ended_at_ms": None, "worked_ms": None, "tool_count": 0}}],
+                "ended_at_ms": None, "worked_ms": None, "tool_count": 0,
+                "audience": _turn_audience(agent_id, turn_id)}}],
                 status_after=True)
+
+    def set_turn_audience(self, agent_id: str, turn_id: str, audience: str) -> bool:
+        """Say on the wire that the open turn's audience changed (a coordination
+        turn the user stepped into is shown from now on). True when it was sent."""
+        with self._lock:
+            state = self._by_agent.get(agent_id)
+            turn = dict((state.view.turn if state is not None else None) or {})
+            if not turn or turn.get("turn_id") != turn_id or turn.get("audience") == audience:
+                return False
+            self._flush(state)
+            turn["audience"] = audience
+            self._emit(state, [{"op": "turn", "conv": state.conv, "turn": turn}])
+            return True
 
     def end_turn(self, agent_id: str, *, status: str = "completed",
                  error: dict[str, str] | None = None) -> None:
@@ -507,6 +521,16 @@ class LiveHub:
                         "since_ms": item.get("started_at_ms") or now, "headline": headline}
         return {**base, "state": "thinking", "headline": "Thinking",
                 "since_ms": _previous_since(state.view.activity, "thinking", now)}
+
+def _turn_audience(agent_id: str, turn_id: str) -> str:
+    """'agents' when another agent's message started the turn, else 'user'
+    (lib.coordination). Live items never break a turn: unknown is 'user'."""
+    try:
+        from . import coordination
+        return coordination.audience_of(agent_id, turn_id)
+    except Exception:  # noqa: BLE001
+        return "user"
+
 
 def _previous_since(activity: dict[str, Any] | None, state_name: str, now: int) -> int:
     if activity and activity.get("state") == state_name and activity.get("since_ms"):
