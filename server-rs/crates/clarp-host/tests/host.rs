@@ -27,6 +27,8 @@ mod delivery;
 mod diagnostics;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
+#[path = "host/harness.rs"]
+mod harness;
 #[path = "host/import_render_specs.rs"]
 mod import_render_specs;
 #[path = "host/installer.rs"]
@@ -67,6 +69,51 @@ fn this_file_holds_no_more_tests_than_it_held_when_each_piece_was_given_a_file()
 }
 
 static HOSTS: AtomicU64 = AtomicU64::new(0);
+
+thread_local! {
+    /// Every Host the test on this thread started, by the line it said it listens with, and
+    /// what it has said since, while it lives: what a wait that times out shows.
+    static STARTED: std::cell::RefCell<Vec<(String, std::sync::Weak<Mutex<String>>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The last lines each Host of this test still living has said, each cut to a length that can
+/// be read: nothing when there is none. A Host whose shim is not beside it starts no turn and
+/// says so only to the turn: that is said here too.
+fn what_the_hosts_said() -> String {
+    const LINES: usize = 40;
+    const LONGEST: usize = 300;
+    STARTED.with(|started| {
+        let mut told = String::new();
+        let shim =
+            std::path::Path::new(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
+        if !started.borrow().is_empty() && !shim.exists() {
+            told.push_str(
+                "\n--- no clarp-shim beside the Host under test: no turn of its can start (a test \
+                 run named by package builds no other binary: build -p clarp-shim first)",
+            );
+        }
+        for (start, heard) in started.borrow().iter() {
+            let Some(heard) = heard.upgrade() else {
+                continue;
+            };
+            let heard = heard.lock().unwrap().clone();
+            let lines: Vec<&str> = heard.lines().collect();
+            let last = &lines[lines.len().saturating_sub(LINES)..];
+            told.push_str(&format!(
+                "\n--- the Host that said \"{start}\", its last {} of {} lines:",
+                last.len(),
+                lines.len()
+            ));
+            for line in last {
+                let cut: String = line.chars().take(LONGEST).collect();
+                let more = if cut.len() < line.len() { " [...]" } else { "" };
+                told.push_str(&format!("\n    {cut}{more}"));
+            }
+        }
+        told
+    })
+}
 
 /// A command of the Host's own program that is to end by itself: what it said and how it
 /// ended. One that does not end is ended, and that is a failure: a Host that starts where it
@@ -191,6 +238,8 @@ impl Place {
             startup.push_str(&line);
         };
         let heard = Arc::new(Mutex::new(startup));
+        let start = format!("clarp-host listens on {address}");
+        STARTED.with(|started| started.borrow_mut().push((start, Arc::downgrade(&heard))));
         let keeping = heard.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -387,10 +436,18 @@ const TOOLS: [&str; 7] = [
     "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
 ];
 
-fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(30);
+fn wait_for(what: &str, ready: impl FnMut() -> bool) {
+    wait_within(what, Duration::from_secs(30), ready);
+}
+
+/// The same, for as long as is given. When it gives up, it says what every Host the test
+/// started and that still lives last said.
+fn wait_within(what: &str, most: Duration, mut ready: impl FnMut() -> bool) {
+    let deadline = Instant::now() + most;
     while !ready() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        if Instant::now() >= deadline {
+            panic!("timed out waiting for {what}{}", what_the_hosts_said());
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
