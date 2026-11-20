@@ -145,7 +145,7 @@ fn agent(id: &str, session: &str, persona: &str) -> Vec<u8> {
 const NO_JSON: &[u8] = b"not json at all";
 /// JSON that names an agent, in a shape no Host wrote.
 const ANOTHER_SHAPE: &[u8] = br#"{"session":"kept-name","persona":"Kept Name","zebra":2}"#;
-/// A push token, which is a secret: only its first signs are ever said.
+/// A push token, which is a secret: not one sign of it is ever said.
 const TOKEN: &str = "0123456789abcdefghijklmnopqrstuv";
 
 fn counts(fleet: &FleetHandle) -> BTreeMap<String, u64> {
@@ -171,6 +171,8 @@ async fn a_record_that_cannot_be_read_is_left_out_kept_as_it_was_and_counted() {
         store.put(table, &format!("{table}-bad"), NO_JSON).unwrap();
     }
     store.put(PUSH, TOKEN, b"[]").unwrap();
+    // A book's record (the chip's, which its desk lists): set aside, not left in place for a desk.
+    store.put("kept.chip", "chip-bad", NO_JSON).unwrap();
     drop(store);
 
     // The Host starts, and runs what it can read.
@@ -178,6 +180,7 @@ async fn a_record_that_cannot_be_read_is_left_out_kept_as_it_was_and_counted() {
     assert!(fleet.directory().by_session("good").is_some());
     let expected: BTreeMap<String, u64> = [
         ("agent", 2),
+        ("chip", 1),
         ("device", 1),
         ("peer", 1),
         ("persona", 1),
@@ -192,9 +195,22 @@ async fn a_record_that_cannot_be_read_is_left_out_kept_as_it_was_and_counted() {
         fleet
             .left_out()
             .line()
-            .contains("7 records could not be read")
+            .contains("8 records read at the start could not be read")
     );
-    // Each is said once, by its kind and key; the token only by its first signs, and nothing
+    // The book's record is moved aside, its key free, and no desk that lists the kind sees the
+    // copy.
+    let copy = place
+        .store()
+        .get("kept.chip", "chip-bad.unreadable")
+        .unwrap();
+    assert_eq!(copy.as_deref(), Some(NO_JSON));
+    assert_eq!(place.store().get("kept.chip", "chip-bad").unwrap(), None);
+    let listed = fleet.kept_all("chip").await.unwrap();
+    assert!(
+        listed.iter().all(|(key, _)| !key.ends_with(".unreadable")),
+        "{listed:?}"
+    );
+    // Each is said once, by its kind and key; the token, a secret, by its place alone, and nothing
     // of what any record holds.
     let said = place.said();
     for (kind, key) in [
@@ -210,7 +226,9 @@ async fn a_record_that_cannot_be_read_is_left_out_kept_as_it_was_and_counted() {
         );
     }
     assert!(
-        said.iter().any(|s| s.ends_with("left out: 01234567…")),
+        said.iter()
+            .any(|s| s
+                .ends_with("kind push could not be read and is left out: 1 of this kind so far")),
         "{said:?}"
     );
     for line in &said {
@@ -356,4 +374,51 @@ async fn a_store_that_does_not_answer_stops_the_start() {
         panic!("a store that does not answer stopped nothing");
     };
     assert!(why.contains("no answer"), "{why}");
+}
+
+#[tokio::test]
+async fn a_kind_judged_when_read_is_judged_at_its_listing_and_not_at_the_start() {
+    let place = Place::new("judged-when-read");
+    let mut store = place.store();
+    store
+        .put("kept.oracle-delegation", "d-bad", NO_JSON)
+        .unwrap();
+    store
+        .put("kept.keeper-progress", "attachment-1", br#"{"seen":1}"#)
+        .unwrap();
+    // Not read at the start: nothing of it is counted there.
+    let fleet = place.start();
+    assert!(counts(&fleet).is_empty());
+    // Listed by its desk: the one judge at that read, the same as the walk's.
+    let listed = fleet.kept_listed("oracle-delegation").await.unwrap();
+    assert!(listed.is_empty());
+    assert_eq!(counts(&fleet).get("oracle-delegation"), Some(&1));
+    let aside = place
+        .store()
+        .get("kept.oracle-delegation", "d-bad.unreadable");
+    assert_eq!(aside.unwrap().as_deref(), Some(NO_JSON));
+    // What is its desk's is answered.
+    let progress = fleet.kept_listed("keeper-progress").await.unwrap();
+    assert_eq!(progress.len(), 1);
+}
+
+#[tokio::test]
+async fn a_row_left_out_is_seen_by_no_desk_until_the_owners_write_repairs_it() {
+    let place = Place::new("rows-hidden");
+    let mut store = place.store();
+    store.put("kept.opening_history", "r-bad", NO_JSON).unwrap();
+    let fleet = place.start();
+    // Left out at the start: no read of a desk meets it, by key or whole; it is where it was.
+    assert!(fleet.kept_all("opening_history").await.unwrap().is_empty());
+    let asked = fleet.kept("opening_history", "r-bad".into()).await.unwrap();
+    assert_eq!(asked, None);
+    let kept = place.store().get("kept.opening_history", "r-bad").unwrap();
+    assert_eq!(kept.as_deref(), Some(NO_JSON));
+    // The owner's write repairs it: seen again.
+    fleet
+        .keep("opening_history", "r-bad".into(), Some(b"{}".to_vec()))
+        .await
+        .unwrap();
+    let asked = fleet.kept("opening_history", "r-bad".into()).await.unwrap();
+    assert_eq!(asked.as_deref(), Some(&b"{}"[..]));
 }

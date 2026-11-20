@@ -423,3 +423,52 @@ async fn refused_settings_batch_preserves_the_directory_and_store() {
         assert_eq!(reader.directory().setting("other.setting"), Some("next"));
     }
 }
+
+#[tokio::test]
+async fn a_record_it_cannot_read_is_set_aside_when_read_and_its_counter_is_not_begun_anew() {
+    let place = Place::new();
+    let fleet = place.start();
+    let desk = Desk::default();
+    let first = desk
+        .record(&fleet, clip("A", "voice", "one"))
+        .await
+        .unwrap();
+    assert_eq!(first, 1);
+    // Written where they are kept: a run of another shape, and a counter that is no number.
+    let mut kept = place.engine.open(Path::new("vocab-test")).unwrap();
+    let other: &[u8] = br#"{"other":1}"#;
+    kept.put("kept.vocabulary-runs", "1", other).unwrap();
+    kept.put("kept.vocabulary-counter", "last", b"\"one\"")
+        .unwrap();
+    // Nothing was read at a start of it: counted only when read.
+    drop(fleet);
+    let fleet = place.start();
+    assert!(fleet.left_out().counts().is_empty());
+    // The run is not this desk's: set aside as it came and counted, and no run is answered.
+    let asked = desk
+        .report(&fleet, "run", &json!({ "trace_id": "voice" }))
+        .await;
+    assert!(asked.is_err());
+    assert_eq!(fleet.left_out().counts().get("vocabulary-runs"), Some(&1));
+    let aside = kept.get("kept.vocabulary-runs", "1.unreadable").unwrap();
+    assert_eq!(aside.as_deref(), Some(other));
+    // The counter is not begun anew: no run is recorded over the one kept.
+    let refused = desk.record(&fleet, clip("B", "", "two")).await;
+    assert_eq!(
+        refused.err().map(|(code, _)| code),
+        Some(StatusCode::SERVICE_UNAVAILABLE)
+    );
+    assert_eq!(
+        fleet.left_out().counts().get("vocabulary-counter"),
+        Some(&1)
+    );
+    // Moved aside, its key free: the next clip is not numbered anew over the run either.
+    let again = desk.record(&fleet, clip("B", "", "three")).await;
+    assert_eq!(
+        again.err().map(|(code, _)| code),
+        Some(StatusCode::SERVICE_UNAVAILABLE)
+    );
+    assert_eq!(kept.get("kept.vocabulary-runs", "1").unwrap(), None);
+    let aside = kept.get("kept.vocabulary-runs", "1.unreadable").unwrap();
+    assert_eq!(aside.as_deref(), Some(other));
+}
