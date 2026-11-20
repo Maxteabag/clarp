@@ -85,3 +85,46 @@ def test_google_keeps_its_words_with_a_reason(monkeypatch, told):
     (e,) = _errors(told)
     assert e["message"] == "Voice paused: Google Chirp 3 HD quota exceeded."
     assert (e["reason"], e["provider"]) == ("provider_failed", "google")
+
+
+def test_clips_without_a_trace_are_told_once_per_agent_in_ten_minutes(tmp_path, monkeypatch, told):
+    """Review of 485: four trace-less clips used to give four events; the turn lookup is
+    keyed on the agent and the missing trace, bounded to ten minutes."""
+    monkeypatch.setattr(config, "_CACHED", config.Config(tts_provider="cartesia", cartesia_api_key="ck"))
+    zed = _agent(tmp_path)
+    _speak(tmp_path, zed, clips=4, trace=None)
+    assert len(_errors(told)) == 1 and "trace_id" not in _errors(told)[0]
+    ida = _agent(tmp_path, persona="Ida", session="ida")
+    _speak(tmp_path, ida, clips=2, trace=None, session="ida")       # another agent is its own
+    assert [e["agent_id"] for e in _errors(told)] == [zed, ida]
+    from lib import db
+    db.conn().execute("UPDATE tts_queue SET enqueued_at = enqueued_at - ? WHERE agent_id = ?",
+                      (11 * 60 * 1000, zed))
+    _speak(tmp_path, zed, clips=2, trace=None)                      # ten minutes later: told again
+    assert [e["agent_id"] for e in _errors(told)] == [zed, ida, zed]
+    _speak(tmp_path, zed, clips=1, trace="trace-9")                 # a traced turn is not muted by it
+    assert len(_errors(told)) == 4
+
+
+def test_a_reply_partly_spoken_says_part_of_it_was_not(tmp_path, monkeypatch, told):
+    """Review of 485: spoken, failed, spoken read "Not spoken: ..." for the whole reply."""
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="cartesia", cartesia_api_key="ck", cartesia_voices={"Zed": "cart-zed"}))
+
+    def synth(*, text, out_path, on_chunk=None, **kw):
+        if text.startswith("Sentence 1"):
+            raise tts_registry.CartesiaError("HTTP 503")
+        pathlib.Path(out_path).write_bytes(b"ID3" + b"\0" * 64)
+        return 1
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", synth)
+    agent_id = _agent(tmp_path)
+    _speak(tmp_path, agent_id, clips=3)
+    (e,) = _errors(told)
+    assert e["message"] == "Part of this reply was not spoken: Cartesia Sonic did not make the clip."
+    assert e["reason"] == "provider_failed"
+    # A reply none of whose clips was spoken still reads as not spoken.
+    monkeypatch.setattr(tts_registry, "cartesia_synthesize", lambda **kw: (_ for _ in ()).throw(
+        tts_registry.CartesiaError("HTTP 503")))
+    _speak(tmp_path, agent_id, clips=2, trace="trace-2")
+    assert [x["message"] for x in _errors(told)][1:] == [
+        "Not spoken: Cartesia Sonic did not make the clip."]

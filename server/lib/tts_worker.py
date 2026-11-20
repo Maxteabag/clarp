@@ -387,6 +387,10 @@ def _provider_label(provider: str | None) -> str:
     return row["name"] if row else (provider or "")
 
 
+_TURN_TOLD_MS = 6 * 3600 * 1000
+_UNTRACED_TOLD_MS = 10 * 60 * 1000
+
+
 def _publish_tts_error(stream: Any | None, row: dict, agent: dict | None, error: str | None,
                        *, cfg=None, reason: str | None = None,
                        provider: str | None = None) -> None:
@@ -408,21 +412,28 @@ def _publish_tts_error(stream: Any | None, row: dict, agent: dict | None, error:
             log_exception("ttsFailureReasonFail", exc, detail=(error or "")[:60])
             reason = voice_profile.PROVIDER_FAILED
     queue_id, trace_id = row.get("queue_id"), row.get("trace_id") or ""
+    # A turn is told once per reason; clips without a trace, once per agent and reason
+    # in _UNTRACED_TOLD_MS (they cannot be grouped into a turn).
+    enqueued_at = int(row.get("enqueued_at") or 0)
+    since_ms = enqueued_at - (_TURN_TOLD_MS if trace_id else _UNTRACED_TOLD_MS)
+    partly = False
     try:
         if queue_id is not None:
             tts_queue.mark_failed(queue_id, f"{reason}: {error or ''}")
-        if (trace_id and queue_id is not None and row.get("agent_id")
+        if (queue_id is not None and row.get("agent_id")
                 and tts_queue.turn_already_told(
                     agent_id=row["agent_id"], trace_id=trace_id, queue_id=queue_id,
-                    reason=reason, since_ms=int(row.get("enqueued_at") or 0) - 6 * 3600 * 1000)):
+                    reason=reason, since_ms=since_ms)):
             return
+        partly = bool(row.get("agent_id")) and tts_queue.turn_partly_spoken(
+            agent_id=row["agent_id"], trace_id=trace_id, since_ms=since_ms)
     except Exception as exc:  # noqa: BLE001 - telling twice beats not telling
         log_exception("ttsFailureOnceFail", exc, detail=str(queue_id))
     if stream is None:
         return
     persona = (agent or {}).get("persona")
     message = _GOOGLE_WORDS.get(google_code or "") or voice_profile.not_spoken_words(
-        reason, provider_label=_provider_label(provider), name=persona or "")
+        reason, provider_label=_provider_label(provider), name=persona or "", partly=partly)
     try:
         events.broadcast(stream, events.tts_error(
             session=row.get("session"),

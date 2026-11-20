@@ -144,6 +144,42 @@ def test_override_fallback_off_and_missing_key():
     assert no_key["silent_reason"] == "not_configured" and no_key["voice_id"] is None
 
 
+OVERRIDE_VOICES = {"cartesia": CARTESIA_UUID, "elevenlabs": ELEVEN_ID, "gemini": "Kore",
+                   "google": "nb-NO-Chirp3-HD-Puck"}
+
+
+@pytest.mark.parametrize("persona", PERSONAS)
+@pytest.mark.parametrize("shape", ("empty-map", "map-cartesia", "map-gemini"))
+@pytest.mark.parametrize("override", sorted(OVERRIDE_VOICES))
+@pytest.mark.parametrize("fallback", ("none", "cartesia", "elevenlabs", "gemini"))
+def test_speech_off_on_the_host_wins_over_an_agents_override(monkeypatch, tmp_path, fallback, override,
+                                                              shape, persona):
+    """Review of 485 (96 cells): with the Host's provider "none" the worker ends every clip
+    before it reads an override, so the profile says provider_off whatever the override."""
+    from lib import events, tts_queue
+    from lib.protocol import TurnSource
+    calls: list = []
+    _stand_ins(monkeypatch, calls)
+    sent: list = []
+    monkeypatch.setattr(events, "broadcast", lambda stream, event: sent.append(dict(event)))
+    cfg = _cfg("none", tts_fallback=fallback, tts_agent_overrides={
+        persona.lower(): {"provider": override, f"{override}_voice": OVERRIDE_VOICES[override]}})
+    monkeypatch.setattr(config, "_CACHED", cfg)
+    agent_id = agents_db.create_agent(persona=persona, voice_id=SHAPES[shape], cwd=str(tmp_path),
+                                      session=persona.lower())
+    agent = agents_db.get_by_agent_id(agent_id)
+    shown = voice_profile.speech(_host(cfg), agent)
+    assert (shown["provider"], shown["voice_id"], shown["silent_reason"]) == (
+        "none", None, voice_profile.PROVIDER_OFF)
+    tts_queue.enqueue(agent_id=agent_id, text="Hei.", voice_id=SHAPES[shape], session=persona.lower(),
+                      source=TurnSource.PWA, trace_id="t")
+    audio = tmp_path / "audio"
+    audio.mkdir()
+    assert tts_worker.synth_one(audio_dir=audio, stream=object())
+    assert calls == [] and not list(audio.iterdir())                   # nothing is heard
+    assert [e for e in sent if e.get("type") == "tts-error"] == []      # and nothing is told
+
+
 # ---------------------------------------------------------------- hearing
 
 def _plan_of_the_pipeline(session):
