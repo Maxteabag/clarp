@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import db as _db
 from .db import change_stamp, conn
-from . import origins, team_leader
+from . import coordination, origins, team_leader
 from . import log as cache_log
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
@@ -98,10 +98,13 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            m.phase, m.turn_json,
                            sender.persona AS sender_name,
-                           sender.session AS sender_session
+                           sender.session AS sender_session,
+                           ct.audience AS trace_audience
                       FROM messages m
                       LEFT JOIN agents sender
                         ON sender.agent_id = m.sender_agent_id
+                      LEFT JOIN coordination_traces ct
+                        ON ct.agent_id = m.agent_id AND ct.trace_id = m.trace_id
                      WHERE {where}
                      ORDER BY {order}
                      LIMIT ?"""
@@ -111,9 +114,10 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
                            m.phase, m.turn_json,
                            sender.persona AS sender_name,
-                           sender.session AS sender_session
+                           sender.session AS sender_session,
+                           ct.audience AS trace_audience
                       FROM (
-                            SELECT message_id, role, timestamp, text, kind,
+                            SELECT message_id, agent_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
                                    seq, revision, origin, sender_agent_id, trace_id,
                                    phase, turn_json
@@ -124,6 +128,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                       ) m
                       LEFT JOIN agents sender
                         ON sender.agent_id = m.sender_agent_id
+                      LEFT JOIN coordination_traces ct
+                        ON ct.agent_id = m.agent_id AND ct.trace_id = m.trace_id
                      ORDER BY COALESCE(m.timestamp, '') ASC, m.seq ASC, m.message_id ASC"""
     rows = conn().execute(query, tuple(params)).fetchall()
     out: list[dict[str, Any]] = []
@@ -158,6 +164,10 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             "trace_id": (row["trace_id"] or ""),
             **provenance_fields(row),
             "revision": int(row["revision"]),
+            # 'agents': a row of a turn another agent's message started
+            # (lib.coordination); every other row, and a note, is 'user'.
+            "audience": coordination.row_audience(kind=row["kind"],
+                                                  trace_audience=row["trace_audience"]),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
             "phase": row["phase"],

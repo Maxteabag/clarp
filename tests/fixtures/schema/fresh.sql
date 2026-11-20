@@ -1,4 +1,4 @@
--- user_version 129
+-- user_version 130
 
 -- index idx_agent_portraits_agent_created on agent_portraits
 CREATE INDEX idx_agent_portraits_agent_created ON agent_portraits(agent_id, created_at) WHERE deleted_at IS NULL;
@@ -831,7 +831,8 @@ CREATE TABLE agents (
     role TEXT NOT NULL DEFAULT 'agent',
     helper_state TEXT,
     helper_completed_at INTEGER,
-    custom_status_at INTEGER
+    custom_status_at INTEGER,
+    coordination_visibility TEXT NOT NULL DEFAULT ''
 );
 
 -- table agy_turn_authority on agy_turn_authority
@@ -999,6 +1000,17 @@ CREATE TABLE conversation_heads (
     replace_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, backend_session_id)
 );
+
+-- table coordination_traces on coordination_traces
+CREATE TABLE coordination_traces (
+    agent_id TEXT NOT NULL,
+    trace_id TEXT NOT NULL,
+    sender_agent_id TEXT NOT NULL DEFAULT '',
+    audience TEXT NOT NULL DEFAULT 'agents' CHECK (audience IN ('agents', 'mixed')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, trace_id)
+) WITHOUT ROWID;
 
 -- table cursor_positions on cursor_positions
 CREATE TABLE cursor_positions (

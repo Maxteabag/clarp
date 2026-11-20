@@ -78,6 +78,23 @@ class Suppress:
 Decision = Notify | Suppress
 
 
+NOTE_REASON = "agent-note"
+
+
+def note_decision(capabilities: AgentCapabilities) -> Decision:
+    """Whether an agent's note to the user (POST /agent-notes) pages the user.
+
+    The note is the agent's explicit act addressed to the user, so its
+    origin and the turn it was written in (another agent's, often) do not
+    silence it. A quiet agent stays quiet; mute and the helper rule take only
+    the push, as for a reply. Desktop presence applies at delivery."""
+    if capabilities.quiet or (capabilities.present and not capabilities.can_chat):
+        return Suppress("janitor-maintenance")
+    if capabilities.muted:
+        return Notify(reason=f"{NOTE_REASON}-muted", kind=NOTE_REASON, push=False, muted=True)
+    return Notify(reason=NOTE_REASON, kind=NOTE_REASON, push=True, muted=False)
+
+
 def notify_decision(origin: str, completed_turn: CompletedTurn,
                     capabilities: AgentCapabilities,
                     settings: NotificationSettings) -> Decision:

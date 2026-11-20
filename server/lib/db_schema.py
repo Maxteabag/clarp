@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 129  # provider_turns.trace_id: the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
+_SCHEMA_VERSION = 130  # coordination_traces (a table) and agents.coordination_visibility: coordination between agents (issue 478). 129: provider_turns.trace_id, the trace of the turn a token was issued to (R102). 128: Per-native-session usage cursors. 127: goal_keeper_receipts (a table): one receipt per goal per Goal keeper run. Before it: 126, Goal steps of goals paused before pausing froze them, frozen from their last pause (data only). Before it: 125, device_tokens.supported_conversation_modes (Live calls on an Android phone). Before it: 124, transcript_import_frontiers (a table); 123, device_tokens.provider (apns | fcm); 122, the janitor_runs newest-run index. 120 is a hole: no step has that number (see db_migrations._migrate)
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -55,7 +55,10 @@ CREATE TABLE agents (
     role TEXT NOT NULL DEFAULT 'agent',
     helper_state TEXT,
     helper_completed_at INTEGER,
-    custom_status_at INTEGER
+    custom_status_at INTEGER,
+    -- Coordination between agents in this chat: '' follows the Host's
+    -- setting, else 'show' or 'hide' (lib.coordination).
+    coordination_visibility TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_agents_parent ON agents(parent_agent_id) WHERE parent_agent_id IS NOT NULL;
 
@@ -1455,3 +1458,6 @@ _SCHEMA_SQL += "\n" + _HTML_FORM_EVENTS_SCHEMA + "\n"
 
 from .persistence.schema_parts.goal_ledger import SCHEMA as _GOAL_LEDGER_SCHEMA
 _SCHEMA_SQL += "\n" + _GOAL_LEDGER_SCHEMA + "\n"
+
+from .persistence.schema_parts.coordination import SCHEMA as _COORDINATION_SCHEMA
+_SCHEMA_SQL += "\n" + _COORDINATION_SCHEMA + "\n"
