@@ -21,7 +21,7 @@
 
 mod opencode;
 
-use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
@@ -371,7 +371,11 @@ fn stands_still(group: i32) -> bool {
         return false;
     };
     for entry in all.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|n| n.parse::<i32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
             continue;
         };
         match state_and_group(Path::new(&format!("/proc/{pid}/stat"))) {
@@ -1126,7 +1130,9 @@ mod tests {
             printed: Some(Arc::new(Printed::new(
                 out_read.as_fd().try_clone_to_owned().unwrap(),
             ))),
-            errors: Some(Arc::new(Printed::new(err_read.as_fd().try_clone_to_owned().unwrap()))),
+            errors: Some(Arc::new(Printed::new(
+                err_read.as_fd().try_clone_to_owned().unwrap(),
+            ))),
             served: false,
             hold: Mutex::default(),
             hold_changed: Condvar::new(),
@@ -1197,26 +1203,48 @@ mod tests {
         rig.control.to_spool.send(ToSpool::Entry(record)).unwrap();
         let length = |rig: &Rig| std::fs::metadata(&rig.spool).unwrap().len();
         let held = count(&rig, &own).expect("nothing is in the way");
-        assert_eq!(held.spool, length(&rig), "the record sent before is counted");
+        assert_eq!(
+            held.spool,
+            length(&rig),
+            "the record sent before is counted"
+        );
         assert!(held.spool > 0);
-        assert_eq!((held.partial_out, held.partial_err, held.left_ms), (0, 0, 0));
+        assert_eq!(
+            (held.partial_out, held.partial_err, held.left_ms),
+            (0, 0, 0)
+        );
 
         // What waits in either pipe is in the way, until it is taken.
         rig.out.write_all(b"x").unwrap();
-        assert_eq!(count(&rig, &own), None, "a byte in the pipe of standard output");
+        assert_eq!(
+            count(&rig, &own),
+            None,
+            "a byte in the pipe of standard output"
+        );
         rig.out_read.read_exact(&mut [0]).unwrap();
         rig.err.write_all(b"x").unwrap();
-        assert_eq!(count(&rig, &own), None, "a byte in the pipe of standard error");
+        assert_eq!(
+            count(&rig, &own),
+            None,
+            "a byte in the pipe of standard error"
+        );
         rig.err_read.read_exact(&mut [0]).unwrap();
         assert!(count(&rig, &own).is_some());
 
         // A connection that waits to be taken is in the way; taken, it is a connection.
         let client = UnixStream::connect(&rig.socket).unwrap();
-        assert_eq!(count(&rig, &own), None, "a connection waits in the listener");
+        assert_eq!(
+            count(&rig, &own),
+            None,
+            "a connection waits in the listener"
+        );
         let (taken, _) = rig.listener.accept().unwrap();
         let other = connection(&taken);
         lock(&rig.control.connections).push(other.clone());
-        assert!(count(&rig, &own).is_some(), "a connection with nothing in it");
+        assert!(
+            count(&rig, &own).is_some(),
+            "a connection with nothing in it"
+        );
         // What waits in a connection is in the way; so is a request read and not carried out.
         (&client).write_all(b"{\"op\":\"ping\"}\n").unwrap();
         assert_eq!(count(&rig, &own), None, "a request in a connection");
@@ -1224,12 +1252,19 @@ mod tests {
         (&taken).read_exact(&mut request).unwrap();
         assert!(count(&rig, &own).is_some());
         other.pending.store(true, Ordering::SeqCst);
-        assert_eq!(count(&rig, &own), None, "a request read and not carried out");
+        assert_eq!(
+            count(&rig, &own),
+            None,
+            "a request read and not carried out"
+        );
         other.pending.store(false, Ordering::SeqCst);
         // But not the connection that asks for the count.
         let own_other = other.clone();
         (&client).write_all(b"{\"op\":\"ping\"}\n").unwrap();
-        assert!(count(&rig, &own_other).is_some(), "its own request is not in its way");
+        assert!(
+            count(&rig, &own_other).is_some(),
+            "its own request is not in its way"
+        );
         assert_eq!(count(&rig, &own), None);
         (&taken).read_exact(&mut request).unwrap();
 
@@ -1247,7 +1282,11 @@ mod tests {
             .unwrap();
         drop(turn);
         let held = counting.join().unwrap().unwrap();
-        assert_eq!(held.spool, length(&rig), "and counts what was carried out under it");
+        assert_eq!(
+            held.spool,
+            length(&rig),
+            "and counts what was carried out under it"
+        );
 
         // What the pumps hold of a line that is not whole is said.
         rig.control
@@ -1274,7 +1313,11 @@ mod tests {
         let (own, _peer) = UnixStream::pair().unwrap();
         let own = connection(&own);
         assert_eq!(rig.control.count(&own, Instant::now()), None);
-        assert!(rig.control.count(&own, Instant::now() + Duration::from_secs(1)).is_some());
+        assert!(
+            rig.control
+                .count(&own, Instant::now() + Duration::from_secs(1))
+                .is_some()
+        );
         rig.end();
     }
 
@@ -1305,13 +1348,20 @@ mod tests {
         let until = Instant::now() + Duration::from_secs(2);
         let still = || looked.fetch_add(1, Ordering::SeqCst) >= 2;
         assert_eq!(rig2.control.stand_still(until, still), Ok(()));
-        assert_eq!(looked.load(Ordering::SeqCst), 3, "looked at until it stood still");
+        assert_eq!(
+            looked.load(Ordering::SeqCst),
+            3,
+            "looked at until it stood still"
+        );
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(rig2.state(), Some('T'));
         assert!(rig2.control.let_go());
         // Ended while it was looked at: not let go, and said.
         rig2.mark(Hold::Ended);
-        assert_eq!(rig2.control.stand_still(until, || false), Err(ENDED_WHILE_HELD));
+        assert_eq!(
+            rig2.control.stand_still(until, || false),
+            Err(ENDED_WHILE_HELD)
+        );
         assert!(matches!(*lock(&rig2.control.hold), Hold::Ended));
         rig.end();
         rig2.end();
@@ -1328,8 +1378,7 @@ mod tests {
         let holding = std::thread::spawn(move || control.hold(2_000, &own_too));
         let sleeper = rig.sleeper();
         let stopped = || {
-            state_and_group(Path::new(&format!("/proc/{sleeper}/stat"))).map(|s| s.0)
-                == Some('T')
+            state_and_group(Path::new(&format!("/proc/{sleeper}/stat"))).map(|s| s.0) == Some('T')
         };
         let deadline = Instant::now() + Duration::from_secs(2);
         while !stopped() {
