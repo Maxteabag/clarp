@@ -491,8 +491,14 @@ pub(crate) fn after(
     }
     let mut entries = rows(log, &items, Place::Newest, which)?;
     let latest_revision = if has_more {
-        // There is more in the log than this page: the cursor stops at what was read.
-        cursor.unwrap_or(revision)
+        // There is more in the log than this page: the cursor stops at what was read. A row
+        // is read as it is now; one whose newest part lies beyond what this page read is
+        // left out of it, and comes once, on the page that reaches that part. So no row of a
+        // page is newer than its cursor, and whoever takes a row's revision for a cursor
+        // passes over nothing.
+        let cursor = cursor.unwrap_or(revision);
+        entries.retain(|row| row.revision <= cursor);
+        cursor
     } else {
         for draft in drafts {
             let shown = draft.versioned();
@@ -502,6 +508,9 @@ pub(crate) fn after(
         }
         head_revision.max(revision)
     };
+    // Changes in the order of their revisions: a reply being written took its revision when
+    // it last grew, and what was stored since stands above it.
+    entries.sort_by_key(|row| row.revision);
     Ok(Page {
         entries,
         latest_revision,
