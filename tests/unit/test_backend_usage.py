@@ -1465,3 +1465,19 @@ def test_snapshot_and_exhaustion_take_no_write_lock_behind_active_writer(tmp_pat
     ).fetchall()
     plan_text = " | ".join(str(tuple(r)) for r in plan)
     assert "idx_state_log_agent_ts" in plan_text
+
+
+def test_the_usage_refresher_never_starts_under_the_test_suite(monkeypatch):
+    """Every in-process Host a test builds starts its workers; a refresher there
+    reached for the real Codex app-server 20 s later, from another test."""
+    worker = backend_usage.UsageRefreshWorker(stream=None)
+    worker.start()
+    assert worker._thread is None
+    monkeypatch.delenv(backend_usage.REFRESH_WORKER_ENV)
+    worker.start()                  # an installed Host has no such variable
+    try:
+        assert worker._thread is not None and worker._thread.is_alive()
+    finally:
+        worker.stop()
+        worker._thread.join(5)
+    assert not worker._thread.is_alive()
