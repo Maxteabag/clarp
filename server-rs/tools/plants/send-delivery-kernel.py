@@ -41,5 +41,19 @@ PLANTS = [(K, "vectors", why, before, after) for why, before, after in [
     ("the runtime's mark given to a client", "if internal && python::truthy(&stored[mark]) {", "if python::truthy(&stored[mark]) {"),
 ]]
 
+# The position of each event of one write, and of each event a fold reads (journal.rs): a send
+# admitted and the user's Stop in one batch, and the same folded from the log.
+J = "clarp-kernel/src/journal.rs"
+RUNS["journal"] = ["test", "-p", "clarp-kernel", "--lib", "a_send_and_the_users_stop_in_one_write"]
+PLANTS += [
+    (J, "journal", "every event of a write at the write's first position",
+     "                        .at(self.recorder.last_seq + self.items.len() as Seq);",
+     "                        .at(self.recorder.last_seq + 1);"),
+    (J, "journal", "a folded event at the position before its own",
+     "                        agent.at(item.seq);\n                        agent\n                            .apply(&event)",
+     "                        agent.at(item.seq - 1);\n                        agent\n                            .apply(&event)"),
+]
+
+
 if __name__ == "__main__":
     raise SystemExit(runner.main(__file__, RUNS, PLANTS))
