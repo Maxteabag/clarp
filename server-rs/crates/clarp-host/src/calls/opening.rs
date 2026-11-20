@@ -249,6 +249,82 @@ impl Desk {
     }
 }
 
+/// What a ring whose clip could not be bound at the start is counted as, until it is.
+const UNBOUND: &str = "opening_binding";
+
+/// What recovers an agent's opening bindings for the one that speaks, once the Host can.
+pub struct Recovering(pub App);
+
+impl crate::voice::held::Recover for Recovering {
+    fn recover(
+        &self,
+        agent_id: String,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = bool> + Send + '_>> {
+        Box::pin(async move { self.0.calls.recover_agent(&self.0, &agent_id).await })
+    }
+}
+
+impl super::Desk {
+    /// Recovers the bindings of an agent that did not answer at the start: answers whether all
+    /// of them are recovered now. Those that are are no longer counted.
+    pub async fn recover_agent(&self, app: &App, agent_id: &str) -> bool {
+        let _serial = self.opening_turn.lock().await;
+        let mut unbound = self.unbound.lock().await;
+        let Some(waiting) = unbound.remove(agent_id) else {
+            return true;
+        };
+        let Some(member) = app
+            .fleet
+            .directory()
+            .members
+            .iter()
+            .find(|m| m.record.agent_id == agent_id)
+            .cloned()
+        else {
+            unbound.insert(agent_id.to_string(), waiting);
+            return false;
+        };
+        let mut left = Vec::new();
+        for (ring_id, kind, id) in waiting {
+            match self.recover_clip(app, &member, &ring_id, kind, &id).await {
+                Ok(()) => app.fleet.recovered(UNBOUND, &ring_id),
+                Err(_) => left.push((ring_id, kind, id)),
+            }
+        }
+        let all = left.is_empty();
+        if !all {
+            unbound.insert(agent_id.to_string(), left);
+        }
+        all
+    }
+}
+
+/// How often a store that did not answer is asked again while calls are recovered at the
+/// start, and how long it is waited for before each time (longer each time).
+const TRIES: u32 = 3;
+const AGAIN_AFTER: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Asks the store again, a few times, while it does not answer.
+async fn again<T, F, Fut>(mut ask: F) -> Result<T, Unavailable>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, Unavailable>>,
+{
+    let mut tried = 0;
+    loop {
+        match ask().await {
+            Ok(answer) => return Ok(answer),
+            Err(why) => {
+                tried += 1;
+                if tried >= TRIES {
+                    return Err(why);
+                }
+                tokio::time::sleep(AGAIN_AFTER * tried).await;
+            }
+        }
+    }
+}
+
 pub(super) fn proven(with: &With) -> Value {
     let Some(proof) = with.world.opening else {
         return Value::Null;
@@ -474,13 +550,11 @@ impl Desk {
 }
 
 impl Desk {
+    /// The openings of calls that are over, each read alone: one that cannot be read is left
+    /// out and counted (`kept.rs`), and stops nothing.
     async fn archived_openings(app: &App) -> Result<Vec<clarp_kernel::rings::Ring>, Unavailable> {
-        app.fleet
-            .kept_all("opening_history")
-            .await?
-            .into_iter()
-            .map(|(_, raw)| serde_json::from_slice(&raw).map_err(|e| Unavailable(e.to_string())))
-            .collect()
+        let rows = app.fleet.kept_rows("opening_history").await?;
+        Ok(rows.read.into_iter().map(|(_, ring)| ring).collect())
     }
 
     /// The message journal proves which admission actually got the turn.
@@ -489,15 +563,13 @@ impl Desk {
         let _serial = self.opening_turn.lock().await;
         // Previous releases kept a trace index. It cannot establish turn
         // ownership and must not retain private tokens after their openings go.
-        let old = app
-            .fleet
-            .kept_all("opening_audio")
+        let old: Vec<(&'static str, String)> = again(|| app.fleet.kept_all("opening_audio"))
             .await?
             .into_iter()
             .map(|(key, _)| ("opening_audio", key))
             .collect();
-        app.fleet.change_together(Vec::new(), old).await?;
-        let mut records = Self::archived_openings(app).await?;
+        again(|| app.fleet.change_together(Vec::new(), old.clone())).await?;
+        let mut records = again(|| Self::archived_openings(app)).await?;
         {
             let mut held = self.books.lock().await;
             let books = Self::read(&mut held, app).await?;
@@ -527,8 +599,33 @@ impl Desk {
                 }) {
                     continue;
                 }
-                self.recover_clip(app, &member, &r.ring_id, kind, id)
-                    .await?;
+                let mut tried = 0;
+                while let Err(why) = self.recover_clip(app, &member, &r.ring_id, kind, id).await {
+                    // An agent that does not answer now opens again by itself, and its lines
+                    // could then be said beside its call: it is held, and its binding is
+                    // recovered when it next hands a line over (`voice/held.rs`). Counted until
+                    // then.
+                    if member.agent.opening_row(id).await.is_err() {
+                        app.fleet.leave_out(UNBOUND, &r.ring_id);
+                        let agent_id = member.record.agent_id.clone();
+                        let entry = (r.ring_id.clone(), kind, id.to_string());
+                        self.unbound
+                            .lock()
+                            .await
+                            .entry(agent_id.clone())
+                            .or_default()
+                            .push(entry);
+                        app.mouth.held.hold(&agent_id);
+                        break;
+                    }
+                    // The store did not answer: tried again a few times, and then the start
+                    // stops, as for any store that does not answer.
+                    tried += 1;
+                    if tried >= TRIES {
+                        return Err(why);
+                    }
+                    tokio::time::sleep(AGAIN_AFTER * tried).await;
+                }
             }
         }
         Ok(())
@@ -687,5 +784,36 @@ impl Desk {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::{TRIES, Unavailable, again};
+
+    #[tokio::test]
+    async fn a_store_that_answers_again_is_asked_again_and_one_that_does_not_stops_the_start() {
+        // It does not answer twice, and then does: the answer is taken.
+        let asked = AtomicU32::new(0);
+        let answered = again(|| async {
+            match asked.fetch_add(1, Ordering::SeqCst) {
+                0 | 1 => Err(Unavailable("no answer".into())),
+                _ => Ok(7),
+            }
+        })
+        .await;
+        assert_eq!((answered.unwrap(), asked.load(Ordering::SeqCst)), (7, 3));
+        // It never answers: asked a few times, no more, and then its failure is the answer.
+        let asked = AtomicU32::new(0);
+        let answered = again(|| async {
+            asked.fetch_add(1, Ordering::SeqCst);
+            Err::<u32, _>(Unavailable("no answer".into()))
+        })
+        .await;
+        assert_eq!(answered.unwrap_err().0, "no answer");
+        assert_eq!(asked.load(Ordering::SeqCst), TRIES);
     }
 }

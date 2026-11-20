@@ -41,7 +41,7 @@ use crate::unkept::RecordFailure;
 
 pub mod generation;
 pub mod live;
-pub(crate) mod opening;
+pub mod opening;
 pub mod opening_launch;
 mod tools;
 mod transcript;
@@ -95,9 +95,18 @@ struct Books {
 
 /// The desk of calls and rings. Its books are `None` until they were read where they are
 /// kept.
+/// The openings whose clip waits for its agent, by the agent's id: each ring, the kind of clip
+/// and the admission it waits on.
+type Unbound =
+    std::collections::BTreeMap<String, Vec<(String, clarp_kernel::rings::binding::Kind, String)>>;
+
 #[derive(Default)]
 pub struct Desk {
     opening_turn: tokio::sync::Mutex<()>,
+    /// The openings whose clip could not be bound at the start because their agent did not
+    /// answer, by the agent's id: each ring and the admission it waits on. Recovered when that
+    /// agent next hands a line over (`voice/held.rs`).
+    unbound: tokio::sync::Mutex<Unbound>,
     tool_slots: std::sync::Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     books: tokio::sync::Mutex<Option<Books>>,
     /// One ring is placed at a time: from the moment it is admitted until it rings, while
@@ -186,16 +195,16 @@ impl Desk {
     ) -> Result<&'a mut Books, RecordFailure> {
         if held.is_none() {
             let mut books: BTreeMap<String, Vec<Call>> = BTreeMap::new();
-            for (principal, kept) in app
+            // What cannot be read is no call: the phone starts a new one, and its own new
+            // call is what is kept under that phone again. Until then it is counted
+            // (`kept.rs`).
+            let calls = app
                 .fleet
-                .kept_all(KIND)
+                .kept_rows::<Vec<Call>>(KIND)
                 .await
-                .map_err(RecordFailure::Read)?
-            {
-                // What cannot be read is no call: the phone starts a new one.
-                if let Ok(calls) = serde_json::from_slice::<Vec<Call>>(&kept) {
-                    books.insert(principal, calls);
-                }
+                .map_err(RecordFailure::Read)?;
+            for (principal, calls) in calls.read {
+                books.insert(principal, calls);
             }
             // And of the rings what can be read: the rest begins anew.
             let kept: HashMap<String, Vec<u8>> = app
