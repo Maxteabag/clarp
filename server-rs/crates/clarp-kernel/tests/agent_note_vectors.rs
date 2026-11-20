@@ -173,7 +173,10 @@ fn ask(
         ..Capabilities::default()
     });
     let Decision::Notify {
-        reason, push, muted, ..
+        reason,
+        push,
+        muted,
+        ..
     } = decision
     else {
         panic!("a note of these agents always notifies");
@@ -238,8 +241,13 @@ fn a_note_is_refused_accepted_and_notified_as_the_python_host_does() {
             }
             // The agent's chat: its notes, in the order they were written, always the user's.
             let notes = step["notes"].as_array().unwrap();
-            let named = body_of(step)["session"].as_str().map(str::trim).map(str::to_string);
-            let session = named.filter(|named| number(named).is_some()).unwrap_or(own.clone());
+            let named = body_of(step)["session"]
+                .as_str()
+                .map(str::trim)
+                .map(str::to_string);
+            let session = named
+                .filter(|named| number(named).is_some())
+                .unwrap_or(own.clone());
             let kept: Vec<(String, String)> = agents
                 .get(&session)
                 .map(|agent: &Agent| agent.notes.clone())
@@ -248,9 +256,7 @@ fn a_note_is_refused_accepted_and_notified_as_the_python_host_does() {
                 let agent_id = format!("agent-{}", number(&session).unwrap());
                 let ours: Vec<Value> = kept
                     .iter()
-                    .map(|(id, words)| {
-                        json!([coordination::note_message_id(&agent_id, id), words])
-                    })
+                    .map(|(id, words)| json!([coordination::note_message_id(&agent_id, id), words]))
                     .collect();
                 let theirs: Vec<Value> = notes
                     .iter()
@@ -275,7 +281,10 @@ fn a_note_is_refused_accepted_and_notified_as_the_python_host_does() {
             }
         }
     }
-    assert_eq!((stories.len(), steps, refused, written, again), (15, 59, 44, 13, 2));
+    assert_eq!(
+        (stories.len(), steps, refused, written, again),
+        (15, 59, 44, 13, 2)
+    );
 }
 
 #[test]
@@ -291,7 +300,14 @@ fn a_notes_id_is_of_its_row_and_its_body_is_read_as_the_python_host_reads_it() {
     assert_eq!(read(json!(4.5)).unwrap().text, "4.5");
     assert_eq!(read(json!(["a", 1])).unwrap().text, "['a', 1]");
     assert_eq!(read(json!({"a": null})).unwrap().text, "{'a': None}");
-    for nothing in [json!(false), json!(0), json!([]), json!({}), json!(null), json!("")] {
+    for nothing in [
+        json!(false),
+        json!(0),
+        json!([]),
+        json!({}),
+        json!(null),
+        json!(""),
+    ] {
         assert_eq!(read(nothing).unwrap_err().status, 400);
     }
     // The bounds counted in signs, not bytes, from both sides.
