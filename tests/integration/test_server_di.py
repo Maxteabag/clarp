@@ -3187,16 +3187,46 @@ def test_recoverable_clips_endpoint_returns_interrupted_session_audio(
     assert [event["clip_id"] for event in payload["events"]] == [clip_id]
 
 
+def _recency(agents_by_name, *, created, started):
+    """The two facts the names are ordered by (VocabService.active_agent_names), set by the test:
+    each agent's creation time and its latest turn's start (None: no turn)."""
+    from lib import db
+    con = db.conn()
+    for name, agent_id in agents_by_name.items():
+        con.execute("UPDATE agents SET created_at=? WHERE agent_id=?", (created[name], agent_id))
+        con.execute("DELETE FROM turns WHERE agent_id=?", (agent_id,))
+        if started.get(name) is not None:
+            con.execute("INSERT INTO turns(agent_id, source, trace_id, started_at) VALUES (?,?,?,?)",
+                        (agent_id, "pwa", f"t-{name}", started[name]))
+    con.commit()
+
+
+def _names(base):
+    status, body = _get(base + "/transcription-guidance")
+    assert status == 200
+    return json.loads(body)["active_agent_names"]
+
+
 def test_transcription_guidance_is_computer_owned_and_editable(running_server):
+    """R131: the names' order is set here, not left to what ran before or to the clock. It is
+    the user's own agents, the most recently used first (the latest turn's start), then by
+    creation, then by agent id. Mike and Rachel are made in the same millisecond more often
+    than not, and their ids are random: without the creation times set here, a tie left the
+    order to the ids."""
     base, ctx, _srv = running_server
+    from lib import agents as agents_db
     from lib.agents import create_agent
     create_agent(persona="Lena", voice_id="V_LENA", cwd=str(ctx.root), session="lena")
+    ids = {name: agents_db.get_by_session(session)["agent_id"]
+           for name, session in (("Mike", "claude"), ("Rachel", "rachel"), ("Lena", "lena"))}
+    created = {"Mike": 1_000, "Rachel": 2_000, "Lena": 3_000}
+    _recency(ids, created=created, started={})
 
     status, body = _get(base + "/transcription-guidance")
     assert status == 200
     initial = json.loads(body)
     assert initial["settings"]["delegation_agent_names_enabled"] is True
-    assert "Lena" in initial["active_agent_names"]
+    assert initial["active_agent_names"] == ["Mike", "Rachel", "Lena"]   # no turns: by creation
     assert initial["defaults"]["technical_glossary"] == ""
 
     status, body = _post(base + "/transcription-guidance", {
@@ -3211,6 +3241,27 @@ def test_transcription_guidance_is_computer_owned_and_editable(running_server):
         "Technical vocabulary: SwiftUI Cloudflare.")
     assert saved["delegation_estimated_prompt_tokens"] <= saved["prompt_token_limit"]
     assert saved["regular_estimated_prompt_tokens"] <= saved["prompt_token_limit"]
+
+
+def test_the_names_go_by_the_latest_turn_both_ways_and_a_tie_by_creation(running_server):
+    base, ctx, _srv = running_server
+    from lib import agents as agents_db
+    ids = {name: agents_db.get_by_session(session)["agent_id"]
+           for name, session in (("Mike", "claude"), ("Rachel", "rachel"))}
+    created = {"Mike": 1_000, "Rachel": 2_000}
+
+    _recency(ids, created=created, started={"Mike": 50_000, "Rachel": 40_000})
+    assert _names(base) == ["Mike", "Rachel"]                       # Mike used last
+    _recency(ids, created=created, started={"Mike": 40_000, "Rachel": 50_000})
+    assert _names(base) == ["Rachel", "Mike"]                       # Rachel used last
+    _recency(ids, created=created, started={"Mike": 50_000, "Rachel": 50_000})
+    assert _names(base) == ["Mike", "Rachel"]                       # same ms: the older first
+    _recency(ids, created={"Mike": 2_000, "Rachel": 1_000}, started={"Mike": 50_000, "Rachel": 50_000})
+    assert _names(base) == ["Rachel", "Mike"]                       # ... whichever that is
+    _recency(ids, created={"Mike": 1_000, "Rachel": 1_000}, started={})
+    first = _names(base)
+    by_id = sorted(ids, key=ids.get)
+    assert first == by_id and all(_names(base) == first for _ in range(3))  # full tie: by id, stable
 
 
 def test_signed_notification_avatar_serves_custom_agent_without_app_auth(
