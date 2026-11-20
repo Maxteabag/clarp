@@ -100,8 +100,13 @@ def merge_provider_maps(stored: str | None, incoming: str | None,
     changed and takes the incoming value; one in the base but not in the incoming map
     was removed on purpose; one in the stored map but in neither was added by someone
     else since the read and stays. Without ``base`` nothing is removed by absence:
-    the providers present are set, and an empty value removes one."""
-    have = voice_map(canonical(stored))
+    the providers present are set, and an empty value removes one.
+
+    The stored value and the base are read as they always have been (voice_map: a bare
+    value is an ElevenLabs id); only the incoming value is read by its form. An edit never
+    moves a stored bare id to another provider: that is the migration's, behind its
+    audible check."""
+    have = voice_map(stored)
     want = voice_map(canonical(incoming)) if (incoming or "").strip() not in {"", "{}"} else {}
     raw_incoming = {}
     text = (incoming or "").strip()
@@ -119,7 +124,7 @@ def merge_provider_maps(stored: str | None, incoming: str | None,
             if value in ("", None):
                 merged.pop(str(provider), None)
         return json.dumps(merged, sort_keys=True, separators=(",", ":"))
-    was = voice_map(canonical(base))
+    was = voice_map(base)
     merged = dict(have)
     for provider in set(was) | set(want):
         if want.get(provider) == was.get(provider):

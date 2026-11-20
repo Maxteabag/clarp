@@ -89,13 +89,68 @@ def test_the_report_marks_what_would_sound_different_and_apply_writes_only_the_r
     assert rows[same]["audible"] is False and rows[eleven]["audible"] is False
     assert rows[differs]["audible"] is True                     # Cartesia would speak the stored uuid
     assert rows[differs]["today"]["provider"][1] == ADA and rows[differs]["after"]["provider"][1] == UUID
-    result = voice_migration.apply(report)
+    result = voice_migration.apply(report, reviewed=report["digest"])
     assert "agent Ada" in result["refused_audible"]
     assert agents_db.get_by_agent_id(same)["voice_id"] == '{"cartesia":"%s"}' % ADA
     assert agents_db.get_by_agent_id(eleven)["voice_id"] == '{"elevenlabs":"%s"}' % ELEVEN
     assert agents_db.get_by_agent_id(differs)["voice_id"] == UUID          # refused: untouched
     left = [r for r in voice_migration.plan()["voices"] if r["kind"] == "agent"]
     assert [r["agent_id"] for r in left] == [differs]                    # only the audible row remains
+
+
+def test_a_row_is_audible_when_another_provider_would_hear_it_differently(monkeypatch):
+    """Pre-read of V2a, P1: a bare Cartesia uuid on a Host where Cartesia is neither provider
+    nor fallback sounds the same today (ElevenLabs refuses it either way), but the day the
+    Host moves to Cartesia it would speak the uuid instead of its persona voice."""
+    cfg = config.Config(tts_provider="elevenlabs", tts_fallback="none", eleven_api_key="ek",
+                        cartesia_voices={"Ada": ADA})
+    monkeypatch.setattr(config, "load", lambda path=None: cfg)
+    moved = agents_db.create_agent(persona="Ada", voice_id=UUID, cwd="/tmp", session="ada")
+    still = agents_db.create_agent(persona="Ada", voice_id=ADA, cwd="/tmp", session="ada-2")
+    report = voice_migration.plan()
+    rows = {r["agent_id"]: r for r in report["voices"] if r["kind"] == "agent"}
+    assert rows[moved]["today"] == rows[moved]["after"]          # the configured two agree ...
+    assert rows[moved]["per_provider"]["cartesia"] == {"today": [ADA, None], "after": [UUID, None]}
+    assert rows[moved]["audible"] is True                         # ... and it is still refused
+    assert rows[still]["per_provider"] == {} and rows[still]["audible"] is False
+    result = voice_migration.apply(report, reviewed=report["digest"])
+    assert result["refused_audible"] == ["agent Ada"]
+    assert agents_db.get_by_agent_id(moved)["voice_id"] == UUID
+
+
+def test_apply_writes_only_the_plan_the_dry_run_showed(cartesia_host):
+    """Pre-read of V2a, P3: a row that changed after the dry run is never written unseen."""
+    agent = agents_db.create_agent(persona="Zed", voice_id=ELEVEN, cwd="/tmp", session="zed")
+    read = voice_migration.plan()
+    late = agents_db.create_agent(persona="Bo", voice_id=UUID, cwd="/tmp", session="bo")
+    now = voice_migration.plan()
+    assert now["digest"] != read["digest"]
+    with pytest.raises(voice_migration.PlanChanged):
+        voice_migration.apply(now, reviewed=read["digest"])
+    with pytest.raises(voice_migration.PlanChanged):
+        voice_migration.apply(now, reviewed="")
+    assert agents_db.get_by_agent_id(agent)["voice_id"] == ELEVEN       # nothing written
+    assert agents_db.get_by_agent_id(late)["voice_id"] == UUID
+    assert voice_migration.apply(now, reviewed=now["digest"])["written"]
+
+
+def test_a_contact_edit_reads_the_stored_value_as_it_always_was(cartesia_host):
+    """Pre-read of V2a, P2: an edit (Android sends the whole map) never moves a stored bare
+    uuid under Cartesia, so the contact's agents keep their voice; that is the migration's."""
+    row = personas.create(name="Wanda", voice_id=json.dumps({"gemini": "Kore"}))
+    personas.set_stored_voice(row["persona_id"], UUID)                   # a value from before V2a
+    as_agent = {"agent_id": "", "persona": "Wanda", "session": "", "voice_id": UUID}
+    from lib import voice_profile
+    host = voice_profile.HostView.build(cartesia_host, stored={})
+    before = voice_profile.speech(host, as_agent)
+    personas.update(original_name="Wanda", name="Wanda", voice_id=json.dumps({"gemini": "Kore"}))
+    stored = personas.get("Wanda")["voice_id"]
+    assert json.loads(stored) == {"elevenlabs": UUID, "gemini": "Kore"}
+    after = voice_profile.speech(host, {**as_agent, "voice_id": stored})
+    assert (after["provider"], after["voice_id"]) == (before["provider"], before["voice_id"])
+    # The incoming value alone is read by its form.
+    personas.update(original_name="Wanda", name="Wanda", voice_id=ADA)
+    assert json.loads(personas.get("Wanda")["voice_id"])["cartesia"] == ADA
 
 
 def test_transcription_settings_are_copied_under_agent_ids(cartesia_host):
@@ -105,7 +160,7 @@ def test_transcription_settings_are_copied_under_agent_ids(cartesia_host):
     report = voice_migration.plan()
     assert report["transcription"]["languages"] == {a: "no,en", b: "no,en"}
     assert report["transcription"]["shared_keys"][0]["key"] == "ada"
-    voice_migration.apply(report)
+    voice_migration.apply(report, reviewed=report["digest"])
     stored = json.loads(settings_store.get_text(stt_language.AGENT_LANGUAGES_KEY))
     assert stored["ada"] == "no,en" and stored[a.lower()] == "no,en"
     assert stt_language.language_for("ada-2") == "no,en"                    # unchanged for everyone
