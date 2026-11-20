@@ -50,7 +50,11 @@ def _host(cfg) -> voice_profile.HostView:
 def _stand_ins(monkeypatch, calls):
     def fake(name):
         def synth(*, text, out_path, on_chunk=None, **kw):
-            calls.append((name, kw.get("voice_id") or kw.get("voice")))
+            voice = kw.get("voice_id") or kw.get("voice")
+            if name == "elevenlabs" and not voice_profile.elevenlabs_id_usable(voice):
+                # What ElevenLabs answers for a JSON text, a uuid or nothing.
+                raise RuntimeError("elevenlabs: voice not found")
+            calls.append((name, voice))
             return 1
         return synth
     monkeypatch.setattr(tts_registry, "cartesia_synthesize", fake("cartesia"))
@@ -86,10 +90,14 @@ def _worker_selects(cfg, agent, tmp_path, calls):
 @pytest.mark.parametrize("persona", PERSONAS)
 @pytest.mark.parametrize("shape", sorted(SHAPES))
 @pytest.mark.parametrize("provider", PROVIDERS)
-def test_table_1_4_profile_is_what_the_worker_speaks(monkeypatch, tmp_path, provider, shape, persona):
+@pytest.mark.parametrize("fallback", ("none", "elevenlabs", "cartesia"))
+def test_table_1_4_profile_is_what_the_worker_speaks(monkeypatch, tmp_path, provider, shape, persona,
+                                                      fallback):
+    """Shape x provider x configured fallback: the profile names the provider and voice that
+    actually speak, the fallback's when the first provider has none for this agent."""
     calls: list = []
     _stand_ins(monkeypatch, calls)
-    cfg = _cfg(provider)
+    cfg = _cfg(provider, tts_fallback=fallback)
     agent = {"agent_id": "a1", "persona": persona, "session": persona.lower(),
              "voice_id": SHAPES[shape]}
     shown = voice_profile.speech(_host(cfg), agent)
@@ -99,10 +107,7 @@ def test_table_1_4_profile_is_what_the_worker_speaks(monkeypatch, tmp_path, prov
         assert shown["silent_reason"] is None
     else:
         assert shown["silent_reason"] == voice_profile.NO_VOICE
-        # Silence is either refused before audio, or a value handed to ElevenLabs that it
-        # refuses (a JSON text, a Cartesia uuid, nothing): the profile says so up front.
-        assert spoken is None or (spoken[0] == "elevenlabs"
-                                  and not voice_profile.elevenlabs_id_usable(spoken[1]))
+        assert spoken is None
 
 
 def test_the_table_s_surprises_are_shown(monkeypatch):
@@ -295,3 +300,42 @@ def test_the_creation_answer_and_events_carry_the_profile():
     assert set(item) == {"speech", "hearing"} and item["speech"]["shared_with"] == 0
     from lib import events
     assert voice_profile.for_session("nobody") is events.OMIT
+
+
+def test_a_label_is_a_real_name_or_null_never_empty(monkeypatch):
+    from lib import cartesia_voices, elevenlabs_voices
+    monkeypatch.setattr(cartesia_voices, "cached_names", lambda: {ADA_CARTESIA: "  "})
+    monkeypatch.setattr(elevenlabs_voices, "cached_names", lambda: {ELEVEN_ID: ""})
+    for provider in PROVIDERS:
+        host = _host(_cfg(provider))
+        host.keys[voice_profile.GOOGLE] = True
+        for shape in SHAPES.values():
+            item = voice_profile.profile(host, {"agent_id": "a", "persona": "Ada", "session": "ada",
+                                                "voice_id": shape})
+            for label in (item["speech"]["voice_label"], item["speech"]["provider_label"],
+                          *(e["label"] for e in item["hearing"]["engines"])):
+                assert label is None or (isinstance(label, str) and label.strip()), (provider, shape)
+
+
+def test_device_cloud_languages_only_when_the_phone_may_choose():
+    host = voice_profile.HostView.build(_cfg("cartesia"), stored={
+        "transcription.language": "no",
+        "transcription.agent_engines": json.dumps({"ada": "google:chirp_3"}),
+        "transcription.agent_languages": json.dumps({"ada": "no,en", "bo": "no,en"})})
+    hear = lambda persona: voice_profile.hearing(host, {"persona": persona, "session": persona.lower()})
+    assert hear("Ada")["device_cloud_languages"] is None              # its own engine: the phone cannot choose
+    assert hear("Bo")["device_cloud_languages"] == ["no", "en"]        # its own set
+    assert hear("Cy")["device_cloud_languages"] == ["no"]              # the Host's default
+
+
+def test_accepts_language_set_is_the_list_the_path_refuses_by(monkeypatch):
+    from lib import stt_language, stt_providers
+    rows = stt_providers.cloud_models()
+    assert rows and all(r["accepts_language_set"] == (r["provider"] in stt_providers.LANGUAGE_SET_PROVIDERS)
+                        for r in rows)
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "k")
+    monkeypatch.setattr(stt_language, "current_language", lambda: "no,en")
+    for row in rows:
+        if not row["accepts_language_set"]:
+            with pytest.raises(ValueError, match="language-set"):
+                stt_providers.transcribe(row["id"], b"", "audio/wav", "")

@@ -239,11 +239,14 @@ def _streaming(provider: str) -> bool:
 
 
 def _voice_label(host: HostView, provider: str, voice: str | None) -> str | None:
+    """A real name or None, never an empty string (apps show their own words for None)."""
     if not voice:
         return None
     if provider == GEMINI:
-        return None if voice.startswith("voice_") else voice
-    return host.labels.get(provider, {}).get(voice)
+        label = None if voice.startswith("voice_") else voice
+    else:
+        label = host.labels.get(provider, {}).get(voice)
+    return (label or "").strip() or None
 
 
 def _attempt(host: HostView, agent: Mapping, route: tts_mode.Route, provider: str) -> dict:
@@ -333,10 +336,16 @@ def hearing(host: HostView, agent: Mapping) -> dict:
         language_origin = DEFAULT
     elif stt_providers.provider_of(first) == "elevenlabs" and len(codes) > 1:
         codes = []          # Scribe is handed no language for a set: it detects (stt_providers)
+    device_may_override = engine_origin == DEFAULT
+    # What a hosted engine chosen on the phone is handed for this agent
+    # (stt_providers.transcribe: the agent's own set, else the Host's).
+    device_cloud = ([c for c in (own_language or host.language).split(",") if c]
+                    if device_may_override else None)
     return {
         "engines": [_engine_row(e) for e in engines],
         "engine_origin": engine_origin,
-        "device_may_override": engine_origin == DEFAULT,
+        "device_may_override": device_may_override,
+        "device_cloud_languages": device_cloud,
         "languages": codes,
         "language_origin": language_origin,
     }
