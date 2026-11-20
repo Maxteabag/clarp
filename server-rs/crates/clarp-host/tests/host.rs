@@ -5377,14 +5377,16 @@ fn an_agent_writes_to_another_agent_with_its_own_tool() {
     );
     assert_eq!(host.get("/peers"), json!([named]), "never its token");
     // The owner's own command for it reads the same.
-    let listed = place.host_command()
+    let listed = place
+        .host_command()
         .args(["peer", "list", "--host", &host.address])
         .ended();
     assert_eq!(
         String::from_utf8_lossy(&listed.stdout).trim(),
         format!("work http://{}", other.address)
     );
-    let unnamed = place.host_command()
+    let unnamed = place
+        .host_command()
         .args([
             "peer",
             "add",
@@ -9751,7 +9753,8 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
     );
 
     // The command line asks the same Host for the same thing.
-    let shown = place.host_command()
+    let shown = place
+        .host_command()
         .args([
             "pair",
             "--url",
@@ -9767,7 +9770,8 @@ fn a_device_is_paired_with_a_code_and_speaks_with_a_token_that_can_be_taken_away
         String::from_utf8_lossy(&shown.stderr)
     );
     assert!(String::from_utf8_lossy(&shown.stdout).starts_with("clarp://pair?name="));
-    let refused = place.host_command()
+    let refused = place
+        .host_command()
         .args([
             "pair",
             "--url",
@@ -10155,7 +10159,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     );
 
     // The move, as its owner would run it.
-    let moved = new_place.host_command()
+    let moved = new_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10354,7 +10359,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
         "{refused}"
     );
     // Asked for again, the files are the same files: nothing arrives twice.
-    let again = new_place.host_command()
+    let again = new_place
+        .host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10389,7 +10395,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     ];
     let kept = fetch(&third_host, "", "POST", "/media", &under_its_id, &long_ago);
     assert_eq!(kept.status, 200, "{}", kept.text());
-    let again = third_place.host_command()
+    let again = third_place
+        .host_command()
         .args(["import", "--files", "--from", &old_host.address])
         .args(["--session", &session, "--host", &new_host.address])
         .args(["--files-from", &third_host.address])
@@ -10454,7 +10461,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     assert_eq!(queue["paused"], false, "{queue}");
     // The first Host was read, not changed; and an agent arrives once.
     assert_eq!(old_host.conversation(&session), before);
-    let again = third_place.host_command()
+    let again = third_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -10464,7 +10472,8 @@ fn an_agent_moves_from_one_host_to_another_with_its_conversation() {
     // The agent whose picture came along moves too. Its picture is here already, as a file
     // the first agent shows: it becomes its own here, in its gallery as it was, and it is
     // still one file. The first agent's gallery is as it was.
-    let moved = third_place.host_command()
+    let moved = third_place
+        .host_command()
         .args(["import", "--from", &old_host.address])
         .args(["--session", &other_session, "--host", &new_host.address])
         .env_remove("CLARP_HOST_TOKEN")
@@ -13621,7 +13630,8 @@ fn an_agent_forks_itself_into_helpers_that_start_from_its_conversation() {
         r#"{"children": [{"name": "Spec One", "task": "from a file"}]}"#,
     )
     .unwrap();
-    let own = place.host_command()
+    let own = place
+        .host_command()
         .args([
             "tool",
             "clarp-admin",
@@ -16063,7 +16073,8 @@ fn a_turn_is_given_a_token_for_its_agents_tools_and_never_the_hosts_own() {
     assert_eq!(said("script_token"), tools, "{seen}");
 
     // That token opens the tools, from this machine, and nothing the apps read or do.
-    let by_hand = place.host_command()
+    let by_hand = place
+        .host_command()
         .args(["tool", "clarp-admin", "sessions"])
         .current_dir(&place.root)
         .env("CLARP_HOST_ADDR", &host.address)
@@ -23562,7 +23573,8 @@ fn an_agent_that_moves_stays_who_it_was() {
         old_host.conversation(&session).len() == 2 && old_host.state(&session) == "done"
     });
 
-    let moved = new_place.host_command()
+    let moved = new_place
+        .host_command()
         .args(["import", "--from", &old_host.address, "--session", &session])
         .args(["--host", &new_host.address])
         .current_dir(&new_place.root)
@@ -24691,7 +24703,8 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
         })
     );
     assert!(!status.to_string().contains(&key));
-    let shown = place.host_command()
+    let shown = place
+        .host_command()
         .args(["network", "relay", "status", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -24711,7 +24724,8 @@ fn a_phone_reaches_the_host_through_the_relay_and_is_never_the_administrator() {
             && link.contains("&url=https%3A%2F%2Frelay.example%2Fh%2Felitebook-test&code="),
         "{link}"
     );
-    let shown = place.host_command()
+    let shown = place
+        .host_command()
         .args(["pair", "--relay", "--host", &host.address])
         .env("CLARP_HOST_TOKEN", ADMIN)
         .ended();
@@ -25110,7 +25124,8 @@ fn a_host_dials_no_relay_unless_it_is_told_to_and_can() {
     );
     assert!(worker.session_within(1).is_none(), "nothing is dialled");
     // A stand-in for the relay is on this machine, or it is none.
-    let elsewhere = place.host_command()
+    let elsewhere = place
+        .host_command()
         .args(["--data", place.root.join("other").to_str().unwrap()])
         .env("CLARP_RELAY_DIAL", "ws://relay.example:80")
         .ended();
@@ -30351,10 +30366,7 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         ("CLARP_CLAUDE_PROGRAM", fallback.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let help = place.host_command()
-        .arg("--help")
-        .output()
-        .unwrap();
+    let help = place.host_command().arg("--help").output().unwrap();
     assert!(
         format!(
             "{}{}",
@@ -30363,7 +30375,8 @@ print('{"command":{"data":{"groups":[{"name":"model family","buckets":[{"remaini
         )
         .contains("--ask-usage")
     );
-    let mut refused = place.host_command()
+    let mut refused = place
+        .host_command()
         .args([
             "--ask-usage",
             "--data",
@@ -34558,7 +34571,8 @@ fn a_phone_streams_what_it_hears_and_is_told_what_the_engine_says_of_the_turns()
             "an address on this machine",
         ),
     ] {
-        let started = other.host_command()
+        let started = other
+            .host_command()
             .args(["--data", other.root.join("elsewhere").to_str().unwrap()])
             .env(variable, elsewhere)
             .ended();
@@ -41902,7 +41916,8 @@ fn a_call_of_the_oracle_uses_its_second_voice() {
         assert_eq!(refused_a_socket(&absent, &phone, "/oracle/v2").0, 503);
         assert_eq!(connections.load(Ordering::SeqCst), 0);
     }
-    let mut child = place.host_command()
+    let mut child = place
+        .host_command()
         .arg("--data")
         .arg(place.root.join("data"))
         .arg("--run")

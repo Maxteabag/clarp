@@ -417,7 +417,9 @@ mod tests {
         let ids: Vec<&str> = PROGRAMS.iter().map(|(id, _, _)| *id).collect();
         assert_eq!(
             ids,
-            ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"]
+            [
+                "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"
+            ]
         );
         for (id, variable, name) in PROGRAMS {
             assert!(

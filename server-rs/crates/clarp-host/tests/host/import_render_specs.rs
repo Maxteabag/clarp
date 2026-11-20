@@ -96,7 +96,8 @@ fn a_move_names_every_render_spec_left_on_the_source_and_takes_its_other_artifac
         ("/transcription-providers", "200 OK", "{}".into()),
     ]);
     let import = |session: &str, extra: &[&str]| {
-        place.host_command()
+        place
+            .host_command()
             .args([
                 "import",
                 "--from",

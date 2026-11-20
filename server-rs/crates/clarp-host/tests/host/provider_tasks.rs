@@ -206,7 +206,8 @@ pathlib.Path(__file__).with_name('hook-reply').write_text(json.dumps(reply))
         },
     );
     let register = |host: &Host, raw: &str| {
-        let result = place.host_command()
+        let result = place
+            .host_command()
             .args([
                 "tool",
                 "clarp-agent-bg",
