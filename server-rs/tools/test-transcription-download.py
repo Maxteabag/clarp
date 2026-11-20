@@ -5,10 +5,14 @@ import hashlib
 import os
 from pathlib import Path
 import runpy
-import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scratch
+
 
 worker = runpy.run_path(str(Path(__file__).with_name("transcription-download.py")))
 fetch = worker["fetch"]
@@ -16,7 +20,7 @@ fetch = worker["fetch"]
 
 class Download(unittest.TestCase):
     def setUp(self):
-        temp = self.enterContext(tempfile.TemporaryDirectory())
+        temp = self.enterContext(scratch.directory("model-download-"))
         self.root = Path(temp) / "staging"
         self.root.mkdir()
         self.fd = os.open(self.root, os.O_DIRECTORY)
@@ -94,7 +98,7 @@ class Download(unittest.TestCase):
         self.assertFalse((self.root/"first").exists())
 
     def test_rejects_links_and_escaping_manifest_names(self):
-        outside=self.enterContext(tempfile.TemporaryDirectory())
+        outside=self.enterContext(scratch.directory("external-model-"))
         keep=Path(outside)/"untouched"
         keep.write_bytes(b"outside")
         dest=self.root/"sub"
