@@ -745,7 +745,8 @@ async fn get_artifact(
         };
     }
     if let Some(artifact_id) = rest.strip_suffix("/html") {
-        return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, &headers).await;
+        return page_for_a_browser(&app, artifact_id.trim_matches('/'), &principal, presented)
+            .await;
     }
     if let Some(artifact_id) = rest.strip_suffix("/revisions") {
         return revisions(&app, artifact_id.trim_matches('/'), &query).await;
@@ -832,7 +833,7 @@ async fn page_for_a_browser(
     app: &App,
     artifact_id: &str,
     principal: &Principal,
-    headers: &HeaderMap,
+    presented: Presented,
 ) -> Result<Response, ApiError> {
     let limited = matches!(
         principal,
@@ -847,10 +848,8 @@ async fn page_for_a_browser(
             "full device access required",
         ));
     }
-    let said = |name| headers.get(name).and_then(|value| value.to_str().ok());
-    let in_a_header = said(header::AUTHORIZATION).is_some_and(|value| value.starts_with("Bearer "))
-        || said(header::COOKIE).is_some_and(|cookies| cookies.contains("claude_pwa_token="));
-    if !in_a_header && !app.config.auth_token.is_empty() {
+    // Where the token that let the request in was found, not which headers came with it.
+    if presented == Presented::Address {
         return Err(refused(
             StatusCode::FORBIDDEN,
             "send the credential in a header or cookie, not the URL",
