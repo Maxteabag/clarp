@@ -2,6 +2,9 @@
 import runner
 
 RUNS={"rules":["test","--test","provider_background_tasks"],"reader":["test","--lib","provider_refresh_"],"actor":["test","--test","actor","provider_visits_commit"],"host":["test","--test","host","the_host_observes_native_bash_jobs"],"output":["test","--lib","a_provider_log_comes_only"]}
+# These three mutations change the standalone executable invoked by the Host test.
+# Selecting the shim integration target rebuilds that executable after each change.
+RUNS["hook_binary"] = ["test", "--test", "host", "--test", "shim", "--", "the_host_observes_native_bash_jobs"]
 PLANTS=[
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'allow empty ids', '1..=160', '0..=160'),
     ('clarp-kernel/provider-hook/src/lib.rs', 'rules', 'reject one character ids', '1..=160', '2..=160'),
@@ -171,9 +174,9 @@ PLANTS=[
     ('clarp-host/src/edge.rs', 'host', 'claim the expected generation matches', '*generation != current.generation', 'false'),
     ('clarp-host/src/agent.rs', 'host', 'omit managed Claude settings', '"--settings".into(), settings', '"--other-settings".into(),settings'),
     ('clarp-host/src/launcher.rs', 'host', 'register the wrong hook event', '"PreToolUse":[', '"PostToolUse":['),
-    ('clarp-shim/src/main.rs', 'host', 'reject the largest permitted hook input', 'bytes.len() as u64 > MAX_INPUT', 'bytes.len() as u64>=MAX_INPUT'),
-    ('clarp-shim/src/main.rs', 'host', 'accept an oversized hook input', 'bytes.len() as u64 > MAX_INPUT', 'false'),
-    ('clarp-shim/src/main.rs', 'host', 'advisory hook rejects malformed calls', 'background_hook(argv.next());\n        return ExitCode::SUCCESS;', 'background_hook(argv.next());return ExitCode::FAILURE;'),
+    ('clarp-shim/src/main.rs', 'hook_binary', 'reject the largest permitted hook input', 'bytes.len() as u64 > MAX_INPUT', 'bytes.len() as u64>=MAX_INPUT'),
+    ('clarp-shim/src/main.rs', 'hook_binary', 'accept an oversized hook input', 'bytes.len() as u64 > MAX_INPUT', 'false'),
+    ('clarp-shim/src/main.rs', 'hook_binary', 'advisory hook rejects malformed calls', 'background_hook(argv.next());\n        return ExitCode::SUCCESS;', 'background_hook(argv.next());return ExitCode::FAILURE;'),
     ('clarp-host/src/agent.rs', 'host', 'lose mirrored event revision', 'json!(event.revision)', 'json!(0)'),
     ('clarp-host/src/edge.rs', 'host', 'expose superseded jobs in snapshot', '.filter(|(_, _, hidden)| !hidden)', '.filter(|_|true)'),
     ('clarp-actor/src/lib.rs', 'host', 'leave the old link visible', 'std::iter::once(&record.job.metadata).chain(previous)', 'std::iter::once(&record.job.metadata)'),
