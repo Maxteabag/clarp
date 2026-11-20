@@ -749,6 +749,9 @@ async fn get_artifact(
     if let Some(artifact_id) = rest.strip_suffix("/revisions") {
         return revisions(&app, artifact_id.trim_matches('/'), &query).await;
     }
+    if let Some(artifact_id) = rest.strip_suffix("/export") {
+        return export(&app, artifact_id.trim_matches('/'), &principal);
+    }
     let Some(row) = find(&app, rest) else {
         return Err(refused(StatusCode::NOT_FOUND, "artifact not found"));
     };
@@ -768,6 +771,48 @@ async fn get_artifact(
         .is_some_and(|given| given == "flat-v1");
     let row = shown(&app, row, if flat { "flat-v1" } else { "" }, false).await;
     Ok(Json(json!({ "artifact": row })).into_response())
+}
+
+/// `GET /artifacts/<id>/export` (R137, the Python Host's PR 474): what a move to another Host
+/// needs of a render spec, whatever the caller's display negotiation, for the administrator
+/// only: any device is refused, limited or full. `{kind: "render_spec", render_spec: {artifact,
+/// stored, submission}}`: the row as it is listed, the payload as it is kept, and the answer
+/// that was accepted with what became of it, or none (`render_spec_store.export`). Another kind
+/// is refused in words, its kind beside them, so that a kind can be added later.
+fn export(app: &App, artifact_id: &str, principal: &Principal) -> Result<Response, ApiError> {
+    if *principal != Principal::Administrator {
+        return Err(refused(StatusCode::FORBIDDEN, "administrator only"));
+    }
+    let Some(row) = find(app, artifact_id) else {
+        return Err(refused(StatusCode::NOT_FOUND, "not found"));
+    };
+    let Some(artifact) = spec_of(app, artifact_id) else {
+        let kind = row["type"].as_str().unwrap_or_default().to_string();
+        let said = json!({ "error": format!("export is not available for {kind} artifacts"), "kind": kind });
+        return Ok((StatusCode::CONFLICT, Json(said)).into_response());
+    };
+    // The first answer that was taken: a spec is answered once.
+    let accepted = artifact
+        .submissions
+        .iter()
+        .min_by(|a, b| (a.created_at, &a.submission_id).cmp(&(b.created_at, &b.submission_id)));
+    let submission = accepted.map_or(Value::Null, |taken| {
+        json!({
+            "submission_id": taken.submission_id,
+            "version": taken.version,
+            "answers": taken.answers.clone().unwrap_or(Value::Null),
+            "accepted_at": taken.created_at,
+            "payload_hash": taken.payload_hash,
+            "synthesize_audio": taken.synthesize_audio,
+            "delivery_status": taken.status(),
+            "delivered_at": taken.delivered_at,
+        })
+    });
+    let body = json!({
+        "kind": spec::KIND,
+        "render_spec": { "artifact": row, "stored": artifact.payload, "submission": submission },
+    });
+    Ok(Json(body).into_response())
 }
 
 /// `GET /artifacts/<id>/html`: a report's page as a browser is given it, behind the policy
