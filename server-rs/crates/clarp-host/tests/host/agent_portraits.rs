@@ -192,6 +192,10 @@ fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_t
     );
     no_key.kill();
     let host = launch();
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["agent_portraits"],
+        1
+    );
     let key = |host: &Host, s: &str| host.get(&format!("/agent-portrait-generation?session={s}"));
     let post = |host: &Host, s: &str| {
         host.ask(
