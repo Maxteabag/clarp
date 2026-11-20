@@ -81,7 +81,8 @@
       "properties": {
         "type": {"const": "agent-roster"},
         "kind": {"type": "string"},
-        "session": {"type": "string"}
+        "session": {"type": "string"},
+        "voice_profile": {"type": "object", "description": "feature voice_profile: as on the snapshot agent row"}
       }
     },
     "agent-focus": {
@@ -163,7 +164,10 @@
         "agent_id": {"type": "string"},
         "persona": {"type": "string"},
         "message": {"type": "string"},
-        "error": {"type": "string"}
+        "error": {"type": "string"},
+        "reason": {"type": "string", "description": "feature speech_outcome; open set: no_voice, not_configured, provider_off, provider_failed, host_failed"},
+        "provider": {"type": "string"},
+        "trace_id": {"type": "string", "description": "the turn whose reply was not spoken"}
       }
     },
     "server-version": {
