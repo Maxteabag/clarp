@@ -10951,7 +10951,8 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             &json!(true),
         )
     );
-    assert_eq!(agent.as_object().unwrap().len(), 21);
+    assert_eq!(agent.as_object().unwrap().len(), 22);
+    assert!(agent["voice_profile"].is_object());
     let helper = "slice-1";
     let helper_id = agent["agent_id"].as_str().unwrap().to_string();
     // A session name that is taken is not given twice: the next agent gets one of its own.
@@ -21521,8 +21522,16 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
         row_of(&snapshot(), &stranger)["voice_profile"]
     );
 
-    wait_for("the parent's turn to finish", || {
+    host.send(
+        &maximus,
+        r#"{"session":"profile-parent","reply":"A conversation to fork."}"#,
+        "fork-seed",
+    );
+    wait_for("the parent's native session and conversation", || {
         host.state(&maximus) == "done"
+            && host
+                .conversation(&maximus)
+                .contains(&said("assistant", "A conversation to fork."))
     });
     let children = host.post(
         &format!("/agents/{maximus}/fork"),
