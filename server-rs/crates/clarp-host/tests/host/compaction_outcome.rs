@@ -77,7 +77,12 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     // nothing of the machine it runs on.
     let home = place.root.join("home");
     let at = |name: &str| home.join(name).to_str().unwrap().to_string();
-    let (config, data, cache, state) = (at(".config"), at(".local/share"), at(".cache"), at(".local/state"));
+    let (config, data, cache, state) = (
+        at(".config"),
+        at(".local/share"),
+        at(".cache"),
+        at(".local/state"),
+    );
     let nothing = place.root.join("nothing").to_str().unwrap().to_string();
     let world = [
         ("HOME", home.to_str().unwrap()),
@@ -101,13 +106,19 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     let row_of = |host: &Host, session: &str| -> Value {
         let snapshot = host.get("/agents/snapshot");
         let rows = snapshot["agents"].as_array().unwrap();
-        rows.iter().find(|row| row["session"] == session).cloned().unwrap()
+        rows.iter()
+            .find(|row| row["session"] == session)
+            .cloned()
+            .unwrap()
     };
     let compact = |host: &Host| {
         let (status, told) = host.ask("POST", "/compact", Some(&json!({ "session": agent })));
         assert_eq!(
             (status, &told),
-            (200, &json!({ "ok": true, "status": "started", "backend": "claude" })),
+            (
+                200,
+                &json!({ "ok": true, "status": "started", "backend": "claude" })
+            ),
             "the compaction was started"
         );
     };
@@ -126,6 +137,15 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
         })
     };
 
+    // The Host says it has the feature, with the contract that brought it.
+    let info = host.get("/server-info");
+    assert_eq!(
+        info["contract"]["features"]["compaction_outcome"], 107,
+        "{info}"
+    );
+    let listed = info["capabilities"]["features"].as_array().unwrap();
+    assert!(listed.contains(&json!("compaction_outcome")), "{info}");
+
     // Until the user compacts the agent, its row says nothing of it.
     let first = row_of(&host, &agent);
     assert_eq!(first.get("last_compaction"), Some(&Value::Null), "{first}");
@@ -139,7 +159,10 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     let one = outcome(&host, &Value::Null);
     assert!(one["at"].as_i64().unwrap() > 0, "{one}");
     let words = "Claude Code recorded the compaction";
-    assert_eq!(one, said("compacted", json!(30_729), json!(8_957), words, &one["at"]));
+    assert_eq!(
+        one,
+        said("compacted", json!(30_729), json!(8_957), words, &one["at"])
+    );
     assert_eq!(row_of(&host, &agent)["context_tokens"], 8_957);
 
     // A turn of the user's in which the tool compacts by itself says nothing of the user's
@@ -155,23 +178,53 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     compact(&host);
     let two = outcome(&host, &one);
     let words = "Claude Code recorded no compaction";
-    assert_eq!(two, said("not_compacted", json!(30_729), Value::Null, words, &two["at"]));
+    assert_eq!(
+        two,
+        said(
+            "not_compacted",
+            json!(30_729),
+            Value::Null,
+            words,
+            &two["at"]
+        )
+    );
     assert!(two["at"].as_i64() >= one["at"].as_i64(), "{two}");
 
-    // Stopped before the tool recorded it: not compacted. The Stop holds what is sent after
-    // it, and a compaction asked for while that waits is refused in the Python Host's words.
+    // A message sent while the tool compacts waits behind the compaction, and nothing of it
+    // ends the compaction. Stopped before the tool recorded it: not compacted. The Stop holds
+    // what waited, and a compaction asked for while that waits is refused in the Python
+    // Host's words.
     compact(&host);
     wait_for("the row to say it is compacting", || {
         row_of(&host, &agent)["compacting"] == true
     });
-    host.post("/stop", json!({ "session": agent }));
-    let three = outcome(&host, &two);
-    let words = "stopped before Claude Code recorded a compaction";
-    assert_eq!(three, said("not_compacted", json!(30_729), Value::Null, words, &three["at"]));
-    host.send(&agent, "third, after the stop", "u-3");
+    host.send(&agent, "third, sent while it compacts", "u-3");
     wait_for("the message to wait", || {
         row_of(&host, &agent)["queued_turn_count"] == 1
     });
+    assert_eq!(
+        row_of(&host, &agent)["compacting"],
+        true,
+        "the message ends nothing"
+    );
+    host.post("/stop", json!({ "session": agent }));
+    let three = outcome(&host, &two);
+    let words = "stopped before Claude Code recorded a compaction";
+    assert_eq!(
+        three,
+        said(
+            "not_compacted",
+            json!(30_729),
+            Value::Null,
+            words,
+            &three["at"]
+        )
+    );
+    assert_eq!(
+        row_of(&host, &agent)["queued_turn_count"],
+        1,
+        "the Stop holds it"
+    );
     let (status, told) = host.ask("POST", "/compact", Some(&json!({ "session": agent })));
     assert_eq!(
         (status, &told["ok"], &told["error"]),
@@ -181,7 +234,11 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
             &json!("messages are waiting for this agent \u{2014} try again when they have run")
         )
     );
-    assert_eq!(row_of(&host, &agent)["last_compaction"], three, "a refusal says nothing");
+    assert_eq!(
+        row_of(&host, &agent)["last_compaction"],
+        three,
+        "a refusal says nothing"
+    );
     host.post("/turn-queue/resume", json!({ "session": agent }));
     wait_for("what waited to run", || {
         let row = row_of(&host, &agent);
@@ -203,8 +260,12 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     // The tool ended without saying how it went: not known.
     compact(&host);
     let five = outcome(&host, &four);
-    let words = "Claude Code ended without saying how it went, so whether it compacted is not known";
-    assert_eq!(five, said("unknown", json!(30_729), Value::Null, words, &five["at"]));
+    let words =
+        "Claude Code ended without saying how it went, so whether it compacted is not known";
+    assert_eq!(
+        five,
+        said("unknown", json!(30_729), Value::Null, words, &five["at"])
+    );
 
     // The Host goes after the tool recorded the compaction and before its turn ended: the Host
     // that comes back reads again what the tool said, and says what it did.
@@ -220,14 +281,24 @@ fn what_the_users_compaction_did_is_said_on_the_agents_row_from_numbers() {
     let host = place.start_in("", &[], &world);
     let six = outcome(&host, &five);
     let words = "Claude Code recorded the compaction";
-    assert_eq!(six, said("compacted", json!(30_729), json!(8_957), words, &six["at"]));
+    assert_eq!(
+        six,
+        said("compacted", json!(30_729), json!(8_957), words, &six["at"])
+    );
     // And another Host after that still has it.
     host.kill();
     let host = place.start_in("", &[], &world);
     assert_eq!(row_of(&host, &agent)["last_compaction"], six);
     let given = std::fs::read_to_string(tools.join("started")).unwrap();
-    let compactions = given.lines().filter(|line| line.contains("\"/compact\"")).count();
-    assert_eq!(compactions, modes.len(), "each compaction ran once: {given}");
+    let compactions = given
+        .lines()
+        .filter(|line| line.contains("\"/compact\""))
+        .count();
+    assert_eq!(
+        compactions,
+        modes.len(),
+        "each compaction ran once: {given}"
+    );
 
     // A tool this Host does not compact is refused in words, and its row says nothing.
     let (_, made) = host.ask(

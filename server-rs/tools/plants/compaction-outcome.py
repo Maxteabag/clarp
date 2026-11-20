@@ -19,6 +19,7 @@ R = 'clarp-actor/src/lib.rs'
 B = 'clarp-backend/src/claude.rs'
 W = 'clarp-host/src/wire.rs'
 C = 'clarp-host/src/compact.rs'
+E = 'clarp-host/src/edge.rs'
 # NOT PLANTED, each with its reason:
 #   that the actor says what a compaction did in the write that ends its turn (`compaction_said` in `closing`), and
 #     that the reading of a turn's output says it before the turn is forgotten (`say_owed_compaction` in `pump`):
@@ -46,7 +47,7 @@ PLANTS = [
     (K, 'vectors', 'the first record of a turn counts', '    seen.or(held)', '    held.or(seen)'),
     (K, 'vectors', 'the size after the tool says is not said', '            said.after_tokens = Some(after);', '            said.after_tokens = None;'),
     (K, 'vectors', 'the size after is said as an estimate', '            said.after_is_estimate = false;', '            said.after_is_estimate = true;'),
-    (K, 'vectors', 'the words still say the size after comes with the next call', '            said.detail = said.detail.split("; ").next().unwrap_or_default().to_string();\n', ''),
+    (K, 'vectors', 'the words still say the size after comes with the next call', '            if let Some((first, _)) = said.detail.clone().split_once("; ") {', '            if let Some((first, _)) = said.detail.clone().split_once(";; ") {'),
     (K, 'vectors', 'a turn that ended well without a record compacted', '        Outcome::Completed => decide_claude(gauge, None, true, "settled"),', '        Outcome::Completed => decide_claude(gauge, Some(0), true, "settled"),'),
     (K, 'vectors', 'a stopped compaction is said in the words of one that ended', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "stopped"),', '        Outcome::Stopped { .. } => decide_claude(gauge, None, true, "settled"),'),
     (K, 'vectors', 'one taken back is said in other words', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped before it began";', 'pub const STOPPED_BEFORE_IT_BEGAN: &str = "stopped";'),
@@ -72,6 +73,8 @@ PLANTS = [
     (R, 'host', 'the state does not carry it', '            last_compaction: agent.last_compaction().cloned(),', '            last_compaction: None,'),
     # The row, and the refusal.
     (W, 'host', 'the row says nothing of it', '        "last_compaction": status.last_compaction,', '        "last_compaction": null,'),
+    (E, 'host', 'the feature is not listed', '    ("compaction_outcome", 107),', ''),
+    (E, 'host', 'the feature came with the contract before', '    ("compaction_outcome", 107),', '    ("compaction_outcome", 106),'),
     (C, 'host', 'a compaction is asked for while messages wait', '    if !status.waiting.is_empty() {', '    if status.waiting.len() > 1 {'),
 ]
 

@@ -175,14 +175,18 @@ pub fn decide(
             // is not true of this Host.
             said.after_tokens = Some(after);
             said.after_is_estimate = false;
-            said.detail = said.detail.split("; ").next().unwrap_or_default().to_string();
+            if let Some((first, _)) = said.detail.clone().split_once("; ") {
+                said.detail = first.to_string();
+            }
         }
         return said;
     }
     match ended {
         Outcome::Completed => decide_claude(gauge, None, true, "settled"),
         Outcome::Stopped { .. } => decide_claude(gauge, None, true, "stopped"),
-        Outcome::Withdrawn { .. } => outcome(NOT_COMPACTED, gauge, None, false, STOPPED_BEFORE_IT_BEGAN),
+        Outcome::Withdrawn { .. } => {
+            outcome(NOT_COMPACTED, gauge, None, false, STOPPED_BEFORE_IT_BEGAN)
+        }
         Outcome::Failed { reason, kind } => {
             let kind = if kind.is_empty() {
                 failures::classify_error(reason)

@@ -446,13 +446,6 @@ EPOCH_MS = range(1_500_000_000_000, 2_000_000_000_000)
 # differences to explain one by one, they are one feature that is not there yet. The register
 # of what is not there yet is server-rs/docs/differences.md.
 NOT_YET = {
-    # What the user's last compaction of an agent did, from numbers (`last_compaction` on its
-    # row of the snapshot, the Python Host's PR 483, R148): `null` there until the agent is
-    # compacted. The port to the Rust Host is owed; its contract stays 106 until it lands.
-    'compaction_outcome': {
-        'fields': ('last_compaction',),
-        'events': (),
-    },
     # What an agent sounds like and how it is heard, as the Host resolves them (the Python Host's
     # PR 485, its contract 109): `voice_profile` on an agent's row of the snapshot, on the
     # creation answer and on the roster's events; `voice_defaults` and `voice_profile_version` on
