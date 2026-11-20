@@ -384,7 +384,7 @@ coordination, whatever sender it names. Otherwise a message is another agent's
 when its sender is another agent of this Host, or when it arrived as an agent's
 (`origin: agent`) with no sender this Host knows (an agent of a peer Host); a
 message an agent sends itself is not. A send made from an agent's own turn is
-that agent's, whatever origin it claims, and so is a peer Host's. The mark is the flag, and the Host sets it: it reads it from the turn's
+that agent's, whatever origin it claims, and so is a peer Host's (it names itself with `X-Clarp-Peer`, which only the Hosts' own peer senders set and the relay never forwards); addressed to itself it is the agent waking itself (`origin: automation`). A send that names a sender and no origin is an agent's message (`origin: agent`), as it always was. The mark is the flag, and the Host sets it: it reads it from the turn's
 trace, never from a row's `origin`, and no sender can set or clear it. An agent
 never hides anything by its own say-so. It can only show something, by an
 explicit act addressed to the user: a note (`POST /agent-notes`), a decision
