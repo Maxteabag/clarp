@@ -147,6 +147,28 @@ def test_the_first_builds_that_accept_both_names():
     assert live.AGENT_LIVE_MODEL_MIN_CLIENT == {"ios": 75, "android": 29}
 
 
+STRICT = [  # each must name no client (or a client below its minimum): the strict form, the name as sent
+    "iOS/2985 contract=75", "IOS/2986 contract=75", "Android/1 contract=29", "ANDROID/993 contract=29",
+    "ios/2986  contract=75", "ios/2986 contract=75 ", "ios/2986\tcontract=75", "ios/2986 contract=75\n",
+    "ios/2986 contract=75 x", " ios/2986 contract=75", "i" * 33 + "/1 contract=75", "ios/" + "1" * 81 + " contract=75",
+    "ios/2986 contract=0000000075", "ios/2986 contract=", "ios/ contract=75", "ios/2986 contract=-75",
+    "ios/2986 contract=7.5e1", "ios/2986 contract=٧٥",
+]
+
+
+@pytest.mark.parametrize("header", STRICT)
+def test_anything_but_the_strict_form_with_the_name_as_sent_runs_gpt_live_1(header):
+    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1.1", live_model_min_client={})
+    assert live.model_for_client(header, cfg) == "gpt-live-1"
+
+
+@pytest.mark.parametrize("header", ["ios/2986 contract=075", "ios/2986 contract=000000075", "ios/" + "1" * 80 + " contract=75",
+                                    "a" * 32 + "/1 contract=1", "android/993 contract=999999999"])
+def test_the_strict_form_at_its_limits_is_read(header):
+    cfg = config.Config(openai_api_key="k", live_model="gpt-live-1.1", live_model_min_client={"a" * 32: 1})
+    assert live.model_for_client(header, cfg) == "gpt-live-1.1"
+
+
 @pytest.mark.parametrize("header, minimum, expected", CASES)
 def test_the_model_for_a_client(header, minimum, expected):
     cfg = config.Config(openai_api_key="k", live_model="gpt-live-1.1", live_model_min_client=minimum)
