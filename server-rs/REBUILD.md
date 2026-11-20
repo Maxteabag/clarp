@@ -2327,7 +2327,7 @@ generation receipts are in `computer-jobs.json`, and the wrong rules in
 `/transcription-models/install` registers a computer-owned job and answers 202 with its generation
 and handle. Repeated requests join that job. Each supported catalog row fixes a repository and
 revision. The speech environment streams the snapshot into checked private staging; the child
-receives an open directory and verifies file lengths and digests. Partial files survive an
+receives an open directory. The catalog pins the revision and records the estimated download size, and the child verifies file lengths and digests against the hub’s manifest for that revision, read when installation begins. Partial files survive an
 interruption and may be resumed only by another Install. Admission reserves the unfilled part of
 each active download's limit and 256 MiB of disk headroom. The per-model limit is 125% of the
 catalog estimate.
