@@ -12,6 +12,7 @@ RUNS = {
     'vectors': ['test', '--test', 'render_spec_vectors'],
     'host': ['test', '--test', 'host', '--', 'a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once'],
     'export': ['test', '--test', 'host', '--', 'the_administrator_exports_a_render_spec_with_its_accepted_answer'],
+    'report': ['test', '--test', 'host', '--', 'an_agent_hands_its_user_a_report_and_revises_it'],
 }
 J = 'clarp-kernel/src/artifacts/render_spec/json.rs'
 C = 'clarp-kernel/src/artifacts/render_spec/catalog.rs'
@@ -405,6 +406,16 @@ PLANTS = [
      'matches!(presented, Presented::Header | Presented::Nowhere | Presented::Cookie);'),
     (L, 'export', 'the token in the address exports', 'matches!(presented, Presented::Header | Presented::Nowhere);',
      'matches!(presented, Presented::Header | Presented::Nowhere | Presented::Address);'),
+    (L, 'report', "a report's page is given for a token in the address", 'if presented == Presented::Address {',
+     'if presented == Presented::Nowhere {'),
+    (L, 'report', "a report's page is refused for a token in a cookie", 'if presented == Presented::Address {',
+     'if matches!(presented, Presented::Address | Presented::Cookie) {'),
+    (E, 'report', 'a token in the address beside a cookie is told as one in a cookie',
+     '    Some((principal, Presented::Address))',
+     '    Some((principal, if headers.contains_key(header::COOKIE) { Presented::Cookie } else { Presented::Address }))'),
+    (E, 'report', 'a token in the address beside an Authorization header is told as one in the header',
+     '    Some((principal, Presented::Address))',
+     '    Some((principal, if headers.contains_key(header::AUTHORIZATION) { Presented::Header } else { Presented::Address }))'),
     (E, 'export', 'a token in a cookie is told as one in the header', 'return Some((principal, Presented::Cookie));',
      'return Some((principal, Presented::Header));'),
     (H, 'host', "a minimum of true in the owner's table is 1", '(key, value.as_integer())',
