@@ -1038,11 +1038,10 @@ fn a_hold_whose_bound_is_spent_lets_go_and_counts_as_the_one() {
     let reply = hold(&running.socket, 0);
     assert!(!reply.ok, "{reply:?}");
     assert_eq!(reply.held, None);
-    let error = reply.error.unwrap();
-    assert!(
-        error == "the tool did not stand still within the bound"
-            || error == "what the tool printed could not be counted within the bound",
-        "{error}"
+    // The bound is spent before the tool is first looked at.
+    assert_eq!(
+        reply.error.as_deref(),
+        Some("the tool did not stand still within the bound")
     );
     let pid = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
     wait_for("the tool to be let go", || state(pid) != Some('T'));
@@ -1223,4 +1222,45 @@ fn a_served_tool_is_not_held() {
     assert!(ask(&socket, &Request::Stop { grace_ms: 500 }).ok);
     ends(&mut shim);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_request_ends_with_its_line_or_with_the_connection() {
+    let mut running = start("requests", "exec sleep 300");
+    wait_for("the socket", || running.socket.exists());
+    let replies = |sent: &[u8], close: bool| {
+        let mut stream = UnixStream::connect(&running.socket).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream.write_all(sent).unwrap();
+        if close {
+            stream.shutdown(std::net::Shutdown::Write).unwrap();
+        }
+        let mut reader = BufReader::new(stream);
+        let mut said = Vec::new();
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => said.push(serde_json::from_str::<Reply>(&line).unwrap().ok),
+            }
+            if !close && said.len() == 2 {
+                break;
+            }
+        }
+        said
+    };
+    // A line may end in a carriage return.
+    assert_eq!(replies(b"{\"op\":\"ping\"}\r\n", true), [true]);
+    // The last request may end with the connection instead of a line.
+    assert_eq!(replies(b"{\"op\":\"ping\"}", true), [true]);
+    // Two requests in one write are both answered, without a third to push them.
+    assert_eq!(
+        replies(b"{\"op\":\"ping\"}\n{\"op\":\"ping\"}\n", false),
+        [true, true]
+    );
+    assert!(ask(&running.socket, &Request::Stop { grace_ms: 500 }).ok);
+    ends(&mut running.shim);
+    std::fs::remove_dir_all(&running.dir).unwrap();
 }

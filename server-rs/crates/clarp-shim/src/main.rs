@@ -1358,8 +1358,13 @@ mod tests {
         assert!(rig2.control.let_go());
         // Ended while it was looked at: not let go, and said.
         rig2.mark(Hold::Ended);
+        let (control, said) = (rig2.control.clone(), mpsc::channel());
+        let answer = said.0;
+        std::thread::spawn(move || {
+            let _ = answer.send(control.stand_still(until, || false));
+        });
         assert_eq!(
-            rig2.control.stand_still(until, || false),
+            said.1.recv_timeout(Duration::from_secs(2)).unwrap(),
             Err(ENDED_WHILE_HELD)
         );
         assert!(matches!(*lock(&rig2.control.hold), Hold::Ended));
@@ -1410,6 +1415,27 @@ mod tests {
                 signal: "SIGKILL".into()
             })]
         );
+        rig.end();
+    }
+
+    #[test]
+    fn a_hold_that_cannot_count_within_its_bound_lets_go_and_says_so() {
+        let rig = rig("late");
+        let (own, _peer) = UnixStream::pair().unwrap();
+        let own = connection(&own);
+        // What waits in the pipe is never taken: nothing pumps it.
+        (&rig.out).write_all(b"never taken").unwrap();
+        let began = Instant::now();
+        let reply = rig.control.hold(60, &own);
+        assert!(began.elapsed() >= Duration::from_millis(55));
+        assert_eq!(
+            reply.error.as_deref(),
+            Some("what the tool printed could not be counted within the bound")
+        );
+        assert_eq!(reply.held, None);
+        assert!(matches!(*lock(&rig.control.hold), Hold::Released));
+        std::thread::sleep(Duration::from_millis(50));
+        assert_ne!(rig.state(), Some('T'), "it was let go");
         rig.end();
     }
 
