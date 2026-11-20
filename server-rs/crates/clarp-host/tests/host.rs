@@ -8625,12 +8625,14 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     // or a value that is no whole number of at least 0, is refused in a line that names it.
     std::fs::write(
         &owner,
-        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Ios = 1, \"1os\" = 1, \"a b\" = 1, \
+        "[artifacts]\nrender_spec_min_contract = { IOS = 1, Android = 2, Ios = 1, \"a b\" = 1, \"1os\" = 1, \
          android = -1, web = 2.5 }\n",
     )
     .unwrap();
     assert!(spec_of("IOS/12 contract=1"), "taken, exactly as written");
     assert!(spec_of("Ios/12 contract=1"));
+    assert!(spec_of("Android/12 contract=2"));
+    assert!(!spec_of("Android/12 contract=1"));
     assert!(!spec_of("ios/12 contract=73"), "iOS keeps its own minimum");
     assert!(spec_of("ios/12 contract=74"));
     assert!(!spec_of("iOs/12 contract=74"), "only the name as written");
@@ -8649,21 +8651,29 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
     };
     assert_eq!(
         said(
-            "config.render_spec_min_contract: refused entries (a client's name as its header \
-              sends it, and a whole number of at least 0): '1os', 'a b', 'android', 'web'"
+            "config.render_spec_min_contract: refused 'a b', '1os', 'android', 'web': \
+             a key is a client's name as it sends it ([A-Za-z][A-Za-z0-9_-]{0,31}), \
+             a value a whole number of 0 or more"
         ),
         1,
         "the refused keys are named, once: {}",
         host.heard.lock().unwrap()
     );
-    for key in ["'IOS'", "'Ios'"] {
-        let line = format!(
-            "config.render_spec_min_contract: {key} is taken as written: it counts for a client \
-             that sends {key}, not for 'ios'"
-        );
-        assert_eq!(said(&line), 1, "{line}: {}", host.heard.lock().unwrap());
-    }
-    // A minimum is a whole number: true is none, though the Python Host's language counts it 1.
+    let line = "config.render_spec_min_contract: 'IOS' (not 'ios'), 'Android' (not 'android'), \
+                'Ios' (not 'ios'): names are matched exactly as clients send them, so each is \
+                another client and leaves the built-in one as it is";
+    assert_eq!(said(line), 1, "{line}: {}", host.heard.lock().unwrap());
+    assert_eq!(
+        said(
+            "config.render_spec_min_client: applies to iOS only; name other clients in [artifacts] render_spec_min_contract"
+        ),
+        1
+    );
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: not a whole number"),
+        1
+    );
+    // A TOML boolean is not a minimum on either Host.
     std::fs::write(
         &owner,
         "[artifacts]\nrender_spec_min_contract = { ios = true }\n",
@@ -8681,6 +8691,17 @@ fn a_render_spec_is_published_shown_to_who_may_see_it_and_answered_once() {
         "the table's 80, not the old 0"
     );
     assert!(!spec_of("ios/12 contract=79"));
+    assert_eq!(
+        said("config.render_spec_min_client: ignored: render_spec_min_contract names ios"),
+        1
+    );
+    std::fs::write(&owner, "[artifacts]\nrender_spec_min_contract = 3\n").unwrap();
+    assert!(spec_of("ios/12 contract=74"));
+    assert!(spec_of("ios/12 contract=74"));
+    assert_eq!(
+        said("config.render_spec_min_contract: ignored: expected a table of client = number"),
+        1
+    );
     std::fs::write(&owner, "[artifacts]\nrender_spec_min_client = 74\n").unwrap();
     let (status, made) = ask(
         "POST",
