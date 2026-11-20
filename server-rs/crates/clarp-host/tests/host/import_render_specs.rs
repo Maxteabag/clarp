@@ -17,7 +17,7 @@ fn a_move_names_every_render_spec_left_on_the_source_and_takes_its_other_artifac
     for i in 0..499 {
         page.push(item("sample","render_spec",&format!("spec-{i}"),"Same title"));
     }
-    page[0]["summary"]=json!("See /media/asset_only_spec");
+    page[0]["title"]=json!("See /media/asset_only_spec");
     page.push(item("sample","document","doc-first","Before the boundary"));
     let mut second_doc=item("sample","data","data-last","After the boundary");
     second_doc["summary"]=json!("See /media/asset_shared");
@@ -62,7 +62,8 @@ fn a_move_names_every_render_spec_left_on_the_source_and_takes_its_other_artifac
     for text in [moved,report(import("sample",&["--files"]))] {
         let mut lines=text.lines();
         assert!(lines.any(|l|l=="Left on the source Host: 500 render specs."));
-        for i in 0..499 {assert_eq!(lines.next().unwrap(),format!("  \"spec-{i}\" — \"Same title\""));}
+        assert_eq!(lines.next(), Some("  \"spec-0\" — \"See /media/asset_only_spec\""));
+        for i in 1..499 {assert_eq!(lines.next().unwrap(),format!("  \"spec-{i}\" — \"Same title\""));}
         assert_eq!(lines.next(),Some("  \"spec-final\" — \"Two\\nlines\""));
     }
     {
