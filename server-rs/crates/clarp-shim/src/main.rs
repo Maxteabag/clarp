@@ -324,6 +324,13 @@ enum StopStage {
     Finished,
 }
 
+impl StopStage {
+    /// Whether nobody has asked the tool to stop and it has not ended.
+    fn ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
 struct BeforeStop {
     signal: Signal,
     wait: Duration,
@@ -490,7 +497,8 @@ impl Control {
                 *hold = Hold::Ended;
                 self.hold_changed.notify_all();
                 drop(hold);
-                Self::signal(self.pid, &self.to_spool, Signal::SIGKILL);
+                let kill = Signal::SIGKILL;
+                Self::signal(self.pid, &self.to_spool, kill);
                 *stage = StopStage::Signalled;
                 self.changed.notify_all();
                 return;
@@ -534,7 +542,7 @@ impl Control {
             if self.leader_exited.load(Ordering::SeqCst) {
                 return Reply::failed("the tool is gone");
             }
-            if !matches!(*stage, StopStage::Ready) {
+            if !stage.ready() {
                 return Reply::failed("the tool is being stopped");
             }
             let mut hold = self.hold.lock().unwrap_or_else(PoisonError::into_inner);
