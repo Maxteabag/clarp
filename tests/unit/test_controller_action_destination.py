@@ -125,3 +125,114 @@ def test_the_parser_gives_no_destination_for_a_host_that_is_not_a_plain_name(url
     """Defence in depth under the comparison: such a host never equals an allowed one, and the
     parser does not give it a destination at all."""
     assert url_destination.destination(url) is None
+
+
+BASE = ("https://allowed.example.invalid/base",)
+B = "https://allowed.example.invalid/base/"
+# R139: a path read as a server might read it: the encoded dot, slash and backslash decoded once,
+# a backslash read as a slash. Refused if a segment is then '.' or '..'.
+DOT_SEGMENTS = {
+    "a raw '..' under a prefix with a path": B + "../admin",
+    "an encoded '..'": B + "%2e%2e/admin",
+    "an encoded '..' in upper case": B + "%2E%2E/admin",
+    "an encoded '..' in mixed case": B + "%2E%2e/admin",
+    "a raw dot beside an encoded one": B + ".%2e/admin",
+    "a raw '.'": B + "./admin",
+    "an encoded '.'": B + "%2E/admin",
+    "a '..' as the last segment": B + "x/..",
+    "a '..' between encoded slashes": B + "a%2F..%2Fb",
+    "a '..' between encoded slashes in lower case": B + "a%2f..%2fb",
+    "a '..' between encoded backslashes": B + "a%5C..%5Cb",
+    "an encoded '..' between encoded backslashes": B + "a%5c%2e%2e%5cb",
+    "a '..' on a loopback default": "http://127.0.0.1:8765/api/../admin",
+    "an encoded '..' on a loopback default": "http://localhost/%2e%2E/admin",
+    "a '.' on a loopback default": "http://[::1]:9/a/./b",
+}
+BACKSLASHES = {
+    "a raw backslash in the path": B + "a\\b",
+    "a raw backslash around a '..'": B + "a\\..\\b",
+    "a raw backslash in the query": B + "x?a=\\",
+    "a raw backslash on a loopback default": "http://localhost/a\\b",
+}
+BRACKETED_NAMES = {
+    "a future-version address in brackets": "http://[v1.localhost]/x",
+    "an allowed name in future-version brackets": "https://[v7.allowed.example.invalid]/base/x",
+    "an IPv4 address in brackets": "http://[127.0.0.1]/x",
+}
+WIDENED = {**DOT_SEGMENTS, **BACKSLASHES, **BRACKETED_NAMES}
+
+
+@pytest.mark.parametrize("url", WIDENED.values(), ids=WIDENED.keys())
+def test_a_dot_segment_a_backslash_or_a_bracketed_name_is_refused_at_creation_edit_and_run(url):
+    """R139: judged on the raw path such a URL lay under the prefix, but a receiving server that
+    resolves dot segments (or reads a backslash as a slash) serves a path outside it; a bracketed
+    name is a host we do not understand. One rule, the loopback defaults included; the sender is
+    never called."""
+    assert url_destination.destination(url) is None and ca.sendable_url(url, BASE) is None
+    with pytest.raises(ca.ActionError, match="allow"):
+        ca.create_action({**ACTION, "url": url}, actor="test", allowed_urls=BASE)
+    ca.create_action({**ACTION, "url": B + "x"}, actor="test", allowed_urls=BASE)
+    with pytest.raises(ca.ActionError, match="allow"):
+        ca.update_action("a1", {"url": url}, actor="test", allowed_urls=BASE)
+    state = ca._load()
+    state["actions"]["a1"]["url"] = url                                  # stored before the rule
+    ca._save(state)
+    result = ca.run("a1", actor="t", request_id="r1", allowed_urls=BASE, http_post=_never)
+    assert result["ok"] is False and "allow" in result["error"]
+
+
+@pytest.mark.parametrize("url", [u for u in WIDENED.values() if "?" not in u],
+                         ids=[k for k, u in WIDENED.items() if "?" not in u])
+def test_such_a_prefix_is_refused_at_configuration(url, monkeypatch):
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: None)
+    assert url_destination.prefix(url) is None
+    assert config._controller_action_urls([url]) == ()
+    assert ca.sendable_url(B + "x", (url,)) is None                      # admits nothing
+
+
+@pytest.mark.parametrize("path", [
+    ".well-known", "a..b", "...", "%2e%2e%2e",
+    "a%2Fb",                            # an encoded slash with no dot segment beside it
+    "%252e%252e/admin",                 # double encoding: not a dot to a server that decodes once
+    "a%252F..%252Fb",
+])
+def test_what_has_no_dot_segment_once_decoded_is_sent_byte_for_byte(path):
+    assert ca.sendable_url(B + path, BASE) == B + path
+
+
+def test_a_bracketed_name_is_refused_even_where_the_name_itself_is_allowed():
+    """Judged by its labels it was the allowed name, and it was sent without its brackets."""
+    allowed = ("https://v1.allowed.example.invalid",)
+    assert ca.sendable_url("https://v1.allowed.example.invalid/x", allowed)
+    url = "https://[v1.allowed.example.invalid]/x"
+    assert ca.sendable_url(url, allowed) is None
+    with pytest.raises(ca.ActionError, match="allow"):
+        ca.create_action({**ACTION, "url": url}, actor="test", allowed_urls=allowed)
+    assert url_destination.prefix(url) is None
+
+
+def test_an_ipv6_address_in_brackets_is_still_a_host():
+    assert ca.sendable_url("http://[::1]:9/x") == "http://[::1]:9/x"
+
+
+@pytest.mark.parametrize("url", [
+    "http://localhost.example.invalid:9/x", "http://localhostx:9/x",
+    "http://127.0.0.1.example.invalid:9/x", "http://127.0.0.10:9/x",
+    "http://[::1:2]:9/x",
+])
+def test_a_host_that_only_begins_with_a_loopback_default_is_refused(url):
+    """The defaults admit any port of their own host; a host that merely begins with that text
+    (a suffix label, a longer address) is another host."""
+    assert ca.sendable_url(url) is None
+    with pytest.raises(ca.ActionError, match="allow"):
+        ca.create_action({**ACTION, "url": url}, actor="test")
+
+
+@pytest.mark.parametrize("char", ["\t", "\r", "\n", "\x00", " "], ids=["tab", "CR", "LF", "NUL", "space"])
+@pytest.mark.parametrize("where", ["host", "path"])
+def test_a_control_character_or_whitespace_inside_the_url_is_refused_at_create(char, where):
+    url = ("https://allowed" + char + ".example.invalid/x" if where == "host"
+           else "https://allowed.example.invalid/x" + char + "y")
+    assert url_destination.destination(url) is None
+    with pytest.raises(ca.ActionError, match="allow"):
+        ca.create_action({**ACTION, "url": url}, actor="test", allowed_urls=ALLOWED)
