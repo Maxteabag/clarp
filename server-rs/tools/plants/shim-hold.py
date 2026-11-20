@@ -32,6 +32,7 @@ RUNS = {
     'unit-still': UNIT + ['a_group_that_does_not_stand_still_is_let_go_at_the_bound'],
     'unit-ended': UNIT + ['a_held_tool_is_ended_at_once_and_a_hold_under_way_says_so'],
     'unit-stat': UNIT + ['a_stat_is_read_after_the_last_bracket_of_the_name', 'a_group_with_one_process_awake'],
+    'unit-zombie': UNIT + ['a_group_with_zombies_and_stopped_tasks_stands_still'],
     'words': ['test', '-p', 'clarp-shim', '--lib', '--', 'a_reply_is_written_as_before'],
 }
 LIB = 'clarp-shim/src/lib.rs'
@@ -97,7 +98,7 @@ PLANTS = [
     (MAIN, 'unit-still', 'the group is looked at once only', '            if still() {\n                return Ok(());\n            }', '            let _ = still();\n            return Ok(());'),
     (MAIN, 'zero', 'a spent bound is refused in other words', 'let why = "the tool did not stand still within the bound";', 'let why = "not still";'),
     (MAIN, 'unit-stat', 'a running thread stands still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'T' | 'Z' | 'R' | 'S')"),
-    (MAIN, 'half', 'a zombie of the group does not stand still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'T')"),
+    (MAIN, 'unit-zombie', 'a zombie of the group does not stand still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'T')"),
     (MAIN, 'count', 'a stopped process does not stand still', "                && !matches!(state, 'T' | 'Z')", "                && !matches!(state, 'Z')"),
     (MAIN, 'unit-stat', 'every process is of the group', '            Some((_, member)) if member == group => {}', '            Some(_) => {}'),
     (MAIN, 'unit-stat', 'the state is read after the first bracket', "    let mut after = stat[stat.rfind(')')? + 1..].split_whitespace();", "    let mut after = stat[stat.find(')')? + 1..].split_whitespace();"),

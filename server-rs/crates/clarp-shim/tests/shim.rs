@@ -823,8 +823,7 @@ fn a_half_line_at_the_hold_is_said_and_whole_lines_are_counted() {
     let mut running = start(
         "hold-half",
         &format!(
-            // A child that has ended and is never waited for stays in the group, as a zombie.
-            "(exit 0) & printf 'whole\\n'; printf 'half'; printf 'e' >&2; : > '{}'; exec sleep 300",
+            "printf 'whole\\n'; printf 'half'; printf 'e' >&2; : > '{}'; exec sleep 300",
             marker.display()
         ),
     );
