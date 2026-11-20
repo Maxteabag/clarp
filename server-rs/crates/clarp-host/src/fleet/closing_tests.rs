@@ -251,8 +251,8 @@ async fn removed_whole(place: &Place, fleet: &FleetHandle) {
     );
     assert_eq!(
         place.told_deleted("held"),
-        3,
-        "one roster event, two of its state"
+        2,
+        "one roster event, one of its state"
     );
     let kept = stored(fleet, HELD).await;
     assert!(kept.deleted_at_ms.is_some());
