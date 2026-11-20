@@ -57,6 +57,20 @@ from .base import CatalogueDefault, BackendBrand, CliMissing, Backend, Compactio
 from .stream_json import launch, start_drain, stop_after_drain_failure
 
 
+# The namespace of the uuids the Host writes on Claude's stdin lines.
+_PROMPT_UUID_NAMESPACE = uuid.UUID("5f0e7c52-9a5b-4d9e-8f53-2f0b9b1d4910")
+
+
+def prompt_uuid(trace_id: str) -> str:
+    """The uuid the Host writes on the stdin line of the turn of ``trace_id``:
+    the same for the same trace, so it can be named again later (a takeover
+    drops that entry, issue 491). A turn without a trace gets a fresh one."""
+    trace = (trace_id or "").strip()
+    if not trace:
+        return str(uuid.uuid4())
+    return str(uuid.uuid5(_PROMPT_UUID_NAMESPACE, trace))
+
+
 def _projects_root(home: pathlib.Path | None) -> pathlib.Path | None:
     return (home / ".claude" / "projects") if home is not None else None
 
@@ -483,8 +497,13 @@ class ClaudeBackend(Backend):
         # (clarp used to accept the positional form, hence the historical bug:
         # passing the prompt as argv + stdin=DEVNULL made clarp exit rc=0 with no
         # init/result — the "clarp exited without stream-json result" symptom.)
+        # Every line carries a uuid, which Claude Code keeps as that entry's uuid
+        # in its session file. It is derived from the turn's trace, so the Host
+        # can name this prompt again without storing it: a takeover drops it
+        # with --resume-drops-turn (issue 491, part B).
         user_msg = json.dumps({
             "type": "user",
+            "uuid": prompt_uuid(trace_id),
             "message": {"role": "user", "content": [{"type": "text", "text": text}]},
         })
         env_session = session if hook_session is None else hook_session
