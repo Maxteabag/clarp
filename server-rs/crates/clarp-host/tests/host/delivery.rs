@@ -54,13 +54,28 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         let row = turns.iter().find(|turn| turn["id"] == id);
         row.map_or(Value::Null, |row| row["delivery"].clone())
     };
+    // What waits is no row yet (issue 491): its delivery is read in the feed, by its id.
+    let waiting = |id: &str| {
+        let feed = log("&delivery_since=0");
+        let updates = feed["delivery_updates"].as_array().unwrap().clone();
+        let update = updates.iter().find(|update| update["message_id"] == id);
+        update.map_or(Value::Null, |update| update["delivery"].clone())
+    };
     let before = log("");
     assert_eq!(
         delivery(&before, "u-m1")["state"],
         "handed_over",
         "{before}"
     );
-    let queued = delivery(&before, "u-m2");
+    let rows = |log: &Value| -> Vec<String> {
+        let turns = log["turns"].as_array().unwrap();
+        turns
+            .iter()
+            .map(|turn| turn["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(rows(&before), ["u-m1"], "{before}");
+    let queued = waiting("u-m2");
     assert_eq!(
         (
             &queued["state"],
@@ -107,14 +122,14 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
     );
     wait_for("the turn to end", || host.state(&session) == "interrupted");
     let after_desk = log("");
-    assert_eq!(delivery(&after_desk, "u-m2"), queued, "{after_desk}");
+    assert_eq!(waiting("u-m2"), queued, "{after_desk}");
     assert_eq!(after_desk["delivery_stop_generation"], 0);
 
     // The user's Stop: the one that waits is fenced, and the generation moves.
     host.post("/stop", json!({ "session": session }));
     let held = log("&delivery_since=0");
-    assert_eq!(delivery(&held, "u-m3"), Value::Null, "{held}");
-    let stopped = delivery(&held, "u-m2");
+    assert_eq!(waiting("u-m3"), Value::Null, "{held}");
+    let stopped = waiting("u-m2");
     assert_eq!(
         (&stopped["state"], &stopped["rev"]),
         (&json!("stopped"), &json!(2)),
@@ -131,7 +146,8 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
 
     // The same id again changes nothing of it.
     host.send(&session, "later", "m2");
-    assert_eq!(delivery(&log(""), "u-m2"), stopped);
+    assert_eq!(waiting("u-m2"), stopped);
+    assert_eq!(rows(&log("")), ["u-m1"], "held, it is still no row");
 
     host.post("/turn-queue/resume", json!({ "session": session }));
     wait_for("the held one to be answered", || {
@@ -143,6 +159,24 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         (&after["state"], &after["rev"]),
         (&json!("handed_over"), &json!(3)),
         "{after}"
+    );
+
+    // Each held one enters the conversation when its turn starts, above its own answer.
+    wait_for("the one left for later to be answered", || {
+        host.conversation(&session)
+            .contains(&said("assistant", "left for later"))
+    });
+    let answered = log("");
+    let roles: Vec<(String, String)> = answered["turns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|turn| (turn["id"].as_str().unwrap().to_string(), turn["role"].as_str().unwrap().to_string()))
+        .collect();
+    let at = |id: &str| roles.iter().position(|(row, _)| row == id).unwrap();
+    assert!(
+        at("u-m2") < at("u-m3") && roles[at("u-m2") + 1].1 == "assistant",
+        "{answered}"
     );
 
     // Told by id alone: the first's launch, the second's fence, and its launch.
