@@ -76,9 +76,14 @@ esac
 
 # Keep source lines for backtraces without embedding full type and variable
 # information in each test executable. Explicit remote Cargo settings win.
+queue_mode=--build
+queue_env=
 case "$cmd" in
     check|test|clippy|conform|answers)
-        EXTRA_ENV="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV" ;;
+        # Admit and compile with the same effective profile, including caller overrides.
+        queue_env="CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only $EXTRA_ENV"
+        queue_mode=--build-debug
+        EXTRA_ENV= ;;
 esac
 
 ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/server-rs"
@@ -113,8 +118,8 @@ if [ "$cmd" = release ]; then
     cargo_cmd+=" && ln target/release/clarp-host target/release/clarp-shim $export_dir/"
 fi
 set +e
-printf -v queued '%q ' env "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py --build "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
-ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec $queued"
+printf -v queued '%q ' "CLARP_BUILD_LEASE=${CLARP_BUILD_LEASE:-}" "CLARP_BUILD_FIRST=${CLARP_BUILD_FIRST:-0}" python3 tools/build-queue.py "$queue_mode" "$floor" "$who" bash -c "CARGO_TERM_COLOR=never $EXTRA_ENV nice -n 19 ionice -c3 $cargo_cmd"
+ssh "${ssh_opts[@]}" "$HOST" "cd $remote/server-rs && exec env $queue_env $queued"
 code=$?
 set -e
 if [ "$cmd" = fmt ] && [ $code -eq 0 ]; then
