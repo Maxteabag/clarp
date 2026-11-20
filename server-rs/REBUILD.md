@@ -3473,9 +3473,11 @@ taken back like one left for later: a rewording that races the start comes eithe
 turn have the new words, or after it, and finds nothing waiting (404); a take-back leaves no row. A message that a
 build before this one wrote into the conversation while it waited stays there: its turn does not write it again,
 its words still cannot change (409), and a start of the agent anew writes it anew as before. A kill between the
-acceptance and the start loses nothing and writes no row; the turn starts after the restart, with its row. The
-names a client reads (the send time on the wire, the queue item's kind, the feature) wait for the Python Host's
-contract page. Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts`,
+acceptance and the start loses nothing and writes no row; the turn starts after the restart, with its row.
+A waited row adds ISO `sent_at` alongside the `timestamp` of the start. The queue item uses `client_msg_id`,
+`text`, ISO `sent_at` and `kind` (`waiting` for a plain send, `later` for a deferred send). The queue's events
+carry the same fields when a message joins, is edited, or starts. A withdrawal identifies the removed item.
+Held by the kernel's tests (`a_message_said_to_a_busy_agent_enters_the_conversation_when_its_turn_starts`,
 `a_message_to_a_parked_or_a_stopping_turn_enters_when_its_own_turn_starts`,
 `a_message_an_older_build_put_into_the_conversation_while_it_waited_stays_there`), the actor's, the Host's test
 `a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_starts` and the wrong rules of

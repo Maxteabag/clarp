@@ -374,6 +374,7 @@ pub struct Waiting {
     pub text: String,
     pub speak: bool,
     pub accepted_at_ms: i64,
+    pub admission: Admission,
 }
 
 /// A row of the conversation an agent had on another Host, on its way in.
@@ -2034,20 +2035,70 @@ impl Actor {
 
     /// The messages that wait, in the order they will run.
     pub fn queue(&self) -> Result<Vec<Waiting>, ActorError> {
-        let mut waiting = Vec::new();
-        for queued in self.recorder.agent().waiting() {
-            let message = self.message_at(queued.message_seq)?;
-            waiting.push(Waiting {
-                turn: queued.id,
-                client_id: message.client_id().to_string(),
-                told_id: message.told_id().to_string(),
-                message_id: message.id,
-                text: message.text,
-                speak: message.speak,
-                accepted_at_ms: queued.accepted_at_ms,
-            });
-        }
-        Ok(waiting)
+        self.recorder
+            .agent()
+            .waiting()
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .collect()
+    }
+
+    /// The item a user can edit or withdraw while it is waiting.
+    pub fn queue_item(&self, turn: TurnId) -> Result<Option<Waiting>, ActorError> {
+        self.recorder
+            .agent()
+            .waiting()
+            .find(|queued| queued.id == turn)
+            .map(|queued| {
+                self.queue_message(
+                    queued.id,
+                    queued.message_seq,
+                    queued.accepted_at_ms,
+                    queued.admission,
+                )
+            })
+            .transpose()
+    }
+
+    /// The item that left the queue to become the current turn.
+    pub fn started_queue_item(&self) -> Result<Option<Waiting>, ActorError> {
+        let agent = self.recorder.agent();
+        let Some(admission) = agent.live_queue_admission() else {
+            return Ok(None);
+        };
+        let (turn, seq, sent_at) = match agent.live() {
+            Some(Turn::Starting(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
+            Some(Turn::Running(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
+            Some(Turn::Parked(turn)) => (turn.id, turn.message_seq, turn.accepted_at_ms),
+            _ => return Ok(None),
+        };
+        self.queue_message(turn, seq, sent_at, admission).map(Some)
+    }
+
+    fn queue_message(
+        &self,
+        turn: TurnId,
+        message_seq: Seq,
+        accepted_at_ms: i64,
+        admission: Admission,
+    ) -> Result<Waiting, ActorError> {
+        let message = self.message_at(message_seq)?;
+        Ok(Waiting {
+            turn,
+            client_id: message.client_id().to_string(),
+            told_id: message.told_id().to_string(),
+            message_id: message.id,
+            text: message.text,
+            speak: message.speak,
+            accepted_at_ms,
+            admission,
+        })
     }
 
     /// The message a turn that ended answered.

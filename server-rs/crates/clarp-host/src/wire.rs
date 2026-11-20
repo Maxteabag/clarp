@@ -6,7 +6,7 @@
 //! nothing to say about is sent as the Python Host sends it when it has nothing to say.
 
 use clarp_actor::conversation::{Page, Versioned};
-use clarp_actor::{LiveStatus, LiveTool, Status};
+use clarp_actor::{LiveStatus, LiveTool, Status, Waiting};
 use clarp_kernel::agent::Rest;
 use clarp_kernel::control;
 use clarp_kernel::conversation::{Entry, Notice, ToolCall, ToolStatus, TurnEnd};
@@ -19,7 +19,7 @@ use clarp_kernel::recovery;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait, automation_kind};
-use clarp_protocol::events::AgentStateKind;
+use clarp_protocol::events::{AgentStateKind, QueueKind};
 use clarp_speech::markup;
 use serde_json::{Map, Value, json};
 
@@ -611,27 +611,74 @@ pub fn delivery_updated(record: &AgentRecord, message_id: &str) -> Value {
     })
 }
 
-/// The queue changed. `message_id` names the message the change is about, when it is about
-/// one: a message that joined the queue, or one that left it to run (`started`).
-pub fn queue_updated(
-    record: &AgentRecord,
-    status: &Status,
-    client_id: Option<&str>,
-    started: bool,
-) -> Value {
-    let mut event = json!({
-        "type": "queue-updated",
-        "agent_id": record.agent_id,
-        "session": record.session,
-        "queue_depth": status.waiting.len(),
-        "queue_paused": status.paused,
-        "queue_started": started,
-        "queue_revision": status.queue_revision,
-    });
-    if let Some(client_id) = client_id {
-        event["client_msg_id"] = json!(client_id);
-    }
-    event
+fn queue_item_fields(message: &Waiting, client_id: &str) -> Map<String, Value> {
+    let kind = if message.admission.left_for_later() {
+        QueueKind::Later
+    } else {
+        QueueKind::Waiting
+    };
+    Map::from_iter([
+        ("client_msg_id".into(), json!(client_id)),
+        ("text".into(), json!(message.text)),
+        ("sent_at".into(), json!(iso(message.accepted_at_ms))),
+        ("kind".into(), json!(kind)),
+    ])
+}
+
+/// One item from `GET /turn-queue`, including the original fields for older clients.
+pub fn queue_item(message: &Waiting) -> Value {
+    let mut item = queue_item_fields(message, &message.client_id);
+    item.insert("id".into(), json!(message.client_id));
+    item.insert("enqueued_at".into(), json!(message.accepted_at_ms));
+    item.insert("synthesize_audio".into(), json!(message.speak));
+    Value::Object(item)
+}
+
+#[derive(Clone, Copy)]
+pub enum QueueUpdate<'a> {
+    Mailbox,
+    Joined(&'a Waiting),
+    Started {
+        client_id: &'a str,
+        message: Option<&'a Waiting>,
+    },
+    Edited(&'a Waiting),
+    Deleted(&'a str),
+}
+
+/// The queue changed, with the item that changed when there is one.
+pub fn queue_updated(record: &AgentRecord, status: &Status, update: QueueUpdate<'_>) -> Value {
+    let mut event = match update {
+        QueueUpdate::Joined(message) | QueueUpdate::Edited(message) => {
+            queue_item_fields(message, &message.told_id)
+        }
+        QueueUpdate::Started { client_id, message } => match message {
+            Some(message) => queue_item_fields(message, client_id),
+            None => Map::from_iter([("client_msg_id".into(), json!(client_id))]),
+        },
+        QueueUpdate::Deleted(client_id) => {
+            Map::from_iter([("client_msg_id".into(), json!(client_id))])
+        }
+        QueueUpdate::Mailbox => Map::new(),
+    };
+    event.extend([
+        ("type".into(), json!("queue-updated")),
+        ("agent_id".into(), json!(record.agent_id)),
+        ("session".into(), json!(record.session)),
+        ("queue_depth".into(), json!(status.waiting.len())),
+        ("queue_paused".into(), json!(status.paused)),
+        (
+            "queue_started".into(),
+            json!(matches!(update, QueueUpdate::Started { .. })),
+        ),
+        ("queue_revision".into(), json!(status.queue_revision)),
+    ]);
+    match update {
+        QueueUpdate::Edited(_) => event.insert("queue_change".into(), json!("edited")),
+        QueueUpdate::Deleted(_) => event.insert("queue_change".into(), json!("deleted")),
+        _ => None,
+    };
+    Value::Object(event)
 }
 
 /// A background job as the apps are given it: what is kept of it, and what is read off it
@@ -1331,6 +1378,9 @@ pub fn row(version: &Versioned) -> Value {
     match &version.entry {
         Entry::Message(message) => {
             row["role"] = json!("user");
+            if let Some(sent_at_ms) = message.sent_at_ms {
+                row["sent_at"] = json!(iso(sent_at_ms));
+            }
             row["text"] = match automated_prompt(kind) {
                 Some(shown) => json!(shown),
                 None => json!(markup::strip_hidden_blocks(&message.text)),
@@ -2711,7 +2761,7 @@ mod tests {
             )
         );
 
-        let held = queue_updated(&record(), &thinking, None, false);
+        let held = queue_updated(&record(), &thinking, QueueUpdate::Mailbox);
         assert_eq!(
             (
                 &held["queue_depth"],
@@ -2722,7 +2772,14 @@ mod tests {
             (&json!(1), &json!(true), &json!(7), &json!(false))
         );
         assert!(held.get("client_msg_id").is_none());
-        let left = queue_updated(&record(), &thinking, Some("m2"), true);
+        let left = queue_updated(
+            &record(),
+            &thinking,
+            QueueUpdate::Started {
+                client_id: "m2",
+                message: None,
+            },
+        );
         assert_eq!(
             (&left["client_msg_id"], &left["queue_started"]),
             (&json!("m2"), &json!(true))
