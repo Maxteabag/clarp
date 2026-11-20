@@ -1633,19 +1633,6 @@ impl Actor {
     /// Where one of the agent's turns stands, by its number: what tells whether a token given
     /// to that turn still names the agent. Two keyed reads, never a scan: the turn that runs,
     /// and the row that ended this one.
-    /// The trace of this turn, as its rows carry it, when it is the agent's running turn now:
-    /// `None` for a turn that does not run (one that ended, or another), and the empty text
-    /// for a running turn whose message came without one.
-    pub fn running_trace(&self, turn: u64) -> Result<Option<String>, ActorError> {
-        let message_seq = match self.recorder.agent().live() {
-            Some(Turn::Starting(live)) if live.id.0 == turn => live.message_seq,
-            Some(Turn::Running(live)) if live.id.0 == turn => live.message_seq,
-            _ => return Ok(None),
-        };
-        let message = self.message_at(message_seq)?;
-        Ok(Some(message.trace_id.unwrap_or_default()))
-    }
-
     pub fn standing_of(&self, turn: u64) -> Result<Standing, ActorError> {
         let live = self.recorder.agent().live().map(|live| live.id().0);
         if live == Some(turn) {
@@ -1657,6 +1644,19 @@ impl Actor {
             },
             None => Standing::Unknown,
         })
+    }
+
+    /// The trace of this turn, as its rows carry it, when it is the agent's running turn now:
+    /// `None` for a turn that does not run (one that ended, or another), and the empty text
+    /// for a running turn whose message came without one.
+    pub fn running_trace(&self, turn: u64) -> Result<Option<String>, ActorError> {
+        let message_seq = match self.recorder.agent().live() {
+            Some(Turn::Starting(live)) if live.id.0 == turn => live.message_seq,
+            Some(Turn::Running(live)) if live.id.0 == turn => live.message_seq,
+            _ => return Ok(None),
+        };
+        let message = self.message_at(message_seq)?;
+        Ok(Some(message.trace_id.unwrap_or_default()))
     }
 
     /// What the agent last finished for one of those `asked_by` names (by the contract's
