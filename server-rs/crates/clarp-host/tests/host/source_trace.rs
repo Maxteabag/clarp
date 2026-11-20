@@ -239,7 +239,9 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         );
     }
     // The Host's own tool, called in the turn, presents that turn's token, as the Python Host's
-    // tool sends it: what it publishes names the turn.
+    // tool sends it: what it publishes names the turn, as what is published over HTTP with that
+    // token at that moment does.
+    let over_http = named(&publish("document", Some(&later), None, "1"), &later_trace);
     let tool = Command::new(env!("CARGO_BIN_EXE_clarp-host"))
         .args([
             "tool",
@@ -259,7 +261,13 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         .ended();
     let printed: Value = serde_json::from_slice(&tool.stdout).unwrap_or(Value::Null);
     let row = printed.get("artifact").cloned().unwrap_or(printed);
-    assert_eq!(named(&row, &later_trace), "the trace", "{row}");
+    let by_tool = named(&row, &later_trace);
+    let told = format!(
+        "{:?} {} | {}",
+        tool.status.code(),
+        String::from_utf8_lossy(&tool.stdout),
+        String::from_utf8_lossy(&tool.stderr)
+    );
 
     // A turn of Codex has its token on this Host too, and names what it publishes: the rule is
     // the token's (the Python Host's Codex agents have none: a registered difference).
@@ -279,7 +287,7 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         body.to_string().as_bytes(),
     );
     let got: Value = serde_json::from_slice(&got.body).unwrap();
-    assert_eq!(named(&got["artifact"], &cody_trace), "the trace", "{got}");
+    let by_codex = named(&got["artifact"], &cody_trace);
     std::fs::write(release.join("cody"), "").unwrap();
 
     // A request to the user, made by its own route in a running turn, names none.
@@ -306,6 +314,7 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
 
     let staged: Vec<&(String, String, String)> = found.iter().collect();
     let mut compared = 0;
+    let mut wrong = Vec::new();
     for vector in vectors() {
         let (case, kind) = (
             vector["case"].as_str().unwrap(),
@@ -318,14 +327,32 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             );
             continue;
         };
-        assert_eq!(shown.as_str(), vector["shown"], "{case} ({kind})");
+        if shown.as_str() != vector["shown"] {
+            wrong.push(format!(
+                "{case} ({kind}): {shown}, the Python Host's {}",
+                vector["shown"]
+            ));
+        }
         compared += 1;
     }
+    assert!(
+        wrong.is_empty(),
+        "otherwise than the Python Host: {wrong:#?}"
+    );
     assert_eq!(
         compared,
         found.len(),
         "every case staged here is one of the Python Host's"
     );
+    assert_eq!(
+        over_http, "the trace",
+        "published over HTTP in the running turn"
+    );
+    assert_eq!(
+        by_tool, "the trace",
+        "published by the tool in the running turn: {told}"
+    );
+    assert_eq!(by_codex, "the trace", "published in a Codex turn: {got}");
 }
 
 /// The Python Host's own form (`tests/fixtures/render_spec/build-decision.json`), at a version.
