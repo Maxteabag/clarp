@@ -171,7 +171,12 @@ fn a_held_send_is_shown_stopped_then_handed_over_and_each_change_is_hinted() {
         .as_array()
         .unwrap()
         .iter()
-        .map(|turn| (turn["id"].as_str().unwrap().to_string(), turn["role"].as_str().unwrap().to_string()))
+        .map(|turn| {
+            (
+                turn["id"].as_str().unwrap().to_string(),
+                turn["role"].as_str().unwrap().to_string(),
+            )
+        })
         .collect();
     let at = |id: &str| roles.iter().position(|(row, _)| row == id).unwrap();
     assert!(

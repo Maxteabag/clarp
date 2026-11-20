@@ -667,7 +667,11 @@ impl Batch<'_> {
         match waiting {
             Ok(found) => {
                 if let Some(stored) = found.into_iter().find(|item| item.seq == message_seq) {
-                    let sent_at = self.recorder.agent.waiting().find(|queued| queued.id == turn);
+                    let sent_at = self
+                        .recorder
+                        .agent
+                        .waiting()
+                        .find(|queued| queued.id == turn);
                     let sent_at = sent_at.map_or(stored.ts_ms, |queued| queued.accepted_at_ms);
                     let body = sent(stored.body, sent_at);
                     let mut item = NewItem::new(kind::MESSAGE, now_ms, body).in_turn(turn.0);
@@ -1361,7 +1365,9 @@ mod tests {
         };
         let items = |r: &Recorder, key: &str| {
             let all = r.log().read_after(0, Kinds::ALL, 1_000).unwrap();
-            let of = all.into_iter().filter(|item| item.key.as_deref() == Some(key));
+            let of = all
+                .into_iter()
+                .filter(|item| item.key.as_deref() == Some(key));
             of.map(|item| (item.kind, item.ts_ms, item.turn, item.body))
                 .collect::<Vec<_>>()
         };
@@ -1414,18 +1420,30 @@ mod tests {
             assert!(!accepted.entered && !accepted.duplicate, "{key}");
             assert_eq!(
                 items(&recorder, key),
-                vec![(kind::WAITING, at, accepted.turn.map(|t| t.0), body(key, key))]
+                vec![(
+                    kind::WAITING,
+                    at,
+                    accepted.turn.map(|t| t.0),
+                    body(key, key)
+                )]
             );
             waiting.push(accepted);
         }
-        assert_eq!(rows(&recorder), vec!["u-m1"], "nothing but the first is a row");
+        assert_eq!(
+            rows(&recorder),
+            vec!["u-m1"],
+            "nothing but the first is a row"
+        );
         let ids = |r: &Recorder| r.agent().waiting().map(|q| q.id.0).collect::<Vec<_>>();
         assert_eq!(ids(&recorder), vec![2, 3, 4]);
         assert!(
             recorder.agent().deliveries().holds(2),
             "what was said keeps its receipt while it waits"
         );
-        assert!(!recorder.agent().deliveries().holds(3), "a trigger's has none");
+        assert!(
+            !recorder.agent().deliveries().holds(3),
+            "a trigger's has none"
+        );
 
         // The same id again: one item, and nothing new.
         let last = recorder.last_seq();
@@ -1438,11 +1456,7 @@ mod tests {
 
         // The user rewords it while it waits, and takes the nameless agent's back.
         let reworded = recorder
-            .reword(
-                TurnId(2),
-                |_| Ok(body("two, better", "u-m2")),
-                24,
-            )
+            .reword(TurnId(2), |_| Ok(body("two, better", "u-m2")), 24)
             .unwrap();
         assert_eq!(reworded, Reworded::Done);
         recorder
@@ -1477,10 +1491,7 @@ mod tests {
             }],
             "the turn answers the reworded message"
         );
-        let row = recorder
-            .log()
-            .read_after(before, kind::ROWS, 10)
-            .unwrap();
+        let row = recorder.log().read_after(before, kind::ROWS, 10).unwrap();
         assert_eq!(
             row.iter()
                 .map(|item| (item.kind, item.ts_ms, item.turn, item.body.clone()))
@@ -1490,7 +1501,9 @@ mod tests {
         );
         assert_eq!(recorder.conversation_seq(), recorder.last_seq());
         assert_eq!(
-            recorder.reword(TurnId(2), |_| Ok(body("too late", "u-m2")), 31).unwrap(),
+            recorder
+                .reword(TurnId(2), |_| Ok(body("too late", "u-m2")), 31)
+                .unwrap(),
             Reworded::NotWaiting,
             "once its turn has started there is nothing to reword"
         );
@@ -1527,7 +1540,10 @@ mod tests {
             )
             .unwrap();
         let background = recorder
-            .accept_message(said("u-b6", "bg", trigger_of("schedule"), Admission::Background), 61)
+            .accept_message(
+                said("u-b6", "bg", trigger_of("schedule"), Admission::Background),
+                61,
+            )
             .unwrap();
         assert!(!background.entered);
         let after = recorder
@@ -1548,7 +1564,11 @@ mod tests {
         for key in ["u-m2", "u-t3", "u-d5"] {
             let kinds: Vec<u16> = items(&recorder, key).iter().map(|item| item.0).collect();
             assert_eq!(kinds.last(), Some(&kind::MESSAGE), "{key}");
-            assert_eq!(kinds.iter().filter(|k| **k == kind::MESSAGE).count(), 1, "{key}");
+            assert_eq!(
+                kinds.iter().filter(|k| **k == kind::MESSAGE).count(),
+                1,
+                "{key}"
+            );
         }
     }
 
@@ -1590,7 +1610,11 @@ mod tests {
         recorder
             .handle(Command::TurnRetried { turn: TurnId(1) }, 4)
             .unwrap();
-        assert_eq!(rows(&recorder), vec!["u-1"], "trying again starts no other turn");
+        assert_eq!(
+            rows(&recorder),
+            vec!["u-1"],
+            "trying again starts no other turn"
+        );
         recorder.handle(ended(1), 5).unwrap();
         assert_eq!(rows(&recorder), vec!["u-1", "u-2"]);
 
@@ -1660,7 +1684,9 @@ mod tests {
         let message_seq = said_as_before(&mut recorder, "u-2", 2);
         assert_eq!(rows(&recorder), vec!["u-1", "u-2"]);
         assert_eq!(
-            recorder.reword(TurnId(2), |_| Ok(b"x".to_vec()), 3).unwrap(),
+            recorder
+                .reword(TurnId(2), |_| Ok(b"x".to_vec()), 3)
+                .unwrap(),
             Reworded::InConversation
         );
         let effects = recorder

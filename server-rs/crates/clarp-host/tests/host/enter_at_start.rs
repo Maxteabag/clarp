@@ -127,8 +127,16 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
         [("u-m1".to_string(), "user".to_string())],
         "nothing that waits is a row"
     );
-    assert_eq!(pending(&host, "u-m2"), "pending_launch", "the user's is shown pending");
-    assert_eq!(pending(&host, "u-t3"), Value::Null, "a trigger's has no receipt");
+    assert_eq!(
+        pending(&host, "u-m2"),
+        "pending_launch",
+        "the user's is shown pending"
+    );
+    assert_eq!(
+        pending(&host, "u-t3"),
+        Value::Null,
+        "a trigger's has no receipt"
+    );
 
     // The same id again: one item.
     let again = host.send(session, "two", "m2");
@@ -143,14 +151,24 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     );
     assert_eq!((status, &reworded["ok"]), (200, &json!(true)), "{reworded}");
     let (status, withdrawn) = host.ask("DELETE", "/turn-queue/a4", None);
-    assert_eq!((status, &withdrawn["ok"]), (200, &json!(true)), "{withdrawn}");
-    assert_eq!(queue(&host), waiting(&[("m2", "two, better"), ("t3", "three")]));
+    assert_eq!(
+        (status, &withdrawn["ok"]),
+        (200, &json!(true)),
+        "{withdrawn}"
+    );
+    assert_eq!(
+        queue(&host),
+        waiting(&[("m2", "two, better"), ("t3", "three")])
+    );
     assert_eq!(users(&host), ["u-m1"]);
 
     // Killed between the acceptance and the start: what waits waits on, and is no row.
     host.kill();
     let host = place.start_in("", &[], &world);
-    assert_eq!(queue(&host), waiting(&[("m2", "two, better"), ("t3", "three")]));
+    assert_eq!(
+        queue(&host),
+        waiting(&[("m2", "two, better"), ("t3", "three")])
+    );
     assert_eq!(users(&host), ["u-m1"]);
 
     // The first answers: the second starts, on its new words, and only now is a row, below
@@ -163,7 +181,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     });
     let now = rows(&host);
     assert_eq!(
-        now.iter().map(|(_, role)| role.as_str()).collect::<Vec<_>>(),
+        now.iter()
+            .map(|(_, role)| role.as_str())
+            .collect::<Vec<_>>(),
         ["user", "assistant", "user"],
         "{now:?}"
     );
@@ -185,7 +205,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     // The user stops it: the trigger's waits on, held, and is no row. What the user says
     // after the Stop runs ahead of it, and enters when its turn starts.
     host.post("/stop", json!({ "session": session }));
-    wait_for("the second turn to end", || host.state(session) == "interrupted");
+    wait_for("the second turn to end", || {
+        host.state(session) == "interrupted"
+    });
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     let after = host.send(session, "five", "m5");
     assert_eq!(after["ok"], true, "{after}");
@@ -195,7 +217,9 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     assert_eq!(queue(&host), waiting(&[("t3", "three")]));
     answer();
     wait_for("the fifth's answer", || {
-        rows(&host).last().is_some_and(|(_, role)| role == "assistant")
+        rows(&host)
+            .last()
+            .is_some_and(|(_, role)| role == "assistant")
     });
     assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5"], "held, it is no row");
 
@@ -212,7 +236,11 @@ fn a_message_sent_while_its_agent_is_busy_enters_the_conversation_when_its_turn_
     assert_eq!(users(&host), ["u-m1", "u-m2", "u-m5", "u-t3"], "{all:?}");
     for id in ["u-m1", "u-m5", "u-t3"] {
         let at = all.iter().position(|(row, _)| row == id).unwrap();
-        assert_eq!(all[at + 1].1, "assistant", "{id} is answered below it: {all:?}");
+        assert_eq!(
+            all[at + 1].1,
+            "assistant",
+            "{id} is answered below it: {all:?}"
+        );
     }
     assert!(queue(&host).is_empty());
     assert_eq!(taken().len(), 4, "the taken back never ran");
