@@ -17861,6 +17861,44 @@ fn an_agent_hands_its_user_a_report_and_revises_it() {
     );
     assert_eq!(in_the_address.status, 403, "{}", in_the_address.text());
     assert!(in_the_address.text().contains("not the URL"));
+    // It is read by where the token that let the request in was found, not by which headers
+    // came with it: a cookie or a header that holds no token beside the token in the address
+    // opens nothing; the token in the Authorization header beside a cookie of no token does.
+    let page = format!("/artifacts/findings/html?token={token}");
+    let cookie = format!("claude_pwa_token={token}");
+    let not_a_token = [("Cookie", "claude_pwa_token=not-a-token")];
+    for (how, got) in [
+        (
+            "a cookie of no token",
+            fetch(&host, "", "GET", &page, &not_a_token, b""),
+        ),
+        (
+            "a header of no token",
+            fetch(&host, "not-a-token", "GET", &page, &[], b""),
+        ),
+    ] {
+        assert_eq!(got.status, 403, "{how} beside the address: {}", got.text());
+        assert!(got.text().contains("not the URL"), "{how}");
+    }
+    let by_header = fetch(
+        &host,
+        token,
+        "GET",
+        "/artifacts/findings/html",
+        &not_a_token,
+        b"",
+    );
+    assert_eq!(by_header.status, 200, "{}", by_header.text());
+    let by_cookie = [("Cookie", cookie.as_str())];
+    let in_a_cookie = fetch(
+        &host,
+        "",
+        "GET",
+        "/artifacts/findings/html",
+        &by_cookie,
+        b"",
+    );
+    assert_eq!(in_a_cookie.status, 200, "{}", in_a_cookie.text());
     let (phone, _) = pair(&host, "phone", "limited");
     let kept_out = fetch(&host, &phone, "GET", "/artifacts/findings/html", &[], b"");
     assert_eq!(kept_out.status, 403);
