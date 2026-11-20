@@ -1109,6 +1109,43 @@ pub(crate) mod at_the_port {
         );
     }
 
+    #[tokio::test]
+    async fn failed_voice_timeline_writes_are_private_and_consume_no_ids() {
+        let place = place("voice-timeline");
+        let fleet = &place.fleet;
+        let row = serde_json::json!({"event":"fixture","ts":1,"text":"synthetic-secret"});
+        *place.refused.lock().unwrap() = Some(fleet::shelf("voice-events"));
+        assert!(
+            fleet
+                .append_voice(vec![row.clone(), row.clone()])
+                .await
+                .is_err()
+        );
+        for _ in 0..3 {
+            fleet.record_voice(row.clone());
+        }
+        assert!(fleet.kept_all("voice-events").await.unwrap().is_empty());
+        let lines = place.said.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("voice-events") && lines[0].contains("refused here"));
+        assert!(!lines[0].contains("synthetic-secret"));
+        *place.refused.lock().unwrap() = Some(fleet::shelf("voice-event-sequence"));
+        assert!(fleet.append_voice(vec![row.clone()]).await.is_err());
+        assert!(fleet.kept_all("voice-events").await.unwrap().is_empty());
+        *place.refused.lock().unwrap() = None;
+        assert_eq!(fleet.append_voice(vec![row.clone(), row]).await.unwrap(), 2);
+        let saved = fleet.kept_all("voice-events").await.unwrap();
+        assert_eq!(saved.len(), 2);
+        for (index, (key, data)) in saved.iter().enumerate() {
+            let id = index + 1;
+            assert_eq!(key, &format!("{id:020}"));
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(data).unwrap()["event_id"],
+                id
+            );
+        }
+    }
+
     fn here(fleet: &FleetHandle, session: &str) -> bool {
         let directory = fleet.directory();
         directory
