@@ -16,7 +16,7 @@ K = 'clarp-kernel/src/live_call.rs'
 L = 'clarp-host/src/calls/live.rs'
 O = 'clarp-host/src/oracle/call.rs'
 PLANTS = [
-    (K, 'ring', 'a kind the Host reads is called unread', '    "session.started",\n', ''),
+    (K, 'ring', 'a kind the Host reads is called unread', '    "session.started",\n', '    "session.begun",\n'),
     (K, 'kernel', 'what the kind carries is said with it', '    let shown: String = kind\n        .chars()\n        .take(64)',
      '    let shown: String = kind\n        .chars()\n        .take(640)'),
     (K, 'kernel', 'a kind is said in signs a journal line cannot hold', '            if sign.is_ascii_alphanumeric() || "._-".contains(sign) {',

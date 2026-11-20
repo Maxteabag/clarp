@@ -1290,4 +1290,44 @@ mod tests {
         let read: Vec<Ring> = serde_json::from_value(old).unwrap();
         assert_eq!((read[0].ended_at, read[0].call_id.as_str()), (None, ""));
     }
+
+    /// A live ring kept by the build before this one (its snapshot naming the model, its digest
+    /// of that snapshot, no model kept beside its ids) is read as it was kept: its snapshot and
+    /// its digest are the stored ones, written out again unchanged, and nothing reckons a digest
+    /// again (the join is held to the stored one). It runs on the model every app takes.
+    #[test]
+    fn a_live_ring_kept_by_the_build_before_keeps_its_snapshot_and_its_digest() {
+        let snapshot = json!({
+            "schema": 1, "host_id": "host-1", "agent": { "agent_id": "a", "session": "s" },
+            "provider": "openai", "model": "gpt-live-1", "voice": "marin", "language": "nb-NO",
+        });
+        let digest = crate::live_call::digest(&snapshot);
+        let kept = json!([{
+            "ring_id": "rng_1", "session": "s", "persona": "P", "agent_id": "a", "reason": "r",
+            "opening_line": "o", "state": "answered", "created_at": 1, "expires_at": 2,
+            "conversation_mode": "agent_live_v1",
+            "_live": {
+                "snapshot": snapshot, "context_digest": digest, "call_id": "alv_1",
+                "call_epoch": 1, "attempt_id": "att_1", "phase": "answered_waiting_join",
+                "join_expires_at": 9_000_000_000_000_i64,
+            },
+        }]);
+        let read: Vec<Ring> = serde_json::from_value(kept.clone()).unwrap();
+        let live = read[0].live.as_deref().unwrap();
+        assert_eq!(
+            (&live.snapshot, live.context_digest.as_str()),
+            (&snapshot, digest.as_str())
+        );
+        assert_eq!(live.running(), "gpt-live-1");
+        let again = serde_json::to_value(&read).unwrap();
+        assert_eq!(again[0]["_live"]["snapshot"], snapshot);
+        assert_eq!(again[0]["_live"]["context_digest"], json!(digest));
+        assert!(
+            again[0]["_live"].get("model").is_none(),
+            "no model is added to what was kept"
+        );
+        // Kept again, and read again: the very same.
+        let twice: Vec<Ring> = serde_json::from_value(again).unwrap();
+        assert_eq!(twice, read);
+    }
 }
