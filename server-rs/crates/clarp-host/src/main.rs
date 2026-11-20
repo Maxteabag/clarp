@@ -377,6 +377,7 @@ async fn serve(config: Config) -> Result<(), String> {
     clarp_host::oracle::run(&app);
     // And an idle agent that asked for it is given a heartbeat when one is due.
     clarp_host::heartbeat::run(&app);
+    clarp_host::goal_listener::run(&app);
     // And a janitor's scheduled task is run when its schedule says.
     clarp_host::janitors::run(&app);
     clarp_host::seats::start_switcher(&app);

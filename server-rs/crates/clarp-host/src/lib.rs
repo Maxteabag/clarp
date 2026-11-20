@@ -38,6 +38,7 @@ pub mod fcm;
 pub mod files;
 pub mod fleet;
 pub mod forks;
+pub mod goal_listener;
 pub mod goaltool;
 mod google_voice_guard;
 pub mod heard;
