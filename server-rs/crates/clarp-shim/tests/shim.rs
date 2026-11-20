@@ -1158,7 +1158,10 @@ fn a_tool_that_is_gone_is_not_held() {
     assert!(!reply.ok);
     assert_eq!(reply.error.as_deref(), Some("the tool is being stopped"));
     assert_eq!(
-        hold_lines(&running.dir).iter().map(|l| hold_end(l)).collect::<Vec<_>>(),
+        hold_lines(&running.dir)
+            .iter()
+            .map(|l| hold_end(l))
+            .collect::<Vec<_>>(),
         ["refused: the tool is being stopped"]
     );
     std::thread::sleep(Duration::from_millis(100));
@@ -1288,7 +1291,10 @@ fn a_served_tool_is_not_held() {
     assert_eq!(reply.held, None);
     assert_eq!(reply.error.as_deref(), Some("a served tool cannot be held"));
     assert_eq!(
-        hold_lines(&dir).iter().map(|l| hold_end(l)).collect::<Vec<_>>(),
+        hold_lines(&dir)
+            .iter()
+            .map(|l| hold_end(l))
+            .collect::<Vec<_>>(),
         ["refused: a served tool cannot be held"]
     );
     std::thread::sleep(Duration::from_millis(100));
@@ -1350,7 +1356,9 @@ s.sendall(b"{\"op\":\"hook\",\"name\":\"Step\"")
 print("sent",flush=True)
 time.sleep(300)'"#;
     let mut running = start("hold-report-begun", script);
-    wait_for("half a report", || outs(&records(&running.spool)).contains(&"sent"));
+    wait_for("half a report", || {
+        outs(&records(&running.spool)).contains(&"sent")
+    });
     let began = Instant::now();
     let reply = hold(&running.socket, 2_000);
     assert!(reply.ok, "{reply:?}");
