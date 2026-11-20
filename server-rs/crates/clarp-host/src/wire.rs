@@ -931,6 +931,18 @@ pub fn visible_preview(text: &str) -> String {
     cut(written, NOTIFICATION_PREVIEW_MAX, false)
 }
 
+/// What of an agent decides whether the user is told of what it says. A helper reports to the
+/// agent that made it: what it says is marked unread and pages nobody, as if it were muted. A
+/// quiet agent (a janitor) tells nobody, whatever began its turn. No setting treats automation
+/// specially on this Host yet.
+fn capabilities(record: &AgentRecord) -> notify::Capabilities {
+    notify::Capabilities {
+        muted: record.muted || record.is_helper(),
+        quiet: record.is_quiet(),
+        ..notify::Capabilities::default()
+    }
+}
+
 /// The user told of an agent's note (`POST /agent-notes`), as the apps are told it (the Python
 /// Host's `classify_note` and `event_payload`): a notification of its own, keyed by the note's
 /// row, at the note's millisecond. `Err` with the reason when the rule tells nobody (a quiet
@@ -942,12 +954,7 @@ pub fn note_notification(
     text: &str,
     done_ms: i64,
 ) -> Result<Value, String> {
-    let agent = notify::Capabilities {
-        muted: record.muted || record.is_helper(),
-        quiet: record.is_quiet(),
-        ..notify::Capabilities::default()
-    };
-    match coordination::note_decision(&agent) {
+    match coordination::note_decision(&capabilities(record)) {
         notify::Decision::Notify {
             reason,
             push,
@@ -1004,14 +1011,7 @@ pub fn user_notification(
         interrupted: false,
         client: asked.client,
     };
-    // A helper reports to the agent that made it: what it says is marked unread and pages
-    // nobody, as if it were muted. A quiet agent (a janitor) tells nobody, whatever began its
-    // turn. No setting treats automation specially on this Host yet.
-    let agent = notify::Capabilities {
-        muted: record.muted || record.is_helper(),
-        quiet: record.is_quiet(),
-        ..notify::Capabilities::default()
-    };
+    let agent = capabilities(record);
     let notify::Decision::Notify {
         reason,
         push,
