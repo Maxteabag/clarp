@@ -210,16 +210,22 @@ def _cartesia_can_stream(cfg, row: dict, agent: dict | None, clip_route) -> bool
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
-    fallback could speak instead (Cartesia and Gemini; others decide later).
-    The voice comes from the resolver the profile shows (voice_profile)."""
+    fallback could speak instead (Cartesia, Gemini, Google and ElevenLabs; Deepgram
+    always has its one default voice, and an adapter decides later). The voice comes
+    from the resolver the profile shows (voice_profile)."""
     if clip_route.fallback:
         return True
-    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE):
+    if clip_route.provider not in (CARTESIA, GEMINI, GOOGLE, ELEVENLABS):
         return True
     voice = provider_voice(cfg, row.get("voice_id"), agent, clip_route, clip_route.provider).voice
     if clip_route.provider == GOOGLE:
         from . import google_tts
         return voice in google_tts.VOICES
+    if clip_route.provider == ELEVENLABS:
+        # Ruling N: a value ElevenLabs refuses (nothing, a map's JSON, a uuid) used to be
+        # announced and then fail; it ends here as no_voice, as for the others.
+        from .voice_profile import elevenlabs_id_usable
+        return elevenlabs_id_usable(voice)
     return bool(voice)
 
 
