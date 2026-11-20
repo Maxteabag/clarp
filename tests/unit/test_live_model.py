@@ -98,6 +98,28 @@ def test_a_table_key_with_capitals_admits_exactly_that_name(tmp_path, header, ex
     assert live.model_for_client(header, cfg) == expected
 
 
+def test_a_key_differing_from_a_built_in_name_only_in_case_is_taken_and_said_once_per_read(tmp_path, monkeypatch):
+    lines = []
+    monkeypatch.setattr("lib.log.log", lambda *a, **k: lines.append(a))
+    assert config._live_model_min_client({"Ios": 5, "ANDROID": 0, "Desktop": 3}) == {"Ios": 5, "ANDROID": 0, "Desktop": 3}
+    [line] = lines                                                      # one line for the read, naming both
+    assert line[0] == "config.live_model_min_client"
+    assert "'Ios' is taken as its own client" in line[1] and "the built-in 'ios' keeps its own number (75)" in line[1]
+    assert "'ANDROID' is taken as its own client" in line[1] and "the built-in 'android' keeps its own number (29)" in line[1]
+    assert "Desktop" not in line[1]
+    config._live_model_min_client({"Ios": 5})                           # every read says it again, once
+    assert len(lines) == 2
+    config._live_model_min_client({"ios": 80, "Desktop": 3})            # a built-in name as it is: nothing said
+    assert len(lines) == 2
+    path = tmp_path / "config.toml"
+    path.write_text('[openai]\nlive_model = "gpt-live-1.1"\n[openai.live_model_min_client]\nIos = 5\n')
+    cfg = config.load(path)
+    assert len(lines) == 3 and cfg.live_model_min_client == {"Ios": 5}
+    assert live.model_for_client("Ios/1 contract=5", cfg) == "gpt-live-1.1"  # the key is taken
+    assert live.model_for_client("ios/2985 contract=74", cfg) == "gpt-live-1"  # the phone named 'ios' keeps 75
+    assert live.model_for_client("ios/2986 contract=75", cfg) == "gpt-live-1.1"
+
+
 @pytest.mark.parametrize("header", ["ios/2986 contract=75", "ios/9999 contract=999999999"])
 def test_0_in_the_table_switches_that_client_off_and_no_other(tmp_path, header):
     path = tmp_path / "config.toml"
