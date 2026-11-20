@@ -198,11 +198,15 @@ _KEY_SQL = "COALESCE(m.timestamp, '')"
 
 
 def _key_cmp(op: str, key: tuple) -> tuple[str, list]:
-    """Rows strictly ``op`` ('<' or '>') the display key (timestamp, seq, message_id)."""
+    """Rows strictly ``op`` ('<' or '>') the display key (timestamp, seq, message_id).
+
+    The plain ``timestamp {op}= ?`` in front is what lets SQLite read idx_messages_log_order as
+    a range: an OR of the three cases alone cannot use it, and every look-back or count then
+    walked the whole conversation (300 ms a page on 300k rows)."""
     t, seq, mid = key
-    return (f"""({_KEY_SQL} {op} ? OR ({_KEY_SQL} = ? AND m.seq {op} ?)
-               OR ({_KEY_SQL} = ? AND m.seq = ? AND m.message_id {op} ?))""",
-            [t, t, seq, t, seq, mid])
+    return (f"""({_KEY_SQL} {op}= ? AND ({_KEY_SQL} {op} ? OR ({_KEY_SQL} = ? AND m.seq {op} ?)
+               OR ({_KEY_SQL} = ? AND m.seq = ? AND m.message_id {op} ?)))""",
+            [t, t, t, seq, t, seq, mid])
 
 
 def _automated_sql() -> tuple[str, list]:
