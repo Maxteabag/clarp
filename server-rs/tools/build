@@ -102,6 +102,9 @@ ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-sub-agents $remote/s
 "${up[@]}" --delete --exclude __pycache__ -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-sub-agents/" "$HOST:$remote/skills/clarp-sub-agents/"
 # And the program an agent publishes a file with; a test publishes with it.
 "${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../scripts/clarp-media-publish.py" "$HOST:$remote/scripts/"
+# The background-task test runs the repository's goal launcher.
+ssh "${ssh_opts[@]}" "$HOST" "mkdir -p $remote/skills/clarp-background-jobs/scripts"
+"${up[@]}" -e "ssh ${ssh_opts[*]}" "$here/../skills/clarp-background-jobs/scripts/run_detached_job.sh" "$HOST:$remote/skills/clarp-background-jobs/scripts/"
 if [ "$cmd" = conform ] || [ "$cmd" = answers ]; then
     # The conformance driver is the replay harness run against the Rust Host: it needs the
     # harness, and the server's source for the words its report may print.
