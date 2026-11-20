@@ -44,6 +44,7 @@ def record(tmp):
             self.reply = [status, json.loads(body) if mime == 'application/json' else body.decode()]
 
     rows = []
+    malformed = []
     def ask(method, value):
         door = Door()
         sent = []
@@ -53,7 +54,14 @@ def record(tmp):
         door.headers = {'Content-Length': str(len(raw))}
         door.rfile = io.BytesIO(raw)
         handler = Handler._handle_remote_action if method == 'POST' else Handler._handle_remote_action_get
-        handler(door)
+        try:
+            handler(door)
+        except AttributeError as exc:
+            if method != 'POST' or not json.loads(value)['action'] or 'strip' not in str(exc):
+                raise
+            assert not sent
+            malformed.append(value)
+            return
         rows.append([method, value, *door.reply, sent])
 
     with ExitStack() as stack:
@@ -65,6 +73,8 @@ def record(tmp):
         stack.enter_context(patch.object(controls.secrets, 'token_urlsafe', side_effect=lambda n: DRAW if n == 12 else 'unexpected'))
         for raw in ['', '{', 'null', 'false', '1', '"record"', '[]', '{}', '{"action":false}', '{"action":0}']:
             ask('POST', raw)
+        for value in [True, 1, ['record'], {'action':'record'}]:
+            ask('POST', json.dumps({'action':value}))
         for action in sorted(ClientAction.valid()) + ['unknown', ' RECORD ', 'rEcOrD-ToGgLe']:
             ask('GET', 'action=' + action)
             ask('POST', json.dumps({'action':action, 'ts':1, 'queued':'ignored'}))
@@ -86,7 +96,7 @@ def record(tmp):
             ask('POST', json.dumps(dict(base, queued=queued)))
         for field in ['button', 'controller_event']:
             ask('POST', json.dumps({k:v for k,v in base.items() if k != field}))
-    return dict(now=NOW, draw=DRAW, rows=rows,
+    return dict(now=NOW, draw=DRAW, rows=rows, malformed_actions=malformed,
                 limited={m:Handler._device_forbidden(Door(), '/remote-action', m) for m in ['GET','POST']})
 
 
