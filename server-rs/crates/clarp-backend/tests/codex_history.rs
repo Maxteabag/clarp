@@ -56,7 +56,7 @@ fn a_rollout_is_read_as_the_python_host_reads_it() {
     }
     assert_eq!(
         (rollouts.len(), lines_read, turns, shown, tools),
-        (17, 375, 49, 233, 75)
+        (18, 384, 55, 233, 75)
     );
     assert_eq!(
         mended, 1,
