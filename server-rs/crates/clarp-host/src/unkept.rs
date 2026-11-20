@@ -754,6 +754,184 @@ mod at_the_port {
         );
     }
 
+    #[tokio::test]
+    async fn a_model_is_registered_only_with_its_successful_job_generation() {
+        use clarp_kernel::jobs::{JobCommand, Worker};
+        let place = place("install-commit");
+        let fleet = &place.fleet;
+        let key = "install-model";
+        let register = JobCommand::Register {
+            id: key.into(),
+            kind: "transcription-model-install".into(),
+            queued: false,
+            title: "model".into(),
+            detail: String::new(),
+            metadata: serde_json::json!({}),
+            worker: Worker::none(),
+            restart_cancelled: true,
+            heartbeat_timeout_ms: None,
+            started_trace_id: String::new(),
+        };
+        let writes = || {
+            vec![
+                (
+                    "transcription-models",
+                    "records".into(),
+                    Some(b"new".to_vec()),
+                ),
+                ("model-publication", "model".into(), None),
+            ]
+        };
+        fleet
+            .keep(
+                "transcription-models",
+                "records".into(),
+                Some(b"prior".to_vec()),
+            )
+            .await
+            .unwrap();
+        fleet
+            .keep(
+                "model-publication",
+                "model".into(),
+                Some(b"pending".to_vec()),
+            )
+            .await
+            .unwrap();
+        fleet
+            .change_computer_job(register.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        *place.refused.lock().unwrap() = Some(fleet::shelf("computer-jobs"));
+        assert!(
+            fleet
+                .finish_computer_job_with(key.into(), 1, writes())
+                .await
+                .is_err()
+        );
+        assert!(
+            fleet
+                .computer_job(key.into())
+                .await
+                .unwrap()
+                .unwrap()
+                .job
+                .status
+                .is_active()
+        );
+        *place.refused.lock().unwrap() = None;
+        fleet
+            .change_computer_job(JobCommand::Cancel {
+                id: key.into(),
+                expected_generation: Some(1),
+                reason: "user_cancelled".into(),
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            fleet
+                .finish_computer_job_with(key.into(), 1, writes())
+                .await
+                .unwrap()
+                .unwrap()
+                .record
+                .is_none()
+        );
+        fleet.change_computer_job(register).await.unwrap().unwrap();
+        assert!(
+            fleet
+                .finish_computer_job_with(key.into(), 1, writes())
+                .await
+                .unwrap()
+                .unwrap()
+                .record
+                .is_none()
+        );
+        assert_eq!(
+            fleet
+                .kept("transcription-models", "records".into())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(b"prior".as_slice())
+        );
+        assert_eq!(
+            fleet
+                .kept("model-publication", "model".into())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(b"pending".as_slice())
+        );
+        assert!(
+            fleet
+                .finish_computer_job_with(key.into(), 2, writes())
+                .await
+                .unwrap()
+                .unwrap()
+                .record
+                .is_some()
+        );
+        assert_eq!(
+            fleet
+                .kept("transcription-models", "records".into())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(b"new".as_slice())
+        );
+        assert!(
+            fleet
+                .kept("model-publication", "model".into())
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn an_install_in_the_job_book_never_starts_the_download_port_at_host_start() {
+        use clarp_kernel::jobs::{JobCommand, Worker};
+        use clarp_ports::model_download::{DownloadRequest, DownloadRun, ModelDownloader};
+        struct NoDownload;
+        impl ModelDownloader for NoDownload {
+            fn start(&self, _: DownloadRequest) -> std::io::Result<Box<dyn DownloadRun>> {
+                panic!("recovery reached the download port");
+            }
+        }
+        let place = place("recover-offline");
+        let at = place.dir.to_str().unwrap();
+        let config = Config::from_args(
+            ["--data", at, "--run", at, "--cwd", at]
+                .map(String::from)
+                .into_iter(),
+        )
+        .unwrap();
+        let id = "transcription-model-install-344af2724f588da1";
+        place.fleet.change_computer_job(JobCommand::Register{id:id.into(),kind:"transcription-model-install".into(),
+            queued:true,title:"Download".into(),detail:"Preparing model download".into(),worker:Worker::none(),
+            restart_cancelled:true,started_trace_id:String::new(),heartbeat_timeout_ms:Some(120000),
+            metadata:serde_json::json!({"model_id":"faster-whisper:base.en","expire_queued":true})}).await.unwrap().unwrap();
+        assert!(
+            crate::heard::Ears::with_downloader(&config, &place.fleet, Box::new(NoDownload))
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            place
+                .fleet
+                .computer_job(id.into())
+                .await
+                .unwrap()
+                .unwrap()
+                .job
+                .terminal_reason,
+            "worker_never_started"
+        );
+    }
+
     fn here(fleet: &FleetHandle, session: &str) -> bool {
         let directory = fleet.directory();
         directory

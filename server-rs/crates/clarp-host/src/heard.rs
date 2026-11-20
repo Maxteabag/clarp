@@ -18,9 +18,12 @@
 //! owner makes from an app (`POST /transcription-providers`), kept with the fleet.
 
 pub(crate) mod call;
+mod download;
 pub(crate) mod guidance;
+mod install;
 mod inventory;
 mod managed;
+mod staging;
 mod variants;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -59,6 +62,7 @@ const WAITS: Duration = Duration::from_secs(10);
 
 /// The Host's engines that listen, and what it keeps for them.
 pub struct Ears {
+    pub(crate) installs: install::Desk,
     pub(crate) vocab: crate::vocabulary::Desk,
     pub(crate) workspace: Arc<crate::vocabulary::workspace::Cache>,
     pub(crate) judge: crate::vocabulary::judge::Judge,
@@ -125,7 +129,26 @@ impl Ears {
     /// The engines this Host was configured with. The Host's own is started at once, so
     /// that its model is loaded when the first clip comes.
     pub async fn new(config: &Config, fleet: &crate::fleet::FleetHandle) -> Result<Self, String> {
+        let downloader = download::SpeechDownloader {
+            python: PathBuf::from(&config.whisper_python),
+            script: config
+                .whisper_worker
+                .with_file_name("transcription-download.py"),
+        };
+        Self::with_downloader(config, fleet, Box::new(downloader)).await
+    }
+
+    pub(crate) async fn with_downloader(
+        config: &Config,
+        fleet: &crate::fleet::FleetHandle,
+        downloader: Box<dyn clarp_ports::model_download::ModelDownloader>,
+    ) -> Result<Self, String> {
         let inventory = inventory::Inventory::open(fleet).await?;
+        let installs = install::Desk::new(config.data_dir.join("models"), downloader);
+        installs
+            .recover(fleet)
+            .await
+            .map_err(|e| format!("reconciling model installs: {e:?}"))?;
         let own = (!config.whisper_python.is_empty()).then(|| {
             let worker = Worker {
                 args: vec![config.whisper_worker.to_string_lossy().to_string()],
@@ -185,6 +208,7 @@ impl Ears {
         Ok(Self {
             own,
             inventory,
+            installs,
             variants: Default::default(),
             judge: Default::default(),
             vocab: Default::default(),
@@ -201,6 +225,14 @@ impl Ears {
             kept: config.data_dir.join("transcriptions"),
             jobs: Mutex::default(),
         })
+    }
+
+    /// Sweep staging periodically without ever starting a download.
+    pub async fn sweep_model_staging(
+        &self,
+        fleet: &crate::fleet::FleetHandle,
+    ) -> Result<(), ApiError> {
+        self.installs.sweep_orphans(fleet).await
     }
 
     /// The key of a provider of engines, where the owner has one for it: read now, kept
@@ -280,8 +312,8 @@ impl Ears {
     ) -> Vec<String> {
         // The cloud engine chosen for this Host stands in for its own; what an app asks
         // for by name still comes first.
-        let stands_in =
-            heard::wants_cloud_engine(requested, own, false) && heard::is_cloud(default_engine);
+        let stands_in = heard::wants_cloud_engine(requested, own, false)
+            && (heard::is_cloud(default_engine) || self.inventory.path(default_engine).is_some());
         let cloud = if stands_in { default_engine } else { "" };
         let plan = heard::plan(requested, own, cloud, long_model, false);
         let mut order = vec![plan.model];
@@ -890,7 +922,7 @@ fn told_map(entries: Vec<(String, String)>) -> Value {
 
 /// `GET /transcription-capabilities`: which engines an app may ask for by name, and which
 /// one hears a clip nobody named one for.
-async fn capabilities(State(app): State<App>) -> Json<Value> {
+async fn capabilities(State(app): State<App>) -> Result<Json<Value>, ApiError> {
     let ears = &app.ears;
     let mut models = ears.inventory.models();
     let registered: Vec<_> = models
@@ -910,15 +942,15 @@ async fn capabilities(State(app): State<App>) -> Json<Value> {
     }
     let usable = |row: &Value| row["available"] == true;
     models.extend(cloud_models(ears).into_iter().filter(usable));
-    Json(json!({
+    Ok(Json(json!({
         "available": !models.is_empty(),
         "default_model": ears.own_id().unwrap_or_default(),
         "engine": ears.default_engine(&app.fleet.directory()),
         "turn_taking": turn_taking(&app.fleet.directory()),
         "models": models,
-        "catalog": heard::inventory::catalog(&registered),
+        "catalog": install::catalog(&app.fleet, heard::inventory::catalog(&registered)).await?,
         "adapters": [],
-    }))
+    })))
 }
 
 /// How the end of a turn of speech is found, as the owner set it: on the phone (`native`),
@@ -1150,6 +1182,10 @@ pub fn routes() -> Router<App> {
         )
         .route("/transcription-results/{job}", delete(forget))
         .route("/transcription-capabilities", get(capabilities))
+        .route(
+            "/transcription-models/install",
+            post(install::install_model),
+        )
         .route(
             "/transcription-models/remove",
             post(inventory::remove_model),

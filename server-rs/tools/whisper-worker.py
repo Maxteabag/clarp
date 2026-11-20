@@ -56,7 +56,7 @@ def load(asked: dict):
         return _FakeModel()
     from faster_whisper import WhisperModel  # the heavy import, only where a model is wanted
     return WhisperModel(
-        asked['model_source'], device='cpu',
+        asked['model_source'], device='cpu', local_files_only=True,
         compute_type=asked.get('compute_type') or 'int8',
         cpu_threads=int(asked.get('cpu_threads') or 0),
     )
