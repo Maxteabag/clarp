@@ -119,3 +119,271 @@ fn the_picture_display_preference_survives_restart_and_uses_local_art() {
     );
     assert_eq!(host.get("/agents/snapshot")["model_avatars"], false);
 }
+
+/// Holds each edit until the test has examined its bytes and supplied its reply.
+fn edit_service() -> (
+    String,
+    std::sync::mpsc::Receiver<(String, std::sync::mpsc::Sender<(u16, String)>)>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = format!("http://{}/images", listener.local_addr().unwrap());
+    let (requests, shown) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut socket) = stream else {
+                break;
+            };
+            let raw = whole_request(&mut socket);
+            let (answer, wait) = std::sync::mpsc::channel();
+            if requests.send((raw, answer)).is_err() {
+                break;
+            }
+            std::thread::spawn(move || {
+                if let Ok((status, body)) = wait.recv_timeout(Duration::from_secs(30)) {
+                    let _ = write!(
+                        socket,
+                        "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+            });
+        }
+    });
+    (addr, shown)
+}
+
+#[test]
+fn the_owner_asks_for_two_portrait_edits_and_only_the_current_generation_keeps_them() {
+    let place = Place::new("portrait-launch");
+    let (url, requests) = edit_service();
+    let env = [
+        ("OPENAI_API_KEY", "made-up-key"),
+        ("CLARP_PICTURE_ENDPOINT", url.as_str()),
+    ];
+    let launch = || place.start_in("fixture", &[], &env);
+    let host = launch();
+    let key = |host: &Host, s: &str| host.get(&format!("/agent-portrait-generation?session={s}"));
+    let post = |host: &Host, s: &str| {
+        host.ask(
+            "POST",
+            "/agent-portrait-generation",
+            Some(&json!({"session":s})),
+        )
+    };
+    let job = |host: &Host, id: &str| host.get(&format!("/background-jobs/{id}"))["job"].clone();
+    let image = |tag: &str| {
+        clarp_kernel::python::b64encode(&[b"\x89PNG\r\n\x1a\n", tag.as_bytes()].concat())
+    };
+    let reply = |tag: &str| json!({"data":[{"b64_json":image(tag)}]}).to_string();
+    // Reading capability, an unknown agent, a missing primary and a forbidden controller spend nothing.
+    let plain = host.new_agent("Plain");
+    assert_eq!(
+        key(&host, &plain)["reason"],
+        "Add or select a primary portrait first"
+    );
+    assert_eq!(post(&host, &plain).0, 409);
+    assert_eq!(
+        post(&host, "absent"),
+        (409, json!({"error":"unknown Agent session"}))
+    );
+    assert_eq!(post(&host, "clarp-message-delegator").0, 403);
+    let made = host.post(
+        "/agents",
+        json!({"backend":"scripted","name":"Canvas","avatar_base64":image("primary")}),
+    );
+    let sid = made["session"].as_str().unwrap();
+    let (limited, _) = pair(&host, "fixture reader", "limited");
+    let cap_route = format!("/agent-portrait-generation?session={sid}");
+    assert_eq!(
+        host.ask_as(&limited, "GET", &cap_route, None).1["available"],
+        true
+    );
+    assert_eq!(
+        host.ask_as(
+            &limited,
+            "POST",
+            "/agent-portrait-generation",
+            Some(&json!({"session":sid}))
+        )
+        .0,
+        403
+    );
+    assert!(requests.try_recv().is_err());
+    let gallery = |host: &Host| host.get(&format!("/agent-portraits?session={sid}"));
+    let original = gallery(&host);
+    // The duplicate request reuses a Computer job. The second request is not sent until the first edit succeeds.
+    let (status, first) = post(&host, sid);
+    assert_eq!(status, 202, "{first}");
+    let id = first["job"]["job_id"].as_str().unwrap();
+    assert_eq!(first["job"]["owner_kind"], "computer");
+    assert_eq!(first["job"]["generation"], 1);
+    let receive = || {
+        requests
+            .recv_timeout(Duration::from_secs(20))
+            .expect("a portrait edit")
+    };
+    let (body, finish) = receive();
+    assert!(body.starts_with("POST /images/edits "));
+    assert!(body.contains("a warm") || body.contains("warm close-up"));
+    assert!(body.contains("name=\"image[]\"; filename=\"portrait.png\""));
+    assert!(body.contains("primary"));
+    assert_eq!(post(&host, sid).1["job"]["generation"], 1);
+    assert_eq!(gallery(&host), original);
+    assert!(requests.try_recv().is_err());
+    finish.send((200, reply("one"))).unwrap();
+    let (body, finish) = receive();
+    assert!(body.contains("everyday-life scene") && body.contains("primary"));
+    assert_eq!(gallery(&host), original);
+    finish.send((200, reply("two"))).unwrap();
+    wait_for("both alternatives and their publication", || {
+        gallery(&host)["portraits"].as_array().unwrap().len() == 3
+            && host.get(&format!("/media?session={sid}"))["assets"]
+                .as_array()
+                .unwrap()
+                .len()
+                == 2
+    });
+    let kept = gallery(&host);
+    assert_eq!(kept["primary_portrait_id"], original["primary_portrait_id"]);
+    assert_eq!(job(&host, id)["status"], "succeeded");
+    // A failed second edit and a cancellation with a request already in flight keep the earlier pair.
+    assert_eq!(post(&host, sid).1["job"]["generation"], 2);
+    receive().1.send((200, reply("unkept"))).unwrap();
+    receive().1.send((500, "made-up-key".into())).unwrap();
+    wait_for("the failed pair", || job(&host, id)["status"] == "failed");
+    assert!(!job(&host, id).to_string().contains("made-up-key"));
+    assert_eq!(gallery(&host), kept);
+    assert_eq!(
+        host.get(&format!("/media?session={sid}"))["assets"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(post(&host, sid).1["job"]["generation"], 3);
+    let (_, late) = receive();
+    assert_eq!(
+        host.ask(
+            "DELETE",
+            &format!("/background-jobs/{id}?expected_generation=3"),
+            None
+        )
+        .0,
+        200
+    );
+    late.send((200, reply("late"))).unwrap();
+    assert_eq!(job(&host, id)["status"], "cancelled");
+    assert_eq!(gallery(&host), kept);
+    // A Host restart during the first edit fails the saved run. Starting the Host never starts another edit.
+    assert_eq!(post(&host, sid).1["job"]["generation"], 4);
+    let (_, late) = receive();
+    host.kill();
+    let host = launch();
+    let _ = late.send((200, reply("after restart")));
+    assert_eq!(job(&host, id)["status"], "failed");
+    assert_eq!(
+        job(&host, id)["terminal_reason"],
+        "portrait_worker_interrupted"
+    );
+    assert_eq!(gallery(&host), kept);
+    assert!(requests.try_recv().is_err());
+    // Each attempted launch counts once, including the interrupted one. A fresh agent shares the bound.
+    for n in 5..=20 {
+        assert_eq!(post(&host, sid).1["job"]["generation"], n);
+        let (_, finish) = receive();
+        if n == 20 {
+            assert_eq!(post(&host, sid).1["job"]["generation"], 20);
+        }
+        finish.send((503, "fixture refusal".into())).unwrap();
+        wait_for("the refused first edit", || {
+            job(&host, id)["status"] == "failed"
+        });
+    }
+    let other = host.post(
+        "/agents",
+        json!({"backend":"scripted","name":"Another","avatar_base64":image("other")}),
+    );
+    let other = other["session"].as_str().unwrap();
+    for who in [sid, other] {
+        let cap = key(&host, who);
+        assert_eq!(cap["available"], false);
+        assert_eq!(
+            cap["reason"],
+            clarp_kernel::portrait_generation::DAILY_REASON
+        );
+        assert_eq!(post(&host, who), (409, json!({"error":cap["reason"]})));
+    }
+    assert!(requests.try_recv().is_err());
+}
+
+#[test]
+fn the_portrait_job_handles_each_recorded_provider_result() {
+    let place = Place::new("portrait-results");
+    let (url, requests) = edit_service();
+    let host = place.start_in(
+        "fixture",
+        &[],
+        &[
+            ("OPENAI_API_KEY", "made-up"),
+            ("CLARP_PICTURE_ENDPOINT", &url),
+        ],
+    );
+    let vectors: Value = serde_json::from_str(include_str!(
+        "../../../clarp-kernel/tests/fixtures/portrait-generation.json"
+    ))
+    .unwrap();
+    let image = |n: u8| [b"\x89PNG\r\n\x1a\n".as_slice(), &[n]].concat();
+    let made=host.post("/agents",json!({"name":"Canvas","backend":"scripted","avatar_base64":clarp_kernel::python::b64encode(&image(0))}));
+    let session = made["session"].as_str().unwrap();
+    let mut published = 0;
+    for row in vectors["edits"].as_array().unwrap() {
+        let (status, started) = host.ask(
+            "POST",
+            "/agent-portrait-generation",
+            Some(&json!({"session":session})),
+        );
+        assert_eq!(status, 202, "{started}");
+        let job = started["job"]["job_id"].as_str().unwrap();
+        let responses = row[0].as_array().unwrap();
+        assert_eq!(responses.len(), row[1].as_u64().unwrap() as usize);
+        for (idx, response) in responses.iter().enumerate() {
+            let (_, tx) = requests.recv_timeout(Duration::from_secs(20)).unwrap();
+            let (status, bytes) = match response.as_str().unwrap() {
+                "ok" => (200, image((idx + 1) as u8)),
+                "empty" => (200, Vec::new()),
+                "invalid" => (200, b"not an image".to_vec()),
+                "duplicate" => (200, image(1)),
+                "raise" => (503, Vec::new()),
+                other => panic!("unknown result {other}"),
+            };
+            tx.send((
+                status,
+                json!({"data":[{"b64_json":clarp_kernel::python::b64encode(&bytes)}]}).to_string(),
+            ))
+            .unwrap();
+        }
+        let succeeds = row[3].as_bool().unwrap();
+        let terminal = if succeeds { "succeeded" } else { "failed" };
+        wait_for("the recorded result to settle", || {
+            host.get(&format!("/background-jobs/{job}"))["job"]["status"] == terminal
+        });
+        published += row[2].as_array().unwrap().len();
+        wait_for("the recorded gallery size", || {
+            host.get(&format!("/media?session={session}"))["assets"]
+                .as_array()
+                .unwrap()
+                .len()
+                == published
+        });
+        if let Some(error) = row[4].as_str() {
+            let why =
+                host.get(&format!("/background-jobs/{job}"))["job"]["terminal_reason"].clone();
+            if error == "fixture refusal" {
+                assert_eq!(why, "OpenAI image edit failed: HTTP 503");
+            } else {
+                assert_eq!(why, error);
+            }
+        }
+        assert!(requests.try_recv().is_err());
+    }
+}

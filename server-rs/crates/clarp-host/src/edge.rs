@@ -597,6 +597,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::past::routes())
         .merge(crate::connector::routes())
         .merge(crate::personas::routes())
+        .merge(crate::portrait_generation::routes())
         .merge(crate::contacts::routes())
         .merge(crate::places::routes())
         .merge(crate::oracle::routes())

@@ -315,7 +315,7 @@ pub enum Ask {
     /// The agent published a file: its bytes are kept, and this is what is to be written
     /// of it.
     Publish {
-        asset: Box<Asset>,
+        assets: Vec<Asset>,
         answer: Answer<()>,
     },
     /// The newest changes of a job, oldest first.
@@ -931,8 +931,19 @@ impl AgentHandle {
 
     /// Writes a file the agent published into its log. Its bytes are kept already.
     pub async fn publish(&self, asset: Asset) -> Result<(), Unavailable> {
-        let asset = Box::new(asset);
-        self.ask(|answer| Ask::Publish { asset, answer }).await
+        self.ask(|answer| Ask::Publish {
+            assets: vec![asset],
+            answer,
+        })
+        .await
+    }
+
+    pub(crate) async fn publish_portraits(&self, assets: [Asset; 2]) -> Result<(), Unavailable> {
+        self.ask(|answer| Ask::Publish {
+            assets: Vec::from(assets),
+            answer,
+        })
+        .await
     }
 
     /// Answers the goal tool from this agent's goals.
@@ -2591,9 +2602,9 @@ impl Worker {
                     answer,
                 )?
             }
-            Ask::Publish { asset, answer } => {
+            Ask::Publish { assets, answer } => {
                 let kept = Kept {
-                    media: std::slice::from_ref(&*asset),
+                    media: &assets,
                     ..Kept::default()
                 };
                 answered(actor.keep(&kept, now).map(|out| ((), out)), answer)?
