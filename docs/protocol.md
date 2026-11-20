@@ -91,6 +91,7 @@ event arrives.
       "turn_started_at": 0, "last_activity": 1756800000, "last_turn_end": 1756799000,
       "status_text": null, "activity": { "…": "see agent-activity" },
       "compacting": false, "context_tokens": 12345, "context_window": 1000000,
+      "last_compaction": null,
       "queued_turn_count": 0, "queued_turn_revision": 0, "queue_paused": false,
       "backend_quota": null,
       "background_jobs": {"count": 0, "sub_agents": 0},
@@ -109,6 +110,31 @@ event arrives.
 
 Rules:
 
+- **Compaction says what it did (`compaction_outcome`, R148).** `POST /compact
+  {"session": …}` is the only way the Host compacts an agent: it never does so
+  by itself, on a timer, at a threshold or at launch. It answers at once
+  (`{"ok": true, "status": "started"}`, `"already_compacting"`, or
+  `{"ok": false, "error": "<reason in words>"}`); `compacting` is true while it
+  runs, and a send that arrives meanwhile waits and runs after it, in order.
+  When it ends, `last_compaction` is `{"outcome", "before_tokens",
+  "after_tokens", "after_is_estimate", "detail", "backend", "at"}` (`at` in
+  ms; `null` until the agent's first compaction). `outcome` is decided from
+  sizes, never from how long it took:
+  - Codex: `compacted` needs both sizes, with `after_tokens` <
+    `before_tokens`. `before_tokens` is the size Codex last reported for the
+    thread (after a runtime restart: the newest token count in the last 64 KB
+    of its rollout); `after_tokens` is Codex's own estimate of the new history
+    (`after_is_estimate: true`). The compaction runs in the Host's app-server,
+    the process that holds the thread.
+  - Claude Code: `compacted` on Claude Code's own record of it, the
+    `compact_boundary` it writes after `/compact`; `before_tokens` is that
+    record's `preTokens`, and `after_tokens` stays `null` (the new size is
+    known at the agent's next call, when `context_tokens` shows it; until
+    then `context_tokens` is `null`). No record: `not_compacted`.
+  - `not_compacted`: refused, failed, stopped, or the conversation did not
+    shrink. `unknown`: a size is missing or it did not finish in time;
+    always for a backend that gives the Host no size (Antigravity, Grok).
+    `detail` says why in words.
 - **Archived agents are optional.** A plain `GET /agents/snapshot` carries
   every agent, archived ones too (`archived_at` set). On a Host that has run
   for a while most agents are archived helpers, and a client pays for them on

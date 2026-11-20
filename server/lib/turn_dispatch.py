@@ -32,7 +32,7 @@ from .turn_dispatch_state import (  # noqa: E402,F401  (split_apply: turn-dispat
     MAX_ATTEMPTS, BACKOFF_BASE_SEC, _TURN_LOCK, _SLOTS, _FAILOVERS, _pool_backend, account_failover,
     account_selector, _INFLIGHT, _QUEUED, _CLAIMED_AT, _RECOVERY_LOCK, _RECOVERY_BACKOFF,
     _RECOVERY_RESUMING_ORIGINS, _NO_LOCK, _JANITOR_SPAWN_LOCKS, _TERMINAL_SENTINEL,
-    _STOPPING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, LEAKED_SLOT_GRACE_MS,
+    _STOPPING_SENTINEL, _COMPACTING_SENTINEL, _PROCESS_OWNER_PREFIX, _PROCESS_EXIT_POLL_S, LEAKED_SLOT_GRACE_MS,
     ORPHAN_SPAWN_GRACE_S, REPAIR_SPAWN_GRACE_S, _launching, _launch_running, runtime_status,
     held_order, log_held_order, RECOVERY_PARK_PREFIX, _transfer_refusal, account_recovery_carry,
     resume_account_recovery, unpersisted_held, provider_turns, UPDATE_HOLD_HEADLINE,
@@ -212,6 +212,23 @@ class TurnDispatchService(AdmissionMixin, LauncherMixin, HandoffMixin, ClaimMixi
             spec = replace(spec, park_id=park_id, after_stop=True)
             _SLOTS.enqueue(agent_id, spec)
             return bool(park_id), True
+        if _SLOTS.get(agent_id) == _COMPACTING_SENTINEL:
+            # The user's compaction is working on this conversation. Every
+            # send waits behind it in arrival order and starts when it ends
+            # (finish_compaction); nothing preempts it. A send without a
+            # durable row gets its queue row first (the caller writes it
+            # outside this lock and comes back with queue_id set).
+            if not spec.queue_id:
+                queue_user.append(spec.trace_id)
+                return False, True
+            depth = _SLOTS.enqueue(agent_id, spec)
+            defer_on(_TURN_LOCK, lambda: (
+                eventlog.emit("server", "turnQueuedBehindCompaction",
+                              context=spec.context, detail={"depth": depth}),
+                log("turnQueuedBehindCompaction",
+                    f"agent={agent_id} depth={depth} "
+                    f"trace={spec.trace_id or '∅'} — compaction running, queued")))
+            return False, True
         # An interactive terminal is attached to this agent — queue behind
         # it so we never run a -p turn against a session another process is
         # holding open. drain_after_terminal() spawns this when it closes.
@@ -788,3 +805,52 @@ def drain_after_terminal(ctx, agent_id: str) -> None:
     if next_spec is None:
         return
     TurnDispatchService(ctx)._resume_and_spawn(agent_id, next_spec)
+
+
+def claim_for_compaction(agent_id: str) -> str:
+    """Take the agent's slot for the user's compaction. Returns "" when it is
+    taken, else why not, in words. Only an idle agent with nothing queued is
+    compacted: a send that arrives meanwhile waits behind it, in order."""
+    with _TURN_LOCK:
+        if _SLOTS.fenced:
+            return "the Host is handing over to an update — try again shortly"
+        current = _SLOTS.get(agent_id)
+        if current == _COMPACTING_SENTINEL:
+            return "already compacting"
+        if current or _terminal_live(agent_id):
+            return "agent is busy — try again when idle"
+        if _SLOTS.queue_depth(agent_id):
+            return "messages are waiting for this agent — try again when they have run"
+        _SLOTS.claim(agent_id, _COMPACTING_SENTINEL)
+        _SLOTS.mark_spawned(agent_id, _COMPACTING_SENTINEL)
+    return ""
+
+
+def finish_compaction(service, agent_id: str) -> None:
+    """The compaction ended: hand the slot to the first send that waited
+    behind it (started by ``service``, the dispatcher that owns turns), or
+    free it. A Stop that took the slot meanwhile runs the queue itself
+    (finish_stop), so this is then a no-op."""
+    with _TURN_LOCK:
+        if _SLOTS.get(agent_id) != _COMPACTING_SENTINEL:
+            return
+        next_spec = _SLOTS.pop_next(agent_id, expected=_COMPACTING_SENTINEL)
+    if next_spec is None:
+        return
+    if service is None:
+        # No dispatcher to start it from: give the slot back so the next send
+        # or the queue recovery starts it; nothing is dropped.
+        with _TURN_LOCK:
+            if _SLOTS.get(agent_id) == next_spec.trace_id:
+                _SLOTS.requeue_front(agent_id, next_spec)
+                _SLOTS.release(agent_id, next_spec.trace_id)
+        log("compactionQueueLeft", f"agent={agent_id} — no dispatcher; queue kept")
+        return
+    service._spawn_next(agent_id, next_spec)
+
+
+def compaction_holds_slot(agent_id: str) -> bool:
+    """Whether the compaction still owns the agent's slot. A Stop replaces it
+    with its barrier, which tells the compaction to end."""
+    with _TURN_LOCK:
+        return _SLOTS.get(agent_id) == _COMPACTING_SENTINEL

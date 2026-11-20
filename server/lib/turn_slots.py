@@ -40,7 +40,11 @@ TERMINAL_SENTINEL = "terminal"
 # Placeholder installed by Stop between "interrupt requested" and "interrupt
 # confirmed"; sends admitted meanwhile are parked behind it.
 STOPPING_SENTINEL = "stopping"
-SENTINELS = frozenset({TERMINAL_SENTINEL, STOPPING_SENTINEL})
+# Placeholder owning the slot while the user's compaction runs on the agent's
+# conversation (``compaction``): sends wait behind it, durably and in order,
+# and run when it ends (``turn_dispatch.finish_compaction``).
+COMPACTING_SENTINEL = "compacting"
+SENTINELS = frozenset({TERMINAL_SENTINEL, STOPPING_SENTINEL, COMPACTING_SENTINEL})
 
 
 class OwnershipLock:
@@ -340,14 +344,14 @@ class TurnSlots:
     def free_stale(self, agent_id: str) -> str | None:
         """INV3 (lib.reconcile): free a slot that has no live turn and nothing
         queued behind it. Returns the dead trace id, or None if nothing was
-        freed. Spawning slots and terminal sentinels are left alone."""
+        freed. Spawning slots, terminal and compaction sentinels are left alone."""
         with self.lock:
             if agent_id in self.claimed_at or agent_id not in self.inflight:
                 return None
             if self.queued.get(agent_id):
                 return None  # the next send / finish drains these
             trace = self.inflight.get(agent_id)
-            if trace == TERMINAL_SENTINEL:
+            if trace in (TERMINAL_SENTINEL, COMPACTING_SENTINEL):
                 return None
             self.inflight.pop(agent_id, None)
             return trace or ""
@@ -466,7 +470,8 @@ class TurnSlots:
         with self.lock:
             value = self.inflight.get(agent_id)
             return StopSnapshot(
-                trace_id=value if value not in {None, STOPPING_SENTINEL} else "",
+                # A compaction is no turn: Stop ends it, nothing is to confirm.
+                trace_id=value if value not in {None, STOPPING_SENTINEL, COMPACTING_SENTINEL} else "",
                 claimed_at=self.claimed_at.get(agent_id),
                 queued=tuple(self.queued.get(agent_id) or ()))
 
