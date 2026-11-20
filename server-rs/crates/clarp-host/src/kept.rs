@@ -86,6 +86,23 @@ impl LeftOut {
         was
     }
 
+    /// A record a desk left out is used after all (a call's binding recovered once its agent
+    /// answered): no longer counted, and said.
+    pub fn recovered(&self, table: &str, key: &str, log: &Log) {
+        let was = self.held.lock().is_ok_and(|mut held| {
+            let was = held.get_mut(table).is_some_and(|keys| keys.remove(key));
+            held.retain(|_, keys| !keys.is_empty());
+            was
+        });
+        if was {
+            log.line(&format!(
+                "clarp-host: a record of the kind {} that was left out is used after all: {}",
+                kind_of(table),
+                named(table, key)
+            ));
+        }
+    }
+
     /// Whether this key is one that was left out.
     pub fn is_left_out(&self, table: &str, key: &str) -> bool {
         self.held
@@ -167,11 +184,22 @@ pub fn rows<T: DeserializeOwned>(
     left: &LeftOut,
     log: &Log,
 ) -> Result<Rows<T>, StoreError> {
+    Ok(listed(store.list(table)?, table, left, log))
+}
+
+/// The same, of rows a desk already has as they were kept (`FleetHandle::kept_all`): `table`
+/// is the table they were listed from.
+pub fn listed<T: DeserializeOwned>(
+    kept: Vec<(String, Vec<u8>)>,
+    table: &str,
+    left: &LeftOut,
+    log: &Log,
+) -> Rows<T> {
     let mut rows = Rows {
         read: Vec::new(),
         names: Vec::new(),
     };
-    for (key, stored) in store.list(table)? {
+    for (key, stored) in kept {
         match serde_json::from_slice::<T>(&stored) {
             Ok(record) => rows.read.push((key, record)),
             Err(_) => {
@@ -180,7 +208,7 @@ pub fn rows<T: DeserializeOwned>(
             }
         }
     }
-    Ok(rows)
+    rows
 }
 
 /// The store, as the Host writes it: a write to a key that was left out is the owner's repair,

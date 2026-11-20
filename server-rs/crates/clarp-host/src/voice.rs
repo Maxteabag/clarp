@@ -23,6 +23,7 @@
 //! `routes/voice_timeline.py`, `clip_records.py`, `message_audio.py`): the same statuses,
 //! words and headers.
 
+pub mod held;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt, OpenOptionsExt};
@@ -229,6 +230,8 @@ pub struct Mouth {
     /// keeps it until what it said is told to the apps and written, so that a clip is
     /// never let go before its line knows it.
     herald: tokio::sync::Mutex<Herald<HeldClip>>,
+    /// The agents whose lines wait for their call's binding to be recovered (`held.rs`).
+    pub held: held::Held,
 }
 
 /// How long Cartesia's list of voices is good for.
@@ -662,6 +665,7 @@ impl Waiting {
             preview_locks: Default::default(),
             previews: works.config.data_dir.join("voice-previews"),
             herald: tokio::sync::Mutex::default(),
+            held: held::Held::default(),
         });
         let speaking = mouth.clone();
         tokio::spawn(async move {
@@ -1106,6 +1110,12 @@ impl Mouth {
     /// unless the herald holds it for its agent's turn.
     async fn say(self: &Arc<Self>, member: &Arc<Member>, line: Line, looked_at: bool) {
         let record = &member.record;
+        // An agent whose call's binding was not recovered speaks only once it is: tried now.
+        if !self.held.may_speak(&record.agent_id).await {
+            return self
+                .unsaid(member, &line, None, "opening lookup unavailable", false)
+                .await;
+        }
         let bound = match self.opening_audio(&record.agent_id, line.turn).await {
             Ok(None) => false,
             Ok(Some(tag)) if tag["skip"] != true => true,

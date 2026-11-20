@@ -1257,6 +1257,32 @@ impl FleetHandle {
         .await?
     }
 
+    /// Every record of a kind through the one loader (`kept.rs`): those that can be read, and
+    /// one that cannot left out, counted and said.
+    pub async fn kept_rows<T: serde::de::DeserializeOwned>(
+        &self,
+        kind: &'static str,
+    ) -> Result<crate::kept::Rows<T>, Unavailable> {
+        let kept = self.kept_all(kind).await?;
+        Ok(crate::kept::listed(
+            kept,
+            &shelf(kind),
+            &self.left_out,
+            &self.log,
+        ))
+    }
+
+    /// A record of a kind left out by a desk that could not use it: counted and said by its
+    /// kind and key, as the loader leaves one out.
+    pub fn leave_out(&self, kind: &str, key: &str) {
+        self.left_out.left_out(&shelf(kind), key, &self.log);
+    }
+
+    /// A record left out by a desk is now used after all: no longer counted, and said.
+    pub fn recovered(&self, kind: &str, key: &str) {
+        self.left_out.recovered(&shelf(kind), key, &self.log);
+    }
+
     /// Says what became of a push to a token. Does not wait.
     pub fn pushed(&self, token: String, outcome: Pushed) {
         let _ = self.tx.send(Ask::Pushed { token, outcome });
@@ -2390,8 +2416,7 @@ impl Fleet {
         let pooled = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers =
-                self.wearers();
+            let wearers = self.wearers();
             let pool = clarp_kernel::contacts::pool(&contacts, &wearers, backend, "");
             pool.first().map(|name| (*name).to_string())
         };
@@ -2418,8 +2443,7 @@ impl Fleet {
         let decided = {
             let personas = self.personas_listed();
             let contacts = crate::contacts::contacts_of(&personas);
-            let wearers =
-                self.wearers();
+            let wearers = self.wearers();
             let agent = clarp_kernel::contacts::Assignee {
                 agent_id: &record.agent_id,
                 persona: &record.persona,
@@ -2476,7 +2500,8 @@ impl Fleet {
     /// Who wears which contact, as the pool reads it: every member, and every agent the Host
     /// keeps and does not run, whose contact is not given to another.
     fn wearers(&self) -> Vec<clarp_kernel::contacts::Wearer<'_>> {
-        let mut wearers = crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
+        let mut wearers =
+            crate::contacts::wearers_of(self.members.iter().map(|member| &member.record));
         wearers.extend(self.held.iter().map(|kept| clarp_kernel::contacts::Wearer {
             agent_id: &kept.agent_id,
             persona: &kept.persona,
