@@ -72,7 +72,10 @@ def attempt(command_field: str, models, *, accounts=(), provider="claude", stop_
         if status not in allowed or process.returncode or (status in {"redeemed", "reconciled"} and not verified):
             status = "unverified"
         left = receipt.get("resets_left")
-        return {"status": status, "verified": verified,
+        # What the broker CLAIMS was spent counts against the cap, verified or not (R145): a banked
+        # reset cannot be given back, so the Host never asks again on the strength of a doubt.
+        claimed = receipt.get("status") in {"redeemed", "reconciled"}
+        return {"status": status, "verified": verified, "claimed": claimed,
                 "account": receipt.get("account") if verified else None,
                 "resets_left": left if verified and type(left) is int and left >= 0 else None,
                 "needs_reconcile": status in {"unverified", "cancelled"} or (reconcile_only and not (verified or status == "no_pending"))}
@@ -213,6 +216,9 @@ class ResetWorker:
                 if reconcile_only and attempts >= MAX_RECONCILE_ATTEMPTS:
                     return "attention_required"
                 attempts = attempts + 1 if reconcile_only else 0
+                # A reconcile continues the attempt before it: a redemption it already counted is
+                # not counted again.
+                claim["counted"] = bool(reconcile_only and prior.get("counted"))
                 interval = CHECK_INTERVAL_MS * 2 ** max(0, attempts - 1)
                 claim.update(started=now, next_at=now + interval, handled=False,
                              reconcile_only=reconcile_only, reconcile_attempts=attempts)
@@ -258,13 +264,14 @@ class ResetWorker:
                 with settings_store.transaction():
                     value = json.loads(settings_store.get_text(self._key(provider), default="{}"))
                     if value.get("id") == claim["id"]:
-                        if result.get("verified"):
-                            # A redemption spent: counted, in the same write as its result. A count
-                            # that cannot be read is left as it is, so the step stays closed.
+                        if result.get("claimed") and not value.get("counted"):
+                            # A redemption claimed: counted once, in the same write as its result. A
+                            # count that cannot be read is left as it is, so the step stays closed.
                             now = db.now_ms()
                             spent = self.spent_today(provider, now)
                             if spent is not None:
                                 settings_store.set_text(self._spent_key(provider), json.dumps(spent + [now]))
+                            value["counted"] = True
                         value.update(result=result, completed=db.now_ms(),
                                      needs_reconcile=bool(result.get("needs_reconcile")),
                                      attention_required=bool(result.get("needs_reconcile") and claim.get("reconcile_attempts",0)>=MAX_RECONCILE_ATTEMPTS))
