@@ -300,20 +300,25 @@ fn named(variable: &str) -> Option<String> {
         .filter(|program| !program.trim().is_empty())
 }
 
+/// Every program a person installs that a backend starts: the backend's name, the environment
+/// variable that names the program instead, and the name it is found by on the path. One table,
+/// so that whatever must know every program (a test that keeps a Host from the machine's own)
+/// cannot miss one added later.
+pub const PROGRAMS: &[(&str, &str, &str)] = &[
+    ("claude", CLAUDE_PROGRAM_ENV, "claude"),
+    ("codex", CODEX_PROGRAM_ENV, "codex"),
+    ("agy", AGY_PROGRAM_ENV, "agy"),
+    ("grok", "CLARP_GROK_PROGRAM", "grok"),
+    ("opencode", "CLARP_OPENCODE_PROGRAM", "opencode"),
+    ("deepseek", "CLARP_OPENCODE_PROGRAM", "opencode"),
+    ("muse", "CLARP_MUSE_PROGRAM", "muse"),
+];
+
 /// The program a tool is started as: the one its environment variable names, else the
 /// tool's own name, found on the path. `None` for what is no tool a person installs.
 pub fn program(id: &str) -> Option<String> {
-    match id {
-        "claude" => Some(named(CLAUDE_PROGRAM_ENV).unwrap_or_else(|| "claude".to_string())),
-        "codex" => Some(named(CODEX_PROGRAM_ENV).unwrap_or_else(|| "codex".to_string())),
-        "agy" => Some(named(AGY_PROGRAM_ENV).unwrap_or_else(|| "agy".to_string())),
-        "grok" => Some(named("CLARP_GROK_PROGRAM").unwrap_or_else(|| "grok".into())),
-        "opencode" | "deepseek" => {
-            Some(named("CLARP_OPENCODE_PROGRAM").unwrap_or_else(|| "opencode".to_string()))
-        }
-        "muse" => Some(named("CLARP_MUSE_PROGRAM").unwrap_or_else(|| "muse".into())),
-        _ => None,
-    }
+    let &(_, variable, name) = PROGRAMS.iter().find(|(tool, _, _)| *tool == id)?;
+    Some(named(variable).unwrap_or_else(|| name.to_string()))
 }
 
 /// The backend with this name, as built in.
@@ -403,6 +408,37 @@ impl ErrorTail {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Every tool of the table names its program by a variable of its own and has a name it is
+    /// found by on the path; each is a backend; nothing that is not one has a program. (What
+    /// the variable makes of the program is in the Host's tests, which start a process with it.)
+    #[test]
+    fn every_program_of_the_table_has_its_variable_and_its_default() {
+        let ids: Vec<&str> = PROGRAMS.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(
+            ids,
+            ["claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"]
+        );
+        for (id, variable, name) in PROGRAMS {
+            assert!(
+                variable.starts_with("CLARP_") && variable.ends_with("_PROGRAM"),
+                "{id}: {variable}"
+            );
+            assert!(!name.is_empty() && !name.contains('/'), "{id}: {name}");
+            assert!(by_id(id).is_some(), "{id} is no backend");
+            assert!(program(id).is_some(), "{id}");
+        }
+        assert_eq!(
+            [CLAUDE_PROGRAM_ENV, CODEX_PROGRAM_ENV, AGY_PROGRAM_ENV],
+            [PROGRAMS[0].1, PROGRAMS[1].1, PROGRAMS[2].1]
+        );
+        // The two OpenCode cards are the one program.
+        let (opencode, deepseek) = (PROGRAMS[4], PROGRAMS[5]);
+        assert_eq!((opencode.1, opencode.2), (deepseek.1, deepseek.2));
+        for id in ["scripted", "zoxide", "", "Claude"] {
+            assert_eq!(program(id), None, "{id}");
+        }
+    }
 
     #[test]
     fn the_built_in_backends_are_found_by_name() {
