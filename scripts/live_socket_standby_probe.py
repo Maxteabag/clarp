@@ -36,7 +36,6 @@ import argparse
 import array
 import base64
 import json
-import os
 import pathlib
 import sys
 import threading
@@ -45,6 +44,7 @@ import wave
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "server"))
+from live_key import key_env_name, key_from, scrub  # noqa: E402 - beside this script
 from lib.oracle_live_wire import LIVE_MODELS, LiveWire  # noqa: E402 - the Host's own session builder
 
 URL = "wss://api.openai.com/v1/live/sessions"
@@ -52,17 +52,6 @@ RATE = 24000
 CHUNK = RATE // 10 * 2                     # 100 ms of PCM16
 SILENCE = base64.b64encode(b"\0" * CHUNK).decode()
 INSTRUCTIONS = "Du er en kort norsk assistent i en test. Svar med én kort setning på norsk bokmål."
-
-
-def key_from(env):
-    value = os.environ.get(env, "")
-    if not value.strip():
-        sys.exit(f"Set the OpenAI key in the environment variable {env} (it is read from there only).")
-    return value.strip()
-
-
-def scrub(text, key):
-    return str(text).replace(key, "[key]") if key else str(text)
 
 
 def start_event(model, idle, variant):
@@ -232,7 +221,8 @@ def main():
                         help="send both standby fields (default), only wake_policy, or only idle_timeout_s")
     parser.add_argument("--first-wait", type=float, default=8, help="seconds of silence before any speech")
     parser.add_argument("--wake-audio", type=pathlib.Path, help="a 16-bit WAV of one spoken line")
-    parser.add_argument("--key-env", default="OPENAI_API_KEY", help="the environment variable holding the key")
+    parser.add_argument("--key-env", default="OPENAI_API_KEY", type=key_env_name,
+                        help="the environment variable holding the key (its name must start with OPENAI_)")
     parser.add_argument("--out", default=f"/var/tmp/live-socket-standby-{time.strftime('%Y%m%d-%H%M%S')}")
     parser.add_argument("--plan", action="store_true", help="print the session.start; call nothing")
     args = parser.parse_args()
