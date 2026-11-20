@@ -910,3 +910,28 @@ def test_a_turn_parked_for_its_account_stays_parked_under_a_later_row_about_noth
     assert turn_identity.running_trace(agent_id, "t-acct") is False
     turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.SPAWN_STARTED, {"trace_id": "t-acct"})
     assert turn_identity.running_trace(agent_id, "t-acct") is True
+
+
+def test_the_hide_filter_looks_each_judged_row_up_by_its_trace(world):
+    """Part 4's filter (HIDDEN_ROW_SQL, on a page, a delta and the counts of what it left out)
+    reads the user's word by trace, never by agent: the lesson of the read wall (PR 488)."""
+    from lib import message_previews
+    _marked_conversation(world, marked=3, filler=3)
+    rows = agents.list_messages(agent_id=world.id, backend_session_id="native", limit=100)
+    reads = (
+        lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", limit=100,
+                                     hide_coordination=True),
+        lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", after_revision=1,
+                                     hide_coordination=True),
+        lambda: message_previews.coordination_gaps(agent_id=world.id, sessions=["native"], rows=rows,
+                                                   include_automated=True, contiguous=True, tail=True),
+        lambda: message_previews.coordination_gaps(agent_id=world.id, sessions=["native"], rows=rows[-2:],
+                                                   include_automated=True, contiguous=False, tail=False),
+    )
+    for read in reads:
+        judged = [sql for sql in _statements(read) if " hu " in sql]
+        assert judged, "the read ran no statement that judges rows by the filter"
+        for sql in judged:
+            wall = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql) if " hu " in f" {row[3]} "]
+            assert wall and set(wall) == {"SEARCH hu USING INDEX idx_messages_trace (trace_id=?)"}, wall
+    db.close_local()
