@@ -21318,6 +21318,24 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
         row_of(&first, &stranger)["voice_profile"]["speech"]["silent_reason"],
         "no_voice"
     );
+    wait_for("Relaunch test agent is ready", || {
+        host.state(&theo) == "spawned"
+    });
+    let started = host.post(
+        "/agents",
+        json!({ "replace_sid": theo, "name": "Theo", "backend": "scripted" }),
+    );
+    assert_eq!(
+        &started["agent"]["voice_profile"],
+        &row_of(&first, &theo)["voice_profile"]
+    );
+    wait_for("the relaunch told", || {
+        told_of("relaunched", &theo).is_some()
+    });
+    assert_eq!(
+        told_of("relaunched", &theo).unwrap()["voice_profile"],
+        started["agent"]["voice_profile"]
+    );
     let hearing = &mine["hearing"];
     assert_eq!(
         (
@@ -21488,6 +21506,33 @@ fn an_agents_voice_and_hearing_are_shown_as_the_host_speaks_and_hears() {
     assert_eq!(
         row_of(&shot, &maximus)["voice_profile"]["speech"]["shared_with"],
         0
+    );
+
+    let assigned = host.post(
+        "/agent-assign",
+        json!({ "session": stranger, "mode": "choose", "name": "Mike" }),
+    );
+    assert_eq!(assigned["ok"], true, "{assigned}");
+    wait_for("the contact assignment told", || {
+        told_of("contact-assigned", &stranger).is_some()
+    });
+    assert_eq!(
+        told_of("contact-assigned", &stranger).unwrap()["voice_profile"],
+        row_of(&snapshot(), &stranger)["voice_profile"]
+    );
+
+    wait_for("the parent's turn to finish", || {
+        host.state(&maximus) == "done"
+    });
+    let children = host.post(
+        &format!("/agents/{maximus}/fork"),
+        json!({ "backend": "scripted", "children": [{ "name": "Profile Fork", "task": "read" }] }),
+    );
+    let child = children["children"][0]["session"].as_str().unwrap();
+    wait_for("the fork told", || told_of("forked", child).is_some());
+    assert_eq!(
+        told_of("forked", child).unwrap()["voice_profile"],
+        row_of(&snapshot(), child)["voice_profile"]
     );
 }
 
