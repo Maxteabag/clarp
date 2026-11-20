@@ -66,6 +66,9 @@ fn an_agents_live_call_runs_the_owners_model_only_for_a_client_that_accepts_it()
     // The table may name any client, by the header's name exactly as written (the release owner's
     // ruling): `Desktop` admits `Desktop/...`, never `desktop/...`.
     let named = "[openai]\nlive_model_min_client = { Desktop = 3 }\n";
+    // A table with slips in it (the next test reads what the Host says of them): what is refused
+    // leaves the name with what it had; a built-in name in other letters is another name.
+    let slips = SLIPS;
     for (file, client, runs) in [
         ("", Some("ios/2985 contract=75"), "gpt-live-1.1"),
         ("", Some("ios/2984 contract=74"), "gpt-live-1"),
@@ -82,6 +85,12 @@ fn an_agents_live_call_runs_the_owners_model_only_for_a_client_that_accepts_it()
         (named, Some("Desktop/1 contract=3"), "gpt-live-1.1"),
         (named, Some("Desktop/1 contract=2"), "gpt-live-1"),
         (named, Some("desktop/1 contract=3"), "gpt-live-1"),
+        (slips, Some("Ios/1 contract=75"), "gpt-live-1.1"),
+        (slips, Some("ios/2985 contract=75"), "gpt-live-1.1"),
+        (slips, Some("android/120 contract=29"), "gpt-live-1.1"),
+        (slips, Some("desktop/1 contract=99"), "gpt-live-1"),
+        (NO_TABLE, Some("ios/2985 contract=75"), "gpt-live-1.1"),
+        (NO_TABLE, Some("ios/2984 contract=74"), "gpt-live-1"),
     ] {
         let place = Place::new("live-model-ring");
         let owners = place.root.join("owners.toml");
@@ -223,5 +232,67 @@ fn a_rings_model_is_chosen_for_the_client_that_answers_it() {
             begun["session"]["model"], runs,
             "{client:?}: the voice's session"
         );
+    }
+}
+
+/// An owner's table of minimums with a slip in each way there is: a key that is no client's name
+/// (a blank, a digit first, nothing, a letter outside ASCII, 40 signs, 50 signs), a value that is
+/// no whole number of at least 0 (a text, below 0, true, a fraction), and a built-in name in other
+/// letters, twice.
+const SLIPS: &str = "[openai]\nlive_model_min_client = { \"my client\" = 3, Ios = 75, desktop = \"3\", \
+    Desktop = 4, IOS = 80, \"\" = 1, android = -1, \"1st\" = 5, \"caf\\u00e9\" = 6, \
+    jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj = 7, \
+    kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk = 2, phone = true, watch = 1.5 }\n";
+
+/// An owner's file whose table of minimums is no table: the built-in minimums stand.
+const NO_TABLE: &str = "[openai]\nlive_model_min_client = 3\n";
+
+/// The owner's table speaks when it is read, once, so that a slip in his file does not hide for
+/// weeks, in the words of the one reader of such tables (a render spec's speaks alike): one line
+/// names every entry refused, in the table's order of keys (each quoted, a long one cut short),
+/// and one line names each key taken that differs from a built-in name only in its letters. A
+/// value that is no table is ignored in one line. A table without a slip says nothing.
+#[test]
+fn the_owners_table_of_minimums_says_what_it_refused_and_what_is_a_name_in_other_letters() {
+    const ADMIN: &str = "the-administrators-token";
+    const TABLE: &str = "clarp-host: config.live_model_min_client: ";
+    let refused = format!(
+        "{TABLE}refused entries (a client's name as its header sends it, and a whole number of at \
+         least 0): '', '1st', 'android', 'caf?', 'desktop', '{}', '{}...', 'my client', \
+         'phone', 'watch'",
+        "j".repeat(40),
+        "k".repeat(40)
+    );
+    let cased = |key: &str| {
+        format!(
+            "{TABLE}'{key}' is taken as written: it counts for a client that sends '{key}', not \
+             for 'ios'"
+        )
+    };
+    let (upper, title) = (cased("IOS"), cased("Ios"));
+    let no_table = format!("{TABLE}ignored: expected a table of client = number");
+    for (file, lines) in [
+        (
+            SLIPS,
+            vec![refused.as_str(), upper.as_str(), title.as_str()],
+        ),
+        (
+            "[openai]\nlive_model_min_client = { ios = 80, desktop = 0 }\n",
+            vec![],
+        ),
+        (NO_TABLE, vec![no_table.as_str()]),
+        ("", vec![]),
+    ] {
+        let place = Place::new("live-model-table");
+        let owners = place.root.join("owners.toml");
+        std::fs::write(&owners, file).unwrap();
+        let host = place.start_in(ADMIN, &["--speech-keys", owners.to_str().unwrap()], &[]);
+        let _ = host.get("/oracle/status");
+        let said = host.heard.lock().unwrap().clone();
+        let told: Vec<&str> = said
+            .lines()
+            .filter(|line| line.contains("config.live_model_min_client"))
+            .collect();
+        assert_eq!(told, lines, "{file:?}: {said}");
     }
 }

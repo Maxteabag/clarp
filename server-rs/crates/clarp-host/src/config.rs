@@ -337,27 +337,51 @@ fn owners_of(owners: Option<&Path>) -> Option<toml::Table> {
 
 /// From which client contract an agent's live call runs on the owner's model, by the client's
 /// exact name: the two the apps named, and what the owner's file says of any name (`[openai]
-/// live_model_min_client`; 0 for a name is never for it); a value that is no whole number of at
-/// least 0 is refused in one line, and that name keeps what it had.
+/// live_model_min_client`; 0 for a name is never for it), read by the one reader of such tables
+/// ([`clarp_kernel::client::minimums`]), as a render spec's table is. What it refused is named
+/// and that name keeps what it had; a key that differs from a built-in name only in its case is
+/// taken as written and said; a value that is no table is ignored and said. Each line carries the
+/// table's name, once, when the configuration is read.
 fn live_model_min_client_of(file: Option<&toml::Table>) -> Vec<(String, i64)> {
-    let mut minimums: Vec<(String, i64)> = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT
+    let built_in = clarp_kernel::live_call::AGENT_LIVE_MODEL_MIN_CLIENT;
+    let mut minimums: Vec<(String, i64)> = built_in
         .iter()
         .map(|(name, minimum)| ((*name).to_string(), *minimum))
         .collect();
-    let table = file
+    let table = match file
         .and_then(|file| file.get("openai"))
-        .and_then(|openai| openai.get("live_model_min_client"))
-        .and_then(toml::Value::as_table);
-    for (name, value) in table.into_iter().flatten() {
-        match value.as_integer().filter(|minimum| *minimum >= 0) {
-            Some(minimum) => match minimums.iter_mut().find(|(known, _)| known == name) {
-                Some(known) => known.1 = minimum,
-                None => minimums.push((name.clone(), minimum)),
-            },
-            None => eprintln!("config.openai.live_model_min_client refused for one client name"),
+        .and_then(|openai| openai.get(MIN_CLIENT_KEY))
+    {
+        None => return minimums,
+        Some(toml::Value::Table(table)) => table,
+        Some(_) => {
+            min_client_said("ignored: expected a table of client = number");
+            return minimums;
+        }
+    };
+    let known: Vec<&str> = built_in.iter().map(|(name, _)| *name).collect();
+    let entries = table
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_integer()));
+    let read = clarp_kernel::client::minimums(entries, &known);
+    for line in read.lines() {
+        min_client_said(&line);
+    }
+    for (name, minimum) in read.taken {
+        match minimums.iter_mut().find(|(known, _)| *known == name) {
+            Some(known) => known.1 = minimum,
+            None => minimums.push((name, minimum)),
         }
     }
     minimums
+}
+
+/// The owner's table of minimums for the model of an agent's live call.
+const MIN_CLIENT_KEY: &str = "live_model_min_client";
+
+/// A line of what the reading of that table says, with the table's name before it.
+fn min_client_said(line: &str) {
+    eprintln!("clarp-host: config.{MIN_CLIENT_KEY}: {line}");
 }
 
 /// A stand-in for a provider or an engine, given in `variable`: none where nothing is given, and
