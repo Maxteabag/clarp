@@ -167,13 +167,16 @@ fn there(app: &App) -> impl Fn(&Portrait) -> bool + '_ {
 /// If storage failed between the durable pair decision and filling the blob store,
 /// a reader must not mistake the first available alternative for the whole gallery.
 /// Missing legacy files keep their usual projection once there is no pending publication.
-async fn gallery_ready(app: &App, record: &AgentRecord) -> Result<(), ApiError> {
+pub(crate) async fn gallery_ready(
+    fleet: &crate::fleet::FleetHandle,
+    blobs: &dyn clarp_ports::blobs::Blobs,
+    record: &AgentRecord,
+) -> Result<(), ApiError> {
     for portrait in &record.portraits {
         if portrait.created_by == "portrait_generation:openai"
-            && !there(app)(portrait)
+            && !matches!(blobs.len(&picture_name(&portrait.sha256)), Ok(Some(_)))
             && let Some(id) = &portrait.media_asset_id
-            && app
-                .fleet
+            && fleet
                 .kept(crate::fleet::portrait_jobs::BYTES, id.clone())
                 .await?
                 .is_some()
@@ -212,7 +215,7 @@ async fn portraits(
     let record = &member
         .ok_or_else(|| declined(kept::UNKNOWN_SESSION))?
         .record;
-    gallery_ready(&app, record).await?;
+    gallery_ready(&app.fleet, app.blobs.as_ref(), record).await?;
     let worn = worn(&app, record);
     let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
     let made = (record.agent_id.as_str(), record.created_at_ms);
@@ -230,7 +233,7 @@ async fn portrait(State(app): State<App>, Path(id): Path<String>, headers: Heade
         let record = &member.record;
         let recorded = record.portraits.iter();
         if let Some(found) = recorded.into_iter().find(|kept| kept.portrait_id == id) {
-            if let Err(why) = gallery_ready(&app, record).await {
+            if let Err(why) = gallery_ready(&app.fleet, app.blobs.as_ref(), record).await {
                 return why.into_response();
             }
             let name = picture_name(&found.sha256);
@@ -271,7 +274,7 @@ async fn change_portraits(State(app): State<App>, body: Bytes) -> Result<Json<Va
     let member = directory.by_session(session).cloned();
     let member = member.ok_or_else(|| declined(kept::UNKNOWN_SESSION))?;
     let record = &member.record;
-    gallery_ready(&app, record).await?;
+    gallery_ready(&app.fleet, app.blobs.as_ref(), record).await?;
     let worn = worn(&app, record);
     let wears = worn.as_ref().map(|(digest, kind)| (digest.as_str(), *kind));
     let made = (record.agent_id.as_str(), record.created_at_ms);

@@ -111,7 +111,7 @@ pub fn multipart(boundary: &str, prompt: &str, source: &[u8], mime: &str) -> Vec
 
 pub fn generated_kind(bytes: &[u8]) -> Result<&'static str, &'static str> {
     if bytes.len() <= MAX_IMAGE
-        && let Some(kind) = picture_kind(bytes).filter(|kind| supported(kind))
+        && let Some(kind) = picture_kind(bytes)
     {
         return Ok(kind);
     }
@@ -124,4 +124,19 @@ pub fn distinct(first: &[u8], second: &[u8]) -> Result<(), &'static str> {
     } else {
         Ok(())
     }
+}
+
+/// Decode the provider's bounded reply before passing its image to the second stage.
+pub fn edit_answer(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.len() > MAX_RESPONSE {
+        return Err("OpenAI image response exceeded the safety limit".to_string());
+    }
+    let answer: Value = serde_json::from_slice(bytes)
+        .map_err(|_| "OpenAI image response was invalid".to_string())?;
+    let raw = answer["data"][0]["b64_json"]
+        .as_str()
+        .and_then(crate::python::b64decode)
+        .ok_or_else(|| "OpenAI image response was invalid".to_string())?;
+    generated_kind(&raw)?;
+    Ok(raw)
 }

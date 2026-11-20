@@ -211,3 +211,49 @@ impl Fleet {
         Ok(Ok(change))
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod portrait_count_tests {
+    use super::*;
+    use clarp_kernel::jobs::Worker;
+    #[test]
+    fn portrait_attempts_count_their_own_kind_at_both_edges_of_the_day() {
+        let mut jobs = ComputerJobs::default();
+        let cutoff = 10_000;
+        for (id, kind, now, queued) in [
+            ("earlier", "portrait-generation", cutoff - 1, true),
+            ("boundary", "portrait-generation", cutoff, true),
+            ("later", "portrait-generation", cutoff + 1, true),
+            ("contact", "persona-avatar", cutoff + 1, true),
+            ("other-event", "portrait-generation", cutoff + 1, false),
+        ] {
+            let command = JobCommand::Register {
+                queued,
+                id: id.to_string(),
+                kind: kind.to_string(),
+                title: String::new(),
+                detail: String::new(),
+                worker: Worker::none(),
+                restart_cancelled: true,
+                started_trace_id: String::new(),
+                heartbeat_timeout_ms: None,
+                metadata: serde_json::Value::Null,
+            };
+            let change = jobs.book.decide(command, now, 1).unwrap();
+            jobs.timelines
+                .entry(id.to_string())
+                .or_default()
+                .push(change.record.unwrap());
+        }
+        for (since, count) in [
+            (cutoff - 1, 3),
+            (cutoff, 2),
+            (cutoff + 1, 1),
+            (cutoff + 2, 0),
+        ] {
+            assert_eq!(jobs.begun_since("portrait-generation", since), count);
+        }
+        assert_eq!(jobs.begun_since("persona-avatar", cutoff), 1);
+    }
+}

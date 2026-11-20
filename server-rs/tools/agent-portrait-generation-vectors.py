@@ -104,7 +104,7 @@ def record(root):
         source.write_bytes(png)
         content.return_value = primary
         edits = []
-        for results in (['ok','ok'],['empty'],['invalid'],['raise'],['ok','invalid'],['ok','raise'],['ok','duplicate']):
+        for results in (['ok','ok'],['empty'],['invalid'],['raise'],['ok','invalid'],['ok','raise'],['ok','duplicate'],['gif','ok'],['ok','gif'],['gif','gif']):
             calls = []
             def request(**asked):
                 calls.append(asked['prompt'])
@@ -112,7 +112,7 @@ def record(root):
                 if result == 'raise':
                     raise gen.GenerationError('fixture refusal')
                 return {'ok': png+bytes([len(calls)]), 'empty': b'',
-                        'invalid': b'not an image', 'duplicate': png+b'\x01'}[result]
+                        'gif':b'GIF89afiction', 'invalid': b'not an image', 'duplicate': png+b'\x01'}[result]
             published = []
             def publish(**what):
                 published.append(what['source_name'])
@@ -122,7 +122,7 @@ def record(root):
                 try:
                     gen.generate_two('fixture',handle='bg1:1:example',media_dir=root,request=request)
                     error = None
-                except gen.GenerationError as exc:
+                except (gen.GenerationError,KeyError) as exc:
                     error = str(exc)
                 edits.append([results,len(calls),published,replace.called,error])
     return dict(starts=starts(root, gen),preferences=preferences,updates=updates,capabilities=cases,edits=edits,
