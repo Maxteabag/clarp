@@ -463,7 +463,8 @@ fn the_portrait_job_handles_each_recorded_provider_result() {
         let responses = row[0].as_array().unwrap();
         assert_eq!(responses.len(), row[1].as_u64().unwrap() as usize);
         for (idx, response) in responses.iter().enumerate() {
-            let (_, tx) = requests.recv_timeout(Duration::from_secs(20)).unwrap();
+            let (request, tx) = requests.recv_timeout(Duration::from_secs(20)).unwrap();
+            assert!(request.starts_with("POST /images/edits "));
             let (status, bytes) = match response.as_str().unwrap() {
                 "ok" => (200, image((idx + 1) as u8)),
                 "empty" => (200, Vec::new()),

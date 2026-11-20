@@ -85,7 +85,11 @@ change(J,'generation',[
     ('register running before claiming','queued: true,','queued: false,'),
     ('make cancellation sticky','restart_cancelled: true,','restart_cancelled: false,'),
     ('keep the old alternates','portrait.sha256 == digest','true'),
+])
+change(J,'port',[
     ('change the identity of the retained primary','Some((digest, kind)),','Some(("absent", kind)),'),
+])
+change(J,'generation',[
     ('record a foreign generation','row.job.generation == generation','row.job.generation != generation'),
     ('accept only a cancelled job','row.job.status == JobStatus::Running','row.job.status == JobStatus::Cancelled'),
     ('omit asset link','Some(asset.asset_id.clone()),','None,'),
@@ -115,7 +119,7 @@ change(J,'port',[
     ('omit the committed gallery decision','AGENTS.into(),','"absent".into(),'),
     ('stage bytes as receipts','shelf(BYTES), asset.asset_id.clone()','shelf(PENDING), asset.asset_id.clone()'),
     ('record a different job outcome','failed: None,','failed: Some("failure".into()),'),
-    ('lose publication on the second port write','self.replaced(at, record, sent);','drop((at, record, sent));'),
+    ('lose publication on the second port write','self.replaced(at, record, sent);','let _ = sent.send(());'),
 ])
 change(W,'port',[
     ('clear neither of the two original sources','(BYTES, first.asset_id.clone()),','(PENDING, first.asset_id.clone()),'),
