@@ -279,5 +279,6 @@ fn the_providers_and_voices_are_named_as_the_python_host_names_them() {
     assert_eq!(shipped["elevenlabs"].get("nPczCjzI2devNBz1zQrb").map(String::as_str), Some("Brian"));
     assert_eq!(shipped["deepgram"].get("flux-haley-en").map(String::as_str), Some("Haley"));
     let sets = vectors["language_set_providers"].as_array().unwrap();
-    assert_eq!(sets, &[json!("elevenlabs"), json!("google")]);
+    let ours: Vec<Value> = clarp_kernel::languages::SET_PROVIDERS.iter().map(|id| json!(id)).collect();
+    assert_eq!(sets, &ours);
 }

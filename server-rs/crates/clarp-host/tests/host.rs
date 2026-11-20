@@ -19918,6 +19918,7 @@ fn a_clip_is_heard_by_an_engine_over_the_network_with_a_key_read_where_the_owner
         json!([{ "id": "elevenlabs:scribe_v2", "name": "ElevenLabs Scribe v2", "provider": "elevenlabs",
                  "model": "scribe_v2", "weight": "cloud", "available": true,
                  "credential": "ELEVEN_API_KEY", "turn_detection": "native", "biasing": "keyterms",
+                 "accepts_language_set": true,
                  "budget": { "unit": "terms", "capacity": 100, "max_term_chars": 49 } }])
     );
     let (_, settings) = host.ask_as(token, "GET", "/transcription-providers", None);
@@ -34795,6 +34796,7 @@ fn a_clip_is_heard_by_deepgram_and_its_engine_may_be_set_to_find_the_ends_of_tur
         json!([{ "id": "deepgram:nova-3", "name": "Deepgram Nova-3", "provider": "deepgram",
                  "model": "nova-3", "weight": "cloud", "available": true,
                  "credential": "DEEPGRAM_API_KEY", "turn_detection": "own", "biasing": "keyterm",
+                 "accepts_language_set": false,
                  "budget": { "unit": "terms", "capacity": 50, "max_term_chars": null } }])
     );
     let told = host.get("/transcription-providers");
