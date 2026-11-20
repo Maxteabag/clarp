@@ -22,8 +22,8 @@ use clarp_actor::{ByHand, ImportedRow};
 use clarp_kernel::activity::Leases;
 use clarp_kernel::addressed;
 use clarp_kernel::contacts::{self, Launch};
-use clarp_kernel::coordination;
 use clarp_kernel::conversation::{Message, Sender};
+use clarp_kernel::coordination;
 use clarp_kernel::helpers;
 use clarp_kernel::jobs::{Job, JobCommand};
 use clarp_kernel::journal::Reworded;
@@ -2457,7 +2457,14 @@ pub(crate) async fn send_message(
     app: &App,
     request: SendRequest,
 ) -> Result<SendResponse, ApiError> {
-    send_as(app, request, false, None, &crate::coordination::Made::default()).await
+    send_as(
+        app,
+        request,
+        false,
+        None,
+        &crate::coordination::Made::default(),
+    )
+    .await
 }
 
 /// Takes a message for an agent from whoever made it: the turn of an agent's own tool that
@@ -2474,7 +2481,14 @@ pub(crate) async fn send_from(
 /// of a fork. It is a message like any other, but for this: no app gave it an id, and the
 /// apps are told of it under none.
 pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
-    send_as(app, request, true, None, &crate::coordination::Made::default()).await
+    send_as(
+        app,
+        request,
+        true,
+        None,
+        &crate::coordination::Made::default(),
+    )
+    .await
 }
 
 async fn send_as(
