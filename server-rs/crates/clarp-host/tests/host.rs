@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 // The tests of each piece, a file of its own under `tests/host/`, in the order of the letters.
+#[path = "host/agent_portraits.rs"]
+mod agent_portraits;
 #[path = "host/contacts.rs"]
 mod contacts;
 #[path = "host/controller_actions.rs"]
@@ -23342,7 +23344,6 @@ fn a_screen_of_something_this_host_has_not_is_answered_and_a_change_to_it_refuse
         ("/agent-goal", json!({ "session": echo, "goal": "g" })),
         ("/agent-goal/pause", json!({ "session": echo })),
         ("/agent-portrait-generation", json!({ "session": echo })),
-        ("/avatar-settings", json!({ "model_avatars": true })),
         ("/backend-auth/login", json!({ "backend": "claude" })),
         ("/server-update", json!({})),
         (

@@ -1,0 +1,519 @@
+{
+  "preferences": [
+    [
+      null,
+      {
+        "model_avatars": false
+      }
+    ],
+    [
+      "",
+      {
+        "model_avatars": false
+      }
+    ],
+    [
+      "1",
+      {
+        "model_avatars": true
+      }
+    ],
+    [
+      "true",
+      {
+        "model_avatars": true
+      }
+    ],
+    [
+      "YES",
+      {
+        "model_avatars": true
+      }
+    ],
+    [
+      " on ",
+      {
+        "model_avatars": true
+      }
+    ],
+    [
+      "0",
+      {
+        "model_avatars": false
+      }
+    ],
+    [
+      "false",
+      {
+        "model_avatars": false
+      }
+    ],
+    [
+      "2",
+      {
+        "model_avatars": false
+      }
+    ],
+    [
+      "enabled",
+      {
+        "model_avatars": false
+      }
+    ]
+  ],
+  "updates": [
+    [
+      null,
+      [
+        400,
+        {
+          "error": "model_avatars required"
+        }
+      ]
+    ],
+    [
+      {},
+      [
+        400,
+        {
+          "error": "model_avatars required"
+        }
+      ]
+    ],
+    [
+      {
+        "model_avatars": null
+      },
+      [
+        400,
+        {
+          "error": "model_avatars required"
+        }
+      ]
+    ],
+    [
+      {
+        "model_avatars": 1
+      },
+      [
+        400,
+        {
+          "error": "model_avatars required"
+        }
+      ]
+    ],
+    [
+      {
+        "model_avatars": "true"
+      },
+      [
+        400,
+        {
+          "error": "model_avatars required"
+        }
+      ]
+    ],
+    [
+      {
+        "model_avatars": true
+      },
+      [
+        200,
+        {
+          "model_avatars": true
+        }
+      ]
+    ],
+    [
+      {
+        "model_avatars": false
+      },
+      [
+        200,
+        {
+          "model_avatars": false
+        }
+      ]
+    ]
+  ],
+  "capabilities": [
+    [
+      false,
+      false,
+      false,
+      "",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Unknown Agent session",
+        "job": null
+      }
+    ],
+    [
+      true,
+      false,
+      false,
+      "",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Configure an OpenAI API key on this Computer",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      false,
+      "",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Add or select a primary portrait first",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/gif",
+      1,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Use a PNG, JPEG, or WebP primary portrait",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/png",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/png",
+      20971519,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/png",
+      20971520,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/png",
+      20971521,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Primary portrait is too large to generate from",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/jpeg",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/jpeg",
+      20971519,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/jpeg",
+      20971520,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/jpeg",
+      20971521,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Primary portrait is too large to generate from",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/webp",
+      0,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/webp",
+      20971519,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/webp",
+      20971520,
+      {
+        "contract": "portrait-generation.v1",
+        "available": true,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "",
+        "job": null
+      }
+    ],
+    [
+      true,
+      true,
+      true,
+      "image/webp",
+      20971521,
+      {
+        "contract": "portrait-generation.v1",
+        "available": false,
+        "provider": "openai",
+        "model": "gpt-image-2",
+        "count": 2,
+        "cost_notice": "Uses the configured OpenAI API account; image charges may apply.",
+        "reason": "Primary portrait is too large to generate from",
+        "job": null
+      }
+    ]
+  ],
+  "edits": [
+    [
+      [
+        "ok",
+        "ok"
+      ],
+      2,
+      [
+        "generated-portrait-1.png",
+        "generated-portrait-2.png"
+      ],
+      true,
+      null
+    ],
+    [
+      [
+        "empty"
+      ],
+      1,
+      [],
+      false,
+      "image provider returned invalid portrait content"
+    ],
+    [
+      [
+        "invalid"
+      ],
+      1,
+      [],
+      false,
+      "image provider returned invalid portrait content"
+    ],
+    [
+      [
+        "raise"
+      ],
+      1,
+      [],
+      false,
+      "fixture refusal"
+    ],
+    [
+      [
+        "ok",
+        "invalid"
+      ],
+      2,
+      [],
+      false,
+      "image provider returned invalid portrait content"
+    ],
+    [
+      [
+        "ok",
+        "raise"
+      ],
+      2,
+      [],
+      false,
+      "fixture refusal"
+    ],
+    [
+      [
+        "ok",
+        "duplicate"
+      ],
+      2,
+      [],
+      false,
+      "image provider returned duplicate portrait alternatives"
+    ]
+  ],
+  "ids": [
+    [
+      "",
+      "portrait-generation-e3b0c44298fc1c149afb"
+    ],
+    [
+      "A",
+      "portrait-generation-559aead08264d5795d39"
+    ],
+    [
+      "a",
+      "portrait-generation-ca978112ca1bbdcafac2"
+    ],
+    [
+      "fixture",
+      "portrait-generation-f16d05ec6b29248d2c61"
+    ],
+    [
+      "\u00e9",
+      "portrait-generation-4a99557e4033c3539de2"
+    ]
+  ],
+  "prompts": [
+    "Preserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create an intimate, warm close-up portrait that feels candid and personal, showing more of this character's life. Keep one character only. No text, logos, frames, or watermarks.",
+    "Preserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create a natural everyday-life scene with the same character in a meaningful environment, emotionally warm and personal. Keep one character only. No text, logos, frames, or watermarks."
+  ],
+  "multipart": [
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create an intimate, warm close-up portrait that feels candid and personal, showing more of this character's life. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/png\r\n\r\nfixture\r\n--fixture--\r\n",
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create an intimate, warm close-up portrait that feels candid and personal, showing more of this character's life. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/jpeg\r\n\r\nfixture\r\n--fixture--\r\n",
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create an intimate, warm close-up portrait that feels candid and personal, showing more of this character's life. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/webp\r\n\r\nfixture\r\n--fixture--\r\n",
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create a natural everyday-life scene with the same character in a meaningful environment, emotionally warm and personal. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/png\r\n\r\nfixture\r\n--fixture--\r\n",
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create a natural everyday-life scene with the same character in a meaningful environment, emotionally warm and personal. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/jpeg\r\n\r\nfixture\r\n--fixture--\r\n",
+    "--fixture\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-image-2\r\n--fixture\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\nPreserve the exact identity, facial features, hair, age, visual style, and character design from the reference. Create a natural everyday-life scene with the same character in a meaningful environment, emotionally warm and personal. Keep one character only. No text, logos, frames, or watermarks.\r\n--fixture\r\nContent-Disposition: form-data; name=\"size\"\r\n\r\n1024x1024\r\n--fixture\r\nContent-Disposition: form-data; name=\"quality\"\r\n\r\nmedium\r\n--fixture\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"portrait.png\"\r\nContent-Type: image/webp\r\n\r\nfixture\r\n--fixture--\r\n"
+  ]
+}

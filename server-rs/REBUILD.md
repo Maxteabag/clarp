@@ -3303,3 +3303,10 @@ come ("We will wait with reviewers", 16 Nov 2026).
   verdicts stand, and what runs again on the new commit is what reads the rest of the repository: its own
   gates, and the release that is installed (17 Nov 2026: main moved twice under one green candidate within
   twenty minutes, both times by a hook of Claude Code and its tests).
+
+**Model portraits and the avatar display preference.** The Host keeps the owner's
+choice from `POST /avatar-settings` and returns it to the settings screen and in
+the agents' snapshot. For bundled model art the Host tries the agent's model,
+the tool's configured default in the owner's settings, then the family the tool
+names. Janitors wear the bundled picture of their role or the default janitor
+picture. These reads and display changes make no image request.
