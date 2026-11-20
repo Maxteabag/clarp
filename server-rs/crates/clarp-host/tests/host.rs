@@ -23153,6 +23153,7 @@ fn a_change_the_python_host_has_a_route_for_is_not_built_here_and_any_other_is_n
         "/agent-goal/start",
         "/agent-goal/stop",
         "/oracle/nothing-there",
+        "/oracle/vo%69ce-provider",
         "/oracle/calls/x",
         "/oracle/v2/calls/status",
         "/oracle/realtime",
