@@ -16,7 +16,7 @@ P = 'clarp-host/src/pictures.rs'
 F = 'clarp-host/src/fleet.rs'
 # NOT PLANTED, each with its reason:
 #   pictures.rs, the guard before the provider is asked: the job is begun and started in one go, so no test can end it
-#     between the two without a race; the guard before the picture is kept is planted.
+#     between the two without a race; the guards of the keeping (the end waited for, the generation) are planted.
 #   pictures.rs `under_way` without the installation's word: without it no job is ever begun, so nothing is under way.
 #   pictures.rs the lock of the admission and the registration: one contact's picture is asked twice at once only by
 #     launches at once of one contact, which the fleet refuses as occupied; nothing can show the lock gone.
@@ -41,9 +41,17 @@ PLANTS = [
     (P, 'host', 'a picture is drawn without the installation\'s word',
      '    if !app.config.contact_pictures {\n        return;\n    }\n    let persona = {', '    let persona = {'),
     (P, 'host', 'the owner\'s key is kept in why a picture failed', '            said = said.replace(secret, put);', '            said = said.replace(secret, secret);'),
+    # Two guards keep a cancelled try's picture out, each enough alone: the end of the try, waited for beside the work,
+    # drops the work; the generation looked at before the keeping refuses it. The wrong rule takes both away.
     (P, 'host', 'a try that was cancelled keeps its picture all the same',
-     '        if !current(app, id, generation).await {\n            return Err(None);\n        }\n        app.fleet\n',
-     '        app.fleet\n'),
+     '        if !current(app, id, generation).await {\n            return Err(None);\n        }\n        app.fleet\n'
+     '            .picture_made(persona_id.to_string(), picture)\n            .await\n            .map_err(|why| Some(why.0))\n'
+     '    };\n    // The work beside the end of its try: a cancel, a finish or a new try ends the waiting,\n'
+     '    // and the work with it (what the provider still answers is not read).\n    let made = tokio::select! {\n'
+     '        made = work => made,\n        _ = app.fleet.wait_computer_job_end(id.to_string(), generation) => Err(None),\n    };\n',
+     '        app.fleet\n'
+     '            .picture_made(persona_id.to_string(), picture)\n            .await\n            .map_err(|why| Some(why.0))\n'
+     '    };\n    let made = work.await;\n'),
     (P, 'host', 'a picture a stopped Host left is ended as made', '            failed: Some(INTERRUPTED.to_string()),', '            failed: None,'),
     (F, 'host', 'the agents of a contact do not wear its picture', '            record.avatar.clone_from(&digest);\n', ''),
 ]
