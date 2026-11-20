@@ -351,3 +351,29 @@ def test_the_cap_is_parsed_and_a_value_that_is_not_a_whole_number_is_off(tmp_pat
     loaded = config.load(path)
     assert loaded.codex_reset_max_per_day == cap and loaded.codex_reset_command == ("broker",)
     assert bool([t for t, _ in logged if t == "config.codex_reset_max_per_day"]) is refused
+
+
+# ---- a reset count that cannot be read (F4) -------------------------------------------------------
+
+@pytest.mark.parametrize("ledger", ["garbage", "{}", "5", '"x"', "[null]"])
+def test_a_reset_count_that_cannot_be_read_redeems_nothing_and_is_told_once(
+        switcher, tmp_path, monkeypatch, ledger):  # noqa: F811
+    owner, worker, readings, calls, sent = switcher
+    receipt, requests = _broker(tmp_path, monkeypatch, cap=5)
+    receipt.write_text(json.dumps({"status": "redeemed", "verified": True, "account": "work"}))
+    worker.reset_worker = janitor_reset.ResetWorker(worker.stop_event)
+    settings_store.set_text("hotseat-reset.codex.redeemed", ledger)
+    logged = []
+    from lib import log
+    monkeypatch.setattr(log, "log", lambda tag, message="", *a, **k: logged.append(tag))
+    clock = [db.now_ms() + 1000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    readings["codex"] = _codex(("work", True, 0.0), ("home", False, 0.0))
+    for _ in range(3):
+        _keeper_run(worker, clock)
+        clock[0] += 20 * 60_000
+    assert _requests(requests) == []                                      # fails closed: no call
+    wanted = "Codex: the reset count cannot be read; no automatic reset until it is repaired."
+    assert [n["preview"] for n in sent].count(wanted) == 1
+    assert logged.count("bankedResetLedgerUnreadable") == 1
+    assert settings_store.get_text("hotseat-reset.codex.redeemed") == ledger   # left for repair

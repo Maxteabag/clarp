@@ -528,12 +528,16 @@ class AutonomyJanitors:
 
     # What stops the automatic reset step, told to the owner once per stop (R145), not every run.
     RESET_STOPS={'daily_cap':'{name}: no automatic banked reset now: the cap of {cap} in 24 hours is reached.',
-                 'empty':'{name}: no banked reset is left to redeem.'}
+                 'empty':'{name}: no banked reset is left to redeem.',
+                 'ledger_unreadable':'{name}: the reset count cannot be read; no automatic reset until it is repaired.'}
 
     def _reset_stop_notice(self,owner,run,provider,stop):
         marker=f'hotseat-reset.{provider}.told'
         if settings_store.get_text(marker,default='')==stop:return
         settings_store.set_text(marker,stop)
+        if stop=='ledger_unreadable':
+            from .log import log
+            log('bankedResetLedgerUnreadable',f'provider={provider}: no automatic reset until hotseat-reset.{provider}.redeemed is repaired')
         from . import config
         cap=getattr(config.load(),janitor_hotseat.PROVIDERS[provider].reset_cap_field or '_',0)
         text=self.RESET_STOPS[stop].format(name=provider.capitalize(),cap=cap)
@@ -665,7 +669,7 @@ class AutonomyJanitors:
                     reset_due=janitor_hotseat.PROVIDERS[provider].reset_due
                     if raw_decision['action']=='exhausted' and (reset_due is None or reset_due(raw_accounts)):
                         status=self.reset_worker.offer(provider,reset_field,req_models,owner,accounts=saved,cap_field=reset_cap)
-                        if status=='daily_cap':self._reset_stop_notice(owner,run,provider,'daily_cap')
+                        if status in ('daily_cap','ledger_unreadable'):self._reset_stop_notice(owner,run,provider,status)
                         if status!='disabled':reset_text='Banked resets: '+status
                 switched=None;outcome='completed';error=''
                 if decision['action']=='switch' and options['mode']=='automatic':
