@@ -508,10 +508,8 @@ def in_any_order(path, body):
 # compared of such an answer is what an app's reader needs of it: the status, and every field
 # with its kind. What the fields hold is in server-rs/docs/differences.md as not built.
 NOT_KEPT = frozenset({'/janitors', '/transcription-capabilities', '/transcription-providers', '/agent-model-options',
-                      # Screens of what this Host has not, where the Python Host's first day says something
-                      # this Host must not: that a picture could be made with a key, what the Oracle
-                      # could do. Compared as their fields.
-                      '/agent-portrait-generation', '/oracle/status'})
+                      # The Oracle's available functions depend on the installed providers.
+                      '/oracle/status'})
 ABSENT = (*NOT_YET.values(), *NOT_BUILT.values())
 NOT_YET_FIELDS = frozenset(field for part in ABSENT for field in part['fields'])
 NOT_YET_EVENTS = frozenset(event for part in ABSENT for event in part['events'])
