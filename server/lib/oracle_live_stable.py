@@ -1314,6 +1314,9 @@ def serve(handler):
             handler.wfile.write(ws.text_frame(json.dumps(event)))
             handler.wfile.flush()
     live = live_model(cfg)  # this session's one read of the configured GPT-Live model
+    # A podcast's session is built once from that value: the history records what is sent (ruling B).
+    podcast_session = (podcast_live.session_config(podcast_context, stable=True, model=live)
+                       if podcast_context is not None else None)
     try:
         if podcast_context is None:
             try:
@@ -1326,7 +1329,7 @@ def serve(handler):
             # Persist the exact source/configuration before opening paid audio.
             history_id = podcast_history.create(artifact=artifact,
                 position=float(query.get("position", ["0"])[0]), context=podcast_context,
-                source=podcast_source, model=live, voice=VOICE)
+                source=podcast_source, model=live, voice=VOICE, configuration=podcast_session)
         import websocket
         from . import oracle_voice_provider
         upstream, provider = _connect_voice(cfg, key,
@@ -1412,7 +1415,7 @@ def serve(handler):
             downstream({"type": "oracle_v2.routing_mode", "strategy": strategy,
                 "primary_contact": selected_contact, "operator_model_called": False})
         conversation.send({"type": "session.start", "session":
-            podcast_live.session_config(podcast_context, stable=True, model=live) if podcast_context is not None
+            podcast_session if podcast_context is not None
             else live_config(model=live, roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
                 languages=cfg.oracle_languages,
                 history=memory.startup_history(roster=tools.execute("list_agents", {}, "history")) if memory else ())})
