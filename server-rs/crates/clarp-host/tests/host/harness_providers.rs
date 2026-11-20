@@ -750,3 +750,48 @@ fn a_harness_is_signed_in_to_its_providers_only_by_the_host_that_keeps_the_tools
     );
     wait_for("their servers to end", || machine.ended() == ended + 3);
 }
+
+#[test]
+fn opencode_is_asked_its_sign_in_methods_once_however_many_listings_wait_on_its_answer() {
+    // OpenCode holds its answer while listings are asked, one after another and together:
+    // each is answered at once with what is remembered (nothing yet), and none asks again.
+    let place = Place::new("harness-providers-probe");
+    let machine = Machine::new(&place);
+    std::fs::write(machine.root.join("hold-probe"), "").unwrap();
+    let host = machine.start(&place, &["--accounts", "select"], &[]);
+    let methods = || {
+        row(&host.get("/harness-providers"), "openai")["methods"]
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    let together = |shown: usize| {
+        std::thread::scope(|scope| {
+            let asking: Vec<_> = (0..8).map(|_| scope.spawn(methods)).collect();
+            for asked in asking {
+                assert_eq!(asked.join().unwrap(), shown);
+            }
+        });
+    };
+    assert_eq!(methods(), 1, "nothing remembered yet");
+    wait_for("OpenCode to be asked", || machine.asked().len() == 1);
+    for _ in 0..5 {
+        assert_eq!(methods(), 1, "the listing does not wait for OpenCode");
+    }
+    together(1);
+
+    // Let go: what OpenCode said is kept, and every listing asked after it sees it.
+    std::fs::write(machine.root.join("release-probe"), "").unwrap();
+    wait_for("the sign-in methods", || methods() == 2);
+    wait_for("the probe's server to end", || machine.ended() == 1);
+    together(2);
+    for _ in 0..5 {
+        assert_eq!(methods(), 2);
+    }
+    let asked = machine.asked();
+    assert_eq!(asked.len(), 1, "OpenCode was asked once: {asked:?}");
+    assert_eq!(asked[0]["path"], "/provider/auth");
+    let started = std::fs::read_to_string(machine.root.join("started")).unwrap();
+    let served = started.lines().filter(|l| l.starts_with("serve")).count();
+    assert_eq!(served, 1, "one server was started: {started}");
+}
