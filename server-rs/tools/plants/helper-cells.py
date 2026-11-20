@@ -96,5 +96,13 @@ for label,old,new in [
     ('forget a partial appended line', 'self.lines = lines;', 'self.lines=Default::default();'),
 ]:
     PLANTS.append((F,"reads",label,old,new))
+# Whether a reader holds a conversation that ended (clarp-actor's conversation.rs, Page::ended_for): asked by the
+# route of GET /log and by the follower of clarp-actor's tests, which holds what a reload reads after every change.
+RUNS["page"]=["test","-p","clarp-actor","--lib","a_reader_is_told_its_conversation_ended"]
+RUNS["follow"]=["test","--test","actor","a_follower_by_revision_holds_what_a_reload_reads_after_every_change"]
+PLANTS += [
+    ('clarp-actor/src/conversation.rs', 'follow', 'a reader above the head is not told its conversation ended', 'held > self.head_revision || held <= self.begins_after', 'held <= self.begins_after'),
+    ('clarp-actor/src/conversation.rs', 'page', 'a reader at the floor is not told its conversation ended', 'held > self.head_revision || held <= self.begins_after', 'held > self.head_revision || held < self.begins_after'),
+]
 if __name__=="__main__":
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))

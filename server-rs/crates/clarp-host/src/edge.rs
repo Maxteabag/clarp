@@ -2013,9 +2013,8 @@ async fn log(
     let after = query.after_revision.filter(|revision| *revision > 0);
     let (page, replace) = if let Some(revision) = after {
         let page = member.agent.after(revision, limit, which).await?;
-        // A client that holds a revision this conversation never reached holds another
-        // conversation: it must drop what it has.
-        let replace = revision > page.head_revision || revision <= page.begins_after;
+        // A client that holds another conversation must drop what it has.
+        let replace = page.ended_for(revision);
         (page, replace)
     } else if let Some(id) = query.before {
         let older = member.agent.before(id, limit, which).await?;

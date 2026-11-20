@@ -106,6 +106,18 @@ pub struct Page {
     pub begins_after: u64,
 }
 
+impl Page {
+    /// Whether a reader that holds the revision `held` (the cursor an earlier page gave it)
+    /// holds a conversation that has ended: a revision this conversation never reached, above
+    /// its head, or one at or below where it begins, since the agent was started again after
+    /// it. Such a reader is told to drop what it has and read the conversation anew: a page of
+    /// changes cannot say that a row is gone. A reader that holds nothing (0) asks for the
+    /// newest page, and is not asked this.
+    pub fn ended_for(&self, held: u64) -> bool {
+        held > self.head_revision || held <= self.begins_after
+    }
+}
+
 /// A reply that is being written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Draft {
@@ -533,5 +545,35 @@ pub(crate) fn delegation_baseline(
         if part.len() < CHUNK {
             return Ok(0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reader_is_told_its_conversation_ended_above_the_head_and_at_or_below_where_it_begins() {
+        let page = Page {
+            head_revision: 9 * REVISION_STEP,
+            begins_after: 4 * REVISION_STEP,
+            ..Page::default()
+        };
+        assert!(page.ended_for(9 * REVISION_STEP + 1), "above the head");
+        assert!(!page.ended_for(9 * REVISION_STEP), "at the head");
+        assert!(
+            !page.ended_for(4 * REVISION_STEP + 1),
+            "just after the floor"
+        );
+        assert!(page.ended_for(4 * REVISION_STEP), "at the floor");
+        assert!(page.ended_for(REVISION_STEP), "below the floor");
+        // An agent that was never started again: only above the head.
+        let page = Page {
+            head_revision: 3 * REVISION_STEP,
+            ..Page::default()
+        };
+        assert!(!page.ended_for(1));
+        assert!(!page.ended_for(3 * REVISION_STEP));
+        assert!(page.ended_for(3 * REVISION_STEP + 1));
     }
 }
