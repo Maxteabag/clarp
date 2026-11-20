@@ -17,6 +17,7 @@ from lib import turn_queue
 from lib import turn_dispatch as td
 
 from test_drain_pause_parity import World
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -262,7 +263,7 @@ def test_a_stop_that_fails_on_a_locked_database_does_not_strand_later_sends(
     from lib.runtime_rpc_server import RuntimeRPCServer
 
     world = World(tmp_path)
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"),
                                dispatch_service=world.service, release_id="test")
     runtime.shutdown = lambda: None
 
@@ -301,7 +302,7 @@ def test_a_failed_stop_hands_work_admitted_meanwhile_to_the_free_slot(tmp_path, 
     turn_queue.enqueue(queue_id="q-recovered", agent_id=world.agent, session="mike",
                        text="recovered", trace_id="t-recovered", client_msg_id="recovered",
                        synthesize_audio=False, origin="agent", sender_agent_id="other-agent")
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock",
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"),
                                dispatch_service=world.service, release_id="test")
     runtime.shutdown = lambda: None
     real_pause = turn_queue.set_paused

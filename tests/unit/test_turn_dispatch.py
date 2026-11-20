@@ -16,6 +16,7 @@ from lib.turn_dispatch import (
     clear_for_agent,
 )
 import lib.turn_dispatch as _td
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -1535,29 +1536,35 @@ def test_scheduler_ticks_do_not_duplicate_a_current_durable_wake_after_restart(t
 
 
 def test_queue_during_claim_to_spawn_window_stays_serial(tmp_path):
+    """A send queued while the first turn is between its claim and its spawn waits behind it.
+    By order: the first spawn is held on an Event until the second send is answered. The waits
+    are deadlock guards only (60 s), never the measure: at 2 s they tripped under load and it
+    was quarantined as 'load'."""
     import threading
     service, backends, _agent_id = _make_service(tmp_path)
     entered = threading.Event()
     release = threading.Event()
+    released: list[bool] = []
     original_spawn = backends.spawn_turn
 
     def blocked_spawn(*args, **kwargs):
         entered.set()
-        assert release.wait(timeout=2)
+        released.append(release.wait(timeout=60))
         return original_spawn(*args, **kwargs)
 
     backends.spawn_turn = blocked_spawn
     first = threading.Thread(target=lambda: service.dispatch(
         text="first", requested_session="mike", trace_id="t-first"))
     first.start()
-    assert entered.wait(timeout=2)
+    assert entered.wait(timeout=60)
     queued = service.dispatch(
         text="second", requested_session="mike", trace_id="t-second",
         client_msg_id="u-second-race", queue_if_busy=True)
     assert queued.queued is True
     assert backends.spawned == []
     release.set()
-    first.join(timeout=2)
+    first.join(timeout=60)
+    assert not first.is_alive() and released == [True]
     assert len(backends.spawned) == 1
 
 
@@ -2218,7 +2225,7 @@ def test_strict_runtime_cancellation_accepts_reaped_recovery_work(tmp_path, monk
     service.dispatch(text="delegated work", requested_session="mike", trace_id="oracle-work",
                      origin="oracle")
     monkeypatch.setattr(registry, "interrupt", lambda *_: 0)
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=service)
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"), dispatch_service=service)
     try:
         params = {"agent_id": agent_id, "backend": "claude", "strict": True, "hold": True}
         # Ordinary in-flight work still requires confirmed interruption.
@@ -2961,7 +2968,7 @@ def test_rpc_round_trip_admits_the_command_once_on_the_owning_side(tmp_path, mon
     from lib.prompt_admissions import PromptAdmission
     from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, agent_id = _make_service(tmp_path)
-    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    runtime = RuntimeRPCServer(short_socket("rt.sock"), dispatch_service=owner)
     try:
         client = _wire_runtime(runtime)
         http = TurnDispatchService(
@@ -2995,7 +3002,7 @@ def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch)
     from lib import janitor_autonomy
     from lib.runtime_rpc_server import RuntimeRPCServer
     owner, backends, _agent_id = _make_service(tmp_path)
-    runtime = RuntimeRPCServer(tmp_path / "rt.sock", dispatch_service=owner)
+    runtime = RuntimeRPCServer(short_socket("rt.sock"), dispatch_service=owner)
     checks = []
     monkeypatch.setattr(janitor_autonomy, "validate_dispatch",
                         lambda *args: checks.append(args) or False)

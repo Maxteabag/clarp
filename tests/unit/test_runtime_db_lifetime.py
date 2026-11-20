@@ -10,6 +10,7 @@ import pytest
 
 from lib import db, runtime_bridge as bridge, telemetry
 from lib import runtime_rpc_server as rpc_server
+from short_sockets import socket_path as short_socket
 
 
 def closed(con):
@@ -40,7 +41,7 @@ def rpc(tmp_path, monkeypatch):
             finished.put(handles)
     monkeypatch.setattr(rpc_server._RuntimeRequestHandler, 'finish', observe_finish)
     def create(work):
-        path = tmp_path / f'rpc-{len(servers)}.sock'
+        path = short_socket(f'rpc-{len(servers)}.sock')
         server = rpc_server.RuntimeRPCServer(path, dispatch_service=SimpleNamespace())
         server.dispatch_request = work
         server.handle_error = lambda *_: None  # test-owned deliberate transport errors

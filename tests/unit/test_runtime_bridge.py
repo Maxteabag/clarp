@@ -145,7 +145,7 @@ def test_runtime_wire_protocol_rejects_incompatible_version():
 
 
 def test_runtime_client_surfaces_remote_dispatch_status(tmp_path, monkeypatch):
-    client = RuntimeClient(tmp_path / "runtime.sock")
+    client = RuntimeClient(short_socket("runtime.sock"))
     monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: {
         "ok": False,
         "status": 409,
@@ -201,7 +201,7 @@ def test_runtime_rpc_owns_dispatch_across_client_replacement(tmp_path):
             return 4
 
     dispatch = RuntimeDispatch()
-    socket_path = tmp_path / "private" / "runtime.sock"
+    socket_path = short_socket("private/runtime.sock")
     runtime = RuntimeRPCServer(
         socket_path, dispatch_service=dispatch,
         status_provider=lambda: {"active": {"agent-1": "trace-1"}},
@@ -232,7 +232,7 @@ def test_runtime_rpc_owns_dispatch_across_client_replacement(tmp_path):
 
 
 def test_second_runtime_refuses_to_steal_live_socket(tmp_path):
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     first = RuntimeRPCServer(
         socket_path, dispatch_service=RecordingRuntime())
     thread = threading.Thread(target=first.serve_forever, daemon=True)
@@ -262,7 +262,7 @@ def test_runtime_rpc_rehydrates_prompt_admission(tmp_path):
         def recover_queued(self):
             return 0
 
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=RuntimeDispatch())
     thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     thread.start()
@@ -288,7 +288,7 @@ def test_runtime_rpc_rehydrates_prompt_admission(tmp_path):
 
 def test_runtime_drain_waits_for_idle_and_fences_new_dispatch(tmp_path):
     status = {"active": {"agent-1": "trace-1"}, "queued": {}}
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(
         socket_path, dispatch_service=RecordingRuntime(),
         status_provider=lambda: status,
@@ -321,7 +321,7 @@ def test_runtime_drain_releases_a_leaked_slot_before_judging_idle(tmp_path):
             return {"agent-1": "trace-1"}
 
     runtime = RuntimeRPCServer(
-        tmp_path / "runtime.sock", dispatch_service=LeakHealingRuntime(),
+        short_socket("runtime.sock"), dispatch_service=LeakHealingRuntime(),
         status_provider=lambda: status,
     )
     try:
@@ -338,7 +338,7 @@ def test_runtime_rpc_releases_one_agents_leaked_slot(tmp_path):
             asked.append(agent_id)
             return {agent_id: "trace-1"} if agent_id == "agent-1" else {}
 
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=LeakHealingRuntime())
     thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     thread.start()
@@ -365,7 +365,7 @@ def test_runtime_rpc_repairs_one_agents_slot_with_actor_and_reason(tmp_path):
             asked.append((agent_id, actor, reason, actor_verified))
             return {"released_trace": "trace-1", "queue_recovered": 2}
 
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=RepairingRuntime())
     thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     thread.start()
@@ -385,7 +385,7 @@ def test_runtime_rpc_repairs_one_agents_slot_with_actor_and_reason(tmp_path):
 
 
 def test_runtime_without_leak_release_answers_the_host_with_an_error(tmp_path):
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=RecordingRuntime())
     thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     thread.start()
@@ -498,7 +498,7 @@ def test_runtime_stop_lease_keeps_queue_barrier_in_process_owner(
             backend_registry)))
     monkeypatch.setattr(turn_queue, "set_paused", lambda *_args: None)
 
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     ctx = SimpleNamespace(name="runtime-context")
     dispatch = RecordingRuntime()
     dispatch.ctx = ctx
@@ -547,7 +547,7 @@ def test_runtime_stop_lease_self_releases_if_http_server_disappears(
     dispatch = RecordingRuntime()
     dispatch.ctx = SimpleNamespace()
     dispatch.backends = backends
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     runtime = RuntimeRPCServer(
         socket_path, dispatch_service=dispatch, stop_lease_timeout=0.05,
         status_provider=lambda: {
@@ -586,6 +586,7 @@ def test_private_janitor_run_id_crosses_runtime_boundary():
 import socket as _socket
 import sys as _sys
 import time as _time
+from short_sockets import socket_path as short_socket
 
 _linux_only = pytest.mark.skipif(
     _sys.platform != "linux",
@@ -608,48 +609,62 @@ def _fill_backlog(path, limit: int = 64) -> list:
 
 
 @_linux_only
-def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path):
-    path = tmp_path / "runtime.sock"
+def test_runtime_client_waits_out_a_full_listener_backlog(tmp_path, monkeypatch):
+    """The client retries while the listener's backlog is full and is answered once it frees.
+    By order, not seconds: the client's backoff runs on a planted clock, and its first refusal
+    is what frees the backlog (the fillers are closed and accepted, each an instant EOF). It
+    was quarantined as 'load' when a 0.15 s sleep, a 0.2 s read per filler and the client's
+    5 s budget all ran on the wall clock."""
+    import lib.runtime_bridge as runtime_bridge
+    path = short_socket("runtime.sock")
     listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     listener.bind(str(path))
     listener.listen(1)
     fillers = _fill_backlog(path)
-    served = threading.Event()
+    refused, drained, served = threading.Event(), threading.Event(), threading.Event()
 
-    def accept_later():
-        _time.sleep(0.15)  # the client must retry, not fail, meanwhile
-        listener.settimeout(0.5)
-        deadline = _time.monotonic() + 30
-        while not served.is_set() and _time.monotonic() < deadline:
-            try:
-                conn, _ = listener.accept()
-            except OSError:
-                continue  # an accept timeout is not the end of the helper
-            with conn:
-                conn.settimeout(0.2)
-                try:
-                    data = conn.recv(65536)
-                except OSError:
-                    continue  # a filler that never speaks
-                if b'"status"' in data:
-                    conn.sendall(json.dumps({
-                        "ok": True, "result": {"active": {"a": "t"}}}).encode() + b"\n")
-                    served.set()
+    class Planted:
+        now = 1_000.0
 
-    thread = threading.Thread(target=accept_later, daemon=True)
+        @classmethod
+        def monotonic(cls):
+            return cls.now
+
+        @classmethod
+        def sleep(cls, seconds):          # the client's backoff after a refused connect
+            cls.now += seconds
+            refused.set()
+            assert drained.wait(30), "the backlog was never drained"     # a deadlock guard only
+    monkeypatch.setattr(runtime_bridge, "time", Planted)
+
+    def serve():
+        assert refused.wait(30), "the client was never refused"
+        for raw in fillers:                 # the fillers go away: their connections read EOF
+            raw.close()
+        for _ in fillers:
+            conn, _ = listener.accept()
+            conn.close()
+        drained.set()
+        conn, _ = listener.accept()
+        with conn:
+            if b'"status"' in conn.recv(65536):
+                conn.sendall(json.dumps({"ok": True, "result": {"active": {"a": "t"}}}).encode() + b"\n")
+                served.set()
+
+    thread = threading.Thread(target=serve, daemon=True)
     thread.start()
     try:
         assert RuntimeClient(path, timeout=5.0).status() == {"active": {"a": "t"}}
-        assert served.is_set()
+        assert refused.is_set() and served.is_set()
     finally:
-        for raw in fillers:
-            raw.close()
+        drained.set()
+        thread.join(30)
         listener.close()
 
 
 @_linux_only
 def test_runtime_client_gives_up_within_its_timeout_when_nobody_accepts(tmp_path):
-    path = tmp_path / "runtime.sock"
+    path = short_socket("runtime.sock")
     listener = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     listener.bind(str(path))
     listener.listen(1)
@@ -668,7 +683,7 @@ def test_runtime_client_gives_up_within_its_timeout_when_nobody_accepts(tmp_path
 @_linux_only
 def test_runtime_rpc_server_accepts_a_fleet_wide_burst_without_eagain(tmp_path):
     runtime = RuntimeRPCServer(
-        tmp_path / "runtime.sock", dispatch_service=RecordingRuntime())
+        short_socket("runtime.sock"), dispatch_service=RecordingRuntime())
     pending = []
     try:
         assert RuntimeRPCServer.request_queue_size >= 128
@@ -795,7 +810,7 @@ def test_user_stop_over_the_runtime_rpc_fences_launch_receipts_in_the_owner(
         agent_id="agent-1", trace_id="t-pending", client_msg_id="u-1", origin="user",
         user_stop_generation=turn_queue.user_stop_generation("agent-1"))
     monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     dispatch = RecordingRuntime()
     dispatch.ctx = SimpleNamespace(name="runtime-context")
     dispatch.backends = backends
@@ -826,7 +841,7 @@ def test_an_agent_stop_over_the_runtime_rpc_leaves_pending_user_receipts(tmp_pat
         agent_id="agent-2", trace_id="t-kept", client_msg_id="u-2", origin="user",
         user_stop_generation=turn_queue.user_stop_generation("agent-2"))
     monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
-    socket_path = tmp_path / "runtime.sock"
+    socket_path = short_socket("runtime.sock")
     dispatch = RecordingRuntime()
     dispatch.ctx = SimpleNamespace(name="runtime-context")
     dispatch.backends = backends
@@ -860,7 +875,7 @@ def test_the_idle_fast_path_never_seals_over_work_a_handover_would_cut(tmp_path,
     """TP-04: the fast path and the full handover check judge idleness alike, so
     a release never seals while a provider turn, unpersisted held work or an
     account recovery runs."""
-    server = RuntimeRPCServer(tmp_path / "runtime.sock",
+    server = RuntimeRPCServer(short_socket("runtime.sock"),
                               dispatch_service=SimpleNamespace(),
                               status_provider=lambda: {blocker: value})
     try:
@@ -871,7 +886,7 @@ def test_the_idle_fast_path_never_seals_over_work_a_handover_would_cut(tmp_path,
 
 
 def test_the_idle_fast_path_still_seals_an_idle_runtime(tmp_path):
-    server = RuntimeRPCServer(tmp_path / "runtime.sock",
+    server = RuntimeRPCServer(short_socket("runtime.sock"),
                               dispatch_service=SimpleNamespace(),
                               status_provider=lambda: {})
     try:

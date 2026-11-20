@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from tests import no_servers_guard as guard
+from short_sockets import socket_path as short_socket
 
 pytestmark = pytest.mark.structural  # in GUARDS (Makefile): test_guards_list.py
 
@@ -68,7 +69,7 @@ def test_listeners_of_every_kind_are_refused_before_serving(guarded, tmp_path):
     with pytest.raises(guard.ServerTestRefused, match="run it on heavy-remote"):
         socketserver.TCPServer(("127.0.0.1", 0), socketserver.BaseRequestHandler)
 
-    for family, address in ((socket.AF_INET, ("127.0.0.1", 0)), (socket.AF_UNIX, str(tmp_path / "l.sock"))):
+    for family, address in ((socket.AF_INET, ("127.0.0.1", 0)), (socket.AF_UNIX, str(short_socket("l.sock")))):
         with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.bind(address)   # a bare stream bind (picking a port) is allowed
             with pytest.raises(guard.ServerTestRefused, match="listen on"):

@@ -17,6 +17,7 @@ from lib import tool_explanation_templates as templates
 from lib.backend.codex import TurnState
 from lib.db import conn
 from lib.tool_explanations import ToolExplanations, normalize_activity
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -279,13 +280,13 @@ server.server_close()
 
 
 @pytest.fixture
-def runtime_process(tmp_path):
+def runtime_process():
     """A separate process that remembers commands and serves the runtime bridge, as clarp-runtime does."""
     import pathlib
     import subprocess
     import sys
     from lib.runtime_bridge import RuntimeClient
-    socket_path = tmp_path / "rt" / "runtime.sock"
+    socket_path = short_socket("rt/runtime.sock")
     started = []
 
     def start(agent_id, *remembered):

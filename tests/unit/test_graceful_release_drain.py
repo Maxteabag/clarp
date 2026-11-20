@@ -17,6 +17,7 @@ from tests.patching import patch_shared
 from lib.runtime_rpc_server import RuntimeRPCServer
 from lib.runtime_release import RuntimeReleaseMonitor
 from lib.turn_dispatch import TurnDispatchService
+from short_sockets import socket_path as short_socket
 
 
 @pytest.fixture(autouse=True)
@@ -98,7 +99,7 @@ def _service(tmp_path, provider=None, retries=None):
 
 
 def _runtime(tmp_path, service):
-    runtime = RuntimeRPCServer(tmp_path / "runtime.sock", dispatch_service=service,
+    runtime = RuntimeRPCServer(short_socket("runtime.sock"), dispatch_service=service,
                                release_id="old")
     shutdowns = []
     runtime.shutdown = lambda: shutdowns.append("shutdown")

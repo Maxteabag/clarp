@@ -29,6 +29,7 @@ import pytest
 from lib import db_schema, schema_guard
 from tests.unit.test_clarp_admin import admin
 from tests.unit.test_only_services_migrate import _database_at, _own_port, _snapshot
+from short_sockets import socket_path as short_socket
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CODE = db_schema._SCHEMA_VERSION
@@ -70,7 +71,7 @@ def _environment(home: pathlib.Path, share: pathlib.Path, database: pathlib.Path
     env.update(
         HOME=str(home), CLAUDE_PWA_DB=str(database), CLAUDE_PWA_LOG_DIR=str(home / "logs"),
         CLAUDE_PWA_CONFIG=str(config / "config.toml"), CLARP_CONFIG_DIR=str(config),
-        CLARP_SHARE_DIR=str(share), CLARP_CACHE_DIR=str(home / "cache"),
+        CLARP_SHARE_DIR=str(share), CLARP_CACHE_DIR=str(short_socket("cache")),  # holds runtime.sock
         CLARP_TELEMETRY_DB=str(share / "telemetry.sqlite"),
         XDG_DATA_HOME=str(home / "xdg-data"), XDG_CACHE_HOME=str(home / "xdg-cache"),
         XDG_CONFIG_HOME=str(home / "xdg-config"), XDG_STATE_HOME=str(home / "xdg-state"))
