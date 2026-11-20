@@ -25,6 +25,8 @@ mod delivery;
 mod diagnostics;
 #[path = "host/goal_ledger.rs"]
 mod goal_ledger;
+#[path = "host/import_render_specs.rs"]
+mod import_render_specs;
 #[path = "host/installer.rs"]
 mod installer;
 #[path = "host/janitor_attention.rs"]

@@ -513,6 +513,26 @@ pub(crate) fn movable(agent: &Value) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// The source's ordinary read is insufficient to recreate this kind. Keep that
+/// decision here so a source with a migration export can supply it instead.
+fn left_on_source(artifact: &Value) -> Option<String> {
+    if artifact["type"] != "render_spec" {
+        return None;
+    }
+    let id = artifact["artifact_id"].as_str().unwrap_or("");
+    let title = artifact["title"].as_str().unwrap_or("");
+    Some(format!("  {id:?} — {title:?}"))
+}
+
+fn skipped_report(left: &[String]) -> String {
+    if left.is_empty() {
+        return String::new();
+    }
+    let count = left.len();
+    let kind = if count == 1 { "render spec" } else { "render specs" };
+    format!("Left on the source Host: {count} {kind}.\n{}\n", left.join("\n"))
+}
+
 pub fn import(
     mut args: impl Iterator<Item = String>,
     source_token: &str,
@@ -628,16 +648,22 @@ pub fn import(
     // What it made and asked: its library, a page of it at a time, and for a report what
     // it was, version by version.
     let mut library: Vec<Value> = Vec::new();
+    let mut left = Vec::new();
+    let mut offset = 0;
     loop {
         let path = format!(
-            "/artifacts?session={}&order=created&limit=500&offset={}",
-            ids::in_a_link(&session),
-            library.len()
+            "/artifacts?session={}&order=created&limit=500&offset={offset}",
+            ids::in_a_link(&session)
         );
         let page = get(&from, &path, source_token)?;
         let rows = page["artifacts"].as_array().cloned().unwrap_or_default();
         let count = rows.len();
+        offset += count;
         for artifact in rows {
+            if let Some(line) = left_on_source(&artifact) {
+                left.push(line);
+                continue;
+            }
             let mut revisions: Vec<Value> = Vec::new();
             if artifact["type"] == "html_form" && artifact["read_only"] == true {
                 let id = ids::in_a_link(artifact["artifact_id"].as_str().unwrap_or(""));
@@ -672,6 +698,7 @@ pub fn import(
         source_token,
     )?;
     let gallery = gallery["assets"].as_array().cloned().unwrap_or_default();
+    let skipped = skipped_report(&left);
     let wants = wanted(&gallery, &library, &plans, &turns);
     let way = Way {
         from: &from,
@@ -684,7 +711,7 @@ pub fn import(
     if only_files {
         let followed = files(&way, &wants);
         let (came, more) = followed.told(&way);
-        return Ok(format!("{session} has {came} here.\n{more}")
+        return Ok(format!("{session} has {came} here.\n{skipped}{more}")
             .trim_end()
             .to_string());
     }
@@ -768,7 +795,7 @@ pub fn import(
     let heard = bring_hearing(&way, &agent);
     Ok(format!(
         "{session} is on this Host now, with the {count} rows of its conversation{committed} and {came}.\n\
-         {more}{heard}\
+         {skipped}{more}{heard}\
          It is still on the Host at {from} too. Archive it there, so that only one of the two takes its turns.\n\
          Here it is held until then: it answers what you say to it, and what would start by itself \
          (a goal that is due) waits. Resume it here when it is archived there: the app's Resume, \

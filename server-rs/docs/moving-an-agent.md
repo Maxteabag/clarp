@@ -21,6 +21,8 @@ other Host's apps see it, through that Host's ordinary API, and changes nothing 
 
 ## What does not move yet
 
+- A render spec stays on the source Host because its ordinary API exposes the content only to a render-capable client and omits part of an accepted submission. The move lists the count and each spec’s id and title. A migration read on the source Host is needed to bring these across whole.
+
 - Janitors. Use the destination Host’s own built-in Janitors, or create a custom Janitor there from its definition.
 
 - How much it says while it works and how human it sounds: neither is in what a Host shows of an agent.
