@@ -71,7 +71,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.AGENT_STATE: (
         "agent_id", "session", "persona", "kind", "ts", "detail",
         "status_text", "trace_id", "client_msg_id", "queue_started",
-        "queue_remaining", "origin",
+        "queue_remaining", "origin", "audience", "sender_agent_id", "sender_name",
     ),
     SSEType.AGENT_ACTIVITY: (
         "agent_id", "session", "persona", "kind", "phase", "status", "tool",
@@ -201,7 +201,9 @@ def agent_state(*, session: str, agent_id: str, kind: str,
                 persona: Any = OMIT, ts: Any = OMIT, detail: Any = OMIT,
                 status_text: Any = OMIT, trace_id: Any = OMIT,
                 client_msg_id: Any = OMIT, queue_started: Any = OMIT,
-                queue_remaining: Any = OMIT, origin: Any = OMIT) -> Event:
+                queue_remaining: Any = OMIT, origin: Any = OMIT,
+                audience: Any = OMIT, sender_agent_id: Any = OMIT,
+                sender_name: Any = OMIT) -> Event:
     return _build(SSEType.AGENT_STATE, [
         ("session", session),
         ("agent_id", agent_id),
@@ -215,6 +217,9 @@ def agent_state(*, session: str, agent_id: str, kind: str,
         ("queue_started", queue_started),
         ("queue_remaining", queue_remaining),
         ("origin", origin),
+        ("audience", audience),
+        ("sender_agent_id", sender_agent_id),
+        ("sender_name", sender_name),
     ])
 
 

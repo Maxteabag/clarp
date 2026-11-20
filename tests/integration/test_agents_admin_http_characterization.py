@@ -35,13 +35,16 @@ def test_persona_update_and_delete(running_server):
     assert _call(base, "POST", "/personas/update", raw=b"{") == (400, {"error": "bad json"})
     assert _call(base, "POST", "/personas/update", {}) == refused
     assert _call(base, "POST", "/personas/update", {"original_name": "Nobody", "name": "X"}) == refused
-    status, created = _call(base, "POST", "/personas", {"name": "Zed", "voice_id": "V_Z"})
+    # No portrait job: its status would be 'queued', 'running' or none, by timing (R131).
+    status, created = _call(base, "POST", "/personas", {"name": "Zed", "voice_id": "V_Z",
+                                                        "generate_avatar": False})
     assert status == 201
     persona_id = created["persona"]["id"]
     assert _call(base, "POST", "/personas/update",
                  {"original_name": "Zed", "name": "Zed2", "voice_id": "V_Z"}) == (200, {
         "persona": {"id": persona_id, "name": "Zed2", "voice_id": "V_Z", "avatar_symbol": "",
-                    "avatar_url": "", "personality": "", "builtin": False}})
+                    "avatar_url": "", "avatar_generation_status": None, "personality": "",
+                    "tier": "", "builtin": False}})
     not_removable = (404, {"error": "personality not removable"})
     assert _call(base, "DELETE", "/personas/Nobody") == not_removable
     assert _call(base, "DELETE", "/personas/Mike") == not_removable
