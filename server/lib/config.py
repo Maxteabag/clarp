@@ -897,8 +897,8 @@ def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
     """[artifacts] overrides of render_spec's minimum client contract, per client (issue 428):
     ``render_spec_min_contract = {ios = 74, android = 30}``, laid over the default; 0 switches a
     client off, so ``ios = 0`` switches the kind off on this Host. The old single number
-    (``render_spec_min_client``) is iOS's minimum, never every client's; a line says so."""
-    import re
+    (``render_spec_min_client``) is iOS's minimum, never every client's; a line says so. The
+    table's keys follow server_identity.client_minimums: a name as the client sends it."""
     from .log import log
     out: dict[str, int] = {}
     single = artifacts.get("render_spec_min_client")
@@ -913,13 +913,8 @@ def _render_spec_minimums(artifacts: dict) -> dict[str, int] | None:
     if isinstance(table, dict):
         if "ios" in table and "ios" in out:
             log("config.render_spec_min_client", "ignored: render_spec_min_contract names ios")
-        for name, value in table.items():
-            # A client name as clients send it (lower case; matched exactly), and a whole number
-            # (a TOML boolean is not one, though Python counts it as an int).
-            if re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", str(name)) and type(value) is int and value >= 0:
-                out[str(name)] = value
-            else:
-                log("config.render_spec_min_contract", "ignored an entry: a client name and a whole number")
+        from .server_identity import client_minimums
+        out.update(client_minimums(table, setting="config.render_spec_min_contract"))
     elif table is not None:
         log("config.render_spec_min_contract", "ignored: expected a table of client = number")
     return out or None
