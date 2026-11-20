@@ -206,12 +206,15 @@ pub fn languages_changed(kept_now: Option<&str>, change: &Value) -> Result<Strin
     Ok(kept(entries))
 }
 
+/// The providers whose engines over the network can be handed a set of languages.
+pub const SET_PROVIDERS: [&str; 2] = ["elevenlabs", "google"];
+
 /// The language an engine over the network is handed for a clip. A set of languages is
 /// something only two of them take: Google's Chirp is told the set, and ElevenLabs Scribe
 /// is told nothing and finds out by itself. Any other engine cannot hear such an agent.
 pub fn handed(language: &str, provider: &str) -> Result<Option<String>, &'static str> {
     let several = language.contains(',');
-    if several && !matches!(provider, "google" | "elevenlabs") {
+    if several && !SET_PROVIDERS.contains(&provider) {
         return Err(SET_NEEDS);
     }
     let finds_out = provider == "elevenlabs" && several;
