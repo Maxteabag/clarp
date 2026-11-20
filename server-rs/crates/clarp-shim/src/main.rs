@@ -377,7 +377,9 @@ impl Hold {
 /// until the group stood still, how long taking what it printed took, how long it was held, and
 /// how the hold ended. What is not known is `-`.
 fn hold_line(timing: Option<&Timing>, end: &str) -> String {
-    let ms = |took: Option<Duration>| took.map_or_else(|| "-".to_string(), |d| d.as_millis().to_string());
+    let ms = |took: Option<Duration>| {
+        took.map_or_else(|| "-".to_string(), |d| d.as_millis().to_string())
+    };
     format!(
         "clarp-shim: hold still_ms={} drain_ms={} held_ms={} end={end}",
         ms(timing.and_then(|t| t.still)),
@@ -590,7 +592,9 @@ impl Control {
             return refused("a served tool cannot be held");
         }
         if !self.proc.is_dir() {
-            return refused("this system shows no processes in /proc: the tool cannot be seen to stand still");
+            return refused(
+                "this system shows no processes in /proc: the tool cannot be seen to stand still",
+            );
         }
         let until = {
             let stage = self.stage.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1556,7 +1560,10 @@ mod tests {
             Some("this system shows no processes in /proc: the tool cannot be seen to stand still")
         );
         assert_eq!(reply.held, None);
-        assert!(matches!(*lock(&rig.control.hold), Hold::Free), "not the one hold");
+        assert!(
+            matches!(*lock(&rig.control.hold), Hold::Free),
+            "not the one hold"
+        );
         std::thread::sleep(Duration::from_millis(50));
         assert_ne!(rig.state(), Some('T'));
         rig.end();
@@ -1590,7 +1597,9 @@ mod tests {
             still: None,
             ..timing
         };
-        assert!(hold_line(Some(&begun), "x").starts_with("clarp-shim: hold still_ms=- drain_ms=1 "));
+        assert!(
+            hold_line(Some(&begun), "x").starts_with("clarp-shim: hold still_ms=- drain_ms=1 ")
+        );
     }
 
     #[test]
