@@ -890,11 +890,14 @@ fn chosen(view: &voice_profile::HostView, file: &Table, record: &AgentRecord) ->
             };
             Chosen::By(by.into_iter().map(at_door).collect())
         }
-        Err(unheard) if unheard.provider == "none" => Chosen::Silent,
+        // The owner turned speech off for the Host: nothing is said, and nobody is told. An
+        // agent whose own entry turns it off while the Host speaks is told so.
+        Err(unheard) if unheard.provider == "none" && view.voices.provider == "none" => Chosen::Silent,
         Err(unheard) => {
             let persona = python::text(&record.persona);
             let provider = unheard.provider;
             let why = match unheard.reason {
+                voice_profile::PROVIDER_OFF => SPEECH_OFF.to_string(),
                 voice_profile::NOT_CONFIGURED if !BUILT.contains(&provider.as_str()) => {
                     format!("the engine {provider} is not built into this Host")
                 }
@@ -2304,6 +2307,16 @@ mod tests {
              gemini_voice = \"Puck\"\n",
         );
         assert_eq!(pick(&moved, &maximus, &all), by(&[("gemini", "Puck")]));
+        // One agent whose own entry turns speech off while the Host speaks: it is told so.
+        let quiet = file("[tts]\nprovider = \"cartesia\"\n[tts.agents.maximus]\nprovider = \"none\"\n");
+        assert_eq!(
+            pick(&quiet, &maximus, &all),
+            Chosen::Nobody {
+                why: SPEECH_OFF.to_string(),
+                reason: voice_profile::PROVIDER_OFF,
+                provider: "none".to_string(),
+            }
+        );
     }
 
     #[test]
