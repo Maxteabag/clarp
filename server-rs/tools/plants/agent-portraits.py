@@ -140,5 +140,6 @@ change(W,'generation',[
     ('misidentify the publisher','"portrait_generation:openai".into()','"agent".into()'),
     ('lose alternative number in caption','Generated portrait alternative {index}','Generated portrait alternative'),
 ])
+PLANTS.append((H,'generation','wrong feature contract','("agent_portraits", 1)', '("agent_portraits", 2)'))
 if __name__ == '__main__':
     raise SystemExit(runner.main(__file__,RUNS,PLANTS))
