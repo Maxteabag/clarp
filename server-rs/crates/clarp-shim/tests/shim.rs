@@ -716,7 +716,11 @@ fn gone(pid: i32) -> bool {
 fn stays(spool: &Path, len: u64, how_long: Duration) {
     let until = Instant::now() + how_long;
     while Instant::now() < until {
-        assert_eq!(spool_len(spool), len, "the spool grew while the tool was held");
+        assert_eq!(
+            spool_len(spool),
+            len,
+            "the spool grew while the tool was held"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -985,7 +989,9 @@ fn what_is_written_to_a_held_tool_is_read_when_it_is_let_go() {
 #[test]
 fn a_hold_once_held_is_refused_and_a_release_does_no_harm() {
     let mut running = start("hold-once", "echo up; exec sleep 300");
-    wait_for("the tool", || outs(&records(&running.spool)).contains(&"up"));
+    wait_for("the tool", || {
+        outs(&records(&running.spool)).contains(&"up")
+    });
     let pid = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
     // A release of a tool that is not held lets nothing go and stops nothing.
     let free = release(&running.socket);
@@ -1026,7 +1032,9 @@ fn a_hold_once_held_is_refused_and_a_release_does_no_harm() {
 #[test]
 fn a_hold_whose_bound_is_spent_lets_go_and_counts_as_the_one() {
     let mut running = start("hold-zero", "echo up; exec sleep 300");
-    wait_for("the tool", || outs(&records(&running.spool)).contains(&"up"));
+    wait_for("the tool", || {
+        outs(&records(&running.spool)).contains(&"up")
+    });
     let reply = hold(&running.socket, 0);
     assert!(!reply.ok, "{reply:?}");
     assert_eq!(reply.held, None);
@@ -1074,7 +1082,9 @@ fn a_tool_that_is_gone_is_not_held() {
         "hold-stopping",
         "trap '' TERM; echo up; while :; do sleep 0.05; done",
     );
-    wait_for("the tool", || outs(&records(&running.spool)).contains(&"up"));
+    wait_for("the tool", || {
+        outs(&records(&running.spool)).contains(&"up")
+    });
     let leader = i32::try_from(ask(&running.socket, &Request::Ping).pid.unwrap()).unwrap();
     assert!(ask(&running.socket, &Request::Stop { grace_ms: 3_000 }).ok);
     wait_for("the polite signal", || {
@@ -1138,8 +1148,7 @@ fn a_hooks_report_under_way_at_the_hold_is_counted() {
     // `yes` keeps the pipe busy, so a hook's report waits for the output before it (up to a
     // quarter of a second): at the hold one is nearly always under way.
     let hook = env!("CARGO_BIN_EXE_clarp-hook");
-    let script =
-        format!("yes abcdefgh & while :; do echo '{{\"n\":1}}' | {hook} Step; done");
+    let script = format!("yes abcdefgh & while :; do echo '{{\"n\":1}}' | {hook} Step; done");
     let mut running = start("hold-hook", &script);
     let hooks = |records: &[Record]| {
         records
@@ -1147,9 +1156,7 @@ fn a_hooks_report_under_way_at_the_hold_is_counted() {
             .filter(|r| matches!(&r.entry, Entry::Hook { name, .. } if name == "Step"))
             .count()
     };
-    wait_for("some reports", || {
-        hooks(&after(&running.spool, 0)) >= 3
-    });
+    wait_for("some reports", || hooks(&after(&running.spool, 0)) >= 3);
     let reply = hold(&running.socket, 2_000);
     assert!(reply.ok, "{reply:?}");
     let held = reply.held.unwrap();
@@ -1175,14 +1182,18 @@ fn a_served_tool_is_not_held() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let server = dir.join("stand-in-server");
-    std::fs::write(&server, "#!/bin/sh\necho \"server $$\" >&2\nexec sleep 300\n").unwrap();
-    std::fs::set_permissions(
+    std::fs::write(
         &server,
-        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        "#!/bin/sh\necho \"server $$\" >&2\nexec sleep 300\n",
     )
     .unwrap();
+    std::fs::set_permissions(&server, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let message = dir.join("turn-1.stdin");
-    std::fs::write(&message, r#"{"model":"","effort":"","prompt":"hi","session":""}"#).unwrap();
+    std::fs::write(
+        &message,
+        r#"{"model":"","effort":"","prompt":"hi","session":""}"#,
+    )
+    .unwrap();
     let (spool, socket) = (dir.join("spool/turn-1.jsonl"), dir.join("shim.sock"));
     let shim_path = env!("CARGO_BIN_EXE_clarp-shim");
     let mut shim = Command::new(shim_path)
