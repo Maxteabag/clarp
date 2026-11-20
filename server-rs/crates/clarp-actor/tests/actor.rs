@@ -4853,7 +4853,13 @@ fn r121_a_turn_that_waits_on_a_refused_launch_names_its_trace() {
     );
     // Refused until its count ends it, at the eighth refusal of the tool in a row (the shim's
     // was another refusal): it runs no more, and names no trace.
-    let tried = r121_refuse_all(&mut world, &mut actor, Outputs::default(), sent_at, r121_no_tool);
+    let tried = r121_refuse_all(
+        &mut world,
+        &mut actor,
+        Outputs::default(),
+        sent_at,
+        r121_no_tool,
+    );
     assert_eq!(tried.len(), 8, "{tried:?}");
     assert_eq!(actor.status().live, None);
     assert_eq!(actor.running_trace(1).unwrap(), None);
