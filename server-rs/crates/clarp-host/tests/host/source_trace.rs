@@ -38,7 +38,7 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
             tokens.display()
         ),
         &format!(
-            "case \"$message\" in hold*) n=0; while [ ! -e \"{0}/$CLARP_SESSION\" ] && [ -d \"{0}\" ] \
+            "case \"$message $*\" in *hold*) n=0; while [ ! -e \"{0}/$CLARP_SESSION\" ] && [ -d \"{0}\" ] \
              && [ $n -lt 600 ]; do sleep 0.2; n=$((n+1)); done; rm -f \"{0}/$CLARP_SESSION\";; esac\n",
             release.display()
         ),
@@ -91,6 +91,13 @@ fn an_artifact_names_the_running_turn_that_published_it_as_the_python_host_names
         (token_of(session), trace.unwrap_or_default())
     };
     let let_go = |session: &str| {
+        // It was held: a stand-in that did not hold would have ended long before, and every
+        // case above would have been staged with a turn that ended.
+        assert_ne!(
+            host.state(session),
+            "done",
+            "{session}'s turn was held until now"
+        );
         std::fs::write(release.join(session), "").unwrap();
         wait_for("the turn to end", || host.state(session) == "done");
     };
