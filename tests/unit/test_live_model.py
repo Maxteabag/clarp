@@ -422,3 +422,13 @@ def test_usage_without_a_breakdown_is_priced_as_before():
     usage.observe({"type": "session.usage.updated", "usage": {"seconds": 12, "active_seconds": 12}})
     assert usage.snapshot()["voice_estimate_usd"] == round(12 * .05 / 60, 6)
     assert LiveUsage("subscription").snapshot()["voice_estimate_usd"] is None
+
+
+@pytest.mark.parametrize("given", [{"active_seconds": 60}, {"paused_seconds": 60}, {"active_seconds": 60, "paused_seconds": None},
+                                   {"active_seconds": "60", "paused_seconds": 30}, {"active_seconds": True, "paused_seconds": 30}])
+def test_a_usage_update_with_only_one_of_the_two_reports_neither_and_prices_as_before(given):
+    usage = LiveUsage("api")
+    usage.observe({"type": "session.usage.updated", "usage": {"seconds": 90, **given}})
+    snap = usage.snapshot()
+    assert (snap["active_seconds"], snap["paused_seconds"]) == (None, None)
+    assert snap["voice_estimate_usd"] == round(90 * .05 / 60, 6)
