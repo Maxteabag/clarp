@@ -894,3 +894,19 @@ def test_a_turn_from_a_period_without_notes_stays_shown_after_a_backend_switch(t
     assert coordination.audience_of(agent_id, "t-claude") == "agents"
     shown = agents.list_messages(agent_id=agent_id, backend_session_id="native", limit=50, hide_coordination=True)
     assert [row["id"] for row in shown] == ["u-c-old"]
+
+
+def test_a_turn_parked_for_its_account_stays_parked_under_a_later_row_about_nothing_in_particular(tmp_path, pushes):
+    """The reviewer's running_trace LOW: an audit note repeating the state, newer than the park,
+    read the parked turn as running again. A row that names the trace resumes it."""
+    from lib import turn_identity
+    service, backends, agent_id = _dispatched(tmp_path)
+    _start(service, "t-acct")
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+        "dispatch": "claude", "trace_id": "t-acct", "account_recovery": "waiting", "message": "waiting"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is False
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.AUDIT_NOTED, {
+        "source": "slot_repair", "repair_actor": "user", "repair_reason": "look"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is False
+    turn_lifecycle.try_transition(agent_id, turn_lifecycle.TurnEvent.SPAWN_STARTED, {"trace_id": "t-acct"})
+    assert turn_identity.running_trace(agent_id, "t-acct") is True
