@@ -351,7 +351,8 @@ def restamp_trace(database, agent_id: str, trace_id: str) -> list[str]:
     would be skipped. Answers the conversations touched."""
     heads: dict[str, int] = {}
     for row in database.execute(
-            "SELECT message_id, backend_session_id FROM messages WHERE agent_id = ? AND trace_id = ?",
+            """SELECT message_id, backend_session_id FROM messages INDEXED BY idx_messages_trace
+                WHERE agent_id = ? AND trace_id = ?""",
             (agent_id, trace_id)).fetchall():
         revision = _next_revision(database)
         database.execute("UPDATE messages SET revision = ? WHERE message_id = ?",
@@ -1925,7 +1926,7 @@ def turn_stamp(database, agent_id: str, trace_id: str):
             ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
     rows = database.execute(
         """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json, origin, kind
-             FROM messages WHERE agent_id = ? AND trace_id = ?
+             FROM messages INDEXED BY idx_messages_trace WHERE agent_id = ? AND trace_id = ?
             ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
     if not rows:
         return None

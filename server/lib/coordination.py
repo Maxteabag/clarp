@@ -71,12 +71,15 @@ def is_coordination(*, agent_id: str, origin: str | None, sender_agent_id: str |
 def holds_user_word(database, agent_id: str, trace_id: str) -> bool:
     """Whether the trace holds the user's own word for this agent: a user row
     or a prompt admission with origin 'user' or 'oracle'. Such a turn is the
-    user's and is never 'agents', whatever arrives in it."""
+    user's and is never 'agents', whatever arrives in it. It runs inside the
+    write transaction of every message another agent sends, so it reads the
+    turn's rows by trace and never the agent's whole conversation."""
     from .origins import USER_WORD_ORIGINS
     words = tuple(sorted(USER_WORD_ORIGINS))
     marks = ",".join("?" for _ in words)
     return database.execute(
-        f"""SELECT 1 FROM messages WHERE trace_id = ? AND agent_id = ? AND role = 'user'
+        f"""SELECT 1 FROM messages INDEXED BY idx_messages_trace
+             WHERE trace_id = ? AND agent_id = ? AND role = 'user'
                AND COALESCE(origin, 'user') IN ({marks}) LIMIT 1""",
         (trace_id, agent_id, *words)).fetchone() is not None or database.execute(
         f"""SELECT 1 FROM prompt_admissions WHERE trace_id = ? AND agent_id = ?
@@ -163,8 +166,13 @@ def sender_of(agent_id: str, trace_id: str | None, *, database=None) -> str | No
 # The read side of "a turn the user started is never hidden": a trace marked
 # 'agents' that nonetheless holds a user row with the user's word reads as the
 # user's. Evaluated only for marked rows (a primary-key probe found a mark).
+# The index is named on purpose: left to itself the planner searches ``u`` by
+# agent (idx_messages_agent_timestamp) and walks the agent's whole conversation
+# once per marked row; a real coordination trace holds no user row, so nothing
+# ends that walk early. By trace it reads the turn's own rows only.
 TRACE_AUDIENCE_SQL = """CASE WHEN ct.audience = 'agents' AND NOT EXISTS (
-        SELECT 1 FROM messages u WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
+        SELECT 1 FROM messages u INDEXED BY idx_messages_trace
+         WHERE u.trace_id = m.trace_id AND u.agent_id = m.agent_id
            AND u.role = 'user' AND COALESCE(u.origin, 'user') IN ('user', 'oracle'))
      THEN 'agents' WHEN ct.audience IS NULL THEN NULL ELSE 'mixed' END"""
 

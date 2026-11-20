@@ -769,3 +769,96 @@ def test_an_agent_that_cannot_leave_a_note_is_never_hidden(tmp_path, backend, hi
     assert coordination.audience_of(agent_id, "t-boss") == ("agents" if hidden else "user")
     brief = _turn_protocol(agent_id, origin="agent", sender_agent_id=boss)
     assert ("tell-user" in brief) is hidden
+
+
+# ---- the read wall's cost: a marked row reads its own turn, never the whole conversation -------
+
+def _marked_conversation(world, *, marked: int, filler: int) -> None:
+    """``marked`` coordination turns of one row each, in a conversation of ``filler`` other rows."""
+    for i in range(filler):
+        world.send(f"t-user-{i}", f"user {i}", client=f"c-user-{i}")
+    for i in range(marked):
+        world.send(f"t-agent-{i}", f"from the boss {i}", origin="agent", sender=world.boss,
+                   client=f"c-agent-{i}")
+
+
+def _statements(read) -> list[str]:
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        read()
+    finally:
+        con.set_trace_callback(None)
+    return [sql for sql in seen if "coordination_traces" in sql and sql.lstrip().upper().startswith("SELECT")]
+
+
+def test_the_read_wall_looks_a_marked_row_up_by_its_trace_on_a_page_and_on_a_delta(world):
+    _marked_conversation(world, marked=3, filler=3)
+    reads = (lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", limit=100),
+             lambda: agents.list_messages(agent_id=world.id, backend_session_id="native", after_revision=1))
+    for read in reads:
+        statements = _statements(read)
+        assert statements, "the read ran no statement that joins the marks"
+        for sql in statements:
+            wall = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql) if " u " in f" {row[3]} "]
+            assert wall == ["SEARCH u USING INDEX idx_messages_trace (trace_id=?)"], wall
+    db.close_local()
+
+
+def test_a_page_of_marked_rows_does_not_walk_the_conversation(world):
+    """The work of a page of marked rows does not grow with the rest of the conversation."""
+    def steps(filler: int) -> int:
+        _marked_conversation(world, marked=40, filler=filler)
+        count = [0]
+        con = db.conn()
+        con.set_progress_handler(lambda: count.__setitem__(0, count[0] + 1) or 0, 100)
+        try:
+            rows = agents.list_messages(agent_id=world.id, backend_session_id="native", limit=40)
+        finally:
+            con.set_progress_handler(None, 0)
+        assert sum(row["audience"] == "agents" for row in rows) >= 1
+        return count[0]
+    small = steps(0)
+    large = steps(1500)             # the same page, in a conversation 1,500 rows longer
+    db.close_local()
+    assert large < small * 3 + 50, (small, large)
+
+
+def _trace_lookups(read) -> list[str]:
+    """Every statement ``read`` runs that looks ``messages`` up by a trace."""
+    seen: list[str] = []
+    con = db.conn()
+    con.set_trace_callback(seen.append)
+    try:
+        read()
+    finally:
+        con.set_trace_callback(None)
+    return [sql for sql in seen if "FROM messages" in sql and "trace_id =" in sql
+            and sql.lstrip().upper().startswith("SELECT")]
+
+
+def _reads_by_trace(sql: str) -> bool:
+    plan = [row[3] for row in db.conn().execute("EXPLAIN QUERY PLAN " + sql)]
+    return any("USING INDEX idx_messages_trace (trace_id=?)" in step for step in plan) and not any(
+        "idx_messages_agent" in step for step in plan)
+
+
+def test_every_lookup_of_a_turn_s_rows_goes_by_its_trace_never_by_the_agent(world):
+    """The mark wall (inside every agent send's write), a note's conversation, a loosened turn's
+    restamp and a settled turn's stamp each read one turn; none may walk the conversation."""
+    from lib import message_writes
+    world.send("t-user", "the user's own", client="c-user")
+    world.send("t-boss", "from the boss", origin="agent", sender=world.boss, client="c-boss")
+    lookups = {
+        "the mark wall": lambda: coordination.holds_user_word(db.conn(), world.id, "t-boss"),
+        "a note's conversation": lambda: agent_notes._conversation_of(world.id, "t-boss"),
+        "a loosened turn's restamp": lambda: coordination.loosen(world.id, "t-boss"),
+        "a settled turn's stamp": lambda: message_writes.turn_stamp(db.conn(), world.id, "t-boss"),
+    }
+    for name, read in lookups.items():
+        statements = _trace_lookups(read)
+        assert statements, f"{name} ran no lookup of messages by trace"
+        for sql in statements:
+            assert _reads_by_trace(sql), (name, sql)
+    db.close_local()
