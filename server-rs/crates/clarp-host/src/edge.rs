@@ -1606,6 +1606,17 @@ pub(crate) async fn make_agent(
             .await?
             .map_err(not_made)?,
         None => {
+            if let Some(parent) = request.parent.as_deref()
+                && let Some(member) = app.fleet.directory().named(parent.trim())
+            {
+                member.agent.accepting_work().map_err(|why| {
+                    refused(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        crate::agent::REMOVING_CODE,
+                        &why.0,
+                    )
+                })?;
+            }
             // A new agent may begin with a session its tool kept: taken up where it left
             // off, or from a copy of it.
             let said_cwd = request.cwd.as_deref().unwrap_or("");
@@ -2453,6 +2464,7 @@ async fn send_as(
         };
         (member, target.text, target.by_name)
     };
+    member.agent.accepting_work()?;
     // A tool that takes its message on its command line takes no more than fits there:
     // refused before anything is kept, in the Python Host's words.
     let tool = clarp_backend::by_id(&member.record.backend);

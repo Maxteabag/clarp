@@ -385,6 +385,18 @@ pub(crate) async fn begins(
     // A fork: a copy of the session under a name of its own, in the project of the
     // directory the new agent works in, where its tool looks for it.
     let parent = owner_of(app, &source).map(|(agent_id, _)| agent_id);
+    if let Some(member) = parent
+        .as_deref()
+        .and_then(|id| app.fleet.directory().named(id).cloned())
+    {
+        member.agent.accepting_work().map_err(|why| {
+            refused(
+                StatusCode::SERVICE_UNAVAILABLE,
+                crate::agent::REMOVING_CODE,
+                &why.0,
+            )
+        })?;
+    }
     let session = ids::uuid();
     let (of, name, copy_as) = (cwd.clone(), source.clone(), session.clone());
     let copied = move || -> Result<String, StatusCode> {

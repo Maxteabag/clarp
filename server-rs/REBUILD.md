@@ -3253,17 +3253,17 @@ agent's delegations and keeps its tombstone first, as before, and then closes it
 the agent's thread is the one writer of its log, and a bound that passed says nothing of what the thread still writes,
 so its goals are not retired, its helpers not abandoned, the focus not let go, the apps not told, and the agent stays in
 the roster as it was. The answer says so in words (503: its thread did not answer within three seconds, it is not
-removed yet, ask again). The same request asked again does not stop it again and keeps the moment it was first
-deleted; it sends one more close (a close put behind the first is never handled: the thread ends at the first) and, once
-the thread has closed, does the rest of the removal once, keeping the tombstone again (a change made between the two
-asks writes the record without it). A Host that stops first leaves the tombstone, and its next start finishes the
+removed yet, ask again). Each attempt holds the fleet for at most three seconds waiting for the close, after the
+existing bounded delegation stops on the first attempt. A request for another agent queued during the close is served
+when that wait ends. The first attempt sends one close and keeps its reply for later attempts. Until removal finishes,
+the agent refuses messages, new agents or forks addressed to it, and changes to its record. The refusal tells the
+caller to ask for removal again. The same removal request keeps the original deletion time and, once the thread has
+closed, finishes the removal. A Host that stops first leaves the tombstone, and its next start finishes the
 removal: the agent is not run, its goals are retired, the focus is left out, and a helper whose parent is deleted is
-abandoned there, as the removal would have left it. Held by the fleet's tests at the port (`fleet/closing_tests.rs`: a
-log engine that holds an agent's thread in its first open, or ends it there: at once, after the bound, never, a thread
-that ended before or during the wait, two deletes, a change between the asks, a delete while the Host stops and the
-starts after it), the Host's (`bounded_close.rs`: a store written by its own crate with a deleted parent and its helper)
-and the wrong rules `tools/plants/bounded-close.py`. The asks a request makes of an agent and awaits are not bounded by
-this piece: they hold that request alone, never the fleet.
+abandoned there, as the removal would have left it. The fleet tests hold an agent's thread in its first log open or
+end it there. They cover closes before and after the bound, a thread that never answers, concurrent requests, refused
+writes, and a restart after a timed-out delete. The Host test starts from a store written by its own crate with a
+deleted parent and its helper. The wrong rules are in `tools/plants/bounded-close.py`.
 
 ## 7. Stages and gates
 
