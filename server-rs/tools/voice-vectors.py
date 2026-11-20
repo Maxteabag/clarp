@@ -7,7 +7,7 @@ what an agent's stored voice means for each provider (`server/lib/voice.py`), wh
 agent speaks with and which one is tried after it (`tts_mode.py`, and the owner's settings as
 `config.py` reads them: `tts_override_for`), which of Gemini's and Cartesia's voices a persona
 has (`gemini_voice_for`, `gemini_voice_for_cartesia`, `cartesia_voice_for` in `config.py`,
-`_gemini_voice` in `tts_registry.py`), and what a clip's file is called (`tts_engine.py`). This
+`provider_voice` in `voice_profile.py`), and what a clip's file is called (`tts_engine.py`). This
 calls those functions for many made-up agents and settings and writes what they answered to
 `crates/clarp-kernel/tests/fixtures/voice-vectors.json`.
 
@@ -20,6 +20,7 @@ itself. The settings are made up here: no file of the owner's is read, and no vo
 from __future__ import annotations
 
 import ast
+import dataclasses
 import importlib.util
 import json
 import pathlib
@@ -145,21 +146,26 @@ def persona_voices(methods: dict, registry: dict) -> dict:
     }
     # Which of Gemini's voices one clip is spoken in: what the agent's entry says, what the
     # agent has stored, what its persona has, what the owner of the Cartesia voice it speaks
-    # with has, and the default only for an agent moved to Gemini on purpose.
+    # with has, and the default only for an agent moved to Gemini on purpose. The Cartesia
+    # voice is the one the same resolver gives Cartesia for this clip (written down beside it).
     chosen = []
+    routes = [None, ('gemini', 'Leda'), ('cartesia', 'ca-ingrid'), ('cartesia', 'ca-lonely')]
     for default in ('', 'Zephyr'):
         for overrides in ({}, {'Mover': {'provider': 'gemini'}}):
             cfg = settings(methods, gemini_voices=gemini, cartesia_voices=cartesia, overrides=overrides,
                            gemini_voice=default)
-            for raw in (None, 'el-1', '{"gemini": "Fenrir"}', '{"cartesia": "ca-x"}'):
+            for raw in (None, 'el-1', '{"gemini": "Fenrir"}', '{"cartesia": "ca-x"}', '{"cartesia": "ca-ingrid"}',
+                        '{"cartesia": "ca-lonely"}'):
                 for persona in ('Maximus', 'Nobody', 'Mover', 'Claude-5628'):
-                    for route_voice in (None, 'Leda'):
-                        for cartesia_voice in (None, 'ca-ingrid', 'ca-lonely'):
-                            agent = {'persona': persona, 'session': persona.lower()}
-                            voice = registry['_gemini_voice'](cfg, raw, persona, agent, route_voice, cartesia_voice)
-                            chosen.append({'default': default, 'overrides': overrides, 'raw': raw, 'persona': persona,
-                                           'route_voice': route_voice, 'cartesia_voice': cartesia_voice,
-                                           'voice': voice})
+                    for route in routes:
+                        agent = {'persona': persona, 'session': persona.lower()}
+                        clip = registry['tts_mode'].Route(*(route or ('', None)), '')
+                        made = registry['provider_voice'](cfg, raw, agent, clip, 'gemini')
+                        chosen.append({'default': default, 'overrides': overrides, 'raw': raw, 'persona': persona,
+                                       'route_voice': route[1] if route and route[0] == 'gemini' else None,
+                                       'cartesia_voice': registry['provider_voice'](cfg, raw, agent, clip,
+                                                                                    'cartesia').voice,
+                                       'voice': made.voice})
     out['gemini_voice'] = chosen
     return out
 
@@ -191,7 +197,10 @@ def clip_voices(methods: dict, registry: dict, mode: dict) -> dict:
                 chosen.append({'provider': provider, 'raw': raw, 'persona': persona,
                                'route': {'provider': route.provider, 'voice': route.voice},
                                'cartesia_voice': made.cartesia_voice, 'eleven_voice': made.eleven_voice,
-                               'by_provider': {name: made.voice_for(name)
+                               # What the agent has for each provider of its own: its entry's voice
+                               # for the engine it speaks with, else what it has stored.
+                               'by_provider': {name: registry['_route_voice'](route, name)
+                                               or registry['resolve_voice'](raw, name)
                                                for name in ('cartesia', 'gemini', 'elevenlabs', 'deepgram')}})
     return {'gemini_voices': gemini, 'vertex_voices': vertex, 'cartesia_voices': cartesia, 'overrides': overrides,
             'doors': doors, 'chosen': chosen}
@@ -220,9 +229,17 @@ def main() -> int:
                     ['tts_override_for', 'gemini_voice_for', 'gemini_voice_for_cartesia', 'cartesia_voice_for',
                      'gemini_tts_voice'],
                     taken(LIB / 'config.py', ['_ANONYMOUS_SUFFIX']), inside='Config')
-    registry = taken(LIB / 'tts_registry.py', ['_gemini_voice', 'ProviderRegistry'],
-                     {'resolve_voice': voice['resolve_voice'], 'GEMINI': voice['GEMINI'],
-                      'CARTESIA': voice['CARTESIA'], 'ELEVENLABS': voice['ELEVENLABS']})
+    # The one resolver of a clip's voice (`voice_profile.py`), and the registry that asks it.
+    names = {name: voice[name] for name in ('resolve_voice', 'GEMINI', 'CARTESIA', 'ELEVENLABS', 'DEEPGRAM',
+                                            'GOOGLE')}
+    profile = taken(LIB / 'voice_profile.py', ['OWN', 'DEFAULT', 'VoiceChoice', '_route_voice', 'provider_voice'],
+                    {**names, 'tts_mode': types.SimpleNamespace(**mode)})
+    # Taken out, the class has lost what made it a dataclass; it is made one again as it is, in
+    # this module (a dataclass looks up the module it was made in).
+    profile['VoiceChoice'].__module__ = __name__
+    profile['VoiceChoice'] = dataclasses.dataclass(frozen=True)(profile['VoiceChoice'])
+    registry = {**profile, **taken(LIB / 'tts_registry.py', ['ProviderRegistry'],
+                                   {**names, 'provider_voice': profile['provider_voice']})}
     built_in = taken(LIB / 'config.py', ['DEFAULT_CARTESIA_VOICES'])['DEFAULT_CARTESIA_VOICES']
     engine = taken(LIB / 'tts_engine.py', ['_FN_RE', 'make_clip_filename', 'parse_clip_filename'],
                    {'_now_ms': lambda: 0})
