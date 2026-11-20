@@ -88,26 +88,42 @@ class LanguageSetUnsupported(ValueError):
     """The engine cannot be handed the agent's language set ("no,en")."""
 
 
+class LanguageSetRefused(LanguageSetUnsupported):
+    """No engine the owner chose for transcription can hear the agent's language set:
+    the recording is refused with words that say what to change (422)."""
+
+    def __init__(self, *, engine: str, languages: list[str], engines: list[str]):
+        self.engine, self.languages, self.engines = engine, list(languages), list(engines)
+        super().__init__(
+            f"{engine} cannot hear this agent's languages ({', '.join(languages)}); "
+            f"choose an engine that can: {', '.join(engines)}")
+
+
 # Hosted engines that can be handed a language set; any other refuses one.
 _SET_PROVIDERS = frozenset({"google", "elevenlabs"})
 
 
+def language_set_engines() -> list[str]:
+    """The hosted models that can be handed a language set, in catalogue order."""
+    return [row["id"] for item in CATALOG if item["id"] in _SET_PROVIDERS for row in item["models"]]
+
+
 def language_set_engine() -> str:
-    """A hosted engine that can take a language set, for a recording whose engine
-    cannot (R152): the Host's selected engine when it can, else the first one with
-    a key in catalogue order; "" when there is none (the Host's own engine hears it)."""
+    """The Host's selected transcription engine when it can take a language set and has
+    a key; "" otherwise (R152). Never another provider: a recording of the owner's voice
+    goes only to an engine chosen for transcription (the agent's own, the Host's selected,
+    the device's), whatever keys the Host holds for other uses."""
     from .config import load
-    cfg = load()
-
-    def usable(model_id: str) -> bool:
-        provider = provider_of(model_id)
-        return (provider in _SET_PROVIDERS and _model_row(model_id) is not None
-                and bool(_key_for(cfg, provider)))
-
     selected = selected_engine()
-    if usable(selected):
+    provider = provider_of(selected)
+    if provider in _SET_PROVIDERS and _model_row(selected) is not None and _key_for(load(), provider):
         return selected
-    return next((row["id"] for item in CATALOG for row in item["models"] if usable(row["id"])), "")
+    return ""
+
+
+def own_engine_detects_language(cfg) -> bool:
+    """Whether the Host's own local model detects the language (never a .en model)."""
+    return bool(getattr(cfg, "whisper_enabled", True)) and not str(cfg.whisper_model).endswith(".en")
 
 
 def provider_of(model_id: str) -> str:
