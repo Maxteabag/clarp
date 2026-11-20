@@ -529,8 +529,15 @@ fn skipped_report(left: &[String]) -> String {
         return String::new();
     }
     let count = left.len();
-    let kind = if count == 1 { "render spec" } else { "render specs" };
-    format!("Left on the source Host: {count} {kind}.\n{}\n", left.join("\n"))
+    let kind = if count == 1 {
+        "render spec"
+    } else {
+        "render specs"
+    };
+    format!(
+        "Left on the source Host: {count} {kind}.\n{}\n",
+        left.join("\n")
+    )
 }
 
 pub fn import(
