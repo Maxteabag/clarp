@@ -1363,6 +1363,14 @@ is missing. A damaged reservation is left in the fleet store and counted in the 
 The principal serves ordinary work while the fleet repairs a mismatch. The fleet waits up to
 three seconds for each actor reply. History for either participant is read from the delegation rows.
 
+**Bookkeeping listener** (20 Nov 2026). The Host checks active grants every two seconds.
+Each delegate has a background job. A burst of principal activity gets eight seconds of quiet,
+with the first wake due after at most a minute. An outstanding wake waits for application; an
+unfinished or queued turn holds a retry even after fifteen minutes. A repeat after a failed send
+backs off. The principal keeps dispatch and application separately in its log. On restart the
+listener resumes from those cursors and checks the delegate’s queue before sending.
+The principal keeps the listener heartbeat in memory so a quiet grant does not grow its journal.
+
 **Delegate observation and recording** (20 Nov 2026). A verified delegate with the relationship
 credential can page its principal’s messages and goal events and see its ten most recently changed
 open goals. The reader excludes the delegate’s own messages and this delegation’s events before
@@ -2376,6 +2384,17 @@ removal and publication, and an orphan older than seven days is swept. The insta
 available models. The warm default remains the model named at Host installation. A newly installed
 variant is selectable by name or as the configured engine for clips.
 
+**The voice timeline.** A client batch adds at most 500 rows to the owner's permanent
+timeline. Each row keeps its raw timestamp alongside the time corrected by the batch offset.
+An offset more than six hours from the receipt clock uses receipt time instead.
+The fleet commits each batch and its event sequence together through the storage port.
+Server producers enqueue their events. A subsequent read through the fleet observes earlier
+messages in order. A failed fire-and-forget write is reported through the coalescing store logger.
+The event query returns the newest matching window in chronological order. Utterance summaries
+also join trace-only events before filtering by session. Audio measurements run outside the
+transcription request using the speech environment, with a bounded decoding time. Podcast history
+has no producer here. The wire vectors use synthetic event names, measurements and text.
+
 **The wrong rules are in the repository** (18 Nov 2026). A test that cannot fail holds nothing: for every
 part of the Oracle a list of wrong rules lies in `tools/plants/` (a small change to the source that makes
 the Host do otherwise than it is to do, with the tests that should notice), and `tools/plants/runner.py`
@@ -3345,3 +3364,27 @@ the agents' snapshot. For bundled model art the Host tries the agent's model,
 the tool's configured default in the owner's settings, then the family the tool
 names. Janitors wear the bundled picture of their role or the default janitor
 picture. These reads and display changes make no image request.
+
+**Portrait edits requested by the owner.** A full-access POST to
+`/agent-portrait-generation` starts a Computer job. The capability GET tells
+the app which account pays, why a request is unavailable, and which generation
+is active. Opening the gallery, changing a display setting, and restarting the
+Host make no paid request. Up to twenty launches of this kind may begin per
+Computer in a rolling day. All attempts count. An active duplicate costs
+nothing.
+
+The worker sends the current primary portrait to two successive OpenAI image
+edits with the fixed close-up and everyday-scene prompts. Both use
+`gpt-image-2` at medium quality, 1024 by 1024. A dispatched request can cost
+money even if the other fails or the owner cancels. Each request has a
+180-second deadline. An input or generated image is bounded at 20 MiB, a
+provider response at 32 MiB. `CLARP_PICTURE_ENDPOINT` is the shared loopback
+test base for `generations` and `edits`.
+
+At acceptance the fleet checks the running generation and the primary again.
+One store transaction records the two new alternates, the successful job and
+the local publication receipt with both images. The agent's journal receives
+the two media records together. Once local publication finishes the Host
+removes the receipt and its staging bytes. On restart a committed receipt can
+finish locally and an interrupted generation ends failed. The bounded edit
+fixtures come from the Python Host's own functions in an isolated store.

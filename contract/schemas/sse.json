@@ -35,7 +35,7 @@
         "ts": {"type": "integer"},
         "detail": {"type": ["object", "string", "null"]},
         "status_text": {"type": "string"},
-        "audience": {"enum": ["user", "agents"], "description": "Host contract 110: on a dispatch thinking state, 'agents' for a turn another agent's message started."},
+        "audience": {"enum": ["user", "agents"], "description": "Host contract 108: on a dispatch thinking state, 'agents' for a turn another agent's message started."},
         "sender_agent_id": {"type": "string"},
         "sender_name": {"type": "string"}
       }

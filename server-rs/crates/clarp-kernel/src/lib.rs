@@ -56,6 +56,7 @@ pub mod notify;
 pub mod opencode;
 pub mod oracle;
 pub mod personas;
+pub mod portrait_generation;
 pub mod portraits;
 pub mod presence;
 pub mod provider_tasks;
@@ -86,6 +87,7 @@ pub mod turn_identity;
 pub mod usage;
 pub mod usage_ask;
 pub mod vocabulary;
+pub mod voice_timeline;
 pub mod voices;
 
 pub use clarp_tool_args::native_session_name;

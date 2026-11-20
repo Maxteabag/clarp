@@ -171,7 +171,7 @@ PLANTS += [
     (ACTOR, 'batches', 'the applied count includes entries skipped as duplicates',
      'let count = events.len();', 'let count = entries.len();'),
     (ACTOR, 'batches', 'the last unapplied time may predate delegation creation',
-     't.max(created).min(now)', 't.min(now)'),
+     'activity.oldest.unwrap_or(now).max(created).min(now)', 'activity.oldest.unwrap_or(now).min(now)'),
     (ACTOR, 'rollback', 'a cut is acknowledged although nothing reached the log',
      'write.commit()?;', 'let _ = write.commit();'),
 ]

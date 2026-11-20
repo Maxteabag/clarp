@@ -16,7 +16,7 @@ fn made_up_answer() -> String {
 #[test]
 fn a_host_not_told_to_draw_pictures_asks_the_provider_nothing_at_its_start_nor_for_a_minted_contact()
  {
-    let (provider, asked) = answers(vec![("/images", "200 OK", made_up_answer())]);
+    let (provider, asked) = answers(vec![("/images/generations", "200 OK", made_up_answer())]);
     let endpoint = format!("{provider}/images");
     let world = [
         ("CLARP_PICTURE_ENDPOINT", endpoint.as_str()),
@@ -151,7 +151,7 @@ fn picture_job(host: &Host, name: &str) -> Value {
 
 #[test]
 fn a_minted_contact_is_drawn_its_picture_once_and_its_agent_wears_it() {
-    let (provider, asked) = answers(vec![("/images", "200 OK", made_up_answer())]);
+    let (provider, asked) = answers(vec![("/images/generations", "200 OK", made_up_answer())]);
     let place = Place::new("pictures-made");
     let host = drawing(&place, &provider);
     let events = host.listen();
@@ -204,7 +204,7 @@ fn a_minted_contact_is_drawn_its_picture_once_and_its_agent_wears_it() {
 #[test]
 fn a_picture_that_failed_waits_and_its_reason_holds_no_key() {
     let (provider, asked) = answers(vec![(
-        "/images",
+        "/images/generations",
         "500 Internal Server Error",
         "no picture for a-key-of-the-test".to_string(),
     )]);

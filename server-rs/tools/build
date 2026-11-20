@@ -15,6 +15,7 @@
 #                                          answers (server-rs/conformance); starts only the Rust Host
 #   server-rs/tools/build answers [args]   build the Host, run the corpus against it and bring home what it
 #                                          answered, compared with nothing: for a scenario without a reference yet
+#   server-rs/tools/build voice-timeline-read   time two GETs on a disposable release Host on the build machine
 #   server-rs/tools/build release          build the Host and the shim for release, and bring both home to
 #                                          server-rs/dist/ (not committed): what a Host is installed from
 #   server-rs/tools/build lease COMMAND [args...]   reserve the queue while a local landing driver runs
@@ -74,6 +75,9 @@ case "$cmd" in
     fmt)    cargo_cmd="cargo fmt --all" ;;
     conform) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py compare --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
     answers) cargo_cmd="cargo build -j $JOBS -p clarp-host -p clarp-shim && rm -rf conformance/out && python3 conformance/conform.py rust --rust target/debug/clarp-host --out conformance/out $(printf '%q ' "$@")" ;;
+    voice-timeline-read)
+        cargo_cmd="cargo build --locked --release -j $JOBS -p clarp-host --bin clarp-host && systemd-run --user --scope --quiet -p MemoryMax=8G -p MemorySwapMax=0 unshare --user --map-root-user --net sh -ec 'ip link set lo up; exec python3 tools/measure-voice-timeline.py target/release/clarp-host'"
+        ;;
     fleet-load-build) cargo_cmd="timeout 175 cargo build --locked --release -j $JOBS -p clarp-host -p clarp-shim --bins" ;;
     fleet-load)
         [[ $# = 2 && $1 == /var/tmp/* && $1 != *$'\n'* && $2 =~ ^(move|empty|full|populate|observe)$ ]] || exit 2

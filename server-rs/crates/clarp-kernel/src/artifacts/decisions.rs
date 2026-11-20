@@ -545,6 +545,8 @@ impl ArtifactBook {
             artifact_id: String::new(),
             expected_version: None,
             validate_only: false,
+            // A request to the user names no turn (it does not pass `POST /artifacts`).
+            source_trace_id: String::new(),
         };
         let mut artifact = self.make(maker, &new, ctx)?;
         decision.decision_id = new_id("decision", ctx);
