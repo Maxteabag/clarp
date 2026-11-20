@@ -47,6 +47,7 @@ pub mod journal;
 pub mod kept_portraits;
 pub mod languages;
 pub mod launch_directories;
+pub mod launch_refused;
 pub mod live;
 pub mod live_call;
 pub mod live_session;

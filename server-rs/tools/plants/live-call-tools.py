@@ -212,7 +212,7 @@ for mod,what,old,new in [
 ]:
     PLANTS.append(('clarp-host/src/'+mod+'.rs','host',what,old,new))
 for file,what,old,new in [
-    ('clarp-actor/src/lib.rs','pre-spawn refusal ends an opening','live.opening && !stopping','!live.opening && !stopping'),
+    ('clarp-actor/src/lib.rs','pre-spawn refusal ends an opening','                        if !stopping {\n                            let after = if live.opening {','                        if !stopping && !live.opening {\n                            let after = if live.opening {'),
     ('clarp-actor/src/lib.rs','the previous attempt cannot prove it was unsent','let previous_unsent = attempt > 1','let previous_unsent = attempt > u32::MAX - 1'),
     ('clarp-host/src/calls/opening_launch.rs','the restarted gate discards the previous attempt proof','op["launch_attempt"] == attempt - 1','op["launch_attempt"] == attempt'),
     ('clarp-host/src/calls/opening_launch.rs','the gate forgets which attempt claimed the initiative','op["launch_attempt"] = json!(attempt);','op["launch_attempt"] = json!(0);'),
